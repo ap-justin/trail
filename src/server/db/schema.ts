@@ -133,6 +133,7 @@ export const issue = sqliteTable(
       t.createdAt,
       t.id,
     ),
+    index("issue_project_created_idx").on(t.projectId, t.createdAt, t.id),
     index("issue_assignee_created_idx")
       .on(t.assigneeId, t.createdAt, t.id)
       .where(sql`${c(t.assigneeId)} is not null`),

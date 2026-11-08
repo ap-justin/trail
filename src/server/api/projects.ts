@@ -8,7 +8,13 @@ import {
 } from "../../shared/schemas.js";
 import type { Service } from "../service/index.js";
 import { createRouter } from "./env.js";
-import { errorResponses, idParam, jsonBody, jsonContent } from "./routes.js";
+import {
+  idParam,
+  jsonBody,
+  jsonContent,
+  readErrors,
+  writeErrors,
+} from "./routes.js";
 import { toPage, toProject } from "./serialize.js";
 
 const tags = ["projects"];
@@ -21,7 +27,7 @@ const createProject = createRoute({
   request: { body: jsonBody(projectCreateSchema) },
   responses: {
     201: jsonContent(projectSchema, "The created project"),
-    ...errorResponses,
+    ...writeErrors,
   },
 });
 
@@ -33,7 +39,7 @@ const listProjects = createRoute({
   request: { query: pageQuerySchema },
   responses: {
     200: jsonContent(pageSchema(projectSchema), "A page of projects"),
-    ...errorResponses,
+    ...readErrors,
   },
 });
 
@@ -45,7 +51,7 @@ const getProject = createRoute({
   request: { params: idParam },
   responses: {
     200: jsonContent(projectSchema, "The project"),
-    ...errorResponses,
+    ...readErrors,
   },
 });
 
@@ -57,7 +63,7 @@ const updateProject = createRoute({
   request: { params: idParam, body: jsonBody(projectUpdateSchema) },
   responses: {
     200: jsonContent(projectSchema, "The updated project"),
-    ...errorResponses,
+    ...writeErrors,
   },
 });
 

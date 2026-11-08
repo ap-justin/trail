@@ -47,34 +47,41 @@ const shippedMigrations = fileURLToPath(
   new URL("./migrations", import.meta.url),
 );
 
-// shipped migrations plus a drizzle-kit-shaped rebuild of `project`, which `issue` references
-function migrationsWithProjectRebuild(): { folder: string; when: number } {
-  const folder = join(dir, "migrations-next");
+// shipped migrations plus one more, journaled the way drizzle-kit writes it
+function migrationsWith(
+  tag: string,
+  statements: string[],
+): { folder: string; when: number } {
+  const folder = join(dir, `migrations-${tag}`);
   cpSync(shippedMigrations, folder, { recursive: true });
   const journalPath = join(folder, "meta", "_journal.json");
   const journal = JSON.parse(readFileSync(journalPath, "utf8"));
   const when = journal.entries.at(-1).when + 1;
   journal.entries.push({
-    idx: 1,
+    idx: journal.entries.length,
     version: "6",
     when,
-    tag: "0001_rebuild",
+    tag,
     breakpoints: true,
   });
   writeFileSync(journalPath, JSON.stringify(journal));
   writeFileSync(
-    join(folder, "0001_rebuild.sql"),
-    [
-      "PRAGMA foreign_keys=OFF;",
-      "CREATE TABLE `__new_project` (`id` text PRIMARY KEY NOT NULL, `name` text NOT NULL, `description` text DEFAULT '' NOT NULL, `created_by` text NOT NULL REFERENCES `actor`(`id`), `created_at` integer NOT NULL, `updated_at` integer NOT NULL) STRICT;",
-      "INSERT INTO `__new_project` SELECT * FROM `project`;",
-      "DROP TABLE `project`;",
-      "ALTER TABLE `__new_project` RENAME TO `project`;",
-      "PRAGMA foreign_keys=ON;",
-    ].join("\n--> statement-breakpoint\n"),
+    join(folder, `${tag}.sql`),
+    statements.join("\n--> statement-breakpoint\n"),
   );
   return { folder, when };
 }
+
+// a drizzle-kit-shaped rebuild of `project`, which `issue` references
+const migrationsWithProjectRebuild = () =>
+  migrationsWith("9999_rebuild", [
+    "PRAGMA foreign_keys=OFF;",
+    "CREATE TABLE `__new_project` (`id` text PRIMARY KEY NOT NULL, `name` text NOT NULL, `description` text DEFAULT '' NOT NULL, `created_by` text NOT NULL REFERENCES `actor`(`id`), `created_at` integer NOT NULL, `updated_at` integer NOT NULL) STRICT;",
+    "INSERT INTO `__new_project` SELECT * FROM `project`;",
+    "DROP TABLE `project`;",
+    "ALTER TABLE `__new_project` RENAME TO `project`;",
+    "PRAGMA foreign_keys=ON;",
+  ]);
 
 function seedIssue(db: Db) {
   db.$client.exec(`
@@ -109,5 +116,62 @@ test("an older build refuses a file a newer build migrated", () => {
   migrate(db, migrationsWithProjectRebuild().folder);
 
   expect(() => migrate(db)).toThrow(/migrated by a newer trail/);
+  db.$client.close();
+});
+
+// a migration that fails partway, as a NOT NULL copy onto existing rows does
+const failingMigration = () =>
+  migrationsWith("9999_fails", [
+    "CREATE INDEX `issue_title_idx` ON `issue` (`title`);",
+    "INSERT INTO `issue` (`id`) VALUES ('no title');",
+  ]);
+
+test("a retried failing migration reports its own error, not the backup's", () => {
+  const db = openDatabase(join(dir, "retry.db"));
+  migrate(db);
+  const next = failingMigration();
+
+  expect(() => migrate(db, next.folder)).toThrow(/NOT NULL/);
+  expect(() => migrate(db, next.folder)).toThrow(/NOT NULL/);
+  db.$client.close();
+});
+
+test("a file restored from the pre-migration backup boots into the migration's own error", () => {
+  const path = join(dir, "restore.db");
+  let db = openDatabase(path);
+  migrate(db);
+  seedIssue(db);
+  const next = failingMigration();
+  expect(() => migrate(db, next.folder)).toThrow(/NOT NULL/);
+  db.$client.close();
+
+  for (const sidecar of ["-wal", "-shm"])
+    rmSync(path + sidecar, { force: true });
+  cpSync(`${path}.pre-${next.when}.bak`, path);
+  db = openDatabase(path);
+
+  expect(() => migrate(db, next.folder)).toThrow(/NOT NULL/);
+  expect(db.$client.prepare("select title from issue").pluck().get()).toBe(
+    "keep me",
+  );
+  db.$client.close();
+});
+
+test("a copy cut off mid-write is replaced, not kept as the backup", () => {
+  const path = join(dir, "killed.db");
+  const db = openDatabase(path);
+  migrate(db);
+  seedIssue(db);
+  const next = migrationsWithProjectRebuild();
+  const backup = `${path}.pre-${next.when}.bak`;
+  writeFileSync(`${backup}.partial`, "half a database");
+
+  migrate(db, next.folder);
+
+  const restored = openDatabase(backup);
+  expect(
+    restored.$client.prepare("select title from issue").pluck().get(),
+  ).toBe("keep me");
+  restored.$client.close();
   db.$client.close();
 });

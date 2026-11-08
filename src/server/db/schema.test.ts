@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { eq } from "drizzle-orm";
+import { and, desc, eq, lt, or } from "drizzle-orm";
 import { afterAll, expect, test } from "vitest";
 import { migrate, openDatabase } from "./client.js";
 import { activityEvent, actor, apiKey, issue, project } from "./schema.js";
@@ -151,3 +151,36 @@ test("a timestamp column refuses text", () => {
     ),
   ).toBe("SQLITE_CONSTRAINT_DATATYPE");
 });
+
+// the shape service listIssues sends for a project with no status filter, first page and later
+test.each([
+  ["first page", eq(issue.projectId, proj.id)],
+  [
+    "after a cursor",
+    and(
+      eq(issue.projectId, proj.id),
+      or(
+        lt(issue.createdAt, new Date(1)),
+        and(eq(issue.createdAt, new Date(1)), lt(issue.id, "x")),
+      ),
+    ),
+  ],
+])(
+  "a project's issue list, %s, is read in index order with no sort",
+  (_, where) => {
+    const query = db
+      .select()
+      .from(issue)
+      .where(where)
+      .orderBy(desc(issue.createdAt), desc(issue.id))
+      .limit(51)
+      .toSQL();
+    const plan = sqlite
+      .prepare(`explain query plan ${query.sql}`)
+      .all(...query.params)
+      .map((row) => (row as { detail: string }).detail)
+      .join(" | ");
+    expect(plan).toContain("issue_project_created_idx");
+    expect(plan).not.toContain("TEMP B-TREE");
+  },
+);

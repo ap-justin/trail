@@ -1,9 +1,10 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, test } from "vitest";
 import { migrate, openDatabase } from "../db/client.js";
 import { type ActivityEvent, createEventBus } from "../events/bus.js";
+import { atFakeTime } from "../test-app.js";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors.js";
 import { createService, type Project } from "./index.js";
 import { createBot, createHuman } from "./keys.js";
@@ -27,14 +28,24 @@ beforeEach(() => {
 const bot = createBot(db, "builder").actor;
 const human = createHuman(db, { displayName: "Justin" });
 
+/** Every activity event, newest first, across pages (a single page caps at 200). */
+function allActivity(): ActivityEvent[] {
+  const events: ActivityEvent[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = service.listActivity(bot, { limit: 200, cursor });
+    events.push(...page.items);
+    cursor = page.nextCursor ?? undefined;
+  } while (cursor);
+  return events;
+}
+
 /** The one activity event `write` committed, after checking the bus saw exactly it. */
 function onlyEventOf(write: () => unknown): ActivityEvent {
   const ids = (items: ActivityEvent[]) => new Set(items.map((e) => e.id));
-  const before = ids(service.listActivity(bot, { limit: 200 }).items);
+  const before = ids(allActivity());
   write();
-  const added = service
-    .listActivity(bot, { limit: 200 })
-    .items.filter((e) => !before.has(e.id));
+  const added = allActivity().filter((e) => !before.has(e.id));
   expect(added).toHaveLength(1);
   expect(published).toEqual(added);
   return added[0] as ActivityEvent;
@@ -61,9 +72,9 @@ function rejectsCleanly(
   write: () => unknown,
   error: new (...a: never[]) => Error,
 ) {
-  const before = service.listActivity(bot, { limit: 200 }).items;
+  const before = allActivity();
   expect(write).toThrow(error);
-  expect(service.listActivity(bot, { limit: 200 }).items).toEqual(before);
+  expect(allActivity()).toEqual(before);
   expect(published).toEqual([]);
 }
 
@@ -111,9 +122,9 @@ test("an update that changes nothing writes no event", () => {
 
 /** Checks `write` succeeds yet commits and publishes no event. */
 function rejectsNothing(write: () => unknown) {
-  const before = service.listActivity(bot, { limit: 200 }).items;
+  const before = allActivity();
   write();
-  expect(service.listActivity(bot, { limit: 200 }).items).toEqual(before);
+  expect(allActivity()).toEqual(before);
   expect(published).toEqual([]);
 }
 
@@ -252,24 +263,6 @@ test("the bus publishes only once the event is visible to other connections", ()
   expect(seenByOther).toEqual([true]);
 });
 
-/**
- * Runs each write `stepMs` after the last, hours before the other tests'
- * writes: ids minted in one millisecond sort in random order.
- */
-function atFakeTime<T>(writes: (() => T)[], stepMs = 1): T[] {
-  let now = Date.now() - 3_600_000;
-  vi.useFakeTimers({ toFake: ["Date"] });
-  try {
-    return writes.map((write) => {
-      vi.setSystemTime(now);
-      now += stepMs;
-      return write();
-    });
-  } finally {
-    vi.useRealTimers();
-  }
-}
-
 describe("paging and filters", () => {
   const titles = ["one", "two", "three", "four", "five"];
   const [paged] = atFakeTime([
@@ -348,9 +341,52 @@ describe("paging and filters", () => {
     );
     expect(pages.flat()).toEqual(all.map((e) => e.id));
     expect(pages.map((p) => p.length)).toEqual([3, 3, 2]);
-    const byHuman = service.listActivity(bot, { actorId: human.id }).items;
-    expect(byHuman.length).toBeGreaterThan(0);
-    expect(new Set(byHuman.map((e) => e.actorId))).toEqual(new Set([human.id]));
+  });
+
+  test("activity filters by actor within a project", () => {
+    const shared = service.createProject(bot, { name: "shared" });
+    const [filed] = atFakeTime([
+      () =>
+        service.createIssue(human, {
+          projectId: shared.id,
+          title: "from human",
+        }),
+    ]);
+    const mine = (actorId: string) =>
+      service
+        .listActivity(bot, { projectId: shared.id, actorId })
+        .items.map((e) => e.action);
+    expect(mine(human.id)).toEqual(["issue.created"]);
+    expect(mine(bot.id)).toEqual(["project.created"]);
+    expect(filed?.createdBy).toBe(human.id);
+  });
+
+  test("a result that is an exact multiple of the limit ends without an empty page", () => {
+    const exact = service.createProject(bot, { name: "exact" });
+    const ids = atFakeTime(
+      ["a", "b", "c", "d"].map(
+        (title) => () =>
+          service.createIssue(bot, { projectId: exact.id, title }).id,
+      ),
+    ).reverse();
+    const first = service.listIssues(bot, { projectId: exact.id, limit: 2 });
+    expect(first.items.map((i) => i.id)).toEqual(ids.slice(0, 2));
+    expect(first.nextCursor).not.toBeNull();
+    const second = service.listIssues(bot, {
+      projectId: exact.id,
+      limit: 2,
+      cursor: first.nextCursor ?? undefined,
+    });
+    expect(second.items.map((i) => i.id)).toEqual(ids.slice(2));
+    expect(second.nextCursor).toBeNull();
+  });
+
+  test("an empty list is one page with no cursor", () => {
+    const empty = service.createProject(bot, { name: "empty" });
+    expect(service.listIssues(bot, { projectId: empty.id })).toEqual({
+      items: [],
+      nextCursor: null,
+    });
   });
 
   test("comments page oldest first", () => {

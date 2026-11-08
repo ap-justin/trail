@@ -2,7 +2,8 @@ import { cp } from "node:fs/promises";
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  entry: ["src/server/index.ts"],
+  // cli.ts builds to dist/cli.js: the shipped bundle mints bot keys with plain node
+  entry: ["src/server/index.ts", "src/server/cli.ts"],
   format: ["esm"],
   platform: "node",
   target: "node24",

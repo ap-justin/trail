@@ -1,0 +1,1 @@
+CREATE INDEX `issue_project_created_idx` ON `issue` (`project_id`,`created_at`,`id`);

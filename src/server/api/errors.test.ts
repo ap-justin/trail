@@ -1,7 +1,11 @@
-import { expect, test, vi } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { setupTestApp } from "../test-app.js";
 
 const { db, request } = setupTestApp();
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 test("an unexpected error is a 500 in the shared shape, logged but not leaked", async () => {
   const log = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -15,5 +19,4 @@ test("an unexpected error is a 500 in the shared shape, logged but not leaked", 
   });
   expect(text).not.toMatch(/database|at \//);
   expect(log).toHaveBeenCalledOnce();
-  log.mockRestore();
 });

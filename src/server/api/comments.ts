@@ -7,7 +7,13 @@ import {
 } from "../../shared/schemas.js";
 import type { Service } from "../service/index.js";
 import { createRouter } from "./env.js";
-import { errorResponses, idParam, jsonBody, jsonContent } from "./routes.js";
+import {
+  idParam,
+  jsonBody,
+  jsonContent,
+  readErrors,
+  writeErrors,
+} from "./routes.js";
 import { toComment, toPage } from "./serialize.js";
 
 const tags = ["comments"];
@@ -20,7 +26,7 @@ const addComment = createRoute({
   request: { params: idParam, body: jsonBody(commentCreateSchema) },
   responses: {
     201: jsonContent(commentSchema, "The created comment"),
-    ...errorResponses,
+    ...writeErrors,
   },
 });
 
@@ -32,7 +38,7 @@ const listComments = createRoute({
   request: { params: idParam, query: pageQuerySchema },
   responses: {
     200: jsonContent(pageSchema(commentSchema), "A page of comments"),
-    ...errorResponses,
+    ...readErrors,
   },
 });
 

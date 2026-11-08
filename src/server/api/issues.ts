@@ -8,7 +8,13 @@ import {
 } from "../../shared/schemas.js";
 import type { Service } from "../service/index.js";
 import { createRouter } from "./env.js";
-import { errorResponses, idParam, jsonBody, jsonContent } from "./routes.js";
+import {
+  idParam,
+  jsonBody,
+  jsonContent,
+  readErrors,
+  writeErrors,
+} from "./routes.js";
 import { toIssue, toPage } from "./serialize.js";
 
 const tags = ["issues"];
@@ -21,7 +27,7 @@ const createIssue = createRoute({
   request: { body: jsonBody(issueCreateSchema) },
   responses: {
     201: jsonContent(issueSchema, "The created issue"),
-    ...errorResponses,
+    ...writeErrors,
   },
 });
 
@@ -33,7 +39,7 @@ const listIssues = createRoute({
   request: { query: issueListQuerySchema },
   responses: {
     200: jsonContent(pageSchema(issueSchema), "A page of issues"),
-    ...errorResponses,
+    ...readErrors,
   },
 });
 
@@ -45,7 +51,7 @@ const getIssue = createRoute({
   request: { params: idParam },
   responses: {
     200: jsonContent(issueSchema, "The issue"),
-    ...errorResponses,
+    ...readErrors,
   },
 });
 
@@ -57,7 +63,7 @@ const updateIssue = createRoute({
   request: { params: idParam, body: jsonBody(issueUpdateSchema) },
   responses: {
     200: jsonContent(issueSchema, "The updated issue"),
-    ...errorResponses,
+    ...writeErrors,
   },
 });
 

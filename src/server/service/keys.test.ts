@@ -43,12 +43,22 @@ test("an unknown or malformed key resolves to null", () => {
 });
 
 test("a revoked key stops resolving, and revoking again is a no-op", () => {
-  const { key } = createBot(db, "revoked");
+  const { key, actor } = createBot(db, "revoked");
   const prefix = key.slice(6, 14);
+  expect(resolveKey(db, key)).toEqual(actor);
   const first = revokeKey(db, prefix);
   expect(resolveKey(db, key)).toBeNull();
   const again = revokeKey(db, prefix);
   expect(again.revokedAt).toEqual(first.revokedAt);
+});
+
+test("revoking one bot's key leaves another bot's key resolving", () => {
+  const keep = createBot(db, "keeper");
+  const lose = createBot(db, "loser");
+  expect(resolveKey(db, lose.key)).toEqual(lose.actor);
+  revokeKey(db, lose.key.slice(6, 14));
+  expect(resolveKey(db, lose.key)).toBeNull();
+  expect(resolveKey(db, keep.key)).toEqual(keep.actor);
 });
 
 test("revoking an unknown prefix is a NotFoundError", () => {
@@ -62,4 +72,6 @@ test("a bot needs a display name", () => {
 test("a human can be created with a GitHub id and has no key", () => {
   const human = createHuman(db, { displayName: "Justin", githubId: 42 });
   expect(human).toMatchObject({ kind: "human", githubId: 42 });
+  const keys = db.select().from(apiKey).all();
+  expect(keys.some((r) => r.actorId === human.id)).toBe(false);
 });

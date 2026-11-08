@@ -1,5 +1,5 @@
 import { beforeAll, expect, test } from "vitest";
-import { setupTestApp } from "../test-app.js";
+import { atFakeTimeAsync, setupTestApp } from "../test-app.js";
 
 const { bot, request } = setupTestApp();
 
@@ -116,12 +116,15 @@ test("GET /issues filters by project, status and assignee", async () => {
     return page.items.map((i) => i.title);
   };
 
-  const open = await createIssue({ projectId: otherId, title: "f-open" });
-  const mine = await createIssue({
-    projectId: otherId,
-    title: "f-mine",
-    assigneeId: bot.actor.id,
-  });
+  const [open, mine] = (await atFakeTimeAsync([
+    () => createIssue({ projectId: otherId, title: "f-open" }),
+    () =>
+      createIssue({
+        projectId: otherId,
+        title: "f-mine",
+        assigneeId: bot.actor.id,
+      }),
+  ])) as [IssueBody, IssueBody];
   await request("PATCH", `/api/v1/issues/${mine.id}`, {
     json: { status: "in_progress" },
   });
@@ -146,24 +149,70 @@ test("GET /issues?status=closed is a 422", async () => {
   });
 });
 
+async function freshProject(name: string) {
+  const res = await request("POST", "/api/v1/projects", { json: { name } });
+  return ((await res.json()) as { id: string }).id;
+}
+
+type IssuePage = { items: IssueBody[]; nextCursor: string | null };
+
+async function issuePage(query: string) {
+  const res = await request("GET", `/api/v1/issues?${query}`);
+  expect(res.status).toBe(200);
+  return (await res.json()) as IssuePage;
+}
+
 test("GET /issues pages through nextCursor without repeats", async () => {
-  const fresh = await request("POST", "/api/v1/projects", {
-    json: { name: "paging" },
-  });
-  const pagingId = ((await fresh.json()) as { id: string }).id;
-  for (const title of ["p1", "p2", "p3"]) {
-    await createIssue({ projectId: pagingId, title });
-  }
-  const first = (await (
-    await request("GET", `/api/v1/issues?projectId=${pagingId}&limit=2`)
-  ).json()) as { items: IssueBody[]; nextCursor: string };
+  const pagingId = await freshProject("paging");
+  await atFakeTimeAsync(
+    ["p1", "p2", "p3"].map(
+      (title) => () => createIssue({ projectId: pagingId, title }),
+    ),
+  );
+  const first = await issuePage(`projectId=${pagingId}&limit=2`);
   expect(first.items.map((i) => i.title)).toEqual(["p3", "p2"]);
-  const second = (await (
-    await request(
-      "GET",
-      `/api/v1/issues?projectId=${pagingId}&limit=2&cursor=${first.nextCursor}`,
-    )
-  ).json()) as { items: IssueBody[]; nextCursor: string | null };
+  const second = await issuePage(
+    `projectId=${pagingId}&limit=2&cursor=${first.nextCursor}`,
+  );
   expect(second.items.map((i) => i.title)).toEqual(["p1"]);
   expect(second.nextCursor).toBeNull();
+});
+
+test("GET /issues ends on a null cursor when the count is a multiple of the limit", async () => {
+  const exactId = await freshProject("exact");
+  await atFakeTimeAsync(
+    ["e1", "e2", "e3", "e4"].map(
+      (title) => () => createIssue({ projectId: exactId, title }),
+    ),
+  );
+  const first = await issuePage(`projectId=${exactId}&limit=2`);
+  expect(first.items.map((i) => i.title)).toEqual(["e4", "e3"]);
+  const second = await issuePage(
+    `projectId=${exactId}&limit=2&cursor=${first.nextCursor}`,
+  );
+  expect(second.items.map((i) => i.title)).toEqual(["e2", "e1"]);
+  expect(second.nextCursor).toBeNull();
+});
+
+test("GET /issues on a project with no issues is one empty page", async () => {
+  const emptyId = await freshProject("empty");
+  expect(await issuePage(`projectId=${emptyId}`)).toEqual({
+    items: [],
+    nextCursor: null,
+  });
+});
+
+test("GET /issues accepts the limit bounds 1 and 200", async () => {
+  const boundsId = await freshProject("bounds");
+  await atFakeTimeAsync(
+    ["b1", "b2"].map(
+      (title) => () => createIssue({ projectId: boundsId, title }),
+    ),
+  );
+  const one = await issuePage(`projectId=${boundsId}&limit=1`);
+  expect(one.items.map((i) => i.title)).toEqual(["b2"]);
+  expect(one.nextCursor).not.toBeNull();
+  const max = await issuePage(`projectId=${boundsId}&limit=200`);
+  expect(max.items.map((i) => i.title)).toEqual(["b2", "b1"]);
+  expect(max.nextCursor).toBeNull();
 });

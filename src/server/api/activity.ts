@@ -6,7 +6,7 @@ import {
 } from "../../shared/schemas.js";
 import type { Service } from "../service/index.js";
 import { createRouter } from "./env.js";
-import { errorResponses, jsonContent } from "./routes.js";
+import { jsonContent, readErrors } from "./routes.js";
 import { toActivityEvent, toPage } from "./serialize.js";
 
 const listActivity = createRoute({
@@ -17,7 +17,7 @@ const listActivity = createRoute({
   request: { query: activityListQuerySchema },
   responses: {
     200: jsonContent(pageSchema(activityEventSchema), "A page of events"),
-    ...errorResponses,
+    ...readErrors,
   },
 });
 

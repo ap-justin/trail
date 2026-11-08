@@ -75,34 +75,39 @@ export function pageSchema<T extends z.ZodType>(item: T) {
   });
 }
 
+const name = z.string().min(1).max(200);
+const title = z.string().min(1).max(300);
+// counted in UTF-16 units, so at most 192 KiB of UTF-8: room under MAX_BODY_BYTES (server/api/routes.ts)
+const text = z.string().max(64 * 1024);
+
 // Strict, so a misspelled field is a 422 rather than a write that silently skips it.
 export const projectCreateSchema = z
   .strictObject({
-    name: z.string().min(1),
-    description: z.string().optional(),
+    name,
+    description: text.optional(),
   })
   .openapi("ProjectCreate");
 
 export const projectUpdateSchema = z
   .strictObject({
-    name: z.string().min(1).optional(),
-    description: z.string().optional(),
+    name: name.optional(),
+    description: text.optional(),
   })
   .openapi("ProjectUpdate");
 
 export const issueCreateSchema = z
   .strictObject({
     projectId: id,
-    title: z.string().min(1),
-    description: z.string().optional(),
+    title,
+    description: text.optional(),
     assigneeId: id.nullable().optional(),
   })
   .openapi("IssueCreate");
 
 export const issueUpdateSchema = z
   .strictObject({
-    title: z.string().min(1).optional(),
-    description: z.string().optional(),
+    title: title.optional(),
+    description: text.optional(),
     status: issueStatusSchema.optional(),
     assigneeId: id
       .nullable()
@@ -112,7 +117,7 @@ export const issueUpdateSchema = z
   .openapi("IssueUpdate");
 
 export const commentCreateSchema = z
-  .strictObject({ body: z.string().min(1) })
+  .strictObject({ body: text.min(1) })
   .openapi("CommentCreate");
 
 export const pageQuerySchema = z.object({

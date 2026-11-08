@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
@@ -26,6 +26,21 @@ const migrationsFolder = fileURLToPath(
 );
 
 /**
+ * Copies the file to `backup` unless a copy is already there: a failed or killed
+ * migration leaves the ledger where it was, so an existing backup already holds
+ * this pre-migration state, and VACUUM INTO refuses an existing target.
+ */
+function backUpOnce(sqlite: Db["$client"], backup: string): void {
+  if (existsSync(backup)) return;
+  // written aside and renamed in, so a kill mid-copy never leaves a partial file under the backup's name
+  const partial = `${backup}.partial`;
+  rmSync(partial, { force: true });
+  // VACUUM INTO copies the whole file (needs its size free on disk); it can't run in a transaction
+  sqlite.prepare("vacuum into ?").run(partial);
+  renameSync(partial, backup);
+}
+
+/**
  * Applies pending drizzle-kit migrations. Throws, leaving the file untouched,
  * when the file was migrated by a newer build than this one.
  */
@@ -47,8 +62,7 @@ export function migrate(db: Db, folder = migrationsFolder): void {
 
   const before = lastApplied();
   if (before !== undefined && before < newest && sqlite.name !== ":memory:") {
-    // VACUUM INTO copies the whole file (needs its size free on disk); it can't run in a transaction
-    sqlite.prepare("vacuum into ?").run(`${sqlite.name}.pre-${newest}.bak`);
+    backUpOnce(sqlite, `${sqlite.name}.pre-${newest}.bak`);
   }
 
   // foreign_keys is a no-op inside a transaction, so drizzle-kit's own toggle in a

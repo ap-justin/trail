@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { setupTestApp } from "../test-app.js";
+import { atFakeTimeAsync, setupTestApp } from "../test-app.js";
 
 const { app, bot, request } = setupTestApp();
 
@@ -135,8 +135,9 @@ test.each([
 });
 
 test("GET /projects pages newest first through nextCursor", async () => {
-  const names = ["page-a", "page-b", "page-c"];
-  for (const name of names) await createProject(name);
+  await atFakeTimeAsync(
+    ["page-a", "page-b", "page-c"].map((name) => () => createProject(name)),
+  );
   const seen: string[] = [];
   let cursor: string | null = null;
   let pages = 0;
@@ -155,5 +156,21 @@ test("GET /projects pages newest first through nextCursor", async () => {
   } while (cursor !== null);
   expect(pages).toBe(Math.ceil(seen.length / 2));
   expect(new Set(seen).size).toBe(seen.length);
-  expect(seen.slice(0, 3)).toEqual(["page-c", "page-b", "page-a"]);
+  // earlier tests' projects were written at real time, after these fake-stamped ones
+  expect(seen.filter((n) => n.startsWith("page-"))).toEqual([
+    "page-c",
+    "page-b",
+    "page-a",
+  ]);
+});
+
+test("GET /projects accepts the limit bounds 1 and 200", async () => {
+  await createProject("bounds");
+  for (const limit of [1, 200]) {
+    const res = await request("GET", `/api/v1/projects?limit=${limit}`);
+    expect(res.status).toBe(200);
+    const page = (await res.json()) as { items: unknown[] };
+    expect(page.items.length).toBeGreaterThanOrEqual(1);
+    expect(page.items.length).toBeLessThanOrEqual(limit);
+  }
 });

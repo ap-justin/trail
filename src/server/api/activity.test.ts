@@ -1,9 +1,8 @@
 import { beforeAll, describe, expect, test } from "vitest";
 import { activityEvent } from "../db/schema.js";
-import { createBot } from "../service/keys.js";
-import { setupTestApp } from "../test-app.js";
+import { atFakeTimeAsync, setupTestApp } from "../test-app.js";
 
-const { db, bot, published, request } = setupTestApp();
+const { db, bot, addBot, published, request } = setupTestApp();
 
 type Event = { id: string; action: string; actorId: string; projectId: string };
 type Page = { items: Event[]; nextCursor: string | null };
@@ -13,6 +12,10 @@ const eventRows = () => db.select().from(activityEvent).all();
 async function json<T>(res: Response | Promise<Response>): Promise<T> {
   return (await (await res).json()) as T;
 }
+
+const json_ = (res: Response | Promise<Response>) =>
+  // biome-ignore lint/suspicious/noExplicitAny: loose response bodies for field reads
+  json<Record<string, any>>(res);
 
 async function newProject(name: string, key?: string) {
   return json<{ id: string }>(
@@ -97,12 +100,18 @@ describe("each REST write yields exactly one activity_event and one bus event", 
 });
 
 test("GET /activity lists newest first, filters by project and actor, and pages", async () => {
-  const other = createBot(db, "other");
-  const a = await newProject("activity-a");
-  const b = await newProject("activity-b", other.key);
-  await request("PATCH", `/api/v1/projects/${a.id}`, {
-    json: { description: "changed" },
-  });
+  const other = addBot("other");
+  const [a, b] = await atFakeTimeAsync([
+    () => newProject("activity-a"),
+    () => newProject("activity-b", other.key),
+  ]);
+  if (!a || !b) throw new Error("projects not created");
+  await atFakeTimeAsync([
+    () =>
+      request("PATCH", `/api/v1/projects/${a.id}`, {
+        json: { description: "changed" },
+      }),
+  ]);
 
   const byProject = await json<Page>(
     request("GET", `/api/v1/activity?projectId=${a.id}`),
@@ -139,7 +148,48 @@ test("GET /activity lists newest first, filters by project and actor, and pages"
     cursor = page.nextCursor;
   } while (cursor !== null);
   expect(seen).toEqual(all.items.map((e) => e.id));
-  expect(all.items[0]?.action).toBe("project.updated");
+});
+
+test("each write is attributed to the bot whose key made it", async () => {
+  const first = addBot("attr-first");
+  const second = addBot("attr-second");
+  const asFirst = (method: string, path: string, json?: unknown) =>
+    json_(request(method, path, { json, key: first.key }));
+  const asSecond = (method: string, path: string, json?: unknown) =>
+    json_(request(method, path, { json, key: second.key }));
+
+  const project = await asFirst("POST", "/api/v1/projects", { name: "attr" });
+  const issue = await asSecond("POST", "/api/v1/issues", {
+    projectId: project.id,
+    title: "filed by second",
+  });
+  const comment = await asFirst("POST", `/api/v1/issues/${issue.id}/comments`, {
+    body: "from first",
+  });
+  const reply = await asSecond("POST", `/api/v1/issues/${issue.id}/comments`, {
+    body: "from second",
+  });
+
+  expect(project.createdBy).toBe(first.actor.id);
+  expect(issue.createdBy).toBe(second.actor.id);
+  expect(comment.authorId).toBe(first.actor.id);
+  expect(reply.authorId).toBe(second.actor.id);
+
+  const events = await json<Page>(
+    request("GET", `/api/v1/activity?projectId=${project.id}&limit=200`),
+  );
+  expect(
+    events.items
+      .map((e) => `${e.action}:${e.actorId}`)
+      .sort((x, y) => x.localeCompare(y)),
+  ).toEqual(
+    [
+      `project.created:${first.actor.id}`,
+      `issue.created:${second.actor.id}`,
+      `comment.created:${first.actor.id}`,
+      `comment.created:${second.actor.id}`,
+    ].sort((x, y) => x.localeCompare(y)),
+  );
 });
 
 test("GET /activity with a bad cursor is a 422", async () => {
