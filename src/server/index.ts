@@ -21,6 +21,6 @@ if (!(server instanceof Server)) throw new Error("expected an HTTP/1 server");
 onShutdownSignal({
   server,
   onClosed: () => db.$client.close(),
-  // under the machine's kill_timeout (fly.toml), or the drain is killed mid-way
+  // under Fly's default kill_timeout (5 s), or the drain is killed mid-way
   deadlineMs: 4_000,
 });
