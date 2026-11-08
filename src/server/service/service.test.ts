@@ -328,7 +328,9 @@ describe("updatedAt", () => {
       issue.updatedAt.getTime(),
     );
     expect(updated.createdAt).toEqual(issue.createdAt);
-    expect(service.getIssue(bot, issue.id).updatedAt).toEqual(updated.updatedAt);
+    expect(service.getIssue(bot, issue.id).updatedAt).toEqual(
+      updated.updatedAt,
+    );
   });
 
   test("a project patch that changes nothing leaves the row, updatedAt included, as it was", () => {
