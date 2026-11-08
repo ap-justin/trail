@@ -14,6 +14,7 @@
     "lint": "biome check",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "db:generate": "tsx src/server/db/generate.ts",
     "db:migrate": "tsx src/server/db/migrate.ts",
     "trail": "tsx src/server/cli.ts"
   },
