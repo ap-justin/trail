@@ -11,6 +11,7 @@ import {
   idParam,
   jsonBody,
   jsonContent,
+  notFoundError,
   readErrors,
   writeErrors,
 } from "./routes.js";
@@ -27,6 +28,7 @@ const addComment = createRoute({
   responses: {
     201: jsonContent(commentSchema, "The created comment"),
     ...writeErrors,
+    ...notFoundError,
   },
 });
 
@@ -39,6 +41,7 @@ const listComments = createRoute({
   responses: {
     200: jsonContent(pageSchema(commentSchema), "A page of comments"),
     ...readErrors,
+    ...notFoundError,
   },
 });
 

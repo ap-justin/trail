@@ -52,21 +52,22 @@ test("the spec lists the error statuses each operation can return", async () => 
     ),
   );
 
-  const read = ["200", "401", "404", "422"];
-  const write = (ok: string) =>
-    [ok, "400", "401", "403", "404", "413", "415", "422"].sort();
+  const list = ["200", "401", "422"];
+  const write = (ok: string) => [ok, "400", "401", "413", "415", "422"].sort();
+  const withNotFound = (codes: string[]) => [...codes, "404"].sort();
+  const withForbidden = (codes: string[]) => [...codes, "403"].sort();
   expect(statuses).toEqual({
-    "GET /activity": read,
-    "GET /issues": read,
-    "GET /issues/{id}": read,
-    "GET /issues/{id}/comments": read,
-    "GET /projects": read,
-    "GET /projects/{id}": read,
-    "PATCH /issues/{id}": write("200"),
-    "PATCH /projects/{id}": write("200"),
-    "POST /issues": write("201"),
-    "POST /issues/{id}/comments": write("201"),
-    "POST /projects": write("201"),
+    "GET /activity": list,
+    "GET /issues": list,
+    "GET /issues/{id}": withNotFound(list),
+    "GET /issues/{id}/comments": withNotFound(list),
+    "GET /projects": list,
+    "GET /projects/{id}": withNotFound(list),
+    "PATCH /issues/{id}": withForbidden(withNotFound(write("200"))),
+    "PATCH /projects/{id}": withForbidden(withNotFound(write("200"))),
+    "POST /issues": withNotFound(write("201")),
+    "POST /issues/{id}/comments": withNotFound(write("201")),
+    "POST /projects": withForbidden(write("201")),
   });
 });
 

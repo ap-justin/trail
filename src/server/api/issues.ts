@@ -9,9 +9,11 @@ import {
 import type { Service } from "../service/index.js";
 import { createRouter } from "./env.js";
 import {
+  forbiddenError,
   idParam,
   jsonBody,
   jsonContent,
+  notFoundError,
   readErrors,
   writeErrors,
 } from "./routes.js";
@@ -28,6 +30,7 @@ const createIssue = createRoute({
   responses: {
     201: jsonContent(issueSchema, "The created issue"),
     ...writeErrors,
+    ...notFoundError,
   },
 });
 
@@ -52,6 +55,7 @@ const getIssue = createRoute({
   responses: {
     200: jsonContent(issueSchema, "The issue"),
     ...readErrors,
+    ...notFoundError,
   },
 });
 
@@ -64,6 +68,8 @@ const updateIssue = createRoute({
   responses: {
     200: jsonContent(issueSchema, "The updated issue"),
     ...writeErrors,
+    ...forbiddenError,
+    ...notFoundError,
   },
 });
 

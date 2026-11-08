@@ -14,15 +14,23 @@ export const readErrors = {
     errorSchema,
     "Missing, malformed, unknown or revoked bot key",
   ),
-  404: jsonContent(errorSchema, "No such resource"),
   422: jsonContent(errorSchema, "The request failed validation"),
+};
+
+/** Spread only into operations whose service call can throw `NotFoundError`. */
+export const notFoundError = {
+  404: jsonContent(errorSchema, "No such resource"),
+};
+
+/** Spread only into operations whose service call runs `requireBot`. */
+export const forbiddenError = {
+  403: jsonContent(errorSchema, "Only a bot may make this write"),
 };
 
 /** The error responses every route with a `jsonBody` documents beside its own. */
 export const writeErrors = {
   400: jsonContent(errorSchema, "The body is missing or not valid JSON"),
   ...readErrors,
-  403: jsonContent(errorSchema, "The actor may not make this write"),
   413: jsonContent(errorSchema, `The body is over ${MAX_BODY_BYTES} bytes`),
   415: jsonContent(errorSchema, "The body is not sent as application/json"),
 };

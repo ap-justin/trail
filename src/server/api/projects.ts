@@ -9,9 +9,11 @@ import {
 import type { Service } from "../service/index.js";
 import { createRouter } from "./env.js";
 import {
+  forbiddenError,
   idParam,
   jsonBody,
   jsonContent,
+  notFoundError,
   readErrors,
   writeErrors,
 } from "./routes.js";
@@ -28,6 +30,7 @@ const createProject = createRoute({
   responses: {
     201: jsonContent(projectSchema, "The created project"),
     ...writeErrors,
+    ...forbiddenError,
   },
 });
 
@@ -52,6 +55,7 @@ const getProject = createRoute({
   responses: {
     200: jsonContent(projectSchema, "The project"),
     ...readErrors,
+    ...notFoundError,
   },
 });
 
@@ -64,6 +68,8 @@ const updateProject = createRoute({
   responses: {
     200: jsonContent(projectSchema, "The updated project"),
     ...writeErrors,
+    ...forbiddenError,
+    ...notFoundError,
   },
 });
 
