@@ -148,6 +148,26 @@ test("an issue status outside the enum is rejected", () => {
   ).toBe("SQLITE_CONSTRAINT_CHECK");
 });
 
+test.each([
+  ["open", 1],
+  ["in_progress", 1],
+  ["done", null],
+  ["canceled", null],
+] as const)(
+  "an issue in status %s with completed_at %j is rejected",
+  (status, completedAt) => {
+    expect(
+      errorCode(() =>
+        sqlite
+          .prepare(
+            "insert into issue (id, project_id, number, title, status, created_by, created_at, updated_at, completed_at) values ('i-c', ?, 98, 't', ?, ?, 0, 0, ?)",
+          )
+          .run(proj.id, status, bot.id, completedAt),
+      ),
+    ).toBe("SQLITE_CONSTRAINT_CHECK");
+  },
+);
+
 test("an actor kind outside the enum is rejected", () => {
   expect(
     errorCode(() =>
@@ -344,6 +364,27 @@ test("a label name is unique within its project and non-empty", () => {
   labelIn(other.id, "bug")();
   expect(errorCode(labelIn(proj.id, "bug"))).toBe("SQLITE_CONSTRAINT_UNIQUE");
   expect(errorCode(labelIn(proj.id, ""))).toBe("SQLITE_CONSTRAINT_CHECK");
+});
+
+test("a label name collides regardless of ASCII case, within its project only", () => {
+  const other = db
+    .insert(project)
+    .values({ key: "LBC", name: "label case", createdBy: bot.id })
+    .returning()
+    .get();
+  const labelIn = (projectId: string, name: string) => () =>
+    db.insert(label).values({ projectId, name }).run();
+  labelIn(proj.id, "Foo")();
+  labelIn(other.id, "foo")();
+  expect(errorCode(labelIn(proj.id, "foo"))).toBe("SQLITE_CONSTRAINT_UNIQUE");
+  expect(
+    db
+      .select({ name: label.name })
+      .from(label)
+      .where(eq(label.projectId, proj.id))
+      .all()
+      .map((l) => l.name),
+  ).toContain("Foo");
 });
 
 test("an issue takes labels from its own project only, and loses them with the label", () => {

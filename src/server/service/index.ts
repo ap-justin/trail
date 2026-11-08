@@ -61,6 +61,7 @@ import {
   completedAtOf,
   type Link,
   type LinkInput,
+  labelKey,
   nonBlank,
   optionalRef,
   validEstimate,
@@ -364,13 +365,13 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
       .where(
         and(
           eq(label.projectId, projectId),
-          sql`lower(${label.name}) = lower(${name})`,
+          sql`${label.name} = ${name} collate nocase`,
         ),
       )
       .get();
   }
 
-  /** The project's labels by these names, matched in any case, created when missing. */
+  /** The project's labels by these names, matched ignoring the case of A-Z, created when missing. */
   function labelsNamed(tx: Tx, projectId: string, names: string[]): Label[] {
     return names.map(
       (name) =>
@@ -414,6 +415,58 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
       .returning({ issueSeq: project.issueSeq })
       .get() as { issueSeq: number };
     return issueSeq;
+  }
+
+  /**
+   * The numbers of the issues an import creates, by externalRef. One whose
+   * externalRef is the project's own key form (JUS-187) keeps that number, so
+   * its key still resolves; the project's sequence moves past the highest kept,
+   * then numbers the rest by (createdAt, externalRef), whatever the payload order.
+   */
+  function importNumbers(
+    tx: Tx,
+    target: Project,
+    rows: NormalIssue[],
+  ): Map<string, number> {
+    const ownKey = new RegExp(`^${target.key}-([1-9]\\d*)$`);
+    const numbers = new Map<string, number>();
+    const sequenced: NormalIssue[] = [];
+    for (const row of rows) {
+      const number = Number(ownKey.exec(row.externalRef)?.[1]);
+      if (!Number.isSafeInteger(number)) {
+        sequenced.push(row);
+        continue;
+      }
+      const holder = tx
+        .select()
+        .from(issue)
+        .where(and(eq(issue.projectId, target.id), eq(issue.number, number)))
+        .get();
+      if (holder) {
+        throw new ConflictError(
+          `issue ${row.externalRef} keeps its number, but ${target.key}-${number} is already issue ${holder.id} ("${holder.title}", externalRef ${holder.externalRef ?? "none"}): import into a project without that issue, or send a different externalRef`,
+        );
+      }
+      numbers.set(row.externalRef, number);
+    }
+    if (numbers.size > 0) {
+      tx.update(project)
+        .set({
+          issueSeq: sql`max(${project.issueSeq}, ${Math.max(...numbers.values())})`,
+          updatedAt: sql`${project.updatedAt}`,
+        })
+        .where(eq(project.id, target.id))
+        .run();
+    }
+    sequenced.sort(
+      (a, b) =>
+        a.createdAt.getTime() - b.createdAt.getTime() ||
+        (a.externalRef < b.externalRef ? -1 : 1),
+    );
+    for (const row of sequenced) {
+      numbers.set(row.externalRef, nextIssueNumber(tx, target.id));
+    }
+    return numbers;
   }
 
   type Tally = Record<"created" | "updated" | "unchanged", ImportCounts>;
@@ -478,7 +531,7 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
       .get() as Project;
   }
 
-  /** The project's labels by lowercased name, each payload name created when missing. */
+  /** The project's labels by `labelKey`, each payload name created when missing. */
   function importLabels(
     tx: Tx,
     projectId: string,
@@ -490,7 +543,7 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
       const found = findLabel(tx, projectId, name);
       tally[found ? "unchanged" : "created"].labels++;
       labels.set(
-        name.toLowerCase(),
+        labelKey(name),
         found ?? tx.insert(label).values({ projectId, name }).returning().get(),
       );
     }
@@ -504,12 +557,14 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
     target: Project,
     row: NormalIssue,
     current: Issue | undefined,
+    /** From `importNumbers`, for a row with no `current`. */
+    number: number | undefined,
     labels: Map<string, Label>,
     tally: Tally,
     now: Date,
   ): string {
     const labelsOf = (names: string[]) =>
-      names.map((n) => labels.get(n.toLowerCase()) as Label);
+      names.map((n) => labels.get(labelKey(n)) as Label);
     const completedAt = completedAtOf(
       row.status,
       row.completedAt ?? current?.completedAt ?? null,
@@ -520,7 +575,7 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
         .insert(issue)
         .values({
           projectId: target.id,
-          number: nextIssueNumber(tx, target.id),
+          number: number as number,
           externalRef: row.externalRef,
           title: row.title,
           description: row.description ?? "",
@@ -1077,7 +1132,7 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
             const twin = findLabel(tx, target.id, name);
             if (twin) {
               throw new ConflictError(
-                `project ${target.key} already has the label "${twin.name}": use it as it is, since label names match in any case`,
+                `project ${target.key} already has the label "${twin.name}": use it as it is, since label names match ignoring the case of A-Z`,
               );
             }
             const created = tx
@@ -1135,6 +1190,11 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
               .all(),
           ).map((i) => [i.externalRef, i]),
         );
+        const numbers = importNumbers(
+          tx,
+          target,
+          input.issues.filter((row) => !existing.has(row.externalRef)),
+        );
         for (const row of input.issues) {
           const issueId = importIssue(
             tx,
@@ -1142,6 +1202,7 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
             target,
             row,
             existing.get(row.externalRef),
+            numbers.get(row.externalRef),
             labels,
             tally,
             now,

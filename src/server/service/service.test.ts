@@ -223,6 +223,34 @@ test("a human cannot update a project or an issue", () => {
   expect(service.getIssue(bot, issue.id).status).toBe("open");
 });
 
+test.each([
+  [
+    "post a status update",
+    () =>
+      service.createStatusUpdate(human, {
+        projectId: proj.id,
+        body: "all good",
+        health: "on_track",
+      }),
+  ],
+  [
+    "create a label",
+    () => service.createLabel(human, { projectId: proj.id, name: "human" }),
+  ],
+  [
+    "import a project",
+    () =>
+      service.importProject(human, {
+        externalRef: "human-import",
+        key: projectKey(),
+        name: "imported by a human",
+        issues: [],
+      }),
+  ],
+])("a human cannot %s", (_name, write) => {
+  rejectsCleanly(write, ForbiddenError);
+});
+
 test("a status change is issue.updated with status from and to", () => {
   const issue = service.createIssue(bot, { projectId: proj.id, title: "t" });
   published = [];
@@ -242,6 +270,26 @@ test("a status change is issue.updated with status from and to", () => {
     status: "done",
     assigneeId: bot.id,
   });
+});
+
+test("label names match across ASCII case only, the same in one request as across requests", () => {
+  const p = service.createProject(bot, { key: projectKey(), name: "labels" });
+  const issue = service.createIssue(bot, {
+    projectId: p.id,
+    title: "t",
+    labels: ["Foo", "foo", "Équipe", "équipe"],
+  });
+  expect(issue.labels).toEqual(["Foo", "Équipe", "équipe"]);
+  // "ÉQUIPE" differs from "Équipe" in A-Z only, so it is the same label
+  expect(
+    service.updateIssue(bot, issue.id, { labels: ["FOO", "ÉQUIPE"] }).labels,
+  ).toEqual(["Foo", "Équipe"]);
+  expect(
+    service
+      .listLabels(bot, p.id)
+      .items.map((l) => l.name)
+      .sort(),
+  ).toEqual(["Foo", "Équipe", "équipe"]);
 });
 
 describe("completedAt", () => {

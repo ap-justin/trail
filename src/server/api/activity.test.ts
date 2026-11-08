@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, test } from "vitest";
+import { beforeAll, describe, expect, test, vi } from "vitest";
 import { activityEvent } from "../db/schema.js";
 import { atFakeTimeAsync, projectKey, setupTestApp } from "../test-app.js";
 
@@ -288,6 +288,33 @@ describe("GET /activity?after= resumes the feed oldest first", () => {
     const resumed = await feed(`${scope}&after=${idle.nextCursor}`);
     expect(resumed.items.map((e) => e.action)).toEqual(["issue.updated"]);
     expect(resumed.nextCursor).not.toBe(idle.nextCursor);
+  });
+
+  test("an event stamped earlier than the cursor's, written later, is still returned", async () => {
+    const [project] = await atFakeTimeAsync([() => newProject("backdated")]);
+    const projectId = (project as { id: string }).id;
+    const scope = `projectId=${projectId}`;
+    const { nextCursor } = await feed(`${scope}&after=`);
+    const cursorAt = eventRows()
+      .filter((e) => e.projectId === projectId)
+      .map((e) => e.createdAt.getTime())[0] as number;
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(cursorAt - 60_000));
+      await request("POST", "/api/v1/issues", {
+        json: { projectId, title: "late arrival" },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const late = eventRows().filter(
+      (e) => e.action === "issue.created" && e.projectId === projectId,
+    );
+    expect(late.map((e) => e.createdAt.getTime() < cursorAt)).toEqual([true]);
+    const resumed = await feed(`${scope}&after=${nextCursor}`);
+    expect(resumed.items.map((e) => e.action)).toEqual(["issue.created"]);
   });
 
   test("an empty feed still hands back a cursor to poll from", async () => {

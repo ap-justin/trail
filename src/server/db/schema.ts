@@ -21,6 +21,11 @@ export const issueStatuses = [
   "done",
   "canceled",
 ] as const;
+// the statuses that carry a completed_at
+const completedStatuses = [
+  "done",
+  "canceled",
+] as const satisfies readonly IssueStatus[];
 export const projectHealths = ["on_track", "at_risk", "off_track"] as const;
 export const activitySubjectTypes = [
   "project",
@@ -175,6 +180,10 @@ export const issue = sqliteTable(
     unique("issue_project_number_unique").on(t.projectId, t.number),
     check("issue_estimate_check", sql`${c(t.estimate)} >= 0`),
     check("issue_priority_check", sql`${c(t.priority)} between 0 and 4`),
+    check(
+      "issue_completed_at_check",
+      sql`(${oneOf(t.status, completedStatuses)}) = (${c(t.completedAt)} is not null)`,
+    ),
     uniqueIndex("issue_project_external_ref_unique")
       .on(t.projectId, t.externalRef)
       .where(sql`${c(t.externalRef)} is not null`),
@@ -205,7 +214,11 @@ export const label = sqliteTable(
   },
   (t) => [
     check("label_name_check", sql`length(${c(t.name)}) > 0`),
-    unique("label_project_name_unique").on(t.projectId, t.name),
+    // nocase folds ASCII only: 'Équipe' and 'équipe' are two labels
+    uniqueIndex("label_project_name_unique").on(
+      t.projectId,
+      sql`${c(t.name)} collate nocase`,
+    ),
     // target of issue_label's (label_id, project_id) key
     unique("label_id_project_unique").on(t.id, t.projectId),
   ],

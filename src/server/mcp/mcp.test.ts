@@ -288,6 +288,80 @@ test("list_activity resumes after a cursor and refuses it under other filters", 
   );
 });
 
+test("a retried create on the other create tools returns the first and writes nothing more", async () => {
+  const client = await connect(createBot(db, "mcp retry bot").key);
+  await call(client, "create_project", { key: "MCR", name: "retries" });
+  const issues = (id: string) => ({
+    projectId: "MCR",
+    title: id,
+    idempotency_key: id,
+  });
+  const creates: [string, Body, string, Body][] = [
+    ["create_issue", issues("r-issue"), "list_issues", { projectId: "MCR" }],
+    [
+      "create_label",
+      { projectId: "MCR", name: "Retry", idempotency_key: "r-label" },
+      "list_labels",
+      { projectId: "MCR" },
+    ],
+    [
+      "post_status_update",
+      {
+        projectId: "MCR",
+        body: "steady",
+        health: "on_track",
+        idempotency_key: "r-status",
+      },
+      "list_status_updates",
+      { projectId: "MCR" },
+    ],
+  ];
+  for (const [tool, args, list, listArgs] of creates) {
+    const first = await call(client, tool, args);
+    expect(await call(client, tool, args), tool).toEqual(first);
+    expect((await call(client, list, listArgs)).items, tool).toEqual([first]);
+  }
+});
+
+test("an idempotency_key reused with a changed body is a tool error and writes nothing", async () => {
+  const client = await connect(createBot(db, "mcp reuse bot").key);
+  await call(client, "create_project", { key: "MCK", name: "reuse" });
+  await call(client, "create_issue", {
+    projectId: "MCK",
+    title: "first",
+    idempotency_key: "reused",
+  });
+  expect(
+    await callError(client, "create_issue", {
+      projectId: "MCK",
+      title: "changed",
+      idempotency_key: "reused",
+    }),
+  ).toMatch(/^idempotency_key_reused: /);
+  expect(
+    (await call(client, "list_issues", { projectId: "MCK" })).items.map(
+      (i: Body) => i.title,
+    ),
+  ).toEqual(["first"]);
+});
+
+test("a key revoked after the client connected is refused on the next call and writes nothing", async () => {
+  const other = createBot(db, "mcp revoked later");
+  const client = await connect(other.key);
+  await call(client, "create_project", { key: "MCV", name: "before" });
+  revokeKey(db, other.key.split("_")[1] as string);
+  await expect(
+    client.callTool({
+      name: "create_issue",
+      arguments: { projectId: "MCV", title: "after revoke" },
+    }),
+  ).rejects.toThrow(/"code":"unauthorized"/);
+  const reader = await connect(bot.key);
+  expect(
+    (await call(reader, "list_issues", { projectId: "MCV" })).items,
+  ).toEqual([]);
+});
+
 test("import_project imports a project and a re-run changes nothing", async () => {
   const client = await connect(bot.key);
   const payload = {
@@ -359,6 +433,31 @@ test("a service refusal is a tool error saying what to send instead", async () =
 test("a misspelled argument is a tool error naming it", async () => {
   const client = await connect(bot.key);
   expect(await callError(client, "get_project", { projectID: "MCP" })).toMatch(
-    /projectID/,
+    /^MCP error -32602: Input validation error: Invalid arguments for tool get_project: .*Unrecognized key: "projectID"/s,
   );
+});
+
+test("a link that is not http or https is a tool error naming the url", async () => {
+  const client = await connect(bot.key);
+  await call(client, "create_project", { key: "MCU", name: "links" });
+  for (const url of ["javascript:alert(1)", "data:text/html,<b>x</b>"]) {
+    expect(
+      await callError(client, "create_issue", {
+        projectId: "MCU",
+        title: "bad link",
+        links: [{ url }],
+      }),
+      url,
+    ).toMatch(/must be an http or https url at links\[0\]\.url/);
+  }
+});
+
+test("project key arguments advertise the key rule as a pattern", async () => {
+  const client = await connect(bot.key);
+  const { tools } = await client.listTools();
+  for (const name of ["create_project", "import_project"]) {
+    const props = tools.find((t) => t.name === name)?.inputSchema
+      .properties as Record<string, { pattern?: string }>;
+    expect(props.key?.pattern, name).toBe("^[A-Za-z0-9]{2,10}$");
+  }
 });

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "818aec33-8340-46c5-aea8-d28c002d52e2",
+  "id": "b43ef0b3-343f-432b-85d1-b77593121a18",
   "prevId": "e4221d14-8665-47ea-9796-aeff9c69a8ba",
   "tables": {
     "activity_event": {
@@ -768,6 +768,10 @@
         "issue_priority_check": {
           "name": "issue_priority_check",
           "value": "\"priority\" between 0 and 4"
+        },
+        "issue_completed_at_check": {
+          "name": "issue_completed_at_check",
+          "value": "(\"status\" in ('done', 'canceled')) = (\"completed_at\" is not null)"
         }
       }
     },
@@ -955,7 +959,7 @@
           "name": "label_project_name_unique",
           "columns": [
             "project_id",
-            "name"
+            "\"name\" collate nocase"
           ],
           "isUnique": true
         },
@@ -1240,6 +1244,14 @@
     "columns": {}
   },
   "internal": {
-    "indexes": {}
+    "indexes": {
+      "label_project_name_unique": {
+        "columns": {
+          "\"name\" collate nocase": {
+            "isExpression": true
+          }
+        }
+      }
+    }
   }
 }

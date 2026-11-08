@@ -1,9 +1,11 @@
 -- Edited from drizzle-kit's draft, whose rebuild copies select the new columns from the old
 -- tables. These copies backfill instead: project.key P1, P2… and activity_event.seq in
 -- (created_at, id) order, issue.number the same way within each project, and issue_seq as
--- the project's issue count. The bot-name index fails the whole migration on a file that
--- already holds two bots with one name.
+-- the project's issue count. Bots sharing a display name keep it for the earliest by
+-- (created_at, id); each later one becomes "name (id)" so the bot-name index can build.
+-- issue.completed_at is updated_at for a done or canceled issue, its last change on record.
 ALTER TABLE `actor` ADD `label` text;--> statement-breakpoint
+UPDATE `actor` SET "display_name" = "display_name" || ' (' || "id" || ')' WHERE "kind" = 'bot' AND EXISTS (SELECT 1 FROM `actor` AS `earlier` WHERE `earlier`."kind" = 'bot' AND `earlier`."display_name" = `actor`."display_name" AND (`earlier`."created_at" < `actor`."created_at" OR (`earlier`."created_at" = `actor`."created_at" AND `earlier`."id" < `actor`."id")));--> statement-breakpoint
 CREATE UNIQUE INDEX `actor_bot_display_name_unique` ON `actor` (`display_name`) WHERE "kind" = 'bot';--> statement-breakpoint
 CREATE UNIQUE INDEX `actor_bot_label_unique` ON `actor` (`label`) WHERE "kind" = 'bot' and "label" is not null;--> statement-breakpoint
 CREATE TABLE `__new_project` (
@@ -50,10 +52,11 @@ CREATE TABLE `__new_issue` (
 	CONSTRAINT "issue_title_check" CHECK(length("title") > 0),
 	CONSTRAINT "issue_number_check" CHECK("number" > 0),
 	CONSTRAINT "issue_estimate_check" CHECK("estimate" >= 0),
-	CONSTRAINT "issue_priority_check" CHECK("priority" between 0 and 4)
+	CONSTRAINT "issue_priority_check" CHECK("priority" between 0 and 4),
+	CONSTRAINT "issue_completed_at_check" CHECK(("status" in ('done', 'canceled')) = ("completed_at" is not null))
 ) STRICT;
 --> statement-breakpoint
-INSERT INTO `__new_issue`("id", "project_id", "number", "title", "description", "status", "estimate", "priority", "assignee_id", "created_by", "external_ref", "source_author", "created_at", "updated_at", "completed_at") SELECT "id", "project_id", row_number() OVER (PARTITION BY "project_id" ORDER BY "created_at", "id"), "title", "description", "status", NULL, 0, "assignee_id", "created_by", NULL, NULL, "created_at", "updated_at", NULL FROM `issue`;--> statement-breakpoint
+INSERT INTO `__new_issue`("id", "project_id", "number", "title", "description", "status", "estimate", "priority", "assignee_id", "created_by", "external_ref", "source_author", "created_at", "updated_at", "completed_at") SELECT "id", "project_id", row_number() OVER (PARTITION BY "project_id" ORDER BY "created_at", "id"), "title", "description", "status", NULL, 0, "assignee_id", "created_by", NULL, NULL, "created_at", "updated_at", CASE WHEN "status" IN ('done', 'canceled') THEN "updated_at" END FROM `issue`;--> statement-breakpoint
 DROP TABLE `issue`;--> statement-breakpoint
 ALTER TABLE `__new_issue` RENAME TO `issue`;--> statement-breakpoint
 CREATE INDEX `issue_project_status_created_idx` ON `issue` (`project_id`,`status`,`created_at`,`id`);--> statement-breakpoint
@@ -74,7 +77,7 @@ CREATE TABLE `label` (
 	CONSTRAINT "label_name_check" CHECK(length("name") > 0)
 ) STRICT;
 --> statement-breakpoint
-CREATE UNIQUE INDEX `label_project_name_unique` ON `label` (`project_id`,`name`);--> statement-breakpoint
+CREATE UNIQUE INDEX `label_project_name_unique` ON `label` (`project_id`,"name" collate nocase);--> statement-breakpoint
 CREATE UNIQUE INDEX `label_id_project_unique` ON `label` (`id`,`project_id`);--> statement-breakpoint
 CREATE TABLE `issue_label` (
 	`issue_id` text NOT NULL,

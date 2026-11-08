@@ -97,7 +97,9 @@ test("a project key is stored uppercased; a malformed one is a 422", async () =>
       name: "bad key",
     });
     expect(status, key).toBe(422);
-    expect(body.error.message).toMatch(/key must be 2 to 10 letters/);
+    expect(body.error.message).toBe(
+      "key: must be 2 to 10 letters A-Z or digits, like TRL",
+    );
   }
 });
 
@@ -229,11 +231,34 @@ test("a PATCH setting the labels and links an issue already has writes nothing",
   expect(published.length).toBe(before);
 });
 
+test("a link may be https or http, a localhost one included", async () => {
+  const links = [
+    { url: "https://example.com/spec", title: "spec" },
+    { url: "http://localhost:3000/issues/1", title: "local" },
+  ];
+  const issue = await created("/issues", {
+    projectId: trl.id,
+    title: "linked",
+    links,
+  });
+  expect(issue.links).toEqual(links);
+});
+
 test.each([
   ["priority 5", { priority: 5 }, /^priority: /],
   ["priority 1.5", { priority: 1.5 }, /^priority: /],
   ["a negative estimate", { estimate: -1 }, /^estimate: /],
   ["a link that is not a url", { links: [{ url: "nope" }] }, /^links\.0\.url/],
+  [
+    "a javascript: link",
+    { links: [{ url: "javascript:alert(document.cookie)" }] },
+    /^links\.0\.url: must be an http or https url$/,
+  ],
+  [
+    "a data: link",
+    { links: [{ url: "data:text/html,<script>alert(1)</script>" }] },
+    /^links\.0\.url: must be an http or https url$/,
+  ],
   [
     "a url twice",
     {
@@ -332,7 +357,7 @@ test("POST /projects/:id/labels creates a label; a name taken in any case is a 4
   });
   expect(dup.status).toBe(409);
   expect(dup.body.error.message).toBe(
-    `project ${project.key} already has the label "Feature": use it as it is, since label names match in any case`,
+    `project ${project.key} already has the label "Feature": use it as it is, since label names match ignoring the case of A-Z`,
   );
   const list = await send("GET", `/projects/${project.id}/labels`);
   expect(list.body).toEqual({ items: [label], nextCursor: null });

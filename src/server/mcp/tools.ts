@@ -161,7 +161,7 @@ export function registerTools(
     "create_issue",
     {
       description:
-        "Open an issue in a project. It gets the project's next number, so its key reads like TRL-12. Label names are matched in any case, and a new name creates the label. Links (a PR, say) are a url and an optional title.",
+        "Open an issue in a project. It gets the project's next number, so its key reads like TRL-12. Label names are matched ignoring the case of A-Z (so É and é differ), and a new name creates the label. Links (a PR, say) are a url and an optional title.",
       inputSchema: issueCreateSchema.extend(idempotencyKey),
       annotations: create,
     },

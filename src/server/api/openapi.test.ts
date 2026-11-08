@@ -130,3 +130,21 @@ test.each([
     error: { code: expect.any(String), message: expect.any(String) },
   });
 });
+
+test("project key fields advertise the key rule as a pattern", async () => {
+  const res = await request("GET", "/api/v1/openapi.json", { key: null });
+  const spec = (await res.json()) as {
+    components: {
+      schemas: Record<
+        string,
+        { properties: Record<string, { pattern?: string }> }
+      >;
+    };
+  };
+  for (const schema of ["ProjectCreate", "Import"]) {
+    expect(
+      spec.components.schemas[schema]?.properties.key?.pattern,
+      schema,
+    ).toBe("^[A-Za-z0-9]{2,10}$");
+  }
+});

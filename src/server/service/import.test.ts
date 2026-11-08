@@ -399,28 +399,98 @@ test("a new project whose key another project holds is a conflict; a project's k
   );
 });
 
-test("new issues are numbered in payload order after the project's existing ones", () => {
-  const payload = linearProject();
-  service.importProject(bot, payload);
-  service.createIssue(bot, { projectId: payload.key, title: "by hand" });
-  const added = (ref: string): ImportIssue => ({
-    externalRef: ref,
-    title: ref,
+const todo = (externalRef: string, createdAt = "2026-02-01T00:00:00.000Z") =>
+  ({
+    externalRef,
+    title: externalRef,
     status: "Todo",
-    createdAt: "2026-02-01T00:00:00.000Z",
-  });
-  service.importProject(bot, {
-    ...payload,
-    issues: [added("new-b"), ...(payload.issues ?? []), added("new-a")],
-  });
-  const keyOf = (title: string) =>
+    createdAt,
+  }) satisfies ImportIssue;
+
+test("label names in one payload match across ASCII case only, as on later runs", () => {
+  const payload = {
+    ...linearProject(),
+    labels: ["Foo"],
+    issues: [
+      { ...todo("i-1"), labels: ["foo", "Équipe", "équipe"] },
+      { ...todo("i-2"), labels: ["ÉQUIPE"] },
+    ],
+  } satisfies ImportPayload;
+  expect(service.importProject(bot, payload).created.labels).toBe(3);
+  const labelsOf = (title: string) =>
     service
       .listIssues(bot, { projectId: payload.key })
-      .items.find((i) => i.title === title)?.key;
-  expect(["first", "by hand", "new-b", "new-a"].map(keyOf)).toEqual([
-    `${payload.key}-1`,
-    `${payload.key}-4`,
-    `${payload.key}-5`,
-    `${payload.key}-6`,
-  ]);
+      .items.find((i) => i.title === title)?.labels;
+  expect(labelsOf("i-1")).toEqual(["Foo", "Équipe", "équipe"]);
+  expect(labelsOf("i-2")).toEqual(["Équipe"]);
+  expect(service.importProject(bot, payload).unchanged.labels).toBe(3);
+});
+
+test.each([
+  ["as sorted", [0, 1, 2, 3]],
+  ["reversed", [3, 2, 1, 0]],
+  ["shuffled", [2, 0, 3, 1]],
+])(
+  "new issues are numbered by createdAt then externalRef after the project's existing ones, whatever the payload order (%s)",
+  (_, order) => {
+    const payload = linearProject();
+    service.importProject(bot, payload);
+    service.createIssue(bot, { projectId: payload.key, title: "by hand" });
+    const added = [
+      todo("new-z", "2026-02-01T00:00:00.000Z"),
+      todo("new-a", "2026-02-02T00:00:00.000Z"),
+      todo("new-b", "2026-02-02T00:00:00.000Z"),
+      todo("new-c", "2026-02-03T00:00:00.000Z"),
+    ];
+    service.importProject(bot, {
+      ...payload,
+      issues: [
+        ...(payload.issues ?? []),
+        ...order.map((i) => added[i] as ImportIssue),
+      ],
+    });
+    const keyOf = (title: string) =>
+      service
+        .listIssues(bot, { projectId: payload.key })
+        .items.find((i) => i.title === title)?.key;
+    expect(
+      ["first", "by hand", "new-z", "new-a", "new-b", "new-c"].map(keyOf),
+    ).toEqual([1, 4, 5, 6, 7, 8].map((n) => `${payload.key}-${n}`));
+  },
+);
+
+test("an issue whose externalRef is the project's own key keeps that number, and the sequence moves past it", () => {
+  const payload: ImportPayload = {
+    externalRef: "linear-JUS",
+    key: "JUS",
+    name: "Justin",
+    issues: [todo("JUS-187"), todo("JUS-1"), todo("from-elsewhere")],
+  };
+  service.importProject(bot, payload);
+  expect(service.getIssue(bot, "JUS-187").externalRef).toBe("JUS-187");
+  expect(service.getIssue(bot, "JUS-1").externalRef).toBe("JUS-1");
+  expect(service.getIssue(bot, "JUS-188").externalRef).toBe("from-elsewhere");
+  expect(
+    service.createIssue(bot, { projectId: "JUS", title: "by hand" }).key,
+  ).toBe("JUS-189");
+
+  const rerun = service.importProject(bot, payload);
+  expect(rerun.created).toEqual(zero);
+  expect(rerun.unchanged.issues).toBe(3);
+});
+
+test("an issue keeping a number another issue holds is a conflict naming both, and nothing is written", () => {
+  const payload = linearProject();
+  service.importProject(bot, payload);
+  const holder = service.createIssue(bot, {
+    projectId: payload.key,
+    title: "by hand",
+  });
+  refused(
+    {
+      ...payload,
+      issues: [todo("brand-new"), todo(holder.key)],
+    },
+    `issue ${holder.key} keeps its number, but ${holder.key} is already issue ${holder.id} ("by hand", externalRef none)`,
+  );
 });

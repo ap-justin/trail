@@ -71,12 +71,19 @@ export function optionalRef(ref: string | null | undefined): string | null {
   return ref == null ? null : nonBlank(ref, "externalRef");
 }
 
-/** Trimmed names, a repeat (in any case) dropped. */
+/**
+ * A label name as the labels unique index compares it: SQLite's nocase folds
+ * A-Z only, so "Foo" and "foo" are one label and "Équipe" and "équipe" two.
+ */
+export const labelKey = (name: string) =>
+  name.replace(/[A-Z]/g, (c) => c.toLowerCase());
+
+/** Trimmed names, a repeat (in ASCII case, see `labelKey`) dropped. */
 export function validLabelNames(names: string[]): string[] {
   const seen = new Map<string, string>();
   for (const raw of names) {
     const name = nonBlank(raw, "label name");
-    if (!seen.has(name.toLowerCase())) seen.set(name.toLowerCase(), name);
+    if (!seen.has(labelKey(name))) seen.set(labelKey(name), name);
   }
   return [...seen.values()];
 }

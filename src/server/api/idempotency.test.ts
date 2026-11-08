@@ -92,6 +92,34 @@ test("the replay is the first response even after the row has changed", async ()
   expect(again.title).toBe("original");
 });
 
+test("a body with its fields in another order is the same request", async () => {
+  const first = await post(
+    "/issues",
+    {
+      title: "ordered",
+      projectId: project.id,
+      labels: ["a", "b"],
+      links: [{ title: "PR", url: "https://github.com/o/r/pull/1" }],
+    },
+    "reordered",
+  );
+  expect(first.status).toBe(201);
+  const events = eventCount();
+  const again = await post(
+    "/issues",
+    {
+      links: [{ url: "https://github.com/o/r/pull/1", title: "PR" }],
+      labels: ["a", "b"],
+      projectId: project.id,
+      title: "ordered",
+    },
+    "reordered",
+  );
+  expect(again.status).toBe(201);
+  expect(await again.json()).toEqual(await first.json());
+  expect(eventCount()).toBe(events);
+});
+
 test("a reference sent as a key or an id is the same request", async () => {
   const byId = await post(
     "/issues",

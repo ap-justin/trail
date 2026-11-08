@@ -77,6 +77,41 @@ test("POST /import upserts the project and answers the per-kind counts", async (
   expect(again.unchanged).toEqual(body.created);
 });
 
+test("POST /import keeps an issue's number from an externalRef in the project's key form; one already held is a 409", async () => {
+  const keyed = {
+    externalRef: "P-KEPT",
+    key: "KPT",
+    name: "Kept",
+    issues: [{ ...payload.issues[0], externalRef: "KPT-187", comments: [] }],
+  };
+  expect(
+    (await request("POST", "/api/v1/import", { json: keyed })).status,
+  ).toBe(200);
+  const kept = (await (
+    await request("GET", "/api/v1/issues/KPT-187")
+  ).json()) as Body;
+  expect(kept.externalRef).toBe("KPT-187");
+
+  const byHand = (await (
+    await request("POST", "/api/v1/issues", {
+      json: { projectId: "KPT", title: "by hand" },
+    })
+  ).json()) as Body;
+  expect(byHand.key).toBe("KPT-188");
+  const res = await request("POST", "/api/v1/import", {
+    json: {
+      ...keyed,
+      issues: [{ ...keyed.issues[0], externalRef: "KPT-188" }],
+    },
+  });
+  expect(res.status).toBe(409);
+  const body = (await res.json()) as Body;
+  expect(body.error.code).toBe("conflict");
+  expect(body.error.message).toContain(
+    `issue KPT-188 keeps its number, but KPT-188 is already issue ${byHand.id}`,
+  );
+});
+
 test("POST /import with an unknown status is a 422 listing the accepted names", async () => {
   const res = await request("POST", "/api/v1/import", {
     json: {

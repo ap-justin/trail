@@ -146,12 +146,15 @@ const projectRef = id.meta({
 });
 const labelNames = z.array(labelName).max(50).meta({
   description:
-    "Label names. A name matches the project's label in any case; a new name creates the label.",
+    "Label names. A name matches the project's label ignoring the case of A-Z; a new name creates the label.",
 });
 const links = z
   .array(
     z.strictObject({
-      url: z.url().max(2048),
+      // not z.httpUrl(): it also demands a dotted domain, refusing http://localhost
+      url: z
+        .url({ protocol: /^https?$/, error: "must be an http or https url" })
+        .max(2048),
       title: z
         .string()
         .max(300)
@@ -161,10 +164,18 @@ const links = z
   )
   .max(50);
 
+// the service's rule (service/validate.ts) before it uppercases, so the spec and MCP schema carry it
+const projectKey = z
+  .string()
+  .regex(
+    /^[A-Za-z0-9]{2,10}$/,
+    "must be 2 to 10 letters A-Z or digits, like TRL",
+  );
+
 export const projectCreateSchema = z
   .strictObject({
     name,
-    key: z.string().meta({
+    key: projectKey.meta({
       description:
         "2 to 10 letters A-Z or digits, unique across projects; lowercase is stored uppercased. Its issues' keys are this, a dash and their number: TRL-12.",
       example: "TRL",
@@ -302,7 +313,7 @@ const importStatusUpdateSchema = z
 export const importSchema = z
   .strictObject({
     externalRef: sourceRef,
-    key: z.string().meta({
+    key: projectKey.meta({
       description:
         "The project's key, like TRL: 2 to 10 letters A-Z or digits. Fixed once imported; a re-run sends the same key.",
       example: "TRL",

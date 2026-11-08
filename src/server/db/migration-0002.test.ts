@@ -77,21 +77,56 @@ test("existing projects get unique keys and their issues numbers from 1 in creat
   db.$client.close();
 });
 
-test("a file holding two bots with one name is refused and left as it was", () => {
-  const db = phase1Db(`
-    insert into actor (id, kind, display_name, created_at) values
-      ('b1', 'bot', 'builder', 0), ('b2', 'bot', 'builder', 0);
+test("done and canceled issues are completed at their last update, the rest not at all", () => {
+  const db = phase1Db(`${actors}
+    insert into project (id, name, created_by, created_at, updated_at) values ('p', 'trail', 'b', 0, 0);
+    insert into issue (id, project_id, title, status, created_by, created_at, updated_at) values
+      ('i-open', 'p', 'a', 'open', 'b', 1, 10),
+      ('i-wip', 'p', 'b', 'in_progress', 'b', 2, 20),
+      ('i-done', 'p', 'c', 'done', 'b', 3, 30),
+      ('i-cxl', 'p', 'd', 'canceled', 'b', 4, 40);
   `);
 
-  expect(() => migrate(db)).toThrow(
-    /UNIQUE constraint failed: actor\.display_name/,
-  );
+  migrate(db);
+
+  expect(rows(db, "select id, completed_at from issue order by id")).toEqual([
+    { id: "i-cxl", completed_at: 40 },
+    { id: "i-done", completed_at: 30 },
+    { id: "i-open", completed_at: null },
+    { id: "i-wip", completed_at: null },
+  ]);
+  db.$client.close();
+});
+
+test("bots sharing a name keep it for the earliest, the later ones take their id as a suffix", () => {
+  const db = phase1Db(`
+    insert into actor (id, kind, display_name, created_at) values
+      ('b3', 'bot', 'builder', 5), ('b2', 'bot', 'builder', 0), ('b1', 'bot', 'builder', 0),
+      ('r', 'bot', 'reviewer', 0);
+    insert into actor (id, kind, display_name, github_id, created_at) values
+      ('h1', 'human', 'builder', 1, 0), ('h2', 'human', 'builder', 2, 0);
+    insert into project (id, name, created_by, created_at, updated_at) values ('p', 'trail', 'b2', 0, 0);
+    insert into api_key (id, actor_id, prefix, hash, created_at) values ('k', 'b3', 'trl_x', '${"a".repeat(64)}', 0);
+  `);
+
+  migrate(db);
+
   expect(
-    rows(
-      db,
-      "select name from pragma_table_info('project') where name = 'key'",
-    ),
-  ).toEqual([]);
+    rows(db, "select id, kind, display_name from actor order by id"),
+  ).toEqual([
+    { id: "b1", kind: "bot", display_name: "builder" },
+    { id: "b2", kind: "bot", display_name: "builder (b2)" },
+    { id: "b3", kind: "bot", display_name: "builder (b3)" },
+    { id: "h1", kind: "human", display_name: "builder" },
+    { id: "h2", kind: "human", display_name: "builder" },
+    { id: "r", kind: "bot", display_name: "reviewer" },
+  ]);
+  expect(rows(db, "select created_by from project")).toEqual([
+    { created_by: "b2" },
+  ]);
+  expect(rows(db, "select actor_id from api_key")).toEqual([
+    { actor_id: "b3" },
+  ]);
   db.$client.close();
 });
 
