@@ -34,7 +34,7 @@ for _ in $(seq 50); do
 done
 [ -n "$up" ] || { echo "server never answered /health" >&2; exit 1; }
 
-key=$(node dist/cli.js bot create smoke | awk '$1 == "key" { print $2 }')
+key=$(node dist/cli.js bot create smoke --key-only)
 [ -n "$key" ] || { echo "dist/cli.js printed no key" >&2; exit 1; }
 
 code=$(curl -s -o /dev/null -w '%{http_code}' "$base/api/v1/projects")

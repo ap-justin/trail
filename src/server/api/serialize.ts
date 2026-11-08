@@ -2,19 +2,30 @@ import type {
   ActivityEventView,
   CommentView,
   IssueView,
+  LabelView,
   PageView,
   ProjectView,
+  StatusUpdateView,
 } from "../../shared/schemas.js";
 import type { ActivityEvent } from "../events/bus.js";
-import type { Comment, Issue, Page, Project } from "../service/index.js";
+import type {
+  Comment,
+  Issue,
+  Label,
+  Page,
+  Project,
+  StatusUpdate,
+} from "../service/index.js";
 
 // One function per resource, each listing its wire keys, so a new column reaches the wire only on purpose.
 
 export function toProject(row: Project): ProjectView {
   return {
     id: row.id,
+    key: row.key,
     name: row.name,
     description: row.description,
+    externalRef: row.externalRef,
     createdBy: row.createdBy,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -24,11 +35,18 @@ export function toProject(row: Project): ProjectView {
 export function toIssue(row: Issue): IssueView {
   return {
     id: row.id,
+    key: row.key,
+    number: row.number,
     projectId: row.projectId,
     title: row.title,
     description: row.description,
     status: row.status,
+    priority: row.priority,
+    estimate: row.estimate,
+    labels: row.labels,
+    links: row.links.map((l) => ({ url: l.url, title: l.title })),
     assigneeId: row.assigneeId,
+    externalRef: row.externalRef,
     createdBy: row.createdBy,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -41,6 +59,28 @@ export function toComment(row: Comment): CommentView {
     issueId: row.issueId,
     authorId: row.authorId,
     body: row.body,
+    externalRef: row.externalRef,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+export function toStatusUpdate(row: StatusUpdate): StatusUpdateView {
+  return {
+    id: row.id,
+    projectId: row.projectId,
+    authorId: row.authorId,
+    body: row.body,
+    health: row.health,
+    externalRef: row.externalRef,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+export function toLabel(row: Label): LabelView {
+  return {
+    id: row.id,
+    projectId: row.projectId,
+    name: row.name,
     createdAt: row.createdAt.toISOString(),
   };
 }

@@ -7,8 +7,10 @@ import { commentRoutes } from "./comments.js";
 import { createRouter } from "./env.js";
 import { errorResponse, handleError } from "./errors.js";
 import { issueRoutes } from "./issues.js";
+import { labelRoutes } from "./labels.js";
 import { projectRoutes } from "./projects.js";
 import { MAX_BODY_BYTES } from "./routes.js";
+import { statusUpdateRoutes } from "./status-updates.js";
 
 /** The `/api/v1` app: the spec is public, every other route needs a bot key. */
 export function createApi({ db, service }: { db: Db; service: Service }) {
@@ -43,6 +45,8 @@ export function createApi({ db, service }: { db: Db; service: Service }) {
   api.route("/", projectRoutes(service));
   api.route("/", issueRoutes(service));
   api.route("/", commentRoutes(service));
+  api.route("/", labelRoutes(service));
+  api.route("/", statusUpdateRoutes(service));
   api.route("/", activityRoutes(service));
   return api;
 }

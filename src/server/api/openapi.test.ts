@@ -25,11 +25,15 @@ test("GET /api/v1/openapi.json serves the spec without a key", async () => {
       "GET /issues/{id}/comments",
       "GET /projects",
       "GET /projects/{id}",
+      "GET /projects/{id}/labels",
+      "GET /projects/{id}/status-updates",
       "PATCH /issues/{id}",
       "PATCH /projects/{id}",
       "POST /issues",
       "POST /issues/{id}/comments",
       "POST /projects",
+      "POST /projects/{id}/labels",
+      "POST /projects/{id}/status-updates",
     ].sort(),
   );
   expect(spec.components.securitySchemes).toEqual({
@@ -56,19 +60,57 @@ test("the spec lists the error statuses each operation can return", async () => 
   const write = (ok: string) => [ok, "400", "401", "413", "415", "422"].sort();
   const withNotFound = (codes: string[]) => [...codes, "404"].sort();
   const withForbidden = (codes: string[]) => [...codes, "403"].sort();
+  const withConflict = (codes: string[]) => [...codes, "409"].sort();
   expect(statuses).toEqual({
-    "GET /activity": list,
-    "GET /issues": list,
+    "GET /activity": withNotFound(list),
+    "GET /issues": withNotFound(list),
     "GET /issues/{id}": withNotFound(list),
     "GET /issues/{id}/comments": withNotFound(list),
     "GET /projects": list,
     "GET /projects/{id}": withNotFound(list),
+    "GET /projects/{id}/labels": withNotFound(list),
+    "GET /projects/{id}/status-updates": withNotFound(list),
     "PATCH /issues/{id}": withForbidden(withNotFound(write("200"))),
     "PATCH /projects/{id}": withForbidden(withNotFound(write("200"))),
-    "POST /issues": withNotFound(write("201")),
-    "POST /issues/{id}/comments": withNotFound(write("201")),
-    "POST /projects": withForbidden(write("201")),
+    "POST /issues": withConflict(withNotFound(write("201"))),
+    "POST /issues/{id}/comments": withConflict(withNotFound(write("201"))),
+    "POST /projects": withConflict(withForbidden(write("201"))),
+    "POST /projects/{id}/labels": withConflict(
+      withForbidden(withNotFound(write("201"))),
+    ),
+    "POST /projects/{id}/status-updates": withConflict(
+      withForbidden(withNotFound(write("201"))),
+    ),
   });
+});
+
+test("every create documents the Idempotency-Key header, and no other operation does", async () => {
+  const res = await request("GET", "/api/v1/openapi.json", { key: null });
+  const spec = (await res.json()) as {
+    paths: Record<
+      string,
+      Record<string, { parameters?: { name: string; in: string }[] }>
+    >;
+  };
+  const withHeader = Object.entries(spec.paths).flatMap(([path, methods]) =>
+    Object.entries(methods)
+      .filter(([, op]) =>
+        (op.parameters ?? []).some(
+          (p) =>
+            p.in === "header" && p.name.toLowerCase() === "idempotency-key",
+        ),
+      )
+      .map(([method]) => `${method.toUpperCase()} ${path}`),
+  );
+  expect(withHeader.sort()).toEqual(
+    [
+      "POST /issues",
+      "POST /issues/{id}/comments",
+      "POST /projects",
+      "POST /projects/{id}/labels",
+      "POST /projects/{id}/status-updates",
+    ].sort(),
+  );
 });
 
 test.each([

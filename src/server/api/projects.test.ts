@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { atFakeTimeAsync, setupTestApp } from "../test-app.js";
+import { atFakeTimeAsync, projectKey, setupTestApp } from "../test-app.js";
 
 const { app, bot, request } = setupTestApp();
 
@@ -7,13 +7,15 @@ const isoTimestamp = expect.stringMatching(/^\d{4}-\d\d-\d\dT[\d:.]+Z$/);
 
 test("POST /projects creates a project as the calling bot and returns 201", async () => {
   const res = await request("POST", "/api/v1/projects", {
-    json: { name: "trail", description: "issue tracker" },
+    json: { key: "TRL", name: "trail", description: "issue tracker" },
   });
   expect(res.status).toBe(201);
   expect(await res.json()).toEqual({
     id: expect.any(String),
+    key: "TRL",
     name: "trail",
     description: "issue tracker",
+    externalRef: null,
     createdBy: bot.actor.id,
     createdAt: isoTimestamp,
     updatedAt: isoTimestamp,
@@ -21,7 +23,9 @@ test("POST /projects creates a project as the calling bot and returns 201", asyn
 });
 
 async function createProject(name: string) {
-  const res = await request("POST", "/api/v1/projects", { json: { name } });
+  const res = await request("POST", "/api/v1/projects", {
+    json: { key: projectKey(), name },
+  });
   return (await res.json()) as { id: string; name: string };
 }
 
@@ -34,7 +38,11 @@ test("GET /projects/:id returns the project; an unknown id is a 404", async () =
   const missing = await request("GET", "/api/v1/projects/nope");
   expect(missing.status).toBe(404);
   expect(await missing.json()).toEqual({
-    error: { code: "not_found", message: "no project nope" },
+    error: {
+      code: "not_found",
+      message:
+        "no project nope: pass the id or key (like TRL) of an existing project",
+    },
   });
 });
 
@@ -78,7 +86,7 @@ test.each([
 
 test("a blank name the service rejects is a 422 in the same shape", async () => {
   const res = await request("POST", "/api/v1/projects", {
-    json: { name: "   " },
+    json: { key: projectKey(), name: "   " },
   });
   expect(res.status).toBe(422);
   expect(await res.json()).toEqual(validationFailed("name must not be empty"));

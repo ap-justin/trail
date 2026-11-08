@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { setupTestApp } from "../test-app.js";
+import { projectKey, setupTestApp } from "../test-app.js";
 
 const { app, bot, request } = setupTestApp();
 
@@ -51,13 +51,22 @@ async function created(path: string, json: unknown) {
   return ((await res.json()) as { id: string }).id;
 }
 
-const projectId = await created("/api/v1/projects", { name: "limits" });
+const projectId = await created("/api/v1/projects", {
+  key: projectKey(),
+  name: "limits",
+});
 const issueId = await created("/api/v1/issues", { projectId, title: "t" });
 const KiB64 = 64 * 1024;
 
 test.each([
-  ["POST", "/api/v1/projects", "name", 200, {}],
-  ["POST", "/api/v1/projects", "description", KiB64, { name: "p" }],
+  ["POST", "/api/v1/projects", "name", 200, { key: projectKey() }],
+  [
+    "POST",
+    "/api/v1/projects",
+    "description",
+    KiB64,
+    { key: projectKey(), name: "p" },
+  ],
   ["PATCH", `/api/v1/projects/${projectId}`, "name", 200, {}],
   ["PATCH", `/api/v1/projects/${projectId}`, "description", KiB64, {}],
   ["POST", "/api/v1/issues", "title", 300, { projectId }],

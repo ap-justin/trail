@@ -1,12 +1,12 @@
 import { beforeAll, expect, test } from "vitest";
-import { atFakeTimeAsync, setupTestApp } from "../test-app.js";
+import { atFakeTimeAsync, projectKey, setupTestApp } from "../test-app.js";
 
 const { bot, request } = setupTestApp();
 
 let projectId = "";
 beforeAll(async () => {
   const res = await request("POST", "/api/v1/projects", {
-    json: { name: "issues" },
+    json: { key: "ISS", name: "issues" },
   });
   projectId = ((await res.json()) as { id: string }).id;
 });
@@ -28,11 +28,18 @@ test("POST /issues opens an unassigned issue and returns 201", async () => {
   expect(res.status).toBe(201);
   expect(await res.json()).toEqual({
     id: expect.any(String),
+    key: "ISS-1",
+    number: 1,
     projectId,
     title: "first",
     description: "",
     status: "open",
+    priority: 0,
+    estimate: null,
+    labels: [],
+    links: [],
     assigneeId: null,
+    externalRef: null,
     createdBy: bot.actor.id,
     createdAt: expect.any(String),
     updatedAt: expect.any(String),
@@ -45,7 +52,11 @@ test("POST /issues on an unknown project is a 404", async () => {
   });
   expect(res.status).toBe(404);
   expect(await res.json()).toEqual({
-    error: { code: "not_found", message: "no project nope" },
+    error: {
+      code: "not_found",
+      message:
+        "no project nope: pass the id or key (like TRL) of an existing project",
+    },
   });
 });
 
@@ -106,7 +117,7 @@ test("PATCH /issues/:id assigning an unknown actor is a 422", async () => {
 
 test("GET /issues filters by project, status and assignee", async () => {
   const other = await request("POST", "/api/v1/projects", {
-    json: { name: "filters" },
+    json: { key: projectKey(), name: "filters" },
   });
   const otherId = ((await other.json()) as { id: string }).id;
   const titles = async (query: string) => {
@@ -150,7 +161,9 @@ test("GET /issues?status=closed is a 422", async () => {
 });
 
 async function freshProject(name: string) {
-  const res = await request("POST", "/api/v1/projects", { json: { name } });
+  const res = await request("POST", "/api/v1/projects", {
+    json: { key: projectKey(), name },
+  });
   return ((await res.json()) as { id: string }).id;
 }
 

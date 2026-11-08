@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { activityEvent, comment, issue, project } from "../db/schema.js";
-import { createBot, revokeKey } from "../service/keys.js";
-import { setupTestApp } from "../test-app.js";
+import { createBot, createKey, revokeKey } from "../service/keys.js";
+import { projectKey, setupTestApp } from "../test-app.js";
 
 const { db, app, bot, addBot, published, request } = setupTestApp();
 
@@ -87,7 +87,7 @@ test("revoking one bot's key leaves another's working and keeps the revoked bot'
   const doomed = addBot("doomed");
   const created = await request("POST", "/api/v1/projects", {
     key: doomed.key,
-    json: { name: "outlives its key" },
+    json: { key: projectKey(), name: "outlives its key" },
   });
   const { id } = (await created.json()) as { id: string };
 
@@ -105,7 +105,9 @@ test("revoking one bot's key leaves another's working and keeps the revoked bot'
 test("a revoked key cannot write: POST project, PATCH issue and POST comment are 401s that change nothing", async () => {
   const retired = addBot("retired-writer");
   const created = (await (
-    await request("POST", "/api/v1/projects", { json: { name: "target" } })
+    await request("POST", "/api/v1/projects", {
+      json: { key: projectKey(), name: "target" },
+    })
   ).json()) as { id: string };
   const filed = (await (
     await request("POST", "/api/v1/issues", {
@@ -115,7 +117,7 @@ test("a revoked key cannot write: POST project, PATCH issue and POST comment are
 
   const writes = (tag: string) =>
     [
-      ["POST", "/api/v1/projects", { name: tag }],
+      ["POST", "/api/v1/projects", { key: projectKey(), name: tag }],
       ["PATCH", `/api/v1/issues/${filed.id}`, { title: tag }],
       ["POST", `/api/v1/issues/${filed.id}/comments`, { body: tag }],
     ] as const;
@@ -147,4 +149,23 @@ test("a revoked key cannot write: POST project, PATCH issue and POST comment are
   }
   expect(tables()).toEqual(before);
   expect(published).toHaveLength(publishedBefore);
+});
+
+test("a second key minted for a bot writes as that bot, and revoking it leaves the first working", async () => {
+  const twoKeys = addBot("two keys");
+  const second = createKey(db, twoKeys.actor.id);
+  const res = await request("POST", "/api/v1/projects", {
+    key: second.key,
+    json: { key: projectKey(), name: "second key" },
+  });
+  expect(res.status).toBe(201);
+  expect(await res.json()).toMatchObject({ createdBy: twoKeys.actor.id });
+
+  revokeKey(db, second.key.split("_")[1] as string);
+  expect(
+    (await request("GET", "/api/v1/projects", { key: second.key })).status,
+  ).toBe(401);
+  expect(
+    (await request("GET", "/api/v1/projects", { key: twoKeys.key })).status,
+  ).toBe(200);
 });

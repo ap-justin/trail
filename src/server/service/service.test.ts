@@ -11,7 +11,7 @@ import {
 } from "vitest";
 import { migrate, openDatabase } from "../db/client.js";
 import { type ActivityEvent, createEventBus } from "../events/bus.js";
-import { atFakeTime } from "../test-app.js";
+import { atFakeTime, projectKey } from "../test-app.js";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors.js";
 import { createService, type Issue, type Project } from "./index.js";
 import { createBot, createHuman } from "./keys.js";
@@ -61,7 +61,7 @@ function onlyEventOf(write: () => unknown): ActivityEvent {
 test("creating a project commits one project.created event and publishes it", () => {
   let id = "";
   const event = onlyEventOf(() => {
-    id = service.createProject(bot, { name: "trail" }).id;
+    id = service.createProject(bot, { key: projectKey(), name: "trail" }).id;
   });
   expect(event).toMatchObject({
     actorId: bot.id,
@@ -88,7 +88,7 @@ function rejectsCleanly(
 test("a project with a blank name is rejected with no row and no event", () => {
   const before = service.listProjects(bot).items.length;
   rejectsCleanly(
-    () => service.createProject(bot, { name: "  " }),
+    () => service.createProject(bot, { key: projectKey(), name: "  " }),
     ValidationError,
   );
   expect(service.listProjects(bot).items).toHaveLength(before);
@@ -96,12 +96,52 @@ test("a project with a blank name is rejected with no row and no event", () => {
 
 test("a human cannot create a project", () => {
   rejectsCleanly(
-    () => service.createProject(human, { name: "mine" }),
+    () => service.createProject(human, { key: projectKey(), name: "mine" }),
     ForbiddenError,
   );
 });
 
-const proj = service.createProject(bot, { name: "fixtures" });
+test("a human files an issue unassigned; naming an assignee is refused and writes nothing", () => {
+  const filed = service.createProject(bot, {
+    key: projectKey(),
+    name: "human filed",
+  });
+  published = [];
+  const issue = service.createIssue(human, {
+    projectId: filed.id,
+    title: "from a human",
+  });
+  expect(issue.assigneeId).toBeNull();
+  published = [];
+  for (const assigneeId of [bot.id, human.id]) {
+    rejectsCleanly(
+      () =>
+        service.createIssue(human, {
+          projectId: filed.id,
+          title: "assign it",
+          assigneeId,
+        }),
+      ForbiddenError,
+    );
+  }
+  expect(() =>
+    service.createIssue(human, {
+      projectId: filed.id,
+      title: "assign it",
+      assigneeId: bot.id,
+    }),
+  ).toThrow(
+    "a human files an issue unassigned: drop assigneeId, and a bot assigns it",
+  );
+  expect(
+    service.listIssues(bot, { projectId: filed.id }).items.map((i) => i.title),
+  ).toEqual(["from a human"]);
+});
+
+const proj = service.createProject(bot, {
+  key: projectKey(),
+  name: "fixtures",
+});
 
 test("updating a project records each changed field from and to", () => {
   const event = onlyEventOf(() =>
@@ -248,7 +288,10 @@ test("failed issue and comment writes leave no row and no event", () => {
 test("a write the database rejects leaves no row and no event", () => {
   const ghost = { id: "not-an-actor", kind: "bot" as const };
   const before = service.listProjects(bot, { limit: 200 }).items;
-  rejectsCleanly(() => service.createProject(ghost, { name: "x" }), Error);
+  rejectsCleanly(
+    () => service.createProject(ghost, { key: projectKey(), name: "x" }),
+    Error,
+  );
   expect(service.listProjects(bot, { limit: 200 }).items).toEqual(before);
 });
 
@@ -262,7 +305,7 @@ test("the bus publishes only once the event is visible to other connections", ()
     seenByOther.push(row !== undefined);
   });
   try {
-    service.createProject(bot, { name: "committed" });
+    service.createProject(bot, { key: projectKey(), name: "committed" });
   } finally {
     unsubscribe();
     other.$client.close();
@@ -272,7 +315,10 @@ test("the bus publishes only once the event is visible to other connections", ()
 
 test("an update is attributed to the acting bot, not the row's creator", () => {
   const editor = createBot(db, "editor").actor;
-  const project = service.createProject(bot, { name: "authored" });
+  const project = service.createProject(bot, {
+    key: projectKey(),
+    name: "authored",
+  });
   const issue = service.createIssue(bot, {
     projectId: project.id,
     title: "authored",
@@ -302,7 +348,7 @@ test("an update is attributed to the acting bot, not the row's creator", () => {
 describe("updatedAt", () => {
   test("a project update moves updatedAt past createdAt and leaves createdAt alone", () => {
     const project = atFakeTime([
-      () => service.createProject(bot, { name: "ticking" }),
+      () => service.createProject(bot, { key: projectKey(), name: "ticking" }),
     ])[0] as Project;
     const updated = atFakeTime([
       () => service.updateProject(bot, project.id, { name: "ticked" }),
@@ -317,7 +363,10 @@ describe("updatedAt", () => {
   });
 
   test("an issue update moves updatedAt past createdAt and leaves createdAt alone", () => {
-    const project = service.createProject(bot, { name: "issue clock" });
+    const project = service.createProject(bot, {
+      key: projectKey(),
+      name: "issue clock",
+    });
     const issue = atFakeTime([
       () => service.createIssue(bot, { projectId: project.id, title: "tick" }),
     ])[0] as Issue;
@@ -335,7 +384,12 @@ describe("updatedAt", () => {
 
   test("a project patch that changes nothing leaves the row, updatedAt included, as it was", () => {
     const created = atFakeTime([
-      () => service.createProject(bot, { name: "still", description: "d" }),
+      () =>
+        service.createProject(bot, {
+          key: projectKey(),
+          name: "still",
+          description: "d",
+        }),
     ])[0] as Project;
     published = [];
     const result = atFakeTime([
@@ -351,7 +405,10 @@ describe("updatedAt", () => {
   });
 
   test("an issue patch that changes nothing leaves the row, updatedAt included, as it was", () => {
-    const project = service.createProject(bot, { name: "issue still" });
+    const project = service.createProject(bot, {
+      key: projectKey(),
+      name: "issue still",
+    });
     const created = atFakeTime([
       () => service.createIssue(bot, { projectId: project.id, title: "same" }),
     ])[0] as Issue;
@@ -377,7 +434,10 @@ describe("a write and its activity event commit together", () => {
   afterEach(allowEvents);
 
   test("an event the database refuses rolls the write back; with the refusal lifted the same calls commit", () => {
-    const project = service.createProject(bot, { name: "atomic" });
+    const project = service.createProject(bot, {
+      key: projectKey(),
+      name: "atomic",
+    });
     const issue = service.createIssue(bot, {
       projectId: project.id,
       title: "before",
@@ -428,7 +488,7 @@ describe("a write and its activity event commit together", () => {
 describe("paging and filters", () => {
   const titles = ["one", "two", "three", "four", "five"];
   const [paged] = atFakeTime([
-    () => service.createProject(bot, { name: "paged" }),
+    () => service.createProject(bot, { key: projectKey(), name: "paged" }),
   ]) as [Project];
   const issues = atFakeTime(
     titles.map(
@@ -464,7 +524,10 @@ describe("paging and filters", () => {
   });
 
   test("rows sharing a millisecond each land on exactly one page", () => {
-    const tied = service.createProject(bot, { name: "tied" });
+    const tied = service.createProject(bot, {
+      key: projectKey(),
+      name: "tied",
+    });
     const ids = atFakeTime(
       ["a", "b", "c", "d"].map(
         (title) => () =>
@@ -507,7 +570,10 @@ describe("paging and filters", () => {
   });
 
   test("activity filters by actor within a project", () => {
-    const shared = service.createProject(bot, { name: "shared" });
+    const shared = service.createProject(bot, {
+      key: projectKey(),
+      name: "shared",
+    });
     const [filed] = atFakeTime([
       () =>
         service.createIssue(human, {
@@ -525,7 +591,10 @@ describe("paging and filters", () => {
   });
 
   test("a result that is an exact multiple of the limit ends without an empty page", () => {
-    const exact = service.createProject(bot, { name: "exact" });
+    const exact = service.createProject(bot, {
+      key: projectKey(),
+      name: "exact",
+    });
     const ids = atFakeTime(
       ["a", "b", "c", "d"].map(
         (title) => () =>
@@ -545,7 +614,10 @@ describe("paging and filters", () => {
   });
 
   test("an empty list is one page with no cursor", () => {
-    const empty = service.createProject(bot, { name: "empty" });
+    const empty = service.createProject(bot, {
+      key: projectKey(),
+      name: "empty",
+    });
     expect(service.listIssues(bot, { projectId: empty.id })).toEqual({
       items: [],
       nextCursor: null,
@@ -553,7 +625,10 @@ describe("paging and filters", () => {
   });
 
   test("activity rows sharing a millisecond each land on exactly one page", () => {
-    const tied = service.createProject(bot, { name: "tied activity" });
+    const tied = service.createProject(bot, {
+      key: projectKey(),
+      name: "tied activity",
+    });
     const filed = atFakeTime(
       ["a", "b", "c", "d"].map(
         (title) => () =>
@@ -572,7 +647,10 @@ describe("paging and filters", () => {
   });
 
   test("comments sharing a millisecond each land on exactly one page", () => {
-    const own = service.createProject(bot, { name: "tied comments" });
+    const own = service.createProject(bot, {
+      key: projectKey(),
+      name: "tied comments",
+    });
     const issue = service.createIssue(bot, { projectId: own.id, title: "t" });
     const ids = atFakeTime(
       ["a", "b", "c", "d"].map(
@@ -588,7 +666,10 @@ describe("paging and filters", () => {
   });
 
   test("comments page oldest first", () => {
-    const own = service.createProject(bot, { name: "comment paging" });
+    const own = service.createProject(bot, {
+      key: projectKey(),
+      name: "comment paging",
+    });
     const issueId = service.createIssue(bot, {
       projectId: own.id,
       title: "t",

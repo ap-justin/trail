@@ -5,7 +5,7 @@ import { parseArgs } from "node:util";
 import { loadConfig } from "./config.js";
 import { type Db, migrate, openDatabase } from "./db/client.js";
 import { ValidationError } from "./service/errors.js";
-import { createBot, revokeKey } from "./service/keys.js";
+import { createBot, createKey, listKeys, revokeKey } from "./service/keys.js";
 
 interface Output {
   write(chunk: string): unknown;
@@ -18,9 +18,24 @@ export interface CliIo {
 }
 
 const usage = `Usage:
-  pnpm trail bot create <name>    create a bot and print its key once
-  pnpm trail key revoke <prefix>  revoke a key by its prefix or the full key
+  trail bot create <name> [--label <agent-id>] [--key-only]
+                                   create a bot and print its key once
+  trail key create <bot-id-or-label> [--key-only]
+                                   mint another key for an existing bot
+  trail key list                   list every key's prefix, bot and times
+  trail key revoke <prefix>        revoke a key by its prefix or the full key
+
+  --label <agent-id>  the bot's id in the system that runs it, unique among bots
+  --key-only          print only the key on stdout; the rest goes to stderr
 `;
+
+const options = {
+  help: { type: "boolean", short: "h" },
+  label: { type: "string" },
+  "key-only": { type: "boolean" },
+} as const;
+
+type Flags = { label?: string; "key-only"?: boolean };
 
 class UsageError extends Error {}
 
@@ -28,15 +43,12 @@ class UsageError extends Error {}
 export function runCli(argv: readonly string[], io: CliIo): number {
   let positionals: string[];
   let help: boolean | undefined;
+  let flags: Flags;
   try {
     ({
       positionals,
-      values: { help },
-    } = parseArgs({
-      args: [...argv],
-      options: { help: { type: "boolean", short: "h" } },
-      allowPositionals: true,
-    }));
+      values: { help, ...flags },
+    } = parseArgs({ args: [...argv], options, allowPositionals: true }));
   } catch (e) {
     if (!(e as { code?: string }).code?.startsWith("ERR_PARSE_ARGS_")) throw e;
     return usageError(io, (e as Error).message);
@@ -58,7 +70,12 @@ export function runCli(argv: readonly string[], io: CliIo): number {
   }
 
   try {
-    const input = command.parse(args);
+    for (const flag of Object.keys(flags)) {
+      if (!command.flags.includes(flag as keyof Flags)) {
+        throw new UsageError(`'${noun} ${verb}' takes no --${flag}`);
+      }
+    }
+    const input = command.parse(args, flags);
     const db = openDatabase(loadConfig(io.env ?? process.env).DATABASE_PATH);
     try {
       migrate(db);
@@ -92,16 +109,76 @@ function oneArg(args: readonly string[], name: string): string {
 }
 
 interface Command<T> {
-  parse(args: readonly string[]): T;
+  flags: readonly (keyof Flags)[];
+  parse(args: readonly string[], flags: Flags): T;
   run(db: Db, input: T, io: CliIo): void;
 }
 
-const botCreate: Command<string> = {
-  parse: (args) => oneArg(args, "name"),
-  run(db, name, io) {
-    const { actor, key } = createBot(db, name);
-    io.stdout.write(`actor  ${actor.id}\nkey    ${key}\n`);
-    io.stderr.write("store this key now: it can't be shown again\n");
+/** The actor and key lines on stdout, or with --key-only the key alone and the actor on stderr. */
+function printKey(
+  io: CliIo,
+  created: { actor: { id: string }; key: string },
+  keyOnly: boolean,
+): void {
+  if (keyOnly) {
+    io.stdout.write(`${created.key}\n`);
+    io.stderr.write(`actor  ${created.actor.id}\n`);
+  } else {
+    io.stdout.write(`actor  ${created.actor.id}\nkey    ${created.key}\n`);
+  }
+  io.stderr.write("store this key now: it can't be shown again\n");
+}
+
+const botCreate: Command<{ name: string; label?: string; keyOnly: boolean }> = {
+  flags: ["label", "key-only"],
+  parse: (args, flags) => ({
+    name: oneArg(args, "name"),
+    label: flags.label,
+    keyOnly: flags["key-only"] === true,
+  }),
+  run(db, { name, label, keyOnly }, io) {
+    printKey(io, createBot(db, name, { label }), keyOnly);
+  },
+};
+
+const keyCreate: Command<{ bot: string; keyOnly: boolean }> = {
+  flags: ["key-only"],
+  parse: (args, flags) => ({
+    bot: oneArg(args, "bot-id-or-label"),
+    keyOnly: flags["key-only"] === true,
+  }),
+  run(db, { bot, keyOnly }, io) {
+    printKey(io, createKey(db, bot), keyOnly);
+  },
+};
+
+const keyList: Command<null> = {
+  flags: [],
+  parse(args) {
+    if (args.length > 0) throw new UsageError("key list takes no arguments");
+    return null;
+  },
+  run(db, _, io) {
+    const rows = [
+      ["prefix", "actor", "name", "label", "created", "revoked"],
+      ...listKeys(db).map((k) => [
+        k.prefix,
+        k.actorId,
+        k.displayName,
+        k.label ?? "-",
+        k.createdAt.toISOString(),
+        k.revokedAt?.toISOString() ?? "-",
+      ]),
+    ];
+    const widths = rows[0]?.map((_, i) =>
+      Math.max(...rows.map((r) => (r[i] as string).length)),
+    ) as number[];
+    for (const row of rows) {
+      const cells = row.map((cell, i) =>
+        i === row.length - 1 ? cell : cell.padEnd(widths[i] as number),
+      );
+      io.stdout.write(`${cells.join("  ")}\n`);
+    }
   },
 };
 
@@ -109,6 +186,7 @@ const botCreate: Command<string> = {
 const prefixPattern = /^(?:trail_)?([0-9a-f]{8})(?:_|$)/;
 
 const keyRevoke: Command<string> = {
+  flags: [],
   parse(args) {
     const prefix = prefixPattern.exec(oneArg(args, "prefix"))?.[1];
     if (prefix === undefined) {
@@ -126,8 +204,11 @@ const keyRevoke: Command<string> = {
   },
 };
 
-const commands: Record<string, Command<string> | undefined> = {
+// method syntax in Command keeps run() bivariant, so each command keeps its own input type
+const commands: Record<string, Command<unknown> | undefined> = {
   "bot create": botCreate,
+  "key create": keyCreate,
+  "key list": keyList,
   "key revoke": keyRevoke,
 };
 

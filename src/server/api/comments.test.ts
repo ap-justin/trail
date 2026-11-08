@@ -1,12 +1,12 @@
 import { beforeAll, expect, test } from "vitest";
-import { atFakeTimeAsync, setupTestApp } from "../test-app.js";
+import { atFakeTimeAsync, projectKey, setupTestApp } from "../test-app.js";
 
 const { bot, request } = setupTestApp();
 
 let issueId = "";
 beforeAll(async () => {
   const project = await request("POST", "/api/v1/projects", {
-    json: { name: "comments" },
+    json: { key: projectKey(), name: "comments" },
   });
   const { id: projectId } = (await project.json()) as { id: string };
   const issue = await request("POST", "/api/v1/issues", {
@@ -25,6 +25,7 @@ test("POST /issues/:id/comments adds a comment as the bot and returns 201", asyn
     issueId,
     authorId: bot.actor.id,
     body: "  looks good\n",
+    externalRef: null,
     createdAt: expect.any(String),
   });
 });
@@ -35,7 +36,11 @@ test("POST /issues/:id/comments on an unknown issue is a 404", async () => {
   });
   expect(res.status).toBe(404);
   expect(await res.json()).toEqual({
-    error: { code: "not_found", message: "no issue nope" },
+    error: {
+      code: "not_found",
+      message:
+        "no issue nope: pass the id or key (like TRL-12) of an existing issue",
+    },
   });
 });
 
@@ -50,7 +55,9 @@ test("POST /issues/:id/comments with a blank body is a 422", async () => {
 
 test("GET /issues/:id/comments lists the thread oldest first, paged", async () => {
   const { id: projectId } = (await (
-    await request("POST", "/api/v1/projects", { json: { name: "thread" } })
+    await request("POST", "/api/v1/projects", {
+      json: { key: projectKey(), name: "thread" },
+    })
   ).json()) as { id: string };
   const { id: threadId } = (await (
     await request("POST", "/api/v1/issues", {
