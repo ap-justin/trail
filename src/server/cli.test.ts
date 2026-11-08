@@ -235,4 +235,5 @@ test("the script wires the exit status and streams through to the process", () =
   const unknown = spawn("key", "revoke", "00000000");
   expect([unknown.status, unknown.stdout]).toEqual([1, ""]);
   expect(spawn().status).toBe(2);
-});
+  // four cold tsx starts, serial, while other files run in parallel
+}, 30_000);

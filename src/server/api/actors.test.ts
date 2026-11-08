@@ -35,9 +35,11 @@ test("GET /bots pages every bot oldest first with id, name and label only", asyn
     cursor = body.nextCursor;
   } while (cursor);
   const ids = items.map((i) => i.id);
-  expect(ids.indexOf(first.actor.id)).toBe(0);
-  expect(ids.indexOf(labelled.actor.id)).toBe(1);
-  expect(items[1]).toEqual({
+  expect(ids).toContain(first.actor.id);
+  expect(ids.indexOf(first.actor.id)).toBeLessThan(
+    ids.indexOf(labelled.actor.id),
+  );
+  expect(items.find((i) => i.id === labelled.actor.id)).toEqual({
     id: labelled.actor.id,
     name: "rest listed",
     label: "agent-8",

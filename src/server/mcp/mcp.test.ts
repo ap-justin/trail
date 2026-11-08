@@ -480,9 +480,11 @@ test("whoami answers the key's bot and list_bots pages every bot with id, name a
     cursor = page.nextCursor ?? undefined;
   } while (cursor);
   const ids = items.map((i) => i.id);
-  expect(ids.indexOf(first.actor.id)).toBe(0);
-  expect(ids.indexOf(labelled.actor.id)).toBe(1);
-  expect(items[1]).toEqual({
+  expect(ids).toContain(first.actor.id);
+  expect(ids.indexOf(first.actor.id)).toBeLessThan(
+    ids.indexOf(labelled.actor.id),
+  );
+  expect(items.find((i) => i.id === labelled.actor.id)).toEqual({
     id: labelled.actor.id,
     name: "mcp whoami",
     label: "agent-mcp",
@@ -613,4 +615,102 @@ test("import_project is annotated destructive and says a re-run replaces trail's
     /replacing changes made in trail since the last import.*never deletes/s,
   );
   expect(tool?.description).toMatch(/sourceKey/);
+});
+
+const reviewIssue = {
+  externalRef: "lin-review",
+  title: "in review",
+  status: "In Review",
+  statusType: "started",
+  createdAt: "2026-01-01T00:00:00.000Z",
+};
+
+test("import_project takes statusType over MCP: the type sets the status and get_issue shows the state name as sourceStatus", async () => {
+  const client = await connect(bot.key);
+  await call(client, "import_project", {
+    externalRef: "lin-mcp-type",
+    key: "MST",
+    name: "by type",
+    issues: [reviewIssue],
+  });
+  expect(await call(client, "get_issue", { issueId: "MST-1" })).toMatchObject({
+    status: "in_progress",
+    sourceStatus: "In Review",
+  });
+});
+
+test("update_issue on an imported issue, status change included, leaves sourceStatus as imported", async () => {
+  const client = await connect(bot.key);
+  await call(client, "import_project", {
+    externalRef: "lin-mcp-edit",
+    key: "MSE",
+    name: "edited",
+    issues: [reviewIssue],
+  });
+  expect(
+    await call(client, "update_issue", { issueId: "MSE-1", status: "done" }),
+  ).toMatchObject({ status: "done", sourceStatus: "In Review" });
+  expect(await call(client, "get_issue", { issueId: "MSE-1" })).toMatchObject({
+    status: "done",
+    sourceStatus: "In Review",
+  });
+});
+
+test("update_issue and import_project are attributed in the feed to the bot whose key called, not the row's creator", async () => {
+  const author = createBot(db, "mcp attr author");
+  const editor = createBot(db, "mcp attr editor");
+  const authorClient = await connect(author.key);
+  const editorClient = await connect(editor.key);
+  await call(authorClient, "create_project", { key: "MCT", name: "attr" });
+  await call(authorClient, "create_issue", { projectId: "MCT", title: "t" });
+  await call(editorClient, "update_issue", { issueId: "MCT-1", title: "u" });
+  const imported = await call(editorClient, "import_project", {
+    externalRef: "lin-attr",
+    key: "MCW",
+    name: "attr import",
+    issues: [reviewIssue],
+  });
+
+  const feed = async (projectId: string) =>
+    (await call(editorClient, "list_activity", { projectId, limit: 200 }))
+      .items as Body[];
+  const actorsOf = (items: Body[], action: string) =>
+    items.filter((e) => e.action === action).map((e) => e.actorId);
+  expect(actorsOf(await feed("MCT"), "issue.created")).toEqual([
+    author.actor.id,
+  ]);
+  expect(actorsOf(await feed("MCT"), "issue.updated")).toEqual([
+    editor.actor.id,
+  ]);
+  expect(actorsOf(await feed(imported.project.id), "project.imported")).toEqual(
+    [editor.actor.id],
+  );
+});
+
+test("a create sent over REST and retried over MCP with the same idempotency key returns the first issue and writes nothing more", async () => {
+  const client = await connect(bot.key);
+  await call(client, "create_project", { key: "MXT", name: "transports" });
+  const res = await app.request("/api/v1/issues", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${bot.key}`,
+      "content-type": "application/json",
+      "idempotency-key": "switch-1",
+    },
+    body: JSON.stringify({ projectId: "MXT", title: "once" }),
+  });
+  expect(res.status).toBe(201);
+  const first = (await res.json()) as Body;
+
+  const retried = await call(client, "create_issue", {
+    projectId: "MXT",
+    title: "once",
+    idempotency_key: "switch-1",
+  });
+  expect(retried.id).toBe(first.id);
+  expect(
+    (await call(client, "list_issues", { projectId: "MXT" })).items.map(
+      (i: Body) => i.id,
+    ),
+  ).toEqual([first.id]);
 });

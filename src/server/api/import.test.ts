@@ -157,6 +157,31 @@ test("POST /import maps a custom state by statusType and shows its name as sourc
   );
 });
 
+test("PATCH /issues/:id on an imported issue leaves sourceStatus, status change included", async () => {
+  const custom = {
+    ...payload,
+    externalRef: "P-patched",
+    key: "IMT",
+    issues: [{ ...payload.issues[0], status: "In Review", statusType: "started" }],
+  };
+  expect(
+    (await request("POST", "/api/v1/import", { json: custom })).status,
+  ).toBe(200);
+  const res = await request("PATCH", "/api/v1/issues/IMT-1", {
+    json: { status: "done", title: "closed here" },
+  });
+  expect(res.status).toBe(200);
+  expect(await res.json()).toMatchObject({
+    status: "done",
+    title: "closed here",
+    sourceStatus: "In Review",
+  });
+  expect(
+    ((await (await request("GET", "/api/v1/issues/IMT-1")).json()) as Body)
+      .sourceStatus,
+  ).toBe("In Review");
+});
+
 test("POST /import matches statusType in any case and refuses one outside the seven, naming the field", async () => {
   const { status: _, ...stateless } = payload.issues[0] as Body;
   const typed = (statusType: string, key: string) => ({

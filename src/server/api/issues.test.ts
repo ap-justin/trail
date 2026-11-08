@@ -241,3 +241,13 @@ test("GET /issues accepts the limit bounds 1 and 200", async () => {
   expect(max.items.map((i) => i.title)).toEqual(["b2", "b1"]);
   expect(max.nextCursor).toBeNull();
 });
+
+test("GET /issues refuses limit 0 and 201 with a 422", async () => {
+  for (const limit of [0, 201]) {
+    const res = await request(
+      "GET",
+      `/api/v1/issues?projectId=${projectId}&limit=${limit}`,
+    );
+    expect(res.status, `limit ${limit}`).toBe(422);
+  }
+});

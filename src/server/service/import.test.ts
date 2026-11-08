@@ -403,6 +403,23 @@ test("a custom state name with a statusType imports by the type and keeps the na
   });
 });
 
+test("a trail edit of an imported issue, status change included, leaves sourceStatus as imported", () => {
+  const payload = oneIssue({ status: "In Review", statusType: "started" });
+  service.importProject(bot, payload);
+  const key = `${payload.key}-1`;
+
+  service.updateIssue(bot, key, { title: "retitled" });
+  expect(service.getIssue(bot, key)).toMatchObject({
+    title: "retitled",
+    sourceStatus: "In Review",
+  });
+  service.updateIssue(bot, key, { status: "done" });
+  expect(service.getIssue(bot, key)).toMatchObject({
+    status: "done",
+    sourceStatus: "In Review",
+  });
+});
+
 /** Checks `payload` is refused with `message` and nothing is written. */
 function refused(payload: ImportPayload, message: RegExp | string) {
   const before = rowCounts();

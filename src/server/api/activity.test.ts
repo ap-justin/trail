@@ -402,3 +402,17 @@ describe("GET /activity?after= resumes the feed oldest first", () => {
     expect(res.status).toBe(422);
   });
 });
+
+test.each([
+  ["newest first", ""],
+  ["resuming with after", "&after="],
+])("GET /activity %s takes limit 1 to 200 and refuses 0 and 201 with a 422", async (_, mode) => {
+  for (const limit of [1, 200]) {
+    const res = await request("GET", `/api/v1/activity?limit=${limit}${mode}`);
+    expect(res.status, `limit ${limit}`).toBe(200);
+  }
+  for (const limit of [0, 201]) {
+    const res = await request("GET", `/api/v1/activity?limit=${limit}${mode}`);
+    expect(res.status, `limit ${limit}`).toBe(422);
+  }
+});
