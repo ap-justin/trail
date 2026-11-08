@@ -308,6 +308,19 @@ test.each([{ estimate: -0.5 }, { priority: 5 }, { priority: -1 }])(
   },
 );
 
+test("an issue's source status is null until given, and at most 200 characters", () => {
+  expect(newIssue()().sourceStatus).toBeNull();
+  expect(newIssue({ sourceStatus: "In Review" })().sourceStatus).toBe(
+    "In Review",
+  );
+  expect(newIssue({ sourceStatus: "x".repeat(200) })().sourceStatus).toBe(
+    "x".repeat(200),
+  );
+  expect(errorCode(newIssue({ sourceStatus: "x".repeat(201) }))).toBe(
+    "SQLITE_CONSTRAINT_CHECK",
+  );
+});
+
 test("an issue's external ref is unique within its project only", () => {
   const other = db
     .insert(project)

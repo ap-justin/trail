@@ -169,6 +169,8 @@ export const issue = sqliteTable(
     externalRef: text("external_ref"),
     // the original author's name on an imported row, which created_by credits to the importing bot
     sourceAuthor: text("source_author"),
+    // the imported row's workflow-state name in its source system, e.g. "In Review", kept for reference
+    sourceStatus: text("source_status"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
     completedAt: integer("completed_at", { mode: "timestamp_ms" }),
@@ -180,6 +182,10 @@ export const issue = sqliteTable(
     unique("issue_project_number_unique").on(t.projectId, t.number),
     check("issue_estimate_check", sql`${c(t.estimate)} >= 0`),
     check("issue_priority_check", sql`${c(t.priority)} between 0 and 4`),
+    check(
+      "issue_source_status_check",
+      sql`length(${c(t.sourceStatus)}) <= 200`,
+    ),
     check(
       "issue_completed_at_check",
       sql`(${oneOf(t.status, completedStatuses)}) = (${c(t.completedAt)} is not null)`,
