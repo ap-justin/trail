@@ -36,7 +36,7 @@ test("an initialize POST to /mcp/ gets the same reply as /mcp", async () => {
 test("/mcp/ without a key is a 401", async () => {
   const res = await initialize("/mcp/", {});
   expect(res.status).toBe(401);
-  expect((await res.json()).error.code).toBe("unauthorized");
+  expect(await res.json()).toMatchObject({ error: { code: "unauthorized" } });
 });
 
 test("GET /mcp/ is the same 405 as GET /mcp", async () => {
