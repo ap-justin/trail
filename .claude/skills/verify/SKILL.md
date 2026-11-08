@@ -3,7 +3,7 @@ name: verify
 description: Lint, typecheck, test and live-check trail before a commit.
 ---
 
-Run from the repo root once code exists; skip any step whose script is not yet in `package.json`.
+Run from the repo root.
 
 1. `pnpm lint && pnpm typecheck`. A lint failure on formatting or import order: `pnpm format <paths>` fixes in place (name the files you touched; a bare `pnpm format` reflows the whole tree).
 2. `pnpm test` (each test file opens its own temp SQLite file; no service to start).
