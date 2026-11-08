@@ -367,6 +367,36 @@ describe("GET /activity?after= resumes the feed oldest first", () => {
     expect(again.status).toBe(200);
   });
 
+  test.each([
+    ["an after page's cursor sent as cursor", "after=", "cursor", "after"],
+    ["a cursor page's cursor sent as after", "limit=1", "after", "cursor"],
+  ])(
+    "%s is a 422 that names the parameter to send it on",
+    async (_, firstPage, sentAs, sendOn) => {
+      const project = await newProject("direction");
+      await request("POST", "/api/v1/issues", {
+        json: { projectId: project.id, title: "second event" },
+      });
+      const scope = `projectId=${project.id}`;
+      const { nextCursor } = await feed(`${scope}&${firstPage}`);
+      expect(nextCursor).toEqual(expect.any(String));
+
+      const res = await request(
+        "GET",
+        `/api/v1/activity?${scope}&${sentAs}=${nextCursor}`,
+      );
+      expect(res.status).toBe(422);
+      expect(await res.json()).toEqual({
+        error: {
+          code: "validation_failed",
+          message: expect.stringMatching(
+            new RegExp(`: send it as ${sendOn}, not as ${sentAs}$`),
+          ),
+        },
+      });
+    },
+  );
+
   test("cursor and after together are a 422", async () => {
     const res = await request("GET", "/api/v1/activity?after=&cursor=x");
     expect(res.status).toBe(422);

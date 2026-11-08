@@ -290,6 +290,33 @@ test("list_activity resumes after a cursor and refuses it under other filters", 
   );
 });
 
+test("list_activity refuses a cursor sent on the other parameter, naming the one to use", async () => {
+  const client = await connect(bot.key);
+  await call(client, "create_project", { key: "MCD", name: "direction" });
+  await call(client, "create_issue", { projectId: "MCD", title: "one" });
+  const oldestFirst = await call(client, "list_activity", {
+    after: "",
+    projectId: "MCD",
+  });
+  const newestFirst = await call(client, "list_activity", {
+    limit: 1,
+    projectId: "MCD",
+  });
+
+  expect(
+    await callError(client, "list_activity", {
+      cursor: oldestFirst.nextCursor,
+      projectId: "MCD",
+    }),
+  ).toMatch(/^validation_failed: .*: send it as after, not as cursor$/);
+  expect(
+    await callError(client, "list_activity", {
+      after: newestFirst.nextCursor,
+      projectId: "MCD",
+    }),
+  ).toMatch(/^validation_failed: .*: send it as cursor, not as after$/);
+});
+
 test("a retried create on the other create tools returns the first and writes nothing more", async () => {
   const client = await connect(createBot(db, "mcp retry bot").key);
   await call(client, "create_project", { key: "MCR", name: "retries" });

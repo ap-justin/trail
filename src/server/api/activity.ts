@@ -1,8 +1,7 @@
 import { createRoute } from "@hono/zod-openapi";
 import {
-  activityEventSchema,
   activityListQuerySchema,
-  pageSchema,
+  activityPageSchema,
 } from "../../shared/schemas.js";
 import type { Service } from "../service/index.js";
 import { createRouter } from "./env.js";
@@ -17,7 +16,7 @@ const listActivity = createRoute({
   tags: ["activity"],
   request: { query: activityListQuerySchema },
   responses: {
-    200: jsonContent(pageSchema(activityEventSchema), "A page of events"),
+    200: jsonContent(activityPageSchema, "A page of events"),
     ...readErrors,
     ...notFoundError,
   },

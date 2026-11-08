@@ -153,6 +153,37 @@ test("project key fields advertise the key rule as a pattern", async () => {
   }
 });
 
+test("the /activity nextCursor says which parameter takes it back in each mode", async () => {
+  const res = await request("GET", "/api/v1/openapi.json", { key: null });
+  type Page = {
+    properties: { nextCursor: { description?: string } };
+  };
+  const spec = (await res.json()) as {
+    paths: Record<
+      string,
+      Record<
+        string,
+        {
+          responses: Record<
+            string,
+            { content: Record<string, { schema: Page }> }
+          >;
+        }
+      >
+    >;
+  };
+  const nextCursor = (path: string) =>
+    spec.paths[path]?.get?.responses["200"]?.content["application/json"]
+      ?.schema.properties.nextCursor.description;
+
+  const activity = nextCursor("/activity");
+  expect(activity).toMatch(/after.*pass it back as `after`/);
+  expect(activity).toMatch(/pass it back as `cursor`/);
+  expect(nextCursor("/issues")).toBe(
+    "Pass as `cursor` for the next page; null on the last.",
+  );
+});
+
 test("an import issue's statusType advertises Linear's seven state types", async () => {
   const res = await request("GET", "/api/v1/openapi.json", { key: null });
   const spec = (await res.json()) as {

@@ -161,6 +161,13 @@ export function pageSchema<T extends z.ZodType>(item: T) {
   });
 }
 
+export const activityPageSchema = pageSchema(activityEventSchema).extend({
+  nextCursor: z.string().nullable().meta({
+    description:
+      "On a page read with `after`: pass it back as `after` to get only newer events; never null, and an empty page means nothing new yet. Otherwise: pass it back as `cursor` for the next older page; null on the last. Sent on the other parameter, it is a 422.",
+  }),
+});
+
 const name = z.string().min(1).max(200);
 const title = z.string().min(1).max(300);
 // counted in UTF-16 units, so at most 192 KiB of UTF-8: room under MAX_BODY_BYTES (server/api/routes.ts)
@@ -405,7 +412,7 @@ export const issueListQuerySchema = pageQuerySchema.extend({
 export const activityListQuerySchema = pageQuerySchema.extend({
   cursor: z.string().optional().meta({
     description:
-      "Pages newest first: pass the previous page's nextCursor. Bound to the projectId and actorId it was issued under.",
+      "Pages newest first: pass the nextCursor of the previous page read without `after`. Bound to the projectId and actorId it was issued under.",
   }),
   after: z.string().optional().meta({
     description:

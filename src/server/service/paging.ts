@@ -86,21 +86,33 @@ export function page<T extends { createdAt: Date; id: string }>(
 
 /** The filters a feed cursor was issued under; null is "not filtered". */
 export type FeedFilters = { projectId: string | null; actorId: string | null };
-export type FeedPosition = FeedFilters & { seq: number };
+/** The query parameter a feed cursor goes back on: `cursor` pages newest first, `after` oldest first. */
+export type FeedParam = "cursor" | "after";
+export type FeedPosition = FeedFilters & { seq: number; param: FeedParam };
 
 export function encodeFeedCursor(position: FeedPosition): string {
   return encode({
     seq: position.seq,
     projectId: position.projectId,
     actorId: position.actorId,
+    param: position.param,
   });
 }
 
 const describeFilters = (f: FeedFilters) =>
   `projectId=${f.projectId ?? "(none)"}, actorId=${f.actorId ?? "(none)"}`;
 
-/** The seq a feed cursor points at, refused when it was issued under other filters. */
-export function decodeFeedCursor(cursor: string, filters: FeedFilters): number {
+const feedOrder = { cursor: "newest-first", after: "oldest-first" } as const;
+
+/**
+ * The seq a feed cursor points at, refused when it was issued under other
+ * filters or issued for a parameter other than `param`.
+ */
+export function decodeFeedCursor(
+  cursor: string,
+  filters: FeedFilters,
+  param: FeedParam,
+): number {
   const parsed = decode(cursor) as Partial<FeedPosition> | undefined;
   const nullableString = (v: unknown) => v === null || typeof v === "string";
   if (
@@ -109,7 +121,8 @@ export function decodeFeedCursor(cursor: string, filters: FeedFilters): number {
     !Number.isSafeInteger(parsed.seq) ||
     (parsed.seq as number) < 0 ||
     !nullableString(parsed.projectId) ||
-    !nullableString(parsed.actorId)
+    !nullableString(parsed.actorId) ||
+    (parsed.param !== "cursor" && parsed.param !== "after")
   ) {
     throw new ValidationError(
       "cursor is invalid: pass a nextCursor exactly as a previous activity page returned it",
@@ -122,6 +135,11 @@ export function decodeFeedCursor(cursor: string, filters: FeedFilters): number {
   ) {
     throw new ValidationError(
       `cursor was issued for ${describeFilters(issued)} but this request has ${describeFilters(filters)}: repeat the cursor's filters, or drop the cursor to start over`,
+    );
+  }
+  if (issued.param !== param) {
+    throw new ValidationError(
+      `cursor was issued for ${feedOrder[issued.param]} paging: send it as ${issued.param}, not as ${param}`,
     );
   }
   return issued.seq;

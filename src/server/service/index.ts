@@ -1389,7 +1389,8 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
 
     /**
      * In commit order (`seq`): newest first with `cursor`, oldest first after
-     * `after`. Either cursor is bound to the filters it was issued under.
+     * `after`. Either cursor is bound to the filters and the parameter it was
+     * issued under.
      */
     listActivity(
       _actor: ActingActor,
@@ -1427,16 +1428,24 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
 
       if (query.after !== undefined) {
         const from =
-          query.after === "" ? 0 : decodeFeedCursor(query.after, filters);
+          query.after === ""
+            ? 0
+            : decodeFeedCursor(query.after, filters, "after");
         where.push(gt(activityEvent.seq, from));
         const items = select(asc(activityEvent.seq), limit);
         const seq = items.at(-1)?.seq ?? from;
-        return { items, nextCursor: encodeFeedCursor({ ...filters, seq }) };
+        return {
+          items,
+          nextCursor: encodeFeedCursor({ ...filters, seq, param: "after" }),
+        };
       }
 
       if (query.cursor !== undefined) {
         where.push(
-          lt(activityEvent.seq, decodeFeedCursor(query.cursor, filters)),
+          lt(
+            activityEvent.seq,
+            decodeFeedCursor(query.cursor, filters, "cursor"),
+          ),
         );
       }
       const rows = select(desc(activityEvent.seq), limit + 1);
@@ -1446,7 +1455,7 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
         items,
         nextCursor:
           rows.length > limit && last
-            ? encodeFeedCursor({ ...filters, seq: last.seq })
+            ? encodeFeedCursor({ ...filters, seq: last.seq, param: "cursor" })
             : null,
       };
     },
