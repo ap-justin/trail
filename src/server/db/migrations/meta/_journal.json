@@ -15,6 +15,20 @@
       "when": 1794128994472,
       "tag": "0001_issue_project_created_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1794151400897,
+      "tag": "0002_issue_keys_fields_labels",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1794155109827,
+      "tag": "0003_issue_source_status",
+      "breakpoints": true
     }
   ]
 }

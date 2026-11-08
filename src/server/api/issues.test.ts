@@ -1,12 +1,12 @@
 import { beforeAll, expect, test } from "vitest";
-import { atFakeTimeAsync, setupTestApp } from "../test-app.js";
+import { atFakeTimeAsync, projectKey, setupTestApp } from "../test-app.js";
 
 const { bot, request } = setupTestApp();
 
 let projectId = "";
 beforeAll(async () => {
   const res = await request("POST", "/api/v1/projects", {
-    json: { name: "issues" },
+    json: { key: "ISS", name: "issues" },
   });
   projectId = ((await res.json()) as { id: string }).id;
 });
@@ -28,14 +28,24 @@ test("POST /issues opens an unassigned issue and returns 201", async () => {
   expect(res.status).toBe(201);
   expect(await res.json()).toEqual({
     id: expect.any(String),
+    key: "ISS-1",
+    number: 1,
     projectId,
     title: "first",
     description: "",
     status: "open",
+    priority: 0,
+    estimate: null,
+    labels: [],
+    links: [],
     assigneeId: null,
+    externalRef: null,
+    sourceAuthor: null,
+    sourceStatus: null,
     createdBy: bot.actor.id,
     createdAt: expect.any(String),
     updatedAt: expect.any(String),
+    completedAt: null,
   });
 });
 
@@ -45,7 +55,11 @@ test("POST /issues on an unknown project is a 404", async () => {
   });
   expect(res.status).toBe(404);
   expect(await res.json()).toEqual({
-    error: { code: "not_found", message: "no project nope" },
+    error: {
+      code: "not_found",
+      message:
+        "no project nope: pass the id or key (like TRL) of an existing project",
+    },
   });
 });
 
@@ -74,6 +88,15 @@ test("PATCH /issues/:id moves status, assigns and unassigns", async () => {
   expect(await unassigned.json()).toMatchObject({
     status: "done",
     assigneeId: null,
+    completedAt: expect.stringMatching(/^\d{4}-\d\d-\d\dT/),
+  });
+
+  const reopened = await request("PATCH", `/api/v1/issues/${id}`, {
+    json: { status: "open" },
+  });
+  expect(await reopened.json()).toMatchObject({
+    status: "open",
+    completedAt: null,
   });
 });
 
@@ -106,7 +129,7 @@ test("PATCH /issues/:id assigning an unknown actor is a 422", async () => {
 
 test("GET /issues filters by project, status and assignee", async () => {
   const other = await request("POST", "/api/v1/projects", {
-    json: { name: "filters" },
+    json: { key: projectKey(), name: "filters" },
   });
   const otherId = ((await other.json()) as { id: string }).id;
   const titles = async (query: string) => {
@@ -150,7 +173,9 @@ test("GET /issues?status=closed is a 422", async () => {
 });
 
 async function freshProject(name: string) {
-  const res = await request("POST", "/api/v1/projects", { json: { name } });
+  const res = await request("POST", "/api/v1/projects", {
+    json: { key: projectKey(), name },
+  });
   return ((await res.json()) as { id: string }).id;
 }
 
@@ -215,4 +240,14 @@ test("GET /issues accepts the limit bounds 1 and 200", async () => {
   const max = await issuePage(`projectId=${boundsId}&limit=200`);
   expect(max.items.map((i) => i.title)).toEqual(["b2", "b1"]);
   expect(max.nextCursor).toBeNull();
+});
+
+test("GET /issues refuses limit 0 and 201 with a 422", async () => {
+  for (const limit of [0, 201]) {
+    const res = await request(
+      "GET",
+      `/api/v1/issues?projectId=${projectId}&limit=${limit}`,
+    );
+    expect(res.status, `limit ${limit}`).toBe(422);
+  }
 });

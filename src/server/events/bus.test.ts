@@ -3,6 +3,7 @@ import { type ActivityEvent, createEventBus } from "./bus.js";
 
 const event: ActivityEvent = {
   id: "e1",
+  seq: 1,
   actorId: "a1",
   subjectType: "project",
   subjectId: "p1",

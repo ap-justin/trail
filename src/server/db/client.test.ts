@@ -37,8 +37,13 @@ test("migrate builds every table STRICT on an empty file", () => {
     { name: "actor", strict: 1 },
     { name: "api_key", strict: 1 },
     { name: "comment", strict: 1 },
+    { name: "idempotency_key", strict: 1 },
     { name: "issue", strict: 1 },
+    { name: "issue_label", strict: 1 },
+    { name: "issue_link", strict: 1 },
+    { name: "label", strict: 1 },
     { name: "project", strict: 1 },
+    { name: "project_status_update", strict: 1 },
   ]);
   db.$client.close();
 });
@@ -76,7 +81,7 @@ function migrationsWith(
 const migrationsWithProjectRebuild = () =>
   migrationsWith("9999_rebuild", [
     "PRAGMA foreign_keys=OFF;",
-    "CREATE TABLE `__new_project` (`id` text PRIMARY KEY NOT NULL, `name` text NOT NULL, `description` text DEFAULT '' NOT NULL, `created_by` text NOT NULL REFERENCES `actor`(`id`), `created_at` integer NOT NULL, `updated_at` integer NOT NULL) STRICT;",
+    "CREATE TABLE `__new_project` (`id` text PRIMARY KEY NOT NULL, `key` text NOT NULL UNIQUE, `name` text NOT NULL, `description` text DEFAULT '' NOT NULL, `issue_seq` integer DEFAULT 0 NOT NULL, `external_ref` text, `created_by` text NOT NULL REFERENCES `actor`(`id`), `created_at` integer NOT NULL, `updated_at` integer NOT NULL) STRICT;",
     "INSERT INTO `__new_project` SELECT * FROM `project`;",
     "DROP TABLE `project`;",
     "ALTER TABLE `__new_project` RENAME TO `project`;",
@@ -86,8 +91,8 @@ const migrationsWithProjectRebuild = () =>
 function seedIssue(db: Db) {
   db.$client.exec(`
     insert into actor (id, kind, display_name, created_at) values ('b', 'bot', 'builder', 0);
-    insert into project (id, name, created_by, created_at, updated_at) values ('p', 'trail', 'b', 0, 0);
-    insert into issue (id, project_id, title, created_by, created_at, updated_at) values ('i', 'p', 'keep me', 'b', 0, 0);
+    insert into project (id, key, name, created_by, created_at, updated_at) values ('p', 'TRL', 'trail', 'b', 0, 0);
+    insert into issue (id, project_id, number, title, created_by, created_at, updated_at) values ('i', 'p', 1, 'keep me', 'b', 0, 0);
   `);
 }
 

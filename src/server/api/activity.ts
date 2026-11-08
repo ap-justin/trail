@@ -1,23 +1,24 @@
 import { createRoute } from "@hono/zod-openapi";
 import {
-  activityEventSchema,
   activityListQuerySchema,
-  pageSchema,
+  activityPageSchema,
 } from "../../shared/schemas.js";
 import type { Service } from "../service/index.js";
 import { createRouter } from "./env.js";
-import { jsonContent, readErrors } from "./routes.js";
+import { jsonContent, notFoundError, readErrors } from "./routes.js";
 import { toActivityEvent, toPage } from "./serialize.js";
 
 const listActivity = createRoute({
   method: "get",
   path: "/activity",
-  summary: "List activity events, newest first, filtered by project or actor",
+  summary:
+    "List activity events newest first (cursor), or resume oldest first (after), filtered by project or actor",
   tags: ["activity"],
   request: { query: activityListQuerySchema },
   responses: {
-    200: jsonContent(pageSchema(activityEventSchema), "A page of events"),
+    200: jsonContent(activityPageSchema, "A page of events"),
     ...readErrors,
+    ...notFoundError,
   },
 });
 

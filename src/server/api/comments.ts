@@ -8,7 +8,9 @@ import {
 import type { Service } from "../service/index.js";
 import { createRouter } from "./env.js";
 import {
-  idParam,
+  conflictError,
+  idempotencyHeaders,
+  issueParam,
   jsonBody,
   jsonContent,
   notFoundError,
@@ -24,11 +26,16 @@ const addComment = createRoute({
   path: "/issues/{id}/comments",
   summary: "Comment on an issue",
   tags,
-  request: { params: idParam, body: jsonBody(commentCreateSchema) },
+  request: {
+    params: issueParam,
+    headers: idempotencyHeaders,
+    body: jsonBody(commentCreateSchema),
+  },
   responses: {
     201: jsonContent(commentSchema, "The created comment"),
     ...writeErrors,
     ...notFoundError,
+    ...conflictError,
   },
 });
 
@@ -37,7 +44,7 @@ const listComments = createRoute({
   path: "/issues/{id}/comments",
   summary: "List an issue's comments, oldest first",
   tags,
-  request: { params: idParam, query: pageQuerySchema },
+  request: { params: issueParam, query: pageQuerySchema },
   responses: {
     200: jsonContent(pageSchema(commentSchema), "A page of comments"),
     ...readErrors,
@@ -50,10 +57,11 @@ export function commentRoutes(service: Service) {
     .openapi(addComment, (c) =>
       c.json(
         toComment(
-          service.addComment(c.var.actor, {
-            issueId: c.req.valid("param").id,
-            body: c.req.valid("json").body,
-          }),
+          service.addComment(
+            c.var.actor,
+            { ...c.req.valid("json"), issueId: c.req.valid("param").id },
+            { idempotencyKey: c.req.valid("header")["idempotency-key"] },
+          ),
         ),
         201,
       ),

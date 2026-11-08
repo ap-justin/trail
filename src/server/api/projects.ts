@@ -9,11 +9,13 @@ import {
 import type { Service } from "../service/index.js";
 import { createRouter } from "./env.js";
 import {
+  conflictError,
   forbiddenError,
-  idParam,
+  idempotencyHeaders,
   jsonBody,
   jsonContent,
   notFoundError,
+  projectParam,
   readErrors,
   writeErrors,
 } from "./routes.js";
@@ -26,11 +28,15 @@ const createProject = createRoute({
   path: "/projects",
   summary: "Create a project",
   tags,
-  request: { body: jsonBody(projectCreateSchema) },
+  request: {
+    headers: idempotencyHeaders,
+    body: jsonBody(projectCreateSchema),
+  },
   responses: {
     201: jsonContent(projectSchema, "The created project"),
     ...writeErrors,
     ...forbiddenError,
+    ...conflictError,
   },
 });
 
@@ -51,7 +57,7 @@ const getProject = createRoute({
   path: "/projects/{id}",
   summary: "Get a project",
   tags,
-  request: { params: idParam },
+  request: { params: projectParam },
   responses: {
     200: jsonContent(projectSchema, "The project"),
     ...readErrors,
@@ -64,7 +70,7 @@ const updateProject = createRoute({
   path: "/projects/{id}",
   summary: "Update a project's name or description",
   tags,
-  request: { params: idParam, body: jsonBody(projectUpdateSchema) },
+  request: { params: projectParam, body: jsonBody(projectUpdateSchema) },
   responses: {
     200: jsonContent(projectSchema, "The updated project"),
     ...writeErrors,
@@ -77,7 +83,11 @@ export function projectRoutes(service: Service) {
   return createRouter()
     .openapi(createProject, (c) =>
       c.json(
-        toProject(service.createProject(c.var.actor, c.req.valid("json"))),
+        toProject(
+          service.createProject(c.var.actor, c.req.valid("json"), {
+            idempotencyKey: c.req.valid("header")["idempotency-key"],
+          }),
+        ),
         201,
       ),
     )

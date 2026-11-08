@@ -1,6 +1,6 @@
-import { beforeAll, describe, expect, test } from "vitest";
+import { beforeAll, describe, expect, test, vi } from "vitest";
 import { activityEvent } from "../db/schema.js";
-import { atFakeTimeAsync, setupTestApp } from "../test-app.js";
+import { atFakeTimeAsync, projectKey, setupTestApp } from "../test-app.js";
 
 const { db, bot, addBot, published, request } = setupTestApp();
 
@@ -19,7 +19,10 @@ const json_ = (res: Response | Promise<Response>) =>
 
 async function newProject(name: string, key?: string) {
   return json<{ id: string }>(
-    request("POST", "/api/v1/projects", { json: { name }, key }),
+    request("POST", "/api/v1/projects", {
+      json: { key: projectKey(), name },
+      key,
+    }),
   );
 }
 
@@ -43,7 +46,7 @@ describe("each REST write yields exactly one activity_event and one bus event", 
       "POST /projects",
       "POST",
       () => "/api/v1/projects",
-      () => ({ name: "p" }),
+      () => ({ key: projectKey(), name: "p" }),
       "project.created",
     ],
     [
@@ -131,7 +134,7 @@ test("GET /activity lists newest first, filters by project and actor, and pages"
       actorId: other.actor.id,
       subjectType: "project",
       subjectId: b.id,
-      payload: { name: "activity-b", description: "" },
+      payload: expect.objectContaining({ name: "activity-b", description: "" }),
       createdAt: expect.any(String),
     }),
   ]);
@@ -158,7 +161,10 @@ test("each write is attributed to the bot whose key made it", async () => {
   const asSecond = (method: string, path: string, json?: unknown) =>
     json_(request(method, path, { json, key: second.key }));
 
-  const project = await asFirst("POST", "/api/v1/projects", { name: "attr" });
+  const project = await asFirst("POST", "/api/v1/projects", {
+    key: projectKey(),
+    name: "attr",
+  });
   const issue = await asSecond("POST", "/api/v1/issues", {
     projectId: project.id,
     title: "filed by second",
@@ -202,7 +208,10 @@ test("an update is attributed to the bot that PATCHed, not the one that created 
     json?: unknown,
   ) => json_(request(method, path, { json, key: who.key }));
 
-  const project = await as(author, "POST", "/api/v1/projects", { name: "upd" });
+  const project = await as(author, "POST", "/api/v1/projects", {
+    key: projectKey(),
+    name: "upd",
+  });
   const issue = await as(author, "POST", "/api/v1/issues", {
     projectId: project.id,
     title: "upd",
@@ -240,6 +249,179 @@ test("GET /activity with a bad cursor is a 422", async () => {
   const res = await request("GET", "/api/v1/activity?cursor=%21%21");
   expect(res.status).toBe(422);
   expect(await res.json()).toEqual({
-    error: { code: "validation_failed", message: "cursor is invalid" },
+    error: {
+      code: "validation_failed",
+      message: expect.stringMatching(/^cursor is invalid: /),
+    },
   });
 });
+
+describe("GET /activity?after= resumes the feed oldest first", () => {
+  const feed = (query: string) =>
+    json<Page>(request("GET", `/api/v1/activity?${query}`));
+
+  test("from the start, page by page, then the same cursor while nothing is new", async () => {
+    const project = await newProject("resume");
+    const issue = await json_(
+      request("POST", "/api/v1/issues", {
+        json: { projectId: project.id, title: "resumed" },
+      }),
+    );
+    await request("POST", `/api/v1/issues/${issue.id}/comments`, {
+      json: { body: "one" },
+    });
+    const scope = `projectId=${project.id}`;
+
+    const first = await feed(`${scope}&after=&limit=2`);
+    expect(first.items.map((e) => e.action)).toEqual([
+      "project.created",
+      "issue.created",
+    ]);
+    const second = await feed(`${scope}&after=${first.nextCursor}&limit=2`);
+    expect(second.items.map((e) => e.action)).toEqual(["comment.created"]);
+    const idle = await feed(`${scope}&after=${second.nextCursor}&limit=2`);
+    expect(idle).toEqual({ items: [], nextCursor: second.nextCursor });
+
+    await request("PATCH", `/api/v1/issues/${issue.id}`, {
+      json: { status: "done" },
+    });
+    const resumed = await feed(`${scope}&after=${idle.nextCursor}`);
+    expect(resumed.items.map((e) => e.action)).toEqual(["issue.updated"]);
+    expect(resumed.nextCursor).not.toBe(idle.nextCursor);
+  });
+
+  test("an event stamped earlier than the cursor's, written later, is still returned", async () => {
+    const [project] = await atFakeTimeAsync([() => newProject("backdated")]);
+    const projectId = (project as { id: string }).id;
+    const scope = `projectId=${projectId}`;
+    const { nextCursor } = await feed(`${scope}&after=`);
+    const cursorAt = eventRows()
+      .filter((e) => e.projectId === projectId)
+      .map((e) => e.createdAt.getTime())[0] as number;
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(cursorAt - 60_000));
+      await request("POST", "/api/v1/issues", {
+        json: { projectId, title: "late arrival" },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const late = eventRows().filter(
+      (e) => e.action === "issue.created" && e.projectId === projectId,
+    );
+    expect(late.map((e) => e.createdAt.getTime() < cursorAt)).toEqual([true]);
+    const resumed = await feed(`${scope}&after=${nextCursor}`);
+    expect(resumed.items.map((e) => e.action)).toEqual(["issue.created"]);
+  });
+
+  test("an empty feed still hands back a cursor to poll from", async () => {
+    const quiet = addBot("quiet");
+    const empty = await feed(`actorId=${quiet.actor.id}&after=`);
+    expect(empty.items).toEqual([]);
+    expect(empty.nextCursor).toEqual(expect.any(String));
+    await newProject("first words", quiet.key);
+    const next = await feed(
+      `actorId=${quiet.actor.id}&after=${empty.nextCursor}`,
+    );
+    expect(next.items.map((e) => e.action)).toEqual(["project.created"]);
+  });
+
+  test("a cursor used under other filters is a 422 that says to reuse them or drop it", async () => {
+    const a = await newProject("bound a");
+    const b = await newProject("bound b");
+    const { nextCursor } = await feed(`projectId=${a.id}&after=`);
+    for (const query of [
+      `projectId=${b.id}&after=${nextCursor}`,
+      `after=${nextCursor}`,
+      `projectId=${a.id}&actorId=${bot.actor.id}&after=${nextCursor}`,
+      `projectId=${b.id}&cursor=${nextCursor}`,
+    ]) {
+      const res = await request("GET", `/api/v1/activity?${query}`);
+      expect(res.status, query).toBe(422);
+      expect(await res.json()).toEqual({
+        error: {
+          code: "validation_failed",
+          message: expect.stringMatching(
+            new RegExp(
+              `^cursor was issued for projectId=${a.id}, actorId=\\(none\\) but this request has .*: repeat the cursor's filters, or drop the cursor to start over$`,
+            ),
+          ),
+        },
+      });
+    }
+  });
+
+  test("a cursor issued under a project's id is accepted under its key", async () => {
+    const res = await request("POST", "/api/v1/projects", {
+      json: { key: "FEED", name: "by key" },
+    });
+    const project = (await res.json()) as { id: string };
+    const { nextCursor } = await feed(`projectId=${project.id}&after=`);
+    const again = await request(
+      "GET",
+      `/api/v1/activity?projectId=FEED&after=${nextCursor}`,
+    );
+    expect(again.status).toBe(200);
+  });
+
+  test.each([
+    ["an after page's cursor sent as cursor", "after=", "cursor", "after"],
+    ["a cursor page's cursor sent as after", "limit=1", "after", "cursor"],
+  ])(
+    "%s is a 422 that names the parameter to send it on",
+    async (_, firstPage, sentAs, sendOn) => {
+      const project = await newProject("direction");
+      await request("POST", "/api/v1/issues", {
+        json: { projectId: project.id, title: "second event" },
+      });
+      const scope = `projectId=${project.id}`;
+      const { nextCursor } = await feed(`${scope}&${firstPage}`);
+      expect(nextCursor).toEqual(expect.any(String));
+
+      const res = await request(
+        "GET",
+        `/api/v1/activity?${scope}&${sentAs}=${nextCursor}`,
+      );
+      expect(res.status).toBe(422);
+      expect(await res.json()).toEqual({
+        error: {
+          code: "validation_failed",
+          message: expect.stringMatching(
+            new RegExp(`: send it as ${sendOn}, not as ${sentAs}$`),
+          ),
+        },
+      });
+    },
+  );
+
+  test("cursor and after together are a 422", async () => {
+    const res = await request("GET", "/api/v1/activity?after=&cursor=x");
+    expect(res.status).toBe(422);
+  });
+});
+
+test.each([
+  ["newest first", ""],
+  ["resuming with after", "&after="],
+])(
+  "GET /activity %s takes limit 1 to 200 and refuses 0 and 201 with a 422",
+  async (_, mode) => {
+    for (const limit of [1, 200]) {
+      const res = await request(
+        "GET",
+        `/api/v1/activity?limit=${limit}${mode}`,
+      );
+      expect(res.status, `limit ${limit}`).toBe(200);
+    }
+    for (const limit of [0, 201]) {
+      const res = await request(
+        "GET",
+        `/api/v1/activity?limit=${limit}${mode}`,
+      );
+      expect(res.status, `limit ${limit}`).toBe(422);
+    }
+  },
+);

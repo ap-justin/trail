@@ -1,5 +1,7 @@
 import { z } from "@hono/zod-openapi";
+import { bodyLimit } from "hono/body-limit";
 import { errorSchema } from "../../shared/schemas.js";
+import { errorResponse } from "./errors.js";
 
 export const jsonContent = <T extends z.ZodType>(
   schema: T,
@@ -7,6 +9,21 @@ export const jsonContent = <T extends z.ZodType>(
 ) => ({ content: { "application/json": { schema } }, description });
 
 export const MAX_BODY_BYTES = 1024 * 1024;
+/** The body limit of an import, which carries a whole project: POST /import and /mcp. */
+export const IMPORT_MAX_BODY_BYTES = 16 * 1024 * 1024;
+
+/** Refuses a body over `maxSize` bytes with a 413 in the shared error shape. */
+export const limitBody = (maxSize: number) =>
+  bodyLimit({
+    maxSize,
+    onError: (c) =>
+      errorResponse(
+        c,
+        413,
+        "payload_too_large",
+        `request body exceeds ${maxSize} bytes`,
+      ),
+  });
 
 /** The error responses every authenticated read documents beside its own. */
 export const readErrors = {
@@ -27,6 +44,23 @@ export const forbiddenError = {
   403: jsonContent(errorSchema, "Only a bot may make this write"),
 };
 
+/** Spread only into operations whose service call can throw `ConflictError`. */
+export const conflictError = {
+  409: jsonContent(
+    errorSchema,
+    "A unique value (a key, name, number or externalRef) is already in use",
+  ),
+};
+
+/** The request schema of every create: a repeat with the same key returns the first result. */
+export const idempotencyHeaders = z.object({
+  "idempotency-key": z.string().min(1).max(255).optional().openapi({
+    description:
+      "Makes the create safe to retry: a repeat with the same key and request returns the first response and writes nothing. Reusing a key for a different request is a 422 (code idempotency_key_reused).",
+    example: "3f6c1e0a-run-42-issue-7",
+  }),
+});
+
 /** The error responses every route with a `jsonBody` documents beside its own. */
 export const writeErrors = {
   400: jsonContent(errorSchema, "The body is missing or not valid JSON"),
@@ -41,9 +75,24 @@ export const jsonBody = <T extends z.ZodType>(schema: T) => ({
   required: true,
 });
 
-export const idParam = z.object({
+export const issueParam = z.object({
   id: z
     .string()
     .min(1)
-    .openapi({ param: { name: "id", in: "path" } }),
+    .openapi({
+      param: { name: "id", in: "path" },
+      description: "The issue's id or its key, like TRL-12.",
+      example: "TRL-12",
+    }),
+});
+
+export const projectParam = z.object({
+  id: z
+    .string()
+    .min(1)
+    .openapi({
+      param: { name: "id", in: "path" },
+      description: "The project's id or its key, like TRL.",
+      example: "TRL",
+    }),
 });

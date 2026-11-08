@@ -9,8 +9,10 @@ import {
 import type { Service } from "../service/index.js";
 import { createRouter } from "./env.js";
 import {
+  conflictError,
   forbiddenError,
-  idParam,
+  idempotencyHeaders,
+  issueParam,
   jsonBody,
   jsonContent,
   notFoundError,
@@ -26,11 +28,15 @@ const createIssue = createRoute({
   path: "/issues",
   summary: "Open an issue in a project",
   tags,
-  request: { body: jsonBody(issueCreateSchema) },
+  request: {
+    headers: idempotencyHeaders,
+    body: jsonBody(issueCreateSchema),
+  },
   responses: {
     201: jsonContent(issueSchema, "The created issue"),
     ...writeErrors,
     ...notFoundError,
+    ...conflictError,
   },
 });
 
@@ -43,6 +49,7 @@ const listIssues = createRoute({
   responses: {
     200: jsonContent(pageSchema(issueSchema), "A page of issues"),
     ...readErrors,
+    ...notFoundError,
   },
 });
 
@@ -51,7 +58,7 @@ const getIssue = createRoute({
   path: "/issues/{id}",
   summary: "Get an issue",
   tags,
-  request: { params: idParam },
+  request: { params: issueParam },
   responses: {
     200: jsonContent(issueSchema, "The issue"),
     ...readErrors,
@@ -62,9 +69,10 @@ const getIssue = createRoute({
 const updateIssue = createRoute({
   method: "patch",
   path: "/issues/{id}",
-  summary: "Update an issue's title, description, status or assignee",
+  summary:
+    "Update an issue's title, description, status, assignee, estimate, priority, labels or links",
   tags,
-  request: { params: idParam, body: jsonBody(issueUpdateSchema) },
+  request: { params: issueParam, body: jsonBody(issueUpdateSchema) },
   responses: {
     200: jsonContent(issueSchema, "The updated issue"),
     ...writeErrors,
@@ -77,7 +85,11 @@ export function issueRoutes(service: Service) {
   return createRouter()
     .openapi(createIssue, (c) =>
       c.json(
-        toIssue(service.createIssue(c.var.actor, c.req.valid("json"))),
+        toIssue(
+          service.createIssue(c.var.actor, c.req.valid("json"), {
+            idempotencyKey: c.req.valid("header")["idempotency-key"],
+          }),
+        ),
         201,
       ),
     )

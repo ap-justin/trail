@@ -96,3 +96,7 @@ export async function atFakeTimeAsync<T>(
   fakeNow += 1;
   return results;
 }
+
+let keys = 0;
+/** A project key no other call in this test file has returned. */
+export const projectKey = () => `K${(++keys).toString(36).toUpperCase()}`;

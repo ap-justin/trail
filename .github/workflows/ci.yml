@@ -21,3 +21,28 @@ jobs:
       - run: pnpm test
       # builds dist, then boots it: a bad bundle, externals list or migrations copy fails here
       - run: pnpm smoke
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t trail .
+      - run: docker run --rm trail node -e "require('better-sqlite3')(':memory:')"
+      # boots the image on an empty data dir, as on a fresh Fly volume
+      - run: |
+          mkdir -p "$RUNNER_TEMP/data"
+          docker run -d --name trail -p 8080:8080 -e PORT=8080 -e DATABASE_PATH=/data/trail.db -v "$RUNNER_TEMP/data:/data" trail
+          for i in $(seq 1 30); do curl -fsS localhost:8080/health && exit 0; sleep 1; done
+          docker logs trail
+          exit 1
+      # a key minted by the image's CLI works over REST and MCP; no key is a 401
+      - run: |
+          key=$(docker exec -e DATABASE_PATH=/data/trail.db trail node /app/dist/cli.js bot create ci-bot --key-only)
+          curl -fsS -H "Authorization: Bearer $key" localhost:8080/api/v1/whoami | jq -e '.name == "ci-bot"'
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8080/api/v1/whoami)" = 401
+          curl -fsS -X POST localhost:8080/mcp -H "Authorization: Bearer $key" \
+            -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
+            -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"whoami","arguments":{}}}' \
+            | jq -e '(.result.isError | not) and (.result.content[0].text | fromjson | .name) == "ci-bot"'
+      - if: failure()
+        run: docker logs trail
