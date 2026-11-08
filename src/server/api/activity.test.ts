@@ -192,6 +192,50 @@ test("each write is attributed to the bot whose key made it", async () => {
   );
 });
 
+test("an update is attributed to the bot that PATCHed, not the one that created the row", async () => {
+  const author = addBot("upd-author");
+  const editor = addBot("upd-editor");
+  const as = (
+    who: typeof author,
+    method: string,
+    path: string,
+    json?: unknown,
+  ) => json_(request(method, path, { json, key: who.key }));
+
+  const project = await as(author, "POST", "/api/v1/projects", { name: "upd" });
+  const issue = await as(author, "POST", "/api/v1/issues", {
+    projectId: project.id,
+    title: "upd",
+  });
+  const publishedBefore = published.length;
+
+  await as(editor, "PATCH", `/api/v1/projects/${project.id}`, { name: "upd2" });
+  await as(editor, "PATCH", `/api/v1/issues/${issue.id}`, { status: "done" });
+
+  const events = await json<Page>(
+    request("GET", `/api/v1/activity?projectId=${project.id}&limit=200`),
+  );
+  const updates = events.items.filter((e) => e.action.endsWith(".updated"));
+  expect(
+    updates
+      .map((e) => `${e.action}:${e.actorId}`)
+      .sort((x, y) => x.localeCompare(y)),
+  ).toEqual([
+    `issue.updated:${editor.actor.id}`,
+    `project.updated:${editor.actor.id}`,
+  ]);
+  expect(
+    published
+      .slice(publishedBefore)
+      .map((e) => `${e.action}:${e.actorId}`)
+      .sort((x, y) => x.localeCompare(y)),
+  ).toEqual([
+    `issue.updated:${editor.actor.id}`,
+    `project.updated:${editor.actor.id}`,
+  ]);
+  expect(project.createdBy).toBe(author.actor.id);
+});
+
 test("GET /activity with a bad cursor is a 422", async () => {
   const res = await request("GET", "/api/v1/activity?cursor=%21%21");
   expect(res.status).toBe(422);

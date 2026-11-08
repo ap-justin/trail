@@ -1,12 +1,19 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeEach, describe, expect, test } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "vitest";
 import { migrate, openDatabase } from "../db/client.js";
 import { type ActivityEvent, createEventBus } from "../events/bus.js";
 import { atFakeTime } from "../test-app.js";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors.js";
-import { createService, type Project } from "./index.js";
+import { createService, type Issue, type Project } from "./index.js";
 import { createBot, createHuman } from "./keys.js";
 
 const dir = mkdtempSync(join(tmpdir(), "trail-service-"));
@@ -263,6 +270,159 @@ test("the bus publishes only once the event is visible to other connections", ()
   expect(seenByOther).toEqual([true]);
 });
 
+test("an update is attributed to the acting bot, not the row's creator", () => {
+  const editor = createBot(db, "editor").actor;
+  const project = service.createProject(bot, { name: "authored" });
+  const issue = service.createIssue(bot, {
+    projectId: project.id,
+    title: "authored",
+  });
+  published = [];
+
+  const projectEvent = onlyEventOf(() =>
+    service.updateProject(editor, project.id, { name: "edited" }),
+  );
+  published = [];
+  const issueEvent = onlyEventOf(() =>
+    service.updateIssue(editor, issue.id, { status: "done" }),
+  );
+
+  expect(projectEvent).toMatchObject({
+    action: "project.updated",
+    actorId: editor.id,
+  });
+  expect(issueEvent).toMatchObject({
+    action: "issue.updated",
+    actorId: editor.id,
+  });
+  expect(service.getProject(bot, project.id).createdBy).toBe(bot.id);
+  expect(service.getIssue(bot, issue.id).createdBy).toBe(bot.id);
+});
+
+describe("updatedAt", () => {
+  test("a project update moves updatedAt past createdAt and leaves createdAt alone", () => {
+    const project = atFakeTime([
+      () => service.createProject(bot, { name: "ticking" }),
+    ])[0] as Project;
+    const updated = atFakeTime([
+      () => service.updateProject(bot, project.id, { name: "ticked" }),
+    ])[0] as Project;
+    expect(updated.updatedAt.getTime()).toBeGreaterThan(
+      project.updatedAt.getTime(),
+    );
+    expect(updated.createdAt).toEqual(project.createdAt);
+    expect(service.getProject(bot, project.id).updatedAt).toEqual(
+      updated.updatedAt,
+    );
+  });
+
+  test("an issue update moves updatedAt past createdAt and leaves createdAt alone", () => {
+    const project = service.createProject(bot, { name: "issue clock" });
+    const issue = atFakeTime([
+      () => service.createIssue(bot, { projectId: project.id, title: "tick" }),
+    ])[0] as Issue;
+    const updated = atFakeTime([
+      () => service.updateIssue(bot, issue.id, { status: "in_progress" }),
+    ])[0] as Issue;
+    expect(updated.updatedAt.getTime()).toBeGreaterThan(
+      issue.updatedAt.getTime(),
+    );
+    expect(updated.createdAt).toEqual(issue.createdAt);
+    expect(service.getIssue(bot, issue.id).updatedAt).toEqual(updated.updatedAt);
+  });
+
+  test("a project patch that changes nothing leaves the row, updatedAt included, as it was", () => {
+    const created = atFakeTime([
+      () => service.createProject(bot, { name: "still", description: "d" }),
+    ])[0] as Project;
+    published = [];
+    const result = atFakeTime([
+      () =>
+        service.updateProject(bot, created.id, {
+          name: "still",
+          description: "d",
+        }),
+    ])[0] as Project;
+    expect(result).toEqual(created);
+    expect(service.getProject(bot, created.id)).toEqual(created);
+    expect(published).toEqual([]);
+  });
+
+  test("an issue patch that changes nothing leaves the row, updatedAt included, as it was", () => {
+    const project = service.createProject(bot, { name: "issue still" });
+    const created = atFakeTime([
+      () => service.createIssue(bot, { projectId: project.id, title: "same" }),
+    ])[0] as Issue;
+    published = [];
+    const result = atFakeTime([
+      () =>
+        service.updateIssue(bot, created.id, { title: "same", status: "open" }),
+    ])[0] as Issue;
+    expect(result).toEqual(created);
+    expect(service.getIssue(bot, created.id)).toEqual(created);
+    expect(published).toEqual([]);
+  });
+});
+
+describe("a write and its activity event commit together", () => {
+  const rejectEvents = () =>
+    db.$client.exec(
+      `create trigger reject_event before insert on activity_event
+       begin select raise(abort, 'event rejected'); end`,
+    );
+  const allowEvents = () =>
+    db.$client.exec("drop trigger if exists reject_event");
+  afterEach(allowEvents);
+
+  test("an event the database refuses rolls the write back; with the refusal lifted the same calls commit", () => {
+    const project = service.createProject(bot, { name: "atomic" });
+    const issue = service.createIssue(bot, {
+      projectId: project.id,
+      title: "before",
+    });
+    published = [];
+    const issuesBefore = service.listIssues(bot, { projectId: project.id });
+    const issueBefore = service.getIssue(bot, issue.id);
+    const eventsBefore = allActivity();
+
+    const writes = {
+      createIssue: () =>
+        service.createIssue(bot, { projectId: project.id, title: "after" }),
+      updateIssue: () =>
+        service.updateIssue(bot, issue.id, { title: "after", status: "done" }),
+      addComment: () =>
+        service.addComment(bot, { issueId: issue.id, body: "after" }),
+    };
+
+    rejectEvents();
+    for (const write of Object.values(writes)) {
+      expect(write).toThrow("event rejected");
+    }
+    expect(service.listIssues(bot, { projectId: project.id })).toEqual(
+      issuesBefore,
+    );
+    expect(service.getIssue(bot, issue.id)).toEqual(issueBefore);
+    expect(service.listComments(bot, issue.id).items).toEqual([]);
+    expect(allActivity()).toEqual(eventsBefore);
+    expect(published).toEqual([]);
+
+    allowEvents();
+    for (const write of Object.values(writes)) write();
+    const issuesAfter = service.listIssues(bot, { projectId: project.id });
+    expect(issuesAfter.items).toHaveLength(2);
+    expect(service.getIssue(bot, issue.id)).toMatchObject({
+      title: "after",
+      status: "done",
+    });
+    expect(service.listComments(bot, issue.id).items).toHaveLength(1);
+    expect(published.map((e) => e.action)).toEqual([
+      "issue.created",
+      "issue.updated",
+      "comment.created",
+    ]);
+  });
+});
+
 describe("paging and filters", () => {
   const titles = ["one", "two", "three", "four", "five"];
   const [paged] = atFakeTime([
@@ -281,12 +441,13 @@ describe("paging and filters", () => {
   /** Walks every page of `list` at `limit`, returning ids in order. */
   function walk<T extends { id: string }>(
     list: (cursor?: string) => { items: T[]; nextCursor: string | null },
+    key: (item: T) => string = (item) => item.id,
   ): string[][] {
     const pages: string[][] = [];
     let cursor: string | undefined;
     do {
       const page = list(cursor);
-      pages.push(page.items.map((i) => i.id));
+      pages.push(page.items.map(key));
       cursor = page.nextCursor ?? undefined;
     } while (cursor);
     return pages;
@@ -389,8 +550,47 @@ describe("paging and filters", () => {
     });
   });
 
+  test("activity rows sharing a millisecond each land on exactly one page", () => {
+    const tied = service.createProject(bot, { name: "tied activity" });
+    const filed = atFakeTime(
+      ["a", "b", "c", "d"].map(
+        (title) => () =>
+          service.createIssue(bot, { projectId: tied.id, title }),
+      ),
+      0,
+    );
+    const subjects = [tied.id, ...filed.map((i) => i.id)];
+    const pages = walk(
+      (cursor) =>
+        service.listActivity(bot, { projectId: tied.id, cursor, limit: 1 }),
+      (event) => event.subjectId,
+    );
+    expect(pages).toHaveLength(subjects.length);
+    expect(pages.flat().sort()).toEqual([...subjects].sort());
+  });
+
+  test("comments sharing a millisecond each land on exactly one page", () => {
+    const own = service.createProject(bot, { name: "tied comments" });
+    const issue = service.createIssue(bot, { projectId: own.id, title: "t" });
+    const ids = atFakeTime(
+      ["a", "b", "c", "d"].map(
+        (body) => () => service.addComment(bot, { issueId: issue.id, body }).id,
+      ),
+      0,
+    );
+    const pages = walk((cursor) =>
+      service.listComments(bot, issue.id, { cursor, limit: 1 }),
+    );
+    expect(pages).toHaveLength(ids.length);
+    expect(pages.flat().sort()).toEqual([...ids].sort());
+  });
+
   test("comments page oldest first", () => {
-    const issueId = issues[0]?.id ?? "";
+    const own = service.createProject(bot, { name: "comment paging" });
+    const issueId = service.createIssue(bot, {
+      projectId: own.id,
+      title: "t",
+    }).id;
     const ids = atFakeTime(
       ["a", "b", "c"].map(
         (body) => () => service.addComment(bot, { issueId, body }).id,
