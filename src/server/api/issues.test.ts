@@ -40,9 +40,11 @@ test("POST /issues opens an unassigned issue and returns 201", async () => {
     links: [],
     assigneeId: null,
     externalRef: null,
+    sourceAuthor: null,
     createdBy: bot.actor.id,
     createdAt: expect.any(String),
     updatedAt: expect.any(String),
+    completedAt: null,
   });
 });
 
@@ -85,6 +87,15 @@ test("PATCH /issues/:id moves status, assigns and unassigns", async () => {
   expect(await unassigned.json()).toMatchObject({
     status: "done",
     assigneeId: null,
+    completedAt: expect.stringMatching(/^\d{4}-\d\d-\d\dT/),
+  });
+
+  const reopened = await request("PATCH", `/api/v1/issues/${id}`, {
+    json: { status: "open" },
+  });
+  expect(await reopened.json()).toMatchObject({
+    status: "open",
+    completedAt: null,
   });
 });
 

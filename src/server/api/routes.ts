@@ -1,5 +1,7 @@
 import { z } from "@hono/zod-openapi";
+import { bodyLimit } from "hono/body-limit";
 import { errorSchema } from "../../shared/schemas.js";
+import { errorResponse } from "./errors.js";
 
 export const jsonContent = <T extends z.ZodType>(
   schema: T,
@@ -7,6 +9,21 @@ export const jsonContent = <T extends z.ZodType>(
 ) => ({ content: { "application/json": { schema } }, description });
 
 export const MAX_BODY_BYTES = 1024 * 1024;
+/** The body limit of an import, which carries a whole project: POST /import and /mcp. */
+export const IMPORT_MAX_BODY_BYTES = 16 * 1024 * 1024;
+
+/** Refuses a body over `maxSize` bytes with a 413 in the shared error shape. */
+export const limitBody = (maxSize: number) =>
+  bodyLimit({
+    maxSize,
+    onError: (c) =>
+      errorResponse(
+        c,
+        413,
+        "payload_too_large",
+        `request body exceeds ${maxSize} bytes`,
+      ),
+  });
 
 /** The error responses every authenticated read documents beside its own. */
 export const readErrors = {

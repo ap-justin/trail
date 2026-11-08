@@ -5,6 +5,7 @@ import {
   eq,
   gt,
   inArray,
+  isNotNull,
   lt,
   type SQL,
   sql,
@@ -18,11 +19,9 @@ import {
   issue,
   issueLabel,
   issueLink,
-  issueStatuses,
   label,
   type ProjectHealth,
   project,
-  projectHealths,
   projectStatusUpdate,
 } from "../db/schema.js";
 import type { ActivityEvent, EventBus } from "../events/bus.js";
@@ -38,6 +37,15 @@ import {
   storeResult,
   validIdempotencyKey,
 } from "./idempotency.js";
+import {
+  type ImportCounts,
+  type ImportPayload,
+  type NormalComment,
+  type NormalImport,
+  type NormalIssue,
+  normalImport,
+  zeroCounts,
+} from "./import.js";
 import type { Actor } from "./keys.js";
 import {
   decodeFeedCursor,
@@ -49,12 +57,33 @@ import {
   pageLimit,
 } from "./paging.js";
 import type { Tx } from "./tx.js";
+import {
+  completedAtOf,
+  type Link,
+  type LinkInput,
+  nonBlank,
+  optionalRef,
+  validEstimate,
+  validHealth,
+  validLabelNames,
+  validLinks,
+  validPriority,
+  validProjectKey,
+  validStatus,
+} from "./validate.js";
 
+export type {
+  ImportComment,
+  ImportCounts,
+  ImportIssue,
+  ImportPayload,
+  ImportStatusUpdate,
+} from "./import.js";
 export type { Page, PageQuery } from "./paging.js";
+export type { Link, LinkInput } from "./validate.js";
 
 export type ActingActor = Pick<Actor, "id" | "kind">;
 export type Project = typeof project.$inferSelect;
-export type Link = { url: string; title: string };
 type IssueRow = typeof issue.$inferSelect;
 /** An issue with its key (as in TRL-12), label names A–Z, and links in the order set. */
 export type Issue = IssueRow & { key: string; labels: string[]; links: Link[] };
@@ -84,7 +113,6 @@ export type IssueInput = {
   links?: LinkInput[];
   externalRef?: string | null;
 };
-export type LinkInput = { url: string; title?: string };
 export type IssuePatch = {
   title?: string;
   description?: string;
@@ -111,6 +139,12 @@ export type StatusUpdateInput = {
   externalRef?: string | null;
 };
 export type LabelInput = { projectId: string; name: string };
+export type ImportResult = {
+  project: Project;
+  created: ImportCounts;
+  updated: ImportCounts;
+  unchanged: ImportCounts;
+};
 export type IssueQuery = PageQuery & {
   projectId?: string;
   status?: IssueStatus;
@@ -130,7 +164,6 @@ type NewEvent = Omit<typeof activityEvent.$inferInsert, "id" | "createdAt">;
 type Change = { from: unknown; to: unknown };
 type Write<T> = { result: T; event: NewEvent | null };
 
-const projectKeyPattern = /^[A-Z0-9]{2,10}$/;
 // a project key, a dash and the issue's number: TRL-12
 const issueKeyPattern = /^([A-Za-z0-9]{2,10})-(\d+)$/;
 
@@ -139,87 +172,6 @@ function requireBot(actor: ActingActor, write: string): void {
   if (actor.kind !== "bot") {
     throw new ForbiddenError(`only a bot may ${write}`);
   }
-}
-
-function nonBlank(value: string, field: string): string {
-  const trimmed = value.trim();
-  if (trimmed === "") throw new ValidationError(`${field} must not be empty`);
-  return trimmed;
-}
-
-function validStatus(status: string): IssueStatus {
-  if (!(issueStatuses as readonly string[]).includes(status)) {
-    throw new ValidationError(
-      `status must be one of ${issueStatuses.join(", ")}`,
-    );
-  }
-  return status as IssueStatus;
-}
-
-function validHealth(health: string): ProjectHealth {
-  if (!(projectHealths as readonly string[]).includes(health)) {
-    throw new ValidationError(
-      `health must be one of ${projectHealths.join(", ")}`,
-    );
-  }
-  return health as ProjectHealth;
-}
-
-function validProjectKey(raw: string): string {
-  const key = raw.trim().toUpperCase();
-  if (!projectKeyPattern.test(key)) {
-    throw new ValidationError(
-      `key must be 2 to 10 letters A-Z or digits, like TRL; got "${raw}"`,
-    );
-  }
-  return key;
-}
-
-function validPriority(priority: number | undefined): number | undefined {
-  if (priority === undefined) return undefined;
-  if (!Number.isInteger(priority) || priority < 0 || priority > 4) {
-    throw new ValidationError(
-      "priority must be 0 (none), 1 (urgent), 2 (high), 3 (medium) or 4 (low)",
-    );
-  }
-  return priority;
-}
-
-function validEstimate(
-  estimate: number | null | undefined,
-): number | null | undefined {
-  if (estimate == null) return estimate;
-  if (!Number.isFinite(estimate) || estimate < 0) {
-    throw new ValidationError("estimate must be a number of hours, 0 or more");
-  }
-  return estimate;
-}
-
-function optionalRef(ref: string | null | undefined): string | null {
-  return ref == null ? null : nonBlank(ref, "externalRef");
-}
-
-/** Trimmed names, a repeat (in any case) dropped. */
-function validLabelNames(names: string[]): string[] {
-  const seen = new Map<string, string>();
-  for (const raw of names) {
-    const name = nonBlank(raw, "label name");
-    if (!seen.has(name.toLowerCase())) seen.set(name.toLowerCase(), name);
-  }
-  return [...seen.values()];
-}
-
-function validLinks(links: LinkInput[]): Link[] {
-  const urls = new Set<string>();
-  return links.map((link) => {
-    const url = nonBlank(link.url, "link url");
-    if (urls.has(url)) {
-      throw new ValidationError(`links lists ${url} twice: send each url once`);
-    }
-    urls.add(url);
-    const title = link.title === undefined ? "" : link.title.trim();
-    return { url, title: title === "" ? url : title };
-  });
 }
 
 /** Fields of `patch` whose value differs from `current`, as from/to pairs. */
@@ -235,6 +187,27 @@ function changesOf<T extends object>(
   }
   return changes;
 }
+
+/** The fields of `next` whose value differs from `current`, Dates compared by instant. */
+function changedFields<T extends object>(
+  current: T,
+  next: Partial<T>,
+): Partial<T> {
+  const changed: Partial<T> = {};
+  for (const field of Object.keys(next) as (keyof T)[]) {
+    const to = next[field];
+    if (to === undefined) continue;
+    const from = current[field];
+    const same =
+      from instanceof Date && to instanceof Date
+        ? from.getTime() === to.getTime()
+        : from === to;
+    if (!same) changed[field] = to;
+  }
+  return changed;
+}
+
+const isEmpty = (fields: object) => Object.keys(fields).length === 0;
 
 const sameJson = (a: unknown, b: unknown) =>
   JSON.stringify(a) === JSON.stringify(b);
@@ -428,6 +401,289 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
       .run();
   }
 
+  /** The project's next issue number, handed out in this transaction. */
+  function nextIssueNumber(tx: Tx, projectId: string): number {
+    const { issueSeq } = tx
+      .update(project)
+      .set({
+        issueSeq: sql`${project.issueSeq} + 1`,
+        // numbering an issue is not an edit to the project
+        updatedAt: sql`${project.updatedAt}`,
+      })
+      .where(eq(project.id, projectId))
+      .returning({ issueSeq: project.issueSeq })
+      .get() as { issueSeq: number };
+    return issueSeq;
+  }
+
+  type Tally = Record<"created" | "updated" | "unchanged", ImportCounts>;
+
+  /** The project with the payload's externalRef, created or brought up to date. */
+  function importProjectRow(
+    tx: Tx,
+    actor: ActingActor,
+    input: NormalImport,
+    tally: Tally,
+  ): Project {
+    const existing = tx
+      .select()
+      .from(project)
+      .where(eq(project.externalRef, input.externalRef))
+      .get();
+    if (!existing) {
+      const taken = tx
+        .select()
+        .from(project)
+        .where(eq(project.key, input.key))
+        .get();
+      if (taken) {
+        throw new ConflictError(
+          `project key ${input.key} is taken by project ${taken.id} ("${taken.name}", externalRef ${taken.externalRef ?? "none"}): send another key for ${input.externalRef}`,
+        );
+      }
+      tally.created.projects++;
+      return tx
+        .insert(project)
+        .values({
+          externalRef: input.externalRef,
+          key: input.key,
+          name: input.name,
+          description: input.description ?? "",
+          createdAt: input.createdAt,
+          createdBy: actor.id,
+        })
+        .returning()
+        .get();
+    }
+    if (existing.key !== input.key) {
+      throw new ConflictError(
+        `project ${input.externalRef} was imported with key ${existing.key}: send key ${existing.key}, since a project's key never changes`,
+      );
+    }
+    const changed = changedFields(existing, {
+      name: input.name,
+      description: input.description,
+      createdAt: input.createdAt,
+    });
+    if (isEmpty(changed)) {
+      tally.unchanged.projects++;
+      return existing;
+    }
+    tally.updated.projects++;
+    return tx
+      .update(project)
+      .set(changed)
+      .where(eq(project.id, existing.id))
+      .returning()
+      .get() as Project;
+  }
+
+  /** The project's labels by lowercased name, each payload name created when missing. */
+  function importLabels(
+    tx: Tx,
+    projectId: string,
+    names: string[],
+    tally: Tally,
+  ): Map<string, Label> {
+    const labels = new Map<string, Label>();
+    for (const name of names) {
+      const found = findLabel(tx, projectId, name);
+      tally[found ? "unchanged" : "created"].labels++;
+      labels.set(
+        name.toLowerCase(),
+        found ?? tx.insert(label).values({ projectId, name }).returning().get(),
+      );
+    }
+    return labels;
+  }
+
+  /** The id of the issue `row` names, created or brought up to date. */
+  function importIssue(
+    tx: Tx,
+    actor: ActingActor,
+    target: Project,
+    row: NormalIssue,
+    current: Issue | undefined,
+    labels: Map<string, Label>,
+    tally: Tally,
+    now: Date,
+  ): string {
+    const labelsOf = (names: string[]) =>
+      names.map((n) => labels.get(n.toLowerCase()) as Label);
+    const completedAt = completedAtOf(
+      row.status,
+      row.completedAt ?? current?.completedAt ?? null,
+      now,
+    );
+    if (!current) {
+      const inserted = tx
+        .insert(issue)
+        .values({
+          projectId: target.id,
+          number: nextIssueNumber(tx, target.id),
+          externalRef: row.externalRef,
+          title: row.title,
+          description: row.description ?? "",
+          status: row.status,
+          priority: row.priority ?? 0,
+          estimate: row.estimate ?? null,
+          sourceAuthor: row.sourceAuthor ?? null,
+          createdAt: row.createdAt,
+          completedAt,
+          createdBy: actor.id,
+        })
+        .returning()
+        .get();
+      setLabels(tx, inserted, labelsOf(row.labels ?? []));
+      setLinks(tx, inserted.id, row.links ?? []);
+      tally.created.issues++;
+      tally.created.links += row.links?.length ?? 0;
+      return inserted.id;
+    }
+
+    const changed = changedFields<IssueRow>(current, {
+      title: row.title,
+      description: row.description,
+      status: row.status,
+      priority: row.priority,
+      estimate: row.estimate,
+      sourceAuthor: row.sourceAuthor,
+      createdAt: row.createdAt,
+      completedAt,
+    });
+    const nextLabels =
+      row.labels === undefined ? undefined : labelsOf(row.labels);
+    const labelsChanged =
+      nextLabels !== undefined &&
+      !sameJson(current.labels, sortedNames(nextLabels));
+    const linksChanged =
+      row.links !== undefined && !sameJson(current.links, row.links);
+    for (const link of row.links ?? []) {
+      const before = current.links.find((l) => l.url === link.url);
+      const outcome = !before
+        ? "created"
+        : before.title === link.title
+          ? "unchanged"
+          : "updated";
+      tally[outcome].links++;
+    }
+    if (isEmpty(changed) && !labelsChanged && !linksChanged) {
+      tally.unchanged.issues++;
+      return current.id;
+    }
+    tx.update(issue)
+      .set({ ...changed, updatedAt: now })
+      .where(eq(issue.id, current.id))
+      .run();
+    if (nextLabels && labelsChanged) setLabels(tx, current, nextLabels);
+    if (row.links && linksChanged) setLinks(tx, current.id, row.links);
+    tally.updated.issues++;
+    return current.id;
+  }
+
+  function importComments(
+    tx: Tx,
+    actor: ActingActor,
+    issueId: string,
+    rows: NormalComment[],
+    tally: Tally,
+  ): void {
+    if (rows.length === 0) return;
+    const existing = new Map(
+      tx
+        .select()
+        .from(comment)
+        .where(
+          and(eq(comment.issueId, issueId), isNotNull(comment.externalRef)),
+        )
+        .all()
+        .map((c) => [c.externalRef, c]),
+    );
+    for (const row of rows) {
+      const current = existing.get(row.externalRef);
+      if (!current) {
+        tx.insert(comment)
+          .values({
+            issueId,
+            externalRef: row.externalRef,
+            body: row.body,
+            sourceAuthor: row.sourceAuthor ?? null,
+            createdAt: row.createdAt,
+            authorId: actor.id,
+          })
+          .run();
+        tally.created.comments++;
+        continue;
+      }
+      const changed = changedFields(current, {
+        body: row.body,
+        sourceAuthor: row.sourceAuthor,
+        createdAt: row.createdAt,
+      });
+      if (isEmpty(changed)) {
+        tally.unchanged.comments++;
+        continue;
+      }
+      tx.update(comment).set(changed).where(eq(comment.id, current.id)).run();
+      tally.updated.comments++;
+    }
+  }
+
+  function importStatusUpdates(
+    tx: Tx,
+    actor: ActingActor,
+    projectId: string,
+    rows: NormalImport["statusUpdates"],
+    tally: Tally,
+  ): void {
+    const existing = new Map(
+      tx
+        .select()
+        .from(projectStatusUpdate)
+        .where(
+          and(
+            eq(projectStatusUpdate.projectId, projectId),
+            isNotNull(projectStatusUpdate.externalRef),
+          ),
+        )
+        .all()
+        .map((u) => [u.externalRef, u]),
+    );
+    for (const row of rows) {
+      const current = existing.get(row.externalRef);
+      if (!current) {
+        tx.insert(projectStatusUpdate)
+          .values({
+            projectId,
+            externalRef: row.externalRef,
+            body: row.body,
+            health: row.health,
+            sourceAuthor: row.sourceAuthor ?? null,
+            createdAt: row.createdAt,
+            authorId: actor.id,
+          })
+          .run();
+        tally.created.statusUpdates++;
+        continue;
+      }
+      const changed = changedFields(current, {
+        body: row.body,
+        health: row.health,
+        sourceAuthor: row.sourceAuthor,
+        createdAt: row.createdAt,
+      });
+      if (isEmpty(changed)) {
+        tally.unchanged.statusUpdates++;
+        continue;
+      }
+      tx.update(projectStatusUpdate)
+        .set(changed)
+        .where(eq(projectStatusUpdate.id, current.id))
+        .run();
+      tally.updated.statusUpdates++;
+    }
+  }
+
   const sortedNames = (labels: Label[]) =>
     labels.map((l) => l.name).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 
@@ -581,19 +837,13 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
                 );
               }
             }
-            const { issueSeq } = tx
-              .update(project)
-              .set({
-                issueSeq: sql`${project.issueSeq} + 1`,
-                // numbering an issue is not an edit to the project
-                updatedAt: target.updatedAt,
-              })
-              .where(eq(project.id, target.id))
-              .returning({ issueSeq: project.issueSeq })
-              .get() as { issueSeq: number };
             const row = tx
               .insert(issue)
-              .values({ ...fields, number: issueSeq, createdBy: actor.id })
+              .values({
+                ...fields,
+                number: nextIssueNumber(tx, target.id),
+                createdBy: actor.id,
+              })
               .returning()
               .get();
             setLabels(tx, row, labelsNamed(tx, target.id, labelNames));
@@ -664,9 +914,18 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
         if (Object.keys(changes).length === 0) {
           return { result: current, event: null };
         }
+        const now = new Date();
         const updatedRow = tx
           .update(issue)
-          .set({ ...next, updatedAt: new Date() })
+          .set({
+            ...next,
+            completedAt: completedAtOf(
+              next.status ?? row.status,
+              row.completedAt,
+              now,
+            ),
+            updatedAt: now,
+          })
           .where(eq(issue.id, row.id))
           .returning()
           .get() as IssueRow;
@@ -837,6 +1096,81 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
                 payload: { name },
               },
             };
+          },
+        };
+      });
+    },
+
+    /**
+     * Upserts a project and its rows by externalRef in one transaction: a new
+     * row is created, a changed one updated, an identical one left untouched
+     * (updatedAt included), and nothing missing from the payload is deleted.
+     * One project.imported event carries the counts; a run that changes
+     * nothing writes none.
+     */
+    importProject(actor: ActingActor, payload: ImportPayload): ImportResult {
+      requireBot(actor, "import a project");
+      const input = normalImport(payload);
+      return commit((tx) => {
+        const tally: Tally = {
+          created: zeroCounts(),
+          updated: zeroCounts(),
+          unchanged: zeroCounts(),
+        };
+        const now = new Date();
+        const target = importProjectRow(tx, actor, input, tally);
+        const labels = importLabels(tx, target.id, input.labels, tally);
+        const existing = new Map(
+          hydrate(
+            tx,
+            tx
+              .select()
+              .from(issue)
+              .where(
+                and(
+                  eq(issue.projectId, target.id),
+                  isNotNull(issue.externalRef),
+                ),
+              )
+              .all(),
+          ).map((i) => [i.externalRef, i]),
+        );
+        for (const row of input.issues) {
+          const issueId = importIssue(
+            tx,
+            actor,
+            target,
+            row,
+            existing.get(row.externalRef),
+            labels,
+            tally,
+            now,
+          );
+          importComments(tx, actor, issueId, row.comments, tally);
+        }
+        importStatusUpdates(tx, actor, target.id, input.statusUpdates, tally);
+
+        const result: ImportResult = {
+          project: tx
+            .select()
+            .from(project)
+            .where(eq(project.id, target.id))
+            .get() as Project,
+          ...tally,
+        };
+        const wrote = [tally.created, tally.updated].some((counts) =>
+          Object.values(counts).some((n) => n > 0),
+        );
+        if (!wrote) return { result, event: null };
+        return {
+          result,
+          event: {
+            actorId: actor.id,
+            subjectType: "project",
+            subjectId: target.id,
+            projectId: target.id,
+            action: "project.imported",
+            payload: { externalRef: target.externalRef, ...tally },
           },
         };
       });

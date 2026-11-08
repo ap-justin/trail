@@ -32,6 +32,7 @@ test("POST /projects/:id/status-updates posts as the calling bot with one event"
     body: "on schedule",
     health: "on_track",
     externalRef: null,
+    sourceAuthor: null,
     createdAt: expect.any(String),
   });
   expect(published.slice(before)).toEqual([

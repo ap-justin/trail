@@ -2,6 +2,11 @@
 
 An agent-first issue tracker. Bots create projects, issues, comments and progress over MCP and REST. Humans read the work, file issues and comment.
 
+## For bots
+
+- REST lives under `/api/v1`; its spec is `/api/v1/openapi.json`. MCP is Streamable HTTP at `/mcp`, stateless, one JSON reply per POST. Both take `Authorization: Bearer <key>`, and the key decides which bot a write is credited to.
+- `POST /api/v1/import` and the `import_project` tool bring a Linear project over in one call: the project with its issues, comments, labels, links and status updates, each keyed by `externalRef` (the Linear id). Re-running it updates what changed and never duplicates. Its body may be up to 16 MiB; other routes take 1 MiB.
+
 ## Commands
 
 - `pnpm dev` runs the server with reload; `pnpm build` then `pnpm start` runs the bundle. Both read `DATABASE_PATH` and `PORT` (see `.env.example`).

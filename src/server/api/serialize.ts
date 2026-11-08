@@ -1,6 +1,7 @@
 import type {
   ActivityEventView,
   CommentView,
+  ImportResultView,
   IssueView,
   LabelView,
   PageView,
@@ -10,6 +11,7 @@ import type {
 import type { ActivityEvent } from "../events/bus.js";
 import type {
   Comment,
+  ImportResult,
   Issue,
   Label,
   Page,
@@ -47,9 +49,11 @@ export function toIssue(row: Issue): IssueView {
     links: row.links.map((l) => ({ url: l.url, title: l.title })),
     assigneeId: row.assigneeId,
     externalRef: row.externalRef,
+    sourceAuthor: row.sourceAuthor,
     createdBy: row.createdBy,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    completedAt: row.completedAt?.toISOString() ?? null,
   };
 }
 
@@ -60,6 +64,7 @@ export function toComment(row: Comment): CommentView {
     authorId: row.authorId,
     body: row.body,
     externalRef: row.externalRef,
+    sourceAuthor: row.sourceAuthor,
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -72,6 +77,7 @@ export function toStatusUpdate(row: StatusUpdate): StatusUpdateView {
     body: row.body,
     health: row.health,
     externalRef: row.externalRef,
+    sourceAuthor: row.sourceAuthor,
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -100,4 +106,13 @@ export function toActivityEvent(row: ActivityEvent): ActivityEventView {
 
 export function toPage<T, V>(page: Page<T>, view: (row: T) => V): PageView<V> {
   return { items: page.items.map(view), nextCursor: page.nextCursor };
+}
+
+export function toImportResult(result: ImportResult): ImportResultView {
+  return {
+    project: toProject(result.project),
+    created: result.created,
+    updated: result.updated,
+    unchanged: result.unchanged,
+  };
 }

@@ -244,6 +244,37 @@ test("a status change is issue.updated with status from and to", () => {
   });
 });
 
+describe("completedAt", () => {
+  test("is set when an issue moves to done, kept through canceled, cleared when it reopens", () => {
+    const issue = service.createIssue(bot, { projectId: proj.id, title: "c" });
+    expect(issue.completedAt).toBeNull();
+    const [done] = atFakeTime([
+      () => service.updateIssue(bot, issue.id, { status: "done" }),
+    ]);
+    expect(done?.completedAt).toBeInstanceOf(Date);
+    const doneAt = done?.completedAt?.getTime();
+    expect(
+      service.updateIssue(bot, issue.id, { status: "canceled" }).completedAt,
+    ).toEqual(new Date(doneAt as number));
+    expect(
+      service.updateIssue(bot, issue.id, { status: "in_progress" }).completedAt,
+    ).toBeNull();
+    expect(service.getIssue(bot, issue.id).completedAt).toBeNull();
+  });
+
+  test("is set when an open issue is canceled, and untouched by an edit that keeps it open", () => {
+    const issue = service.createIssue(bot, { projectId: proj.id, title: "c" });
+    expect(
+      service.updateIssue(bot, issue.id, { title: "c2" }).completedAt,
+    ).toBeNull();
+    const canceled = service.updateIssue(bot, issue.id, { status: "canceled" });
+    expect(canceled.completedAt).toBeInstanceOf(Date);
+    expect(service.getIssue(bot, issue.id).completedAt).toEqual(
+      canceled.completedAt,
+    );
+  });
+});
+
 test("failed issue and comment writes leave no row and no event", () => {
   const issue = service.createIssue(bot, { projectId: proj.id, title: "t" });
   published = [];

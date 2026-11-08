@@ -1,6 +1,7 @@
 #!/bin/sh
 # Boots the built bundle (dist/) on a throwaway database and exercises it:
-# /health, an unauthenticated 401, and a bearer key minted by the built CLI.
+# /health, unauthenticated 401s, and a bearer key minted by the built CLI on
+# /api/v1 and /mcp.
 # Run after `pnpm build`; `pnpm smoke` does both. Deliberately no --env-file:
 # a developer's .env must not leak into the check.
 set -eu
@@ -40,4 +41,18 @@ key=$(node dist/cli.js bot create smoke --key-only)
 code=$(curl -s -o /dev/null -w '%{http_code}' "$base/api/v1/projects")
 [ "$code" = 401 ] || { echo "unauthenticated /api/v1/projects gave $code, want 401" >&2; exit 1; }
 curl -fsS -H "Authorization: Bearer $key" "$base/api/v1/projects" >/dev/null
-echo "smoke ok: dist boots, migrates, mints a key and serves /api/v1 on :$PORT"
+
+# /mcp loads the MCP SDK from node_modules at runtime, outside the bundle
+initialize='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"smoke","version":"1"}}}'
+mcp() {
+  curl -s -o "$dir/mcp.json" -w '%{http_code}' -X POST "$base/mcp" \
+    -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+    "$@" -d "$initialize"
+}
+code=$(mcp)
+[ "$code" = 401 ] || { echo "unauthenticated /mcp gave $code, want 401" >&2; exit 1; }
+code=$(mcp -H "Authorization: Bearer $key")
+[ "$code" = 200 ] && grep -q '"name":"trail"' "$dir/mcp.json" || {
+  echo "/mcp initialize gave $code: $(cat "$dir/mcp.json")" >&2; exit 1;
+}
+echo "smoke ok: dist boots, migrates, mints a key and serves /api/v1 and /mcp on :$PORT"

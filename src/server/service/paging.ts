@@ -31,7 +31,9 @@ function decodeCursor(cursor: string): { createdAt: Date; id: string } {
     !Number.isSafeInteger(parsed[0]) ||
     typeof parsed[1] !== "string"
   ) {
-    throw new ValidationError("cursor is invalid");
+    throw new ValidationError(
+      "cursor is invalid: pass a nextCursor exactly as the previous page returned it, or leave cursor out for the first page",
+    );
   }
   return { createdAt: new Date(parsed[0]), id: parsed[1] };
 }

@@ -132,7 +132,10 @@ test("malformed JSON is a 400 in the shared shape", async () => {
 });
 
 test.each([
-  ["cursor=garbage", "cursor is invalid"],
+  [
+    "cursor=garbage",
+    "cursor is invalid: pass a nextCursor exactly as the previous page returned it, or leave cursor out for the first page",
+  ],
   ["limit=0", expect.stringMatching(/^limit: /)],
   ["limit=201", expect.stringMatching(/^limit: /)],
   ["limit=two", expect.stringMatching(/^limit: /)],

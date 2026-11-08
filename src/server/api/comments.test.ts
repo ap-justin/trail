@@ -26,6 +26,7 @@ test("POST /issues/:id/comments adds a comment as the bot and returns 201", asyn
     authorId: bot.actor.id,
     body: "  looks good\n",
     externalRef: null,
+    sourceAuthor: null,
     createdAt: expect.any(String),
   });
 });
