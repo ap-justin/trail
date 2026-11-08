@@ -5,6 +5,7 @@ import {
   issueStatuses,
   projectHealths,
 } from "../server/db/schema.js";
+import { sourceStateTypes } from "../server/service/import.js";
 
 // Field docs go in .meta(), which both the OpenAPI spec and the MCP tools' JSON
 // Schema read; .openapi({ description }) reaches only the spec.
@@ -304,14 +305,23 @@ const importIssueSchema = z
     description: text.optional(),
     status: z.string().min(1).max(200).optional().meta({
       description:
-        "The source state's name (Linear's state.name), kept as the issue's sourceStatus. Without statusType it decides the status, in any case: Backlog or Todo → open, In Progress → in_progress, Done → done, Canceled or Duplicate → canceled, and a trail status (open, in_progress, done, canceled) as is; any other name needs statusType. Send status, statusType or both.",
+        "The source state's name (Linear's state.name), kept as the issue's sourceStatus. Without statusType it decides the status, in any case: Backlog, Todo or Triage → open, In Progress → in_progress, Done → done, Canceled or Duplicate → canceled, and a trail status (open, in_progress, done, canceled) as is; any other name needs statusType. Send status, statusType or both; a re-run without status clears sourceStatus.",
       example: "In Review",
     }),
-    statusType: z.string().min(1).max(100).optional().meta({
-      description:
-        "The source state's type (Linear's state.type), in any case; when sent it decides the status: backlog, unstarted or triage → open, started → in_progress, completed → done, canceled or duplicate → canceled. Send it for a custom state, like In Review of type started.",
-      example: "started",
-    }),
+    // the pipe alone renders as a bare string in the spec and the MCP schema,
+    // so the enum is declared in meta too
+    statusType: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .pipe(z.enum(sourceStateTypes))
+      .optional()
+      .meta({
+        enum: [...sourceStateTypes],
+        description:
+          "The source state's type (Linear's state.type), in any case; when sent it decides the status: backlog, unstarted or triage → open, started → in_progress, completed → done, canceled or duplicate → canceled. Send it for a custom state, like In Review of type started.",
+        example: "started",
+      }),
     priority: priority.optional(),
     estimate: estimate.nullable().optional(),
     labels: labelNames.optional().meta({

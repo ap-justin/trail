@@ -34,8 +34,9 @@ export type ImportIssue = {
   title: string;
   description?: string;
   /**
-   * The source state's name, kept as `sourceStatus`. Without `statusType` it
-   * decides the status (see `sourceStatuses`); one of the two is required.
+   * The source state's name, kept as `sourceStatus` (cleared when left out).
+   * Without `statusType` it decides the status (see `sourceStatuses`); one of
+   * the two is required.
    */
   status?: string;
   /** The source state's type (see `sourceStatusTypes`), deciding the status when sent. */
@@ -79,6 +80,7 @@ export type ImportCounts = {
 const sourceStatuses: Record<string, IssueStatus> = {
   backlog: "open",
   todo: "open",
+  triage: "open",
   "in progress": "in_progress",
   done: "done",
   canceled: "canceled",
@@ -87,7 +89,18 @@ const sourceStatuses: Record<string, IssueStatus> = {
   in_progress: "in_progress",
 };
 
-// Linear's fixed workflow state types, matched in any case
+/** Linear's fixed workflow state types (`state.type`). */
+export const sourceStateTypes = [
+  "backlog",
+  "unstarted",
+  "triage",
+  "started",
+  "completed",
+  "canceled",
+  "duplicate",
+] as const;
+
+// matched in any case
 const sourceStatusTypes: Record<string, IssueStatus> = {
   backlog: "open",
   unstarted: "open",
@@ -96,14 +109,14 @@ const sourceStatusTypes: Record<string, IssueStatus> = {
   completed: "done",
   canceled: "canceled",
   duplicate: "canceled",
-};
+} satisfies Record<(typeof sourceStateTypes)[number], IssueStatus>;
 
 export type NormalIssue = {
   externalRef: string;
   title: string;
   description: string | undefined;
   status: IssueStatus;
-  sourceStatus: string | undefined;
+  sourceStatus: string | null;
   priority: number | undefined;
   estimate: number | null | undefined;
   labels: string[] | undefined;
@@ -139,7 +152,7 @@ function mapStatus(
     const mapped = sourceStatusTypes[row.statusType.trim().toLowerCase()];
     if (mapped === undefined) {
       throw new ValidationError(
-        `${where}: statusType "${row.statusType}" is not a state type: send one of ${Object.keys(sourceStatusTypes).join(", ")} (any case), Linear's state.type`,
+        `${where}: statusType "${row.statusType}" is not a state type: send one of ${sourceStateTypes.join(", ")} (any case), Linear's state.type`,
       );
     }
     return mapped;
@@ -152,7 +165,7 @@ function mapStatus(
   const mapped = sourceStatuses[row.status.trim().toLowerCase()];
   if (mapped === undefined) {
     throw new ValidationError(
-      `${where}: status "${row.status}" has no mapping: send statusType too (Linear's state.type: ${Object.keys(sourceStatusTypes).join(", ")}), or a status of Backlog, Todo, In Progress, Done, Canceled, Duplicate (any case) or a trail status: open, in_progress, done, canceled`,
+      `${where}: status "${row.status}" has no mapping: send statusType too (Linear's state.type: ${sourceStateTypes.join(", ")}), or a status of Backlog, Todo, Triage, In Progress, Done, Canceled, Duplicate (any case) or a trail status: open, in_progress, done, canceled`,
     );
   }
   return mapped;
@@ -202,9 +215,7 @@ function normalIssue(row: ImportIssue): NormalIssue {
   const where = `issue ${externalRef}`;
   const status = mapStatus(row, where);
   const sourceStatus =
-    row.status === undefined
-      ? undefined
-      : nonBlank(row.status, `${where} status`);
+    row.status === undefined ? null : nonBlank(row.status, `${where} status`);
   if (row.completedAt != null && !isClosed(status)) {
     throw new ValidationError(
       `${where} is ${status} (from "${row.statusType ?? row.status}") but has a completedAt: send completedAt only on a done or canceled issue, or null`,

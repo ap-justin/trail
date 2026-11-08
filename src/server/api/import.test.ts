@@ -118,7 +118,7 @@ test("POST /import with a status name that maps to nothing and no statusType is 
       ...payload,
       externalRef: "P-other",
       key: "IMQ",
-      issues: [{ ...payload.issues[0], status: "Triage" }],
+      issues: [{ ...payload.issues[0], status: "In Review" }],
     },
   });
   expect(res.status).toBe(422);
@@ -155,6 +155,33 @@ test("POST /import maps a custom state by statusType and shows its name as sourc
   expect(((await res.json()) as Body).error.message).toMatch(
     /^issue lin-1 has neither status nor statusType: send statusType/,
   );
+});
+
+test("POST /import matches statusType in any case and refuses one outside the seven, naming the field", async () => {
+  const { status: _, ...stateless } = payload.issues[0] as Body;
+  const typed = (statusType: string, key: string) => ({
+    ...payload,
+    externalRef: `P-${key}`,
+    key,
+    issues: [{ ...stateless, statusType }],
+  });
+  expect(
+    (
+      await request("POST", "/api/v1/import", {
+        json: typed(" Started", "IMS"),
+      })
+    ).status,
+  ).toBe(200);
+  expect(
+    ((await (await request("GET", "/api/v1/issues/IMS-1")).json()) as Body)
+      .status,
+  ).toBe("in_progress");
+
+  const res = await request("POST", "/api/v1/import", {
+    json: typed("done", "IMT"),
+  });
+  expect(res.status).toBe(422);
+  expect(((await res.json()) as Body).error.message).toMatch(/statusType/);
 });
 
 test("POST /import with a duplicate issue externalRef is a 422 naming it", async () => {
@@ -208,4 +235,41 @@ test("POST /import without a key is a 401", async () => {
     key: null,
   });
   expect(res.status).toBe(401);
+});
+
+test("POST /import keeps a 200-character status as sourceStatus and refuses 201 with a 422", async () => {
+  const withStatus = (status: string, key: string) => ({
+    ...payload,
+    externalRef: `P-${key}`,
+    key,
+    issues: [{ ...payload.issues[0], status, statusType: "started" }],
+  });
+  const long = "s".repeat(200);
+  expect(
+    (await request("POST", "/api/v1/import", { json: withStatus(long, "IML") }))
+      .status,
+  ).toBe(200);
+  const issue = (await (
+    await request("GET", "/api/v1/issues/IML-1")
+  ).json()) as Body;
+  expect(issue.sourceStatus).toBe(long);
+
+  const res = await request("POST", "/api/v1/import", {
+    json: withStatus(`${long}s`, "IMM"),
+  });
+  expect(res.status).toBe(422);
+  expect((await request("GET", "/api/v1/issues/IMM-1")).status).toBe(404);
+});
+
+test("POST /import refuses a whitespace-only status with a 422 even beside a statusType", async () => {
+  const res = await request("POST", "/api/v1/import", {
+    json: {
+      ...payload,
+      externalRef: "P-blank",
+      key: "IMW",
+      issues: [{ ...payload.issues[0], status: "   ", statusType: "started" }],
+    },
+  });
+  expect(res.status).toBe(422);
+  expect((await request("GET", "/api/v1/projects/IMW")).status).toBe(404);
 });

@@ -364,7 +364,7 @@ export function registerTools(
     "list_bots",
     {
       description:
-        "List every bot, oldest first, with its id, name and label, a page at a time: pass nextCursor back as cursor until it is null. Match a createdBy, authorId or actorId to a bot's id to see who wrote it.",
+        "List every bot, oldest first, with its id, name and label, a page at a time: pass nextCursor back as cursor until it is null. A createdBy, authorId or actorId that matches a bot's id was written by that bot; an id that matches no bot is a human's (humans file issues and comment).",
       inputSchema: z.strictObject(page),
       annotations: read,
     },
@@ -376,7 +376,7 @@ export function registerTools(
     "import_project",
     {
       description:
-        "Bring a whole project over from Linear (or another tracker) in one call: the project with its issues, their comments, labels and links, and its status updates, each keyed by externalRef (the Linear id). Send each issue's statusType (Linear's state.type) and status (its state name, kept as sourceStatus): statusType maps backlog/unstarted/triage → open, started → in_progress, completed → done, canceled/duplicate → canceled; without it, status names map Backlog/Todo → open, In Progress → in_progress, Done → done, Canceled/Duplicate → canceled. Safe to re-run: rows are matched by externalRef, so a re-run updates what changed, leaves the rest, and never duplicates or deletes. Returns per kind how many rows were created, updated and unchanged.",
+        "Bring a whole project over from Linear (or another tracker) in one call: the project with its issues, their comments, labels and links, and its status updates, each keyed by externalRef (the Linear id). Send each issue's statusType (Linear's state.type) and status (its state name, kept as sourceStatus): statusType maps backlog/unstarted/triage → open, started → in_progress, completed → done, canceled/duplicate → canceled; without it, status names map Backlog/Todo/Triage → open, In Progress → in_progress, Done → done, Canceled/Duplicate → canceled. Safe to re-run: rows are matched by externalRef, so a re-run updates what changed, leaves the rest, and never duplicates or deletes. Returns per kind how many rows were created, updated and unchanged.",
       inputSchema: importSchema,
       annotations: update,
     },

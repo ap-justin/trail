@@ -383,6 +383,7 @@ test.each([
   ["Done", "done"],
   ["Canceled", "canceled"],
   ["Duplicate", "canceled"],
+  ["Triage", "open"],
   ["in progress", "in_progress"],
   ["BACKLOG", "open"],
   ["in_progress", "in_progress"],
@@ -412,7 +413,7 @@ function refused(payload: ImportPayload, message: RegExp | string) {
 test("a status name that maps to nothing, with no statusType, is refused, telling the bot to send statusType", () => {
   refused(
     oneIssue({ status: "In Review" }),
-    'issue only: status "In Review" has no mapping: send statusType too (Linear\'s state.type: backlog, unstarted, triage, started, completed, canceled, duplicate), or a status of Backlog, Todo, In Progress, Done, Canceled, Duplicate (any case) or a trail status: open, in_progress, done, canceled',
+    'issue only: status "In Review" has no mapping: send statusType too (Linear\'s state.type: backlog, unstarted, triage, started, completed, canceled, duplicate), or a status of Backlog, Todo, Triage, In Progress, Done, Canceled, Duplicate (any case) or a trail status: open, in_progress, done, canceled',
   );
 });
 
@@ -480,6 +481,42 @@ test("a re-run leaves an unchanged sourceStatus alone and counts a renamed state
     sourceStatus: "Code Review",
   });
   expect(after.updatedAt.getTime()).toBeGreaterThan(before.updatedAt.getTime());
+});
+
+test("a re-run that sends only statusType clears the previous sourceStatus", () => {
+  const payload = oneIssue({ status: "In Review", statusType: "started" });
+  service.importProject(bot, payload);
+
+  const typeOnly = oneIssue({ status: undefined, statusType: "started" });
+  const result = service.importProject(bot, {
+    ...payload,
+    issues: typeOnly.issues,
+  });
+  expect(result.updated.issues).toBe(1);
+  expect(service.getIssue(bot, `${payload.key}-1`)).toMatchObject({
+    status: "in_progress",
+    sourceStatus: null,
+  });
+});
+
+test("a re-run moving statusType from started to completed closes the issue, stamped once", () => {
+  const payload = oneIssue({ status: "In Review", statusType: "started" });
+  service.importProject(bot, payload);
+  expect(service.getIssue(bot, `${payload.key}-1`).completedAt).toBeNull();
+
+  const closed = {
+    ...payload,
+    issues: oneIssue({ status: undefined, statusType: "completed" }).issues,
+  };
+  expect(service.importProject(bot, closed).updated.issues).toBe(1);
+  const done = service.getIssue(bot, `${payload.key}-1`);
+  expect(done).toMatchObject({ status: "done", sourceStatus: null });
+  expect(done.completedAt).toBeInstanceOf(Date);
+
+  expect(service.importProject(bot, closed).unchanged.issues).toBe(1);
+  expect(service.getIssue(bot, `${payload.key}-1`).completedAt).toEqual(
+    done.completedAt,
+  );
 });
 
 test("a completedAt on an open issue is refused", () => {

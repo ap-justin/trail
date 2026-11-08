@@ -581,7 +581,7 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
           title: row.title,
           description: row.description ?? "",
           status: row.status,
-          sourceStatus: row.sourceStatus ?? null,
+          sourceStatus: row.sourceStatus,
           priority: row.priority ?? 0,
           estimate: row.estimate ?? null,
           sourceAuthor: row.sourceAuthor ?? null,

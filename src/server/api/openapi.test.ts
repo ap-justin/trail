@@ -152,3 +152,29 @@ test("project key fields advertise the key rule as a pattern", async () => {
     ).toBe("^[A-Za-z0-9]{2,10}$");
   }
 });
+
+test("an import issue's statusType advertises Linear's seven state types", async () => {
+  const res = await request("GET", "/api/v1/openapi.json", { key: null });
+  const spec = (await res.json()) as {
+    components: {
+      schemas: Record<
+        string,
+        { properties: Record<string, { type?: string; enum?: string[] }> }
+      >;
+    };
+  };
+  expect(spec.components.schemas.ImportIssue?.properties.statusType).toEqual(
+    expect.objectContaining({
+      type: "string",
+      enum: [
+        "backlog",
+        "unstarted",
+        "triage",
+        "started",
+        "completed",
+        "canceled",
+        "duplicate",
+      ],
+    }),
+  );
+});

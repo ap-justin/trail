@@ -798,7 +798,10 @@ test("whoami is the calling actor's row, label included", () => {
 });
 
 test("listBots pages every bot oldest first, never a human", () => {
-  const labelled = createBot(db, "listed bot", { label: "agent-listed" }).actor;
+  const [first, labelled] = atFakeTime([
+    () => createBot(db, "listed first").actor,
+    () => createBot(db, "listed bot", { label: "agent-listed" }).actor,
+  ]) as [typeof bot, typeof bot];
   const all = [];
   let cursor: string | undefined;
   do {
@@ -807,6 +810,9 @@ test("listBots pages every bot oldest first, never a human", () => {
     cursor = page.nextCursor ?? undefined;
   } while (cursor);
   expect(all.every((a) => a.kind === "bot")).toBe(true);
-  expect(all[0]?.id).toBe(bot.id);
-  expect(all.at(-1)).toEqual(labelled);
+  const ids = all.map((a) => a.id);
+  expect(ids.indexOf(first.id)).toBe(0);
+  expect(ids.indexOf(labelled.id)).toBe(1);
+  expect(all[1]).toEqual(labelled);
+  expect(ids).toContain(bot.id);
 });

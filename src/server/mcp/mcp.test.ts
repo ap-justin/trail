@@ -2,7 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { afterAll, expect, test } from "vitest";
 import { createBot, revokeKey } from "../service/keys.js";
-import { setupTestApp } from "../test-app.js";
+import { atFakeTime, setupTestApp } from "../test-app.js";
 
 const { app, db, bot } = setupTestApp();
 
@@ -433,7 +433,10 @@ test("create_issue after import_project numbers past the highest kept Linear num
 });
 
 test("whoami answers the key's bot and list_bots pages every bot with id, name and label", async () => {
-  const labelled = createBot(db, "mcp whoami", { label: "agent-mcp" });
+  const [first, labelled] = atFakeTime([
+    () => createBot(db, "mcp listed first"),
+    () => createBot(db, "mcp whoami", { label: "agent-mcp" }),
+  ]) as [ReturnType<typeof createBot>, ReturnType<typeof createBot>];
   const client = await connect(labelled.key);
   expect(await call(client, "whoami")).toEqual({
     id: labelled.actor.id,
@@ -449,12 +452,15 @@ test("whoami answers the key's bot and list_bots pages every bot with id, name a
     items.push(...page.items);
     cursor = page.nextCursor ?? undefined;
   } while (cursor);
-  expect(items[0]).toEqual({ id: bot.actor.id, name: "tester", label: null });
-  expect(items).toContainEqual({
+  const ids = items.map((i) => i.id);
+  expect(ids.indexOf(first.actor.id)).toBe(0);
+  expect(ids.indexOf(labelled.actor.id)).toBe(1);
+  expect(items[1]).toEqual({
     id: labelled.actor.id,
     name: "mcp whoami",
     label: "agent-mcp",
   });
+  expect(ids).toContain(bot.actor.id);
   for (const item of items) {
     expect(Object.keys(item).sort()).toEqual(["id", "label", "name"]);
   }
@@ -478,12 +484,12 @@ test("a service refusal is a tool error saying what to send instead", async () =
         {
           externalRef: "x",
           title: "x",
-          status: "Triage",
+          status: "In Review",
           createdAt: "2026-01-01T00:00:00.000Z",
         },
       ],
     }),
-  ).toMatch(/^validation_failed: issue x: status "Triage" has no mapping/);
+  ).toMatch(/^validation_failed: issue x: status "In Review" has no mapping/);
 });
 
 test("a misspelled argument is a tool error naming it", async () => {
@@ -516,4 +522,31 @@ test("project key arguments advertise the key rule as a pattern", async () => {
       .properties as Record<string, { pattern?: string }>;
     expect(props.key?.pattern, name).toBe("^[A-Za-z0-9]{2,10}$");
   }
+});
+
+test("import_project advertises Linear's seven state types for statusType", async () => {
+  const client = await connect(bot.key);
+  const { tools } = await client.listTools();
+  const props = tools.find((t) => t.name === "import_project")?.inputSchema
+    .properties as Record<
+    string,
+    { items?: { properties: Record<string, { enum?: string[] }> } }
+  >;
+  expect(props.issues?.items?.properties.statusType?.enum).toEqual([
+    "backlog",
+    "unstarted",
+    "triage",
+    "started",
+    "completed",
+    "canceled",
+    "duplicate",
+  ]);
+});
+
+test("list_bots says an id that matches no bot is a human's", async () => {
+  const client = await connect(bot.key);
+  const { tools } = await client.listTools();
+  expect(tools.find((t) => t.name === "list_bots")?.description).toMatch(
+    /an id that matches no bot is a human's/,
+  );
 });
