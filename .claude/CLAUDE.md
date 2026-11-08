@@ -2,7 +2,7 @@
 
 An agent-first issue tracker: bots write over REST and MCP, humans read and may only file issues and comment. Every write names the bot that made it (`~/.kru/management/trail/product.md`).
 
-<!-- kru v0.177.0 · derived 2026-11-08 · `skills/setup/SKILL.md` to re-derive -->
+<!-- kru v0.179.0 · derived 2026-11-08 · `skills/setup/SKILL.md` to re-derive -->
 ## Team
 
 Load **`skills/lead/SKILL.md`** before building, reviewing, or dispatching a seat — it carries how the team works.
