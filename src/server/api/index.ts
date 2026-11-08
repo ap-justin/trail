@@ -1,6 +1,7 @@
 import type { Db } from "../db/client.js";
 import type { Service } from "../service/index.js";
 import { activityRoutes } from "./activity.js";
+import { actorRoutes } from "./actors.js";
 import { bearerKey } from "./auth.js";
 import { commentRoutes } from "./comments.js";
 import { createRouter } from "./env.js";
@@ -40,5 +41,6 @@ export function createApi({ db, service }: { db: Db; service: Service }) {
   api.route("/", labelRoutes(service));
   api.route("/", statusUpdateRoutes(service));
   api.route("/", activityRoutes(service));
+  api.route("/", actorRoutes(service));
   return api;
 }

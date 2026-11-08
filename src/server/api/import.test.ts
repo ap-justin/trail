@@ -112,7 +112,7 @@ test("POST /import keeps an issue's number from an externalRef in the project's 
   );
 });
 
-test("POST /import with an unknown status is a 422 listing the accepted names", async () => {
+test("POST /import with a status name that maps to nothing and no statusType is a 422 asking for statusType", async () => {
   const res = await request("POST", "/api/v1/import", {
     json: {
       ...payload,
@@ -125,7 +125,35 @@ test("POST /import with an unknown status is a 422 listing the accepted names", 
   const body = (await res.json()) as Body;
   expect(body.error.code).toBe("validation_failed");
   expect(body.error.message).toContain(
-    "send one of Backlog, Todo, In Progress, Done, Canceled, Duplicate",
+    "send statusType too (Linear's state.type: backlog, unstarted, triage, started, completed, canceled, duplicate)",
+  );
+});
+
+test("POST /import maps a custom state by statusType and shows its name as sourceStatus; neither field is a 422", async () => {
+  const { status: _, ...stateless } = payload.issues[0] as Body;
+  const custom = {
+    ...payload,
+    externalRef: "P-review",
+    key: "IMR",
+    issues: [{ ...stateless, status: "In Review", statusType: "started" }],
+  };
+  expect(
+    (await request("POST", "/api/v1/import", { json: custom })).status,
+  ).toBe(200);
+  const issue = (await (
+    await request("GET", "/api/v1/issues/IMR-1")
+  ).json()) as Body;
+  expect(issue).toMatchObject({
+    status: "in_progress",
+    sourceStatus: "In Review",
+  });
+
+  const res = await request("POST", "/api/v1/import", {
+    json: { ...custom, issues: [stateless] },
+  });
+  expect(res.status).toBe(422);
+  expect(((await res.json()) as Body).error.message).toMatch(
+    /^issue lin-1 has neither status nor statusType: send statusType/,
   );
 });
 

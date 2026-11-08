@@ -92,6 +92,7 @@ test("tools/list offers one tool per operation, none naming who writes", async (
       "get_project",
       "import_project",
       "list_activity",
+      "list_bots",
       "list_comments",
       "list_issues",
       "list_labels",
@@ -100,6 +101,7 @@ test("tools/list offers one tool per operation, none naming who writes", async (
       "post_status_update",
       "update_issue",
       "update_project",
+      "whoami",
     ].sort(),
   );
   for (const tool of tools) {
@@ -402,6 +404,60 @@ test("import_project imports a project and a re-run changes nothing", async () =
     createdAt: "2026-01-01T00:00:00.000Z",
     completedAt: "2026-01-02T00:00:00.000Z",
   });
+});
+
+test("create_issue after import_project numbers past the highest kept Linear number", async () => {
+  const client = await connect(bot.key);
+  const issue = (externalRef: string) => ({
+    externalRef,
+    title: externalRef,
+    status: "Todo",
+    createdAt: "2026-01-01T00:00:00.000Z",
+  });
+  const payload = {
+    externalRef: "lin-kept",
+    key: "MKN",
+    name: "kept",
+    issues: [issue("MKN-12")],
+  };
+  await call(client, "import_project", payload);
+  await call(client, "import_project", {
+    ...payload,
+    issues: [issue("MKN-12"), issue("MKN-187")],
+  });
+  const created = await call(client, "create_issue", {
+    projectId: "MKN",
+    title: "by hand",
+  });
+  expect(created.key).toBe("MKN-188");
+});
+
+test("whoami answers the key's bot and list_bots pages every bot with id, name and label", async () => {
+  const labelled = createBot(db, "mcp whoami", { label: "agent-mcp" });
+  const client = await connect(labelled.key);
+  expect(await call(client, "whoami")).toEqual({
+    id: labelled.actor.id,
+    kind: "bot",
+    name: "mcp whoami",
+    label: "agent-mcp",
+  });
+
+  const items: Body[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await call(client, "list_bots", { cursor, limit: 2 });
+    items.push(...page.items);
+    cursor = page.nextCursor ?? undefined;
+  } while (cursor);
+  expect(items[0]).toEqual({ id: bot.actor.id, name: "tester", label: null });
+  expect(items).toContainEqual({
+    id: labelled.actor.id,
+    name: "mcp whoami",
+    label: "agent-mcp",
+  });
+  for (const item of items) {
+    expect(Object.keys(item).sort()).toEqual(["id", "label", "name"]);
+  }
 });
 
 test("a service refusal is a tool error saying what to send instead", async () => {

@@ -33,8 +33,13 @@ export type ImportIssue = {
   externalRef: string;
   title: string;
   description?: string;
-  /** A source status name (see `sourceStatuses`) or a trail status. */
-  status: string;
+  /**
+   * The source state's name, kept as `sourceStatus`. Without `statusType` it
+   * decides the status (see `sourceStatuses`); one of the two is required.
+   */
+  status?: string;
+  /** The source state's type (see `sourceStatusTypes`), deciding the status when sent. */
+  statusType?: string;
   priority?: number;
   estimate?: number | null;
   /** Replaces the issue's labels. */
@@ -82,11 +87,23 @@ const sourceStatuses: Record<string, IssueStatus> = {
   in_progress: "in_progress",
 };
 
+// Linear's fixed workflow state types, matched in any case
+const sourceStatusTypes: Record<string, IssueStatus> = {
+  backlog: "open",
+  unstarted: "open",
+  triage: "open",
+  started: "in_progress",
+  completed: "done",
+  canceled: "canceled",
+  duplicate: "canceled",
+};
+
 export type NormalIssue = {
   externalRef: string;
   title: string;
   description: string | undefined;
   status: IssueStatus;
+  sourceStatus: string | undefined;
   priority: number | undefined;
   estimate: number | null | undefined;
   labels: string[] | undefined;
@@ -114,11 +131,28 @@ export type NormalImport = {
   statusUpdates: NormalStatusUpdate[];
 };
 
-function mapStatus(status: string, where: string): IssueStatus {
-  const mapped = sourceStatuses[status.trim().toLowerCase()];
+function mapStatus(
+  row: Pick<ImportIssue, "status" | "statusType">,
+  where: string,
+): IssueStatus {
+  if (row.statusType !== undefined) {
+    const mapped = sourceStatusTypes[row.statusType.trim().toLowerCase()];
+    if (mapped === undefined) {
+      throw new ValidationError(
+        `${where}: statusType "${row.statusType}" is not a state type: send one of ${Object.keys(sourceStatusTypes).join(", ")} (any case), Linear's state.type`,
+      );
+    }
+    return mapped;
+  }
+  if (row.status === undefined) {
+    throw new ValidationError(
+      `${where} has neither status nor statusType: send statusType (Linear's state.type, like started) and status (the state's name, like In Review)`,
+    );
+  }
+  const mapped = sourceStatuses[row.status.trim().toLowerCase()];
   if (mapped === undefined) {
     throw new ValidationError(
-      `${where}: status "${status}" has no mapping: send one of Backlog, Todo, In Progress, Done, Canceled, Duplicate (any case), or a trail status: open, in_progress, done, canceled`,
+      `${where}: status "${row.status}" has no mapping: send statusType too (Linear's state.type: ${Object.keys(sourceStatusTypes).join(", ")}), or a status of Backlog, Todo, In Progress, Done, Canceled, Duplicate (any case) or a trail status: open, in_progress, done, canceled`,
     );
   }
   return mapped;
@@ -166,10 +200,14 @@ function normalComment(row: ImportComment, where: string): NormalComment {
 function normalIssue(row: ImportIssue): NormalIssue {
   const externalRef = requireRef(row.externalRef, "issue");
   const where = `issue ${externalRef}`;
-  const status = mapStatus(row.status, where);
+  const status = mapStatus(row, where);
+  const sourceStatus =
+    row.status === undefined
+      ? undefined
+      : nonBlank(row.status, `${where} status`);
   if (row.completedAt != null && !isClosed(status)) {
     throw new ValidationError(
-      `${where} is ${status} (from "${row.status}") but has a completedAt: send completedAt only on a done or canceled issue, or null`,
+      `${where} is ${status} (from "${row.statusType ?? row.status}") but has a completedAt: send completedAt only on a done or canceled issue, or null`,
     );
   }
   const comments = (row.comments ?? []).map((c) =>
@@ -181,6 +219,7 @@ function normalIssue(row: ImportIssue): NormalIssue {
     title: nonBlank(row.title, `${where} title`),
     description: row.description,
     status,
+    sourceStatus,
     priority: validPriority(row.priority),
     estimate: validEstimate(row.estimate),
     labels: row.labels === undefined ? undefined : validLabelNames(row.labels),

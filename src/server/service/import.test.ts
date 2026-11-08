@@ -297,6 +297,53 @@ test("an import writes one project.imported event with the counts; a run that ch
   });
 });
 
+test("a second bot re-importing updates rows in place: the first stays their creator, the second is credited with the update", () => {
+  const second = createBot(db, "second migrator").actor;
+  const payload = linearProject();
+  atFakeTime([() => service.importProject(bot, payload)]);
+  const before = rowCounts();
+  const issuesBefore = service.listIssues(bot, {
+    projectId: payload.key,
+  }).items;
+  const [i1, ...rest] = payload.issues ?? [];
+
+  const result = service.importProject(second, {
+    ...payload,
+    issues: [{ ...(i1 as ImportIssue), title: "first, retitled" }, ...rest],
+  });
+  expect(result.created).toEqual(zero);
+  expect(result.updated).toEqual({ ...zero, issues: 1 });
+  expect(rowCounts()).toEqual({
+    ...before,
+    activity_event: (before.activity_event as number) + 1,
+  });
+
+  const issuesAfter = service.listIssues(bot, { projectId: payload.key }).items;
+  expect(issuesAfter.map((i) => i.createdBy)).toEqual(
+    issuesBefore.map(() => bot.id),
+  );
+  const retitled = (list: typeof issuesAfter) =>
+    list.find((i) => i.externalRef === i1?.externalRef);
+  expect(retitled(issuesAfter)?.updatedAt.getTime()).toBeGreaterThan(
+    retitled(issuesBefore)?.updatedAt.getTime() as number,
+  );
+  const untouched = (list: typeof issuesAfter) =>
+    list.filter((i) => i.externalRef !== i1?.externalRef);
+  expect(untouched(issuesAfter)).toEqual(untouched(issuesBefore));
+  expect(result.project.createdBy).toBe(bot.id);
+  expect(
+    service.listComments(bot, `${payload.key}-1`).items.map((c) => c.authorId),
+  ).toEqual([bot.id, bot.id]);
+
+  const [latest] = service.listActivity(bot, {
+    projectId: result.project.id,
+  }).items;
+  expect(latest).toMatchObject({
+    action: "project.imported",
+    actorId: second.id,
+  });
+});
+
 test("a closed issue imported without completedAt is stamped once and keeps that stamp on re-runs", () => {
   const payload = linearProject();
   payload.issues = [
@@ -346,6 +393,15 @@ test.each([
   expect(service.getIssue(bot, `${payload.key}-1`).status).toBe(expected);
 });
 
+test("a custom state name with a statusType imports by the type and keeps the name as sourceStatus", () => {
+  const payload = oneIssue({ status: "In Review", statusType: "started" });
+  service.importProject(bot, payload);
+  expect(service.getIssue(bot, `${payload.key}-1`)).toMatchObject({
+    status: "in_progress",
+    sourceStatus: "In Review",
+  });
+});
+
 /** Checks `payload` is refused with `message` and nothing is written. */
 function refused(payload: ImportPayload, message: RegExp | string) {
   const before = rowCounts();
@@ -353,11 +409,77 @@ function refused(payload: ImportPayload, message: RegExp | string) {
   expect(rowCounts()).toEqual(before);
 }
 
-test("an unknown status is refused, listing the names that map", () => {
+test("a status name that maps to nothing, with no statusType, is refused, telling the bot to send statusType", () => {
   refused(
-    oneIssue({ status: "Triage" }),
-    'issue only: status "Triage" has no mapping: send one of Backlog, Todo, In Progress, Done, Canceled, Duplicate (any case), or a trail status: open, in_progress, done, canceled',
+    oneIssue({ status: "In Review" }),
+    'issue only: status "In Review" has no mapping: send statusType too (Linear\'s state.type: backlog, unstarted, triage, started, completed, canceled, duplicate), or a status of Backlog, Todo, In Progress, Done, Canceled, Duplicate (any case) or a trail status: open, in_progress, done, canceled',
   );
+});
+
+test.each([
+  ["backlog", "open"],
+  ["unstarted", "open"],
+  ["triage", "open"],
+  ["started", "in_progress"],
+  ["completed", "done"],
+  ["canceled", "canceled"],
+  ["duplicate", "canceled"],
+  ["STARTED", "in_progress"],
+])(
+  "statusType %s imports as %s, whatever the name says",
+  (statusType, expected) => {
+    const payload = oneIssue({ status: "Todo", statusType });
+    service.importProject(bot, payload);
+    expect(service.getIssue(bot, `${payload.key}-1`)).toMatchObject({
+      status: expected,
+      sourceStatus: "Todo",
+    });
+  },
+);
+
+test("a statusType alone decides the status and leaves sourceStatus null", () => {
+  const payload = oneIssue({ status: undefined, statusType: "completed" });
+  service.importProject(bot, payload);
+  expect(service.getIssue(bot, `${payload.key}-1`)).toMatchObject({
+    status: "done",
+    sourceStatus: null,
+  });
+});
+
+test("an unknown statusType is refused, listing the accepted types", () => {
+  refused(
+    oneIssue({ status: "In Review", statusType: "reviewing" }),
+    'issue only: statusType "reviewing" is not a state type: send one of backlog, unstarted, triage, started, completed, canceled, duplicate (any case), Linear\'s state.type',
+  );
+});
+
+test("an issue with neither status nor statusType is refused, saying to send them", () => {
+  refused(
+    oneIssue({ status: undefined }),
+    "issue only has neither status nor statusType: send statusType (Linear's state.type, like started) and status (the state's name, like In Review)",
+  );
+});
+
+test("a re-run leaves an unchanged sourceStatus alone and counts a renamed state as updated", () => {
+  const payload = oneIssue({ status: "In Review", statusType: "started" });
+  atFakeTime([() => service.importProject(bot, payload)]);
+  const before = service.getIssue(bot, `${payload.key}-1`);
+
+  expect(service.importProject(bot, payload).unchanged.issues).toBe(1);
+  expect(service.getIssue(bot, `${payload.key}-1`)).toEqual(before);
+
+  const renamed = oneIssue({ status: "Code Review", statusType: "started" });
+  const result = service.importProject(bot, {
+    ...payload,
+    issues: renamed.issues,
+  });
+  expect(result.updated.issues).toBe(1);
+  const after = service.getIssue(bot, `${payload.key}-1`);
+  expect(after).toMatchObject({
+    status: "in_progress",
+    sourceStatus: "Code Review",
+  });
+  expect(after.updatedAt.getTime()).toBeGreaterThan(before.updatedAt.getTime());
 });
 
 test("a completedAt on an open issue is refused", () => {
@@ -477,6 +599,32 @@ test("an issue whose externalRef is the project's own key keeps that number, and
   const rerun = service.importProject(bot, payload);
   expect(rerun.created).toEqual(zero);
   expect(rerun.unchanged.issues).toBe(3);
+});
+
+test("createIssue numbers past the highest kept number, across re-imports and a later import keeping a higher one", () => {
+  const key = projectKey();
+  const payload: ImportPayload = {
+    externalRef: `linear-${key}`,
+    key,
+    name: "kept numbers",
+    issues: [todo(`${key}-12`), todo("elsewhere-1")],
+  };
+  const nextKey = () =>
+    service.createIssue(bot, { projectId: key, title: "by hand" }).key;
+
+  service.importProject(bot, payload);
+  expect(service.getIssue(bot, `${key}-13`).externalRef).toBe("elsewhere-1");
+  expect(nextKey()).toBe(`${key}-14`);
+
+  service.importProject(bot, payload);
+  expect(nextKey()).toBe(`${key}-15`);
+
+  service.importProject(bot, {
+    ...payload,
+    issues: [...(payload.issues ?? []), todo(`${key}-187`), todo(`${key}-3`)],
+  });
+  expect(nextKey()).toBe(`${key}-188`);
+  expect(service.getIssue(bot, `${key}-3`).externalRef).toBe(`${key}-3`);
 });
 
 test("an issue keeping a number another issue holds is a conflict naming both, and nothing is written", () => {

@@ -20,6 +20,7 @@ test("GET /api/v1/openapi.json serves the spec without a key", async () => {
   expect(operations.sort()).toEqual(
     [
       "GET /activity",
+      "GET /bots",
       "GET /issues",
       "GET /issues/{id}",
       "GET /issues/{id}/comments",
@@ -27,6 +28,7 @@ test("GET /api/v1/openapi.json serves the spec without a key", async () => {
       "GET /projects/{id}",
       "GET /projects/{id}/labels",
       "GET /projects/{id}/status-updates",
+      "GET /whoami",
       "PATCH /issues/{id}",
       "PATCH /projects/{id}",
       "POST /import",
@@ -64,6 +66,7 @@ test("the spec lists the error statuses each operation can return", async () => 
   const withConflict = (codes: string[]) => [...codes, "409"].sort();
   expect(statuses).toEqual({
     "GET /activity": withNotFound(list),
+    "GET /bots": list,
     "GET /issues": withNotFound(list),
     "GET /issues/{id}": withNotFound(list),
     "GET /issues/{id}/comments": withNotFound(list),
@@ -71,6 +74,7 @@ test("the spec lists the error statuses each operation can return", async () => 
     "GET /projects/{id}": withNotFound(list),
     "GET /projects/{id}/labels": withNotFound(list),
     "GET /projects/{id}/status-updates": withNotFound(list),
+    "GET /whoami": ["200", "401"],
     "PATCH /issues/{id}": withForbidden(withNotFound(write("200"))),
     "PATCH /projects/{id}": withForbidden(withNotFound(write("200"))),
     "POST /import": withConflict(withForbidden(write("200"))),

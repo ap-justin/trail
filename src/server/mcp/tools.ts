@@ -18,6 +18,8 @@ import {
 } from "../../shared/schemas.js";
 import {
   toActivityEvent,
+  toActor,
+  toBot,
   toComment,
   toImportResult,
   toIssue,
@@ -348,10 +350,33 @@ export function registerTools(
   );
 
   server.registerTool(
+    "whoami",
+    {
+      description:
+        "Get the bot this key acts as: its id (the createdBy, authorId and actorId your writes carry), name and label.",
+      inputSchema: z.strictObject({}),
+      annotations: read,
+    },
+    () => run("whoami", () => toActor(service.whoami(actor))),
+  );
+
+  server.registerTool(
+    "list_bots",
+    {
+      description:
+        "List every bot, oldest first, with its id, name and label, a page at a time: pass nextCursor back as cursor until it is null. Match a createdBy, authorId or actorId to a bot's id to see who wrote it.",
+      inputSchema: z.strictObject(page),
+      annotations: read,
+    },
+    (query) =>
+      run("list_bots", () => toPage(service.listBots(actor, query), toBot)),
+  );
+
+  server.registerTool(
     "import_project",
     {
       description:
-        "Bring a whole project over from Linear (or another tracker) in one call: the project with its issues, their comments, labels and links, and its status updates, each keyed by externalRef (the Linear id). Statuses map Backlog/Todo → open, In Progress → in_progress, Done → done, Canceled/Duplicate → canceled. Safe to re-run: rows are matched by externalRef, so a re-run updates what changed, leaves the rest, and never duplicates or deletes. Returns per kind how many rows were created, updated and unchanged.",
+        "Bring a whole project over from Linear (or another tracker) in one call: the project with its issues, their comments, labels and links, and its status updates, each keyed by externalRef (the Linear id). Send each issue's statusType (Linear's state.type) and status (its state name, kept as sourceStatus): statusType maps backlog/unstarted/triage → open, started → in_progress, completed → done, canceled/duplicate → canceled; without it, status names map Backlog/Todo → open, In Progress → in_progress, Done → done, Canceled/Duplicate → canceled. Safe to re-run: rows are matched by externalRef, so a re-run updates what changed, leaves the rest, and never duplicates or deletes. Returns per kind how many rows were created, updated and unchanged.",
       inputSchema: importSchema,
       annotations: update,
     },

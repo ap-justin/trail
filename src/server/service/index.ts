@@ -80,6 +80,7 @@ export type {
   ImportPayload,
   ImportStatusUpdate,
 } from "./import.js";
+export type { Actor } from "./keys.js";
 export type { Page, PageQuery } from "./paging.js";
 export type { Link, LinkInput } from "./validate.js";
 
@@ -580,6 +581,7 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
           title: row.title,
           description: row.description ?? "",
           status: row.status,
+          sourceStatus: row.sourceStatus ?? null,
           priority: row.priority ?? 0,
           estimate: row.estimate ?? null,
           sourceAuthor: row.sourceAuthor ?? null,
@@ -600,6 +602,7 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
       title: row.title,
       description: row.description,
       status: row.status,
+      sourceStatus: row.sourceStatus,
       priority: row.priority,
       estimate: row.estimate,
       sourceAuthor: row.sourceAuthor,
@@ -1350,6 +1353,33 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
           db
             .select()
             .from(label)
+            .where(where)
+            .orderBy(...orderBy)
+            .limit(limit)
+            .all(),
+      );
+    },
+
+    /** The calling actor, as stored; actors are never deleted, so the row is there. */
+    whoami(actor: ActingActor): Actor {
+      return db
+        .select()
+        .from(actorTable)
+        .where(eq(actorTable.id, actor.id))
+        .get() as Actor;
+    },
+
+    /** Every bot, oldest first. */
+    listBots(_actor: ActingActor, query: PageQuery = {}): Page<Actor> {
+      return page(
+        actorTable,
+        "asc",
+        query,
+        [eq(actorTable.kind, "bot")],
+        (where, orderBy, limit) =>
+          db
+            .select()
+            .from(actorTable)
             .where(where)
             .orderBy(...orderBy)
             .limit(limit)

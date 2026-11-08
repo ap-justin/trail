@@ -1,5 +1,6 @@
 // `pnpm trail <command>`: operator commands against DATABASE_PATH.
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { loadConfig } from "./config.js";
@@ -76,7 +77,9 @@ export function runCli(argv: readonly string[], io: CliIo): number {
       }
     }
     const input = command.parse(args, flags);
-    const db = openDatabase(loadConfig(io.env ?? process.env).DATABASE_PATH);
+    const db = openDatabase(
+      existingDatabase(loadConfig(io.env ?? process.env).DATABASE_PATH),
+    );
     try {
       migrate(db);
       command.run(db, input, io);
@@ -91,6 +94,16 @@ export function runCli(argv: readonly string[], io: CliIo): number {
     io.stderr.write(`trail: ${(e as Error).message}\n`);
     return 1;
   }
+}
+
+/** The path, refused when no file is there, so a mistyped DATABASE_PATH can't mint keys into a new empty database. */
+function existingDatabase(path: string): string {
+  if (!existsSync(path)) {
+    throw new Error(
+      `no database at ${resolve(path)}: start the server or run \`pnpm db:migrate\` with this DATABASE_PATH to create it, then retry`,
+    );
+  }
+  return path;
 }
 
 function usageError(io: CliIo, message: string): number {

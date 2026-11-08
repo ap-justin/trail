@@ -1,5 +1,7 @@
 import type {
   ActivityEventView,
+  ActorView,
+  BotView,
   CommentView,
   ImportResultView,
   IssueView,
@@ -10,6 +12,7 @@ import type {
 } from "../../shared/schemas.js";
 import type { ActivityEvent } from "../events/bus.js";
 import type {
+  Actor,
   Comment,
   ImportResult,
   Issue,
@@ -50,6 +53,7 @@ export function toIssue(row: Issue): IssueView {
     assigneeId: row.assigneeId,
     externalRef: row.externalRef,
     sourceAuthor: row.sourceAuthor,
+    sourceStatus: row.sourceStatus,
     createdBy: row.createdBy,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -102,6 +106,19 @@ export function toActivityEvent(row: ActivityEvent): ActivityEventView {
     payload: row.payload,
     createdAt: row.createdAt.toISOString(),
   };
+}
+
+export function toActor(row: Actor): ActorView {
+  return {
+    id: row.id,
+    kind: row.kind,
+    name: row.displayName,
+    label: row.label,
+  };
+}
+
+export function toBot(row: Actor): BotView {
+  return { id: row.id, name: row.displayName, label: row.label };
 }
 
 export function toPage<T, V>(page: Page<T>, view: (row: T) => V): PageView<V> {

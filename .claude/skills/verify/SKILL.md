@@ -11,6 +11,7 @@ Run from the repo root.
 4. Live check of the dev server, against one database for both the CLI and the server:
    ```sh
    export DATABASE_PATH=$(mktemp -d)/trail.db PORT=3000
+   pnpm -s db:migrate   # the CLI refuses a DATABASE_PATH with no file there
    export TRAIL_BOT_KEY=$(pnpm -s trail bot create verify | awk '$1 == "key" { print $2 }')
    setsid pnpm dev & DEV=$!   # own session: pnpm, sh, tsx watch and the server child all share it
    curl -fsS --retry 30 --retry-delay 1 --retry-connrefused localhost:$PORT/health \

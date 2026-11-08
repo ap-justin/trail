@@ -1,26 +1,32 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { afterAll, expect, test } from "vitest";
 import { runCli } from "./cli.js";
-import { openDatabase } from "./db/client.js";
+import { migrate, openDatabase } from "./db/client.js";
 import { resolveKey } from "./service/keys.js";
 
 const dir = mkdtempSync(join(tmpdir(), "trail-cli-"));
 const DATABASE_PATH = join(dir, "trail.db");
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
+// as the server or `pnpm db:migrate` would leave it; the CLI never creates the file
+const created = openDatabase(DATABASE_PATH);
+migrate(created);
+created.$client.close();
 
-function run(...argv: string[]) {
+function runAt(path: string, argv: string[]) {
   let stdout = "";
   let stderr = "";
   const code = runCli(argv, {
     stdout: { write: (s: string) => (stdout += s) },
     stderr: { write: (s: string) => (stderr += s) },
-    env: { DATABASE_PATH },
+    env: { DATABASE_PATH: path },
   });
   return { code, stdout, stderr };
 }
+
+const run = (...argv: string[]) => runAt(DATABASE_PATH, argv);
 
 function withDb<T>(fn: (db: ReturnType<typeof openDatabase>) => T): T {
   const db = openDatabase(DATABASE_PATH);
@@ -161,6 +167,28 @@ test("key revoke of an unknown prefix exits 1 with the reason on stderr", () => 
   expect(stdout).toBe("");
   expect(stderr).toBe("trail: no key with prefix 00000000\n");
 });
+
+test.each([
+  ["bot create", ["bot", "create", "nowhere"]],
+  ["key create", ["key", "create", "agent-nowhere"]],
+  ["key list", ["key", "list"]],
+  ["key revoke", ["key", "revoke", "00000000"]],
+])(
+  "%s with no file at DATABASE_PATH exits 1 naming the resolved path, and creates nothing",
+  (_, argv) => {
+    const missing = join(dir, "missing", "trail.db");
+    const { code, stdout, stderr } = runAt(
+      relative(process.cwd(), missing),
+      argv,
+    );
+    expect(code).toBe(1);
+    expect(stdout).toBe("");
+    expect(stderr).toBe(
+      `trail: no database at ${missing}: start the server or run \`pnpm db:migrate\` with this DATABASE_PATH to create it, then retry\n`,
+    );
+    expect(existsSync(join(dir, "missing"))).toBe(false);
+  },
+);
 
 test.each([
   ["no command", []],

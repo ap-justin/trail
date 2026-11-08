@@ -785,3 +785,28 @@ describe("paging and filters", () => {
     expect(() => service.listComments(bot, "missing")).toThrow(NotFoundError);
   });
 });
+
+test("whoami is the calling actor's row, label included", () => {
+  const labelled = createBot(db, "whoami bot", { label: "agent-whoami" }).actor;
+  expect(service.whoami(labelled)).toEqual(labelled);
+  expect(service.whoami(human)).toMatchObject({
+    id: human.id,
+    kind: "human",
+    displayName: "Justin",
+    label: null,
+  });
+});
+
+test("listBots pages every bot oldest first, never a human", () => {
+  const labelled = createBot(db, "listed bot", { label: "agent-listed" }).actor;
+  const all = [];
+  let cursor: string | undefined;
+  do {
+    const page = service.listBots(human, { cursor, limit: 1 });
+    all.push(...page.items);
+    cursor = page.nextCursor ?? undefined;
+  } while (cursor);
+  expect(all.every((a) => a.kind === "bot")).toBe(true);
+  expect(all[0]?.id).toBe(bot.id);
+  expect(all.at(-1)).toEqual(labelled);
+});

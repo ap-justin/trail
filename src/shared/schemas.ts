@@ -1,6 +1,7 @@
 import { z } from "@hono/zod-openapi";
 import {
   activitySubjectTypes,
+  actorKinds,
   issueStatuses,
   projectHealths,
 } from "../server/db/schema.js";
@@ -74,6 +75,10 @@ export const issueSchema = z
     assigneeId: id.nullable(),
     externalRef: z.string().nullable(),
     sourceAuthor,
+    sourceStatus: z.string().nullable().meta({
+      description:
+        "On an imported issue, its state's name in the system it came from (like In Review), kept for reference; status is what trail goes by.",
+    }),
     createdBy: id,
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -125,6 +130,26 @@ export const activityEventSchema = z
     createdAt: timestamp,
   })
   .openapi("ActivityEvent");
+
+const actorName = z.string().meta({ example: "migrator" });
+const actorLabel = z.string().nullable().meta({
+  description:
+    "A bot's agent id in the system that runs it, unique among bots; null when it has none, and on a human.",
+  example: "agent-7",
+});
+
+export const actorSchema = z
+  .object({
+    id,
+    kind: z.enum(actorKinds),
+    name: actorName,
+    label: actorLabel,
+  })
+  .openapi("Actor");
+
+export const botSchema = z
+  .object({ id, name: actorName, label: actorLabel })
+  .openapi("Bot");
 
 export function pageSchema<T extends z.ZodType>(item: T) {
   return z.object({
@@ -277,10 +302,15 @@ const importIssueSchema = z
     externalRef: sourceRef,
     title,
     description: text.optional(),
-    status: z.string().min(1).max(100).meta({
+    status: z.string().min(1).max(200).optional().meta({
       description:
-        "The source status name, in any case: Backlog or Todo → open, In Progress → in_progress, Done → done, Canceled or Duplicate → canceled. A trail status (open, in_progress, done, canceled) is taken as is.",
-      example: "In Progress",
+        "The source state's name (Linear's state.name), kept as the issue's sourceStatus. Without statusType it decides the status, in any case: Backlog or Todo → open, In Progress → in_progress, Done → done, Canceled or Duplicate → canceled, and a trail status (open, in_progress, done, canceled) as is; any other name needs statusType. Send status, statusType or both.",
+      example: "In Review",
+    }),
+    statusType: z.string().min(1).max(100).optional().meta({
+      description:
+        "The source state's type (Linear's state.type), in any case; when sent it decides the status: backlog, unstarted or triage → open, started → in_progress, completed → done, canceled or duplicate → canceled. Send it for a custom state, like In Review of type started.",
+      example: "started",
     }),
     priority: priority.optional(),
     estimate: estimate.nullable().optional(),
@@ -381,6 +411,8 @@ export type IssueView = z.infer<typeof issueSchema>;
 export type CommentView = z.infer<typeof commentSchema>;
 export type StatusUpdateView = z.infer<typeof statusUpdateSchema>;
 export type LabelView = z.infer<typeof labelSchema>;
+export type ActorView = z.infer<typeof actorSchema>;
+export type BotView = z.infer<typeof botSchema>;
 export type ActivityEventView = z.infer<typeof activityEventSchema>;
 export type ImportResultView = z.infer<typeof importResultSchema>;
 export type PageView<T> = { items: T[]; nextCursor: string | null };
