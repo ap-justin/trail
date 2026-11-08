@@ -162,7 +162,9 @@ test("PATCH /issues/:id on an imported issue leaves sourceStatus, status change 
     ...payload,
     externalRef: "P-patched",
     key: "IMT",
-    issues: [{ ...payload.issues[0], status: "In Review", statusType: "started" }],
+    issues: [
+      { ...payload.issues[0], status: "In Review", statusType: "started" },
+    ],
   };
   expect(
     (await request("POST", "/api/v1/import", { json: custom })).status,

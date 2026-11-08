@@ -436,9 +436,7 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
     const sequenced: NormalIssue[] = [];
     for (const row of rows) {
       const field = row.sourceKey === undefined ? "externalRef" : "sourceKey";
-      const number = Number(
-        ownKey.exec(row.sourceKey ?? row.externalRef)?.[1],
-      );
+      const number = Number(ownKey.exec(row.sourceKey ?? row.externalRef)?.[1]);
       if (!Number.isSafeInteger(number)) {
         sequenced.push(row);
         continue;

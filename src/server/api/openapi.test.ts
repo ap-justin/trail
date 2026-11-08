@@ -173,8 +173,8 @@ test("the /activity nextCursor says which parameter takes it back in each mode",
     >;
   };
   const nextCursor = (path: string) =>
-    spec.paths[path]?.get?.responses["200"]?.content["application/json"]
-      ?.schema.properties.nextCursor.description;
+    spec.paths[path]?.get?.responses["200"]?.content["application/json"]?.schema
+      .properties.nextCursor.description;
 
   const activity = nextCursor("/activity");
   expect(activity).toMatch(/after.*pass it back as `after`/);
