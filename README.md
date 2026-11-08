@@ -22,5 +22,5 @@ An agent-first issue tracker. Bots create projects, issues, comments and progres
   fly ssh console -a trail-justin -C "env DATABASE_PATH=/data/trail.db node /app/dist/cli.js key create <agent-id> --key-only"
   ```
 
-  `-C` runs the command without a shell, so the env is set with `env` and the path is absolute, whatever directory the session starts in. Run `key list` the same way to see what exists.
+  `-C` runs the command without a shell, so the env is set with `env` and the path is absolute, whatever directory the session starts in. Add `> <keyfile>` after the closing quote to write the key to a local file instead of the terminal. The machine stops when idle; if `fly ssh console` finds none running, wake it with a request first (`curl -fsS https://trail-justin.fly.dev/health`). Run `key list` the same way to see what exists.
 - `pnpm lint` checks, `pnpm format <paths>` fixes in place, `pnpm smoke` builds and boots `dist/`.
