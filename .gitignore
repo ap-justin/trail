@@ -4,3 +4,5 @@ dist/
 .env.*
 !.env.example
 proof/
+.claude/agent-memory-local/
+.claude/settings.local.json
