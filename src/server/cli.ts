@@ -168,7 +168,7 @@ const keyCreate: Command<{ bot: string; keyOnly: boolean }> = {
 const keyList: Command<null> = {
   flags: [],
   parse(args) {
-    if (args.length > 0) throw new UsageError("key list takes no arguments");
+    if (args.length > 0) throw new UsageError("'key list' takes no arguments");
     return null;
   },
   run(db, _, io) {

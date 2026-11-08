@@ -18,7 +18,7 @@ const shippedMigrations = fileURLToPath(
   new URL("./migrations", import.meta.url),
 );
 
-// the shipped migrations cut back to the Phase 1 schema, which files in production hold
+// the shipped migrations cut back to the Phase 1 schema, the one 0002 migrates populated files from
 function phase1Migrations(): string {
   const folder = join(dir, "migrations-phase1");
   cpSync(shippedMigrations, folder, { recursive: true });

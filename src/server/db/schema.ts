@@ -124,7 +124,7 @@ export const project = sqliteTable(
     key: text("key").notNull().unique(),
     name: text("name").notNull(),
     description: text("description").notNull().default(""),
-    // the last issue number handed out in this project
+    // the highest issue number in this project, handed out or kept by an import
     issueSeq: integer("issue_seq").notNull().default(0),
     externalRef: text("external_ref"),
     createdBy: text("created_by")
@@ -153,7 +153,8 @@ export const issue = sqliteTable(
     projectId: text("project_id")
       .notNull()
       .references(() => project.id),
-    // from 1 within the project: project.issue_seq + 1, bumped in the same transaction
+    // unique within the project, from 1: project.issue_seq + 1 for a new issue, bumped in the same
+    // transaction, or the number an import keeps from its source key
     number: integer("number").notNull(),
     title: text("title").notNull(),
     description: text("description").notNull().default(""),

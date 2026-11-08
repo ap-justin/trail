@@ -125,7 +125,7 @@ export function decodeFeedCursor(
     (parsed.param !== "cursor" && parsed.param !== "after")
   ) {
     throw new ValidationError(
-      "cursor is invalid: pass a nextCursor exactly as a previous activity page returned it",
+      `${param} is invalid: pass a nextCursor exactly as a previous activity page returned it`,
     );
   }
   const issued = parsed as FeedPosition;

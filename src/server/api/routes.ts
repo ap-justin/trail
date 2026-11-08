@@ -48,7 +48,7 @@ export const forbiddenError = {
 export const conflictError = {
   409: jsonContent(
     errorSchema,
-    "A unique value (a key, name or externalRef) is already in use",
+    "A unique value (a key, name, number or externalRef) is already in use",
   ),
 };
 

@@ -422,7 +422,7 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
    * The numbers of the issues an import creates, by externalRef. One whose
    * sourceKey, or with none its externalRef, is in the project's own key form
    * (JUS-187) keeps that number, so its key still resolves; the project's
-   * sequence moves past the highest kept, then numbers the rest by
+   * sequence moves up to the highest kept, then numbers the rest after it by
    * (createdAt, externalRef), whatever the payload order.
    */
   function importNumbers(
