@@ -577,3 +577,40 @@ test("list_bots says an id that matches no bot is a human's", async () => {
     /an id that matches no bot is a human's/,
   );
 });
+
+test("import_project keeps a sourceKey's number for an issue matched by its UUID", async () => {
+  const client = await connect(bot.key);
+  const uuid = "6a0f3b2e-1c4d-4e5f-8a9b-0c1d2e3f4a5b";
+  await call(client, "import_project", {
+    externalRef: "lin-sourcekey",
+    key: "MSK",
+    name: "by uuid",
+    issues: [
+      {
+        externalRef: uuid,
+        sourceKey: "MSK-187",
+        title: "kept",
+        status: "Todo",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    ],
+  });
+  expect(
+    (await call(client, "get_issue", { issueId: "MSK-187" })).externalRef,
+  ).toBe(uuid);
+});
+
+test("import_project is annotated destructive and says a re-run replaces trail's edits", async () => {
+  const client = await connect(bot.key);
+  const { tools } = await client.listTools();
+  const tool = tools.find((t) => t.name === "import_project");
+  expect(tool?.annotations).toMatchObject({
+    readOnlyHint: false,
+    destructiveHint: true,
+    idempotentHint: true,
+  });
+  expect(tool?.description).toMatch(
+    /replacing changes made in trail since the last import.*never deletes/s,
+  );
+  expect(tool?.description).toMatch(/sourceKey/);
+});

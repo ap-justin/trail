@@ -679,3 +679,108 @@ test("an issue keeping a number another issue holds is a conflict naming both, a
     `issue ${holder.key} keeps its number, but ${holder.key} is already issue ${holder.id} ("by hand", externalRef none)`,
   );
 });
+
+const linearIssue = (uuid: string, sourceKey?: string) =>
+  ({
+    ...todo(uuid),
+    ...(sourceKey === undefined ? {} : { sourceKey }),
+  }) satisfies ImportIssue;
+
+test("issues sent with Linear UUIDs as externalRef keep the number of a sourceKey in the project's key", () => {
+  const key = projectKey();
+  service.importProject(bot, {
+    externalRef: `linear-${key}`,
+    key,
+    name: "by uuid",
+    issues: [
+      linearIssue("8f1c0f4e-0000-4000-8000-000000000187", `${key}-187`),
+      linearIssue("8f1c0f4e-0000-4000-8000-000000000012", `${key}-12`),
+    ],
+  });
+  expect(service.getIssue(bot, `${key}-187`).externalRef).toBe(
+    "8f1c0f4e-0000-4000-8000-000000000187",
+  );
+  expect(service.getIssue(bot, `${key}-12`).externalRef).toBe(
+    "8f1c0f4e-0000-4000-8000-000000000012",
+  );
+});
+
+test("a sourceKey under another project's key gets the next number, even beside a key-form externalRef", () => {
+  const key = projectKey();
+  service.importProject(bot, {
+    externalRef: `linear-${key}`,
+    key,
+    name: "moved team",
+    issues: [
+      linearIssue("uuid-kept", `${key}-40`),
+      linearIssue("uuid-moved", "OTHER-7"),
+      linearIssue(`${key}-90`, "OTHER-8"),
+    ],
+  });
+  // the sequenced two tie on createdAt, so externalRef orders them
+  expect(service.getIssue(bot, `${key}-41`).externalRef).toBe(`${key}-90`);
+  expect(service.getIssue(bot, `${key}-42`).externalRef).toBe("uuid-moved");
+});
+
+test("without a sourceKey, a key-form externalRef still keeps its number", () => {
+  const key = projectKey();
+  service.importProject(bot, {
+    externalRef: `linear-${key}`,
+    key,
+    name: "old payload",
+    issues: [linearIssue(`${key}-9`)],
+  });
+  expect(service.getIssue(bot, `${key}-9`).externalRef).toBe(`${key}-9`);
+});
+
+test("a re-run with a changed sourceKey leaves the matched issue's number alone and creates nothing", () => {
+  const key = projectKey();
+  const payload: ImportPayload = {
+    externalRef: `linear-${key}`,
+    key,
+    name: "renumbered upstream",
+    issues: [linearIssue("uuid-stays", `${key}-5`)],
+  };
+  service.importProject(bot, payload);
+  const rerun = service.importProject(bot, {
+    ...payload,
+    issues: [linearIssue("uuid-stays", `${key}-77`)],
+  });
+  expect(rerun.created).toEqual(zero);
+  expect(service.getIssue(bot, `${key}-5`).externalRef).toBe("uuid-stays");
+  expect(() => service.getIssue(bot, `${key}-77`)).toThrow(/no issue/);
+});
+
+test("a sourceKey whose number another issue holds is the clash conflict, telling the bot to send a different sourceKey", () => {
+  const payload = linearProject();
+  service.importProject(bot, payload);
+  const holder = service.createIssue(bot, {
+    projectId: payload.key,
+    title: "by hand",
+  });
+  refused(
+    { ...payload, issues: [linearIssue("uuid-clash", holder.key)] },
+    `issue uuid-clash keeps its number, but ${holder.key} is already issue ${holder.id} ("by hand", externalRef none): import into a project without that issue, or send a different sourceKey`,
+  );
+});
+
+test("two new issues keeping one number are refused, naming both, and nothing is written", () => {
+  const payload = linearProject();
+  refused(
+    {
+      ...payload,
+      issues: [
+        linearIssue("uuid-a", `${payload.key}-3`),
+        linearIssue(`${payload.key}-3`),
+      ],
+    },
+    `issues uuid-a and ${payload.key}-3 both keep number ${payload.key}-3: send each issue its own sourceKey`,
+  );
+});
+
+test("a sourceKey not shaped like an issue key is refused, naming it", () => {
+  refused(
+    { ...linearProject(), issues: [linearIssue("uuid-bad", "JUS187")] },
+    'issue uuid-bad: sourceKey "JUS187" is not an issue key: send Linear\'s identifier, like JUS-187',
+  );
+});

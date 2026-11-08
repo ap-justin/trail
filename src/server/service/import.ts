@@ -31,6 +31,11 @@ export type ImportPayload = {
 };
 export type ImportIssue = {
   externalRef: string;
+  /**
+   * The source's human key (Linear's identifier, JUS-187). A new issue keeps
+   * its number when the prefix is the project's key; not stored.
+   */
+  sourceKey?: string;
   title: string;
   description?: string;
   /**
@@ -113,6 +118,8 @@ const sourceStatusTypes: Record<string, IssueStatus> = {
 
 export type NormalIssue = {
   externalRef: string;
+  /** Uppercased. */
+  sourceKey: string | undefined;
   title: string;
   description: string | undefined;
   status: IssueStatus;
@@ -198,6 +205,23 @@ function uniqueRefs(rows: { externalRef: string }[], scope: string): void {
   }
 }
 
+// the schema's sourceKey rule (shared/schemas.ts), for callers that skip it
+const sourceKeyPattern = /^[A-Za-z0-9]{2,10}-[1-9]\d*$/;
+
+function validSourceKey(
+  raw: string | undefined,
+  where: string,
+): string | undefined {
+  if (raw === undefined) return undefined;
+  const key = raw.trim();
+  if (!sourceKeyPattern.test(key)) {
+    throw new ValidationError(
+      `${where}: sourceKey "${raw}" is not an issue key: send Linear's identifier, like JUS-187`,
+    );
+  }
+  return key.toUpperCase();
+}
+
 function normalComment(row: ImportComment, where: string): NormalComment {
   if (row.body.trim() === "") {
     throw new ValidationError(`${where} body must not be empty`);
@@ -227,6 +251,7 @@ function normalIssue(row: ImportIssue): NormalIssue {
   uniqueRefs(comments, `${where} comments`);
   return {
     externalRef,
+    sourceKey: validSourceKey(row.sourceKey, where),
     title: nonBlank(row.title, `${where} title`),
     description: row.description,
     status,

@@ -420,9 +420,10 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
 
   /**
    * The numbers of the issues an import creates, by externalRef. One whose
-   * externalRef is the project's own key form (JUS-187) keeps that number, so
-   * its key still resolves; the project's sequence moves past the highest kept,
-   * then numbers the rest by (createdAt, externalRef), whatever the payload order.
+   * sourceKey, or with none its externalRef, is in the project's own key form
+   * (JUS-187) keeps that number, so its key still resolves; the project's
+   * sequence moves past the highest kept, then numbers the rest by
+   * (createdAt, externalRef), whatever the payload order.
    */
   function importNumbers(
     tx: Tx,
@@ -431,13 +432,24 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
   ): Map<string, number> {
     const ownKey = new RegExp(`^${target.key}-([1-9]\\d*)$`);
     const numbers = new Map<string, number>();
+    const keptBy = new Map<number, string>();
     const sequenced: NormalIssue[] = [];
     for (const row of rows) {
-      const number = Number(ownKey.exec(row.externalRef)?.[1]);
+      const field = row.sourceKey === undefined ? "externalRef" : "sourceKey";
+      const number = Number(
+        ownKey.exec(row.sourceKey ?? row.externalRef)?.[1],
+      );
       if (!Number.isSafeInteger(number)) {
         sequenced.push(row);
         continue;
       }
+      const twin = keptBy.get(number);
+      if (twin !== undefined) {
+        throw new ValidationError(
+          `issues ${twin} and ${row.externalRef} both keep number ${target.key}-${number}: send each issue its own sourceKey`,
+        );
+      }
+      keptBy.set(number, row.externalRef);
       const holder = tx
         .select()
         .from(issue)
@@ -445,7 +457,7 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
         .get();
       if (holder) {
         throw new ConflictError(
-          `issue ${row.externalRef} keeps its number, but ${target.key}-${number} is already issue ${holder.id} ("${holder.title}", externalRef ${holder.externalRef ?? "none"}): import into a project without that issue, or send a different externalRef`,
+          `issue ${row.externalRef} keeps its number, but ${target.key}-${number} is already issue ${holder.id} ("${holder.title}", externalRef ${holder.externalRef ?? "none"}): import into a project without that issue, or send a different ${field}`,
         );
       }
       numbers.set(row.externalRef, number);

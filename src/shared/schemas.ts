@@ -284,7 +284,8 @@ const sourceTimestamp = z.iso
   .meta({ example: "2026-01-02T03:04:05.000Z" });
 const sourceRef = z.string().min(1).max(200).meta({
   description:
-    "The row's id in the system it came from (a Linear id). A re-run matches rows by it: the project across trail, an issue within its project, a comment within its issue, a status update within its project.",
+    "The row's id in the system it came from: Linear's id, a UUID, not an identifier like JUS-187, which Linear changes when an issue moves team. A re-run matches rows by it: the project across trail, an issue within its project, a comment within its issue, a status update within its project.",
+  example: "2b5f6e1c-7d0a-4c3e-9f1b-8a6d4e2c1f07",
 });
 const sourceAuthorInput = z
   .string()
@@ -308,6 +309,19 @@ const importCommentSchema = z
 const importIssueSchema = z
   .strictObject({
     externalRef: sourceRef,
+    // service/import.ts holds the same rule
+    sourceKey: z
+      .string()
+      .regex(
+        /^[A-Za-z0-9]{2,10}-[1-9]\d*$/,
+        "must be an issue key, like JUS-187",
+      )
+      .optional()
+      .meta({
+        description:
+          "The issue's key in the system it came from (Linear's identifier). When its prefix is the project's key, a new issue keeps that number, so JUS-187 in Linear is JUS-187 in trail; otherwise it gets the project's next number. An imported issue's number never changes on a re-run, whatever sourceKey says. Not stored. Without it, an externalRef shaped like JUS-187 keeps its number instead.",
+        example: "JUS-187",
+      }),
     title,
     description: text.optional(),
     status: z.string().min(1).max(200).optional().meta({

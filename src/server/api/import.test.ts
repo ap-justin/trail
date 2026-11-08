@@ -273,3 +273,46 @@ test("POST /import refuses a whitespace-only status with a 422 even beside a sta
   expect(res.status).toBe(422);
   expect((await request("GET", "/api/v1/projects/IMW")).status).toBe(404);
 });
+
+test("POST /import keeps the number of a sourceKey in the project's key while matching by a UUID externalRef", async () => {
+  const uuid = "2b5f6e1c-7d0a-4c3e-9f1b-8a6d4e2c1f07";
+  const res = await request("POST", "/api/v1/import", {
+    json: {
+      externalRef: "P-SRC",
+      key: "SRC",
+      name: "by uuid",
+      issues: [
+        {
+          externalRef: uuid,
+          sourceKey: "SRC-187",
+          title: "kept",
+          status: "Todo",
+          createdAt: "2026-01-02T03:04:05.000Z",
+        },
+      ],
+    },
+  });
+  expect(res.status).toBe(200);
+  const kept = (await (
+    await request("GET", "/api/v1/issues/SRC-187")
+  ).json()) as Body;
+  expect(kept.externalRef).toBe(uuid);
+});
+
+test("the spec shows an import issue's sourceKey, and says a re-run replaces trail's edits to matched rows", async () => {
+  const res = await request("GET", "/api/v1/openapi.json", { key: null });
+  const spec = (await res.json()) as Body;
+  expect(spec.components.schemas.ImportIssue.properties.sourceKey).toEqual(
+    expect.objectContaining({
+      type: "string",
+      pattern: "^[A-Za-z0-9]{2,10}-[1-9]\\d*$",
+      description: expect.stringMatching(/keeps that number/),
+    }),
+  );
+  expect(spec.components.schemas.ImportIssue.required).not.toContain(
+    "sourceKey",
+  );
+  expect(spec.paths["/import"].post.description).toMatch(
+    /replacing changes made in trail since the last import.*never deletes/s,
+  );
+});

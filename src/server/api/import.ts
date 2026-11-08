@@ -21,7 +21,9 @@ const importProject = createRoute({
   method: "post",
   path: "/import",
   summary:
-    "Import a project from another tracker with its issues, comments, labels, links and status updates, matched by externalRef: a re-run updates what changed and never duplicates",
+    "Import a project from another tracker with its issues, comments, labels, links and status updates, matched by externalRef",
+  description:
+    "Rows are matched by externalRef (Linear's id, a UUID), so a re-run never duplicates. Send each issue's sourceKey (Linear's identifier, like JUS-187) to keep its number. A re-run sets each matched row's fields, labels and links to the payload's values, replacing changes made in trail since the last import, and never deletes rows.",
   tags: ["import"],
   middleware: [limitBody(IMPORT_MAX_BODY_BYTES)] as const,
   request: { body: jsonBody(importSchema) },
