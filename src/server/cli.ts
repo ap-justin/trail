@@ -100,7 +100,7 @@ export function runCli(argv: readonly string[], io: CliIo): number {
 function existingDatabase(path: string): string {
   if (!existsSync(path)) {
     throw new Error(
-      `no database at ${resolve(path)}: start the server or run \`pnpm db:migrate\` with this DATABASE_PATH to create it, then retry`,
+      `no database at ${resolve(path)}: set DATABASE_PATH to the server's database file (/data/trail.db on Fly) and retry; the server creates the file on its first start`,
     );
   }
   return path;

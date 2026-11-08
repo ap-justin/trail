@@ -184,7 +184,7 @@ test.each([
     expect(code).toBe(1);
     expect(stdout).toBe("");
     expect(stderr).toBe(
-      `trail: no database at ${missing}: start the server or run \`pnpm db:migrate\` with this DATABASE_PATH to create it, then retry\n`,
+      `trail: no database at ${missing}: set DATABASE_PATH to the server's database file (/data/trail.db on Fly) and retry; the server creates the file on its first start\n`,
     );
     expect(existsSync(join(dir, "missing"))).toBe(false);
   },
