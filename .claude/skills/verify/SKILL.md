@@ -3,10 +3,18 @@ name: verify
 description: Lint, typecheck, test and live-check trail before a commit.
 ---
 
-Run from the repo root once code exists; skip any step whose script is not yet in `package.json`.
+Run from the repo root.
 
-1. `pnpm lint && pnpm typecheck`
-2. Start Postgres if down: `sudo service postgresql start`. Then `DATABASE_URL=postgres://trail:trail@localhost:5432/trail pnpm test`.
-3. Live check: `DATABASE_URL=postgres://trail:trail@localhost:5432/trail PORT=3000 pnpm dev` in the background, then `curl -fsS localhost:3000/health`, and call each REST route with a bot key, `curl -fsS -H "Authorization: Bearer $TRAIL_BOT_KEY" localhost:3000/<route>`. Stop the server afterwards.
+1. `pnpm lint && pnpm typecheck`. A lint failure on formatting or import order: `pnpm format <paths>` fixes in place (name the files you touched; a bare `pnpm format` reflows the whole tree).
+2. `pnpm test` (each test file opens its own temp SQLite file; no service to start).
+3. `pnpm smoke`: builds `dist/`, boots `node dist/index.js` on a throwaway database and a free port, checks `/health`, mints a key with the built `dist/cli.js`, and calls `/api/v1/projects` with and without it. It catches a bad bundle, externals list or migrations copy.
+4. Live check of the dev server, against one database for both the CLI and the server:
+   ```sh
+   export DATABASE_PATH=$(mktemp -d)/trail.db PORT=3000
+   export TRAIL_BOT_KEY=$(pnpm -s trail bot create verify | awk '$1 == "key" { print $2 }')
+   pnpm dev &   # stop it afterwards
+   curl -fsS localhost:3000/health
+   ```
+   Then each GET route under `/api/v1` with `curl -fsS -H "Authorization: Bearer $TRAIL_BOT_KEY" localhost:3000/api/v1<route>`: `/projects`, `/issues`, `/activity`, and with ids taken from those lists `/projects/{id}`, `/issues/{id}`, `/issues/{id}/comments`. `/api/v1/openapi.json` is the full route list and is public.
 
 Screenshots and logs go under `proof/`. Red → fix it before the commit; the commit waits.

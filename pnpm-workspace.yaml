@@ -1,0 +1,5 @@
+# Build-script allowlist lives here, not in package.json (ignored there without error).
+# Without the better-sqlite3 entry its native module is never compiled and fails at first require.
+allowBuilds:
+  better-sqlite3: true
+  esbuild: true
