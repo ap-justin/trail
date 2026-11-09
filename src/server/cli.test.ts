@@ -87,7 +87,7 @@ test("bot create with a name already taken exits 1 and says what to do", () => {
   expect(code).toBe(1);
   expect(stdout).toBe("");
   expect(stderr).toMatch(
-    /^trail: a bot named "twin" already exists \(\S+\): .*key create/,
+    /^trail: a bot named "twin" already exists \(\S+\), and bot names match ignoring the case of A-Z: .*key create/,
   );
 });
 

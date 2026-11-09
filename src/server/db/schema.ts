@@ -83,8 +83,9 @@ export const actor = sqliteTable(
     ),
     // target of api_key's (actor_id, actor_kind) key, which pins keys to bots
     unique("actor_id_kind_unique").on(t.id, t.kind),
-    uniqueIndex("actor_bot_display_name_unique")
-      .on(t.displayName)
+    // lower() folds ASCII only, like nocase: 'Équipe' and 'équipe' are two bots
+    uniqueIndex("actor_bot_display_name_lower_unique")
+      .on(sql`lower(${c(t.displayName)})`)
       .where(sql`${c(t.kind)} = 'bot'`),
     uniqueIndex("actor_bot_label_unique")
       .on(t.label)
@@ -172,6 +173,8 @@ export const issue = sqliteTable(
     sourceAuthor: text("source_author"),
     // the imported row's workflow-state name in its source system, e.g. "In Review", kept for reference
     sourceStatus: text("source_status"),
+    // the imported row's identifier in its source system, uppercased (JUS-187); a lookup alias for the issue
+    sourceKey: text("source_key"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
     completedAt: integer("completed_at", { mode: "timestamp_ms" }),
@@ -194,6 +197,9 @@ export const issue = sqliteTable(
     uniqueIndex("issue_project_external_ref_unique")
       .on(t.projectId, t.externalRef)
       .where(sql`${c(t.externalRef)} is not null`),
+    uniqueIndex("issue_source_key_unique")
+      .on(t.sourceKey)
+      .where(sql`${c(t.sourceKey)} is not null`),
     // target of issue_label's (issue_id, project_id) key
     unique("issue_id_project_unique").on(t.id, t.projectId),
     index("issue_project_status_created_idx").on(

@@ -70,7 +70,7 @@ const updateIssue = createRoute({
   method: "patch",
   path: "/issues/{id}",
   summary:
-    "Update an issue's title, description, status, assignee, estimate, priority, labels or links",
+    "Update an issue's title, description, status, assignee, estimate, priority, labels or links; addLabels, removeLabels, addLinks and removeLinks change part of the set in the same transaction",
   tags,
   request: { params: issueParam, body: jsonBody(issueUpdateSchema) },
   responses: {

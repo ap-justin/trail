@@ -5,7 +5,11 @@ import {
   issueStatuses,
   projectHealths,
 } from "../server/db/schema.js";
-import { sourceStateTypes } from "../server/service/import.js";
+import {
+  IMPORT_LINKS_MAX,
+  IMPORT_TEXT_MAX,
+  sourceStateTypes,
+} from "../server/service/import.js";
 
 // Field docs go in .meta(), which both the OpenAPI spec and the MCP tools' JSON
 // Schema read; .openapi({ description }) reaches only the spec.
@@ -65,6 +69,11 @@ export const issueSchema = z
       example: "TRL-12",
     }),
     number: z.int().meta({ example: 12 }),
+    sourceKey: z.string().nullable().meta({
+      description:
+        "On an imported issue, its key in the system it came from, uppercased (like JUS-187). Any argument or path that takes the issue's id or key takes this too.",
+      example: "JUS-187",
+    }),
     projectId: id,
     title: z.string(),
     description: z.string(),
@@ -259,6 +268,22 @@ export const issueUpdateSchema = z
     links: links.optional().meta({
       description: "Replaces the issue's links; [] removes them all.",
     }),
+    addLabels: labelNames.optional().meta({
+      description:
+        "Labels to add, keeping the issue's others, even those another bot added a moment ago. A name matches the project's label ignoring the case of A-Z; a new name creates the label. Not with labels.",
+    }),
+    removeLabels: z.array(labelName).max(50).optional().meta({
+      description:
+        "Labels to remove, by name ignoring the case of A-Z; a name the issue lacks is ignored. Not with labels.",
+    }),
+    addLinks: links.optional().meta({
+      description:
+        "Links to add, keeping the issue's others. A url already on the issue takes the title sent here, or keeps its own when none is sent. Not with links.",
+    }),
+    removeLinks: z.array(z.string().min(1).max(2048)).max(50).optional().meta({
+      description:
+        "Urls of links to remove; a url the issue lacks is ignored. Not with links.",
+    }),
   })
   .openapi("IssueUpdate");
 
@@ -297,10 +322,32 @@ const sourceAuthorInput = z
     description: "The author's name in the source system.",
   });
 
+// An import row's values are checked by the service (service/import.ts), which reports every failing
+// row with its sourceKey or externalRef in one 422; a schema failure would stop at the first and name
+// no row. These schemas fix the shape, and `meta` carries the limits for the spec and the MCP tool.
+const importLinks = z
+  .array(
+    z.strictObject({
+      url: z.string().meta({
+        description: "An http or https url of at most 2048 characters.",
+      }),
+      title: z
+        .string()
+        .optional()
+        .meta({ description: "At most 300 characters; defaults to the url." }),
+    }),
+  )
+  .meta({ maxItems: IMPORT_LINKS_MAX });
+const importText = (what: string) =>
+  z.string().meta({
+    description: `${what}, at most ${IMPORT_TEXT_MAX} characters (1 MiB).`,
+    maxLength: IMPORT_TEXT_MAX,
+  });
+
 const importCommentSchema = z
   .strictObject({
     externalRef: sourceRef,
-    body: text.min(1),
+    body: importText("The comment"),
     createdAt: sourceTimestamp,
     sourceAuthor: sourceAuthorInput,
   })
@@ -309,33 +356,21 @@ const importCommentSchema = z
 const importIssueSchema = z
   .strictObject({
     externalRef: sourceRef,
-    // service/import.ts holds the same rule
-    sourceKey: z
-      .string()
-      .regex(
-        /^[A-Za-z0-9]{2,10}-[1-9]\d*$/,
-        "must be an issue key, like JUS-187",
-      )
-      .optional()
-      .meta({
-        description:
-          "The issue's key in the system it came from (Linear's identifier). When its prefix is the project's key, a new issue keeps that number, so JUS-187 in Linear is JUS-187 in trail; otherwise it gets the project's next number. An imported issue's number never changes on a re-run, whatever sourceKey says. Not stored. Without it, an externalRef shaped like JUS-187 keeps its number instead.",
-        example: "JUS-187",
-      }),
-    title,
-    description: text.optional(),
-    status: z.string().min(1).max(200).optional().meta({
+    sourceKey: z.string().optional().meta({
+      pattern: "^[A-Za-z0-9]{2,10}-[1-9]\\d*$",
       description:
-        "The source state's name (Linear's state.name), kept as the issue's sourceStatus. Without statusType it decides the status, in any case: Backlog, Todo or Triage → open, In Progress → in_progress, Done → done, Canceled or Duplicate → canceled, and a trail status (open, in_progress, done, canceled) as is; any other name needs statusType. Send status, statusType or both; a re-run without status clears sourceStatus.",
+        "The issue's key in the system it came from (Linear's identifier, like JUS-187; a letter-or-digit prefix, a dash and a number). It is stored uppercased, and the issue is found by it as if it were the issue's id or key; a re-run sets it to the value sent. When its prefix is the project's key, a new issue keeps that number, so JUS-187 in Linear is JUS-187 in trail; if another issue already holds the number, the new one gets the project's next number and is listed in the result's renumbered. An imported issue's number never changes on a re-run. Unique across trail. Without it, an externalRef shaped like JUS-187 keeps its number instead.",
+      example: "JUS-187",
+    }),
+    title: z.string().meta({ description: "1 to 300 characters." }),
+    description: importText("The issue's description").optional(),
+    status: z.string().optional().meta({
+      description:
+        "The source state's name (Linear's state.name), kept as the issue's sourceStatus (at most 200 characters). Without statusType it decides the status, in any case: Backlog, Todo or Triage → open, In Progress → in_progress, Done → done, Canceled or Duplicate → canceled, and a trail status (open, in_progress, done, canceled) as is; any other name needs statusType. Send status, statusType or both; a re-run without status clears sourceStatus.",
       example: "In Review",
     }),
-    // the pipe alone renders as a bare string in the spec and the MCP schema,
-    // so the enum is declared in meta too
     statusType: z
       .string()
-      .trim()
-      .toLowerCase()
-      .pipe(z.enum(sourceStateTypes))
       .optional()
       .meta({
         enum: [...sourceStateTypes],
@@ -343,13 +378,21 @@ const importIssueSchema = z
           "The source state's type (Linear's state.type), in any case; when sent it decides the status: backlog, unstarted or triage → open, started → in_progress, completed → done, canceled or duplicate → canceled. Send it for a custom state, like In Review of type started.",
         example: "started",
       }),
-    priority: priority.optional(),
-    estimate: estimate.nullable().optional(),
-    labels: labelNames.optional().meta({
-      description: "Replaces the issue's labels; a new name creates the label.",
+    priority: z.number().optional().meta({
+      description: "0 none, 1 urgent, 2 high, 3 medium, 4 low.",
     }),
-    links: links.optional().meta({
-      description: "Replaces the issue's links.",
+    estimate: z
+      .number()
+      .nullable()
+      .optional()
+      .meta({ description: "Hours, 0 or more." }),
+    labels: z.array(z.string()).optional().meta({
+      description:
+        "Replaces the issue's labels; a new name creates the label. At most 50, each at most 100 characters.",
+      maxItems: 50,
+    }),
+    links: importLinks.optional().meta({
+      description: `Replaces the issue's links. At most ${IMPORT_LINKS_MAX}.`,
     }),
     createdAt: sourceTimestamp,
     completedAt: sourceTimestamp.nullable().optional().meta({
@@ -364,7 +407,10 @@ const importIssueSchema = z
 const importStatusUpdateSchema = z
   .strictObject({
     externalRef: sourceRef,
-    body: text.min(1),
+    body: z.string().meta({
+      description: "At most 65536 characters.",
+      maxLength: 64 * 1024,
+    }),
     health: healthSchema,
     createdAt: sourceTimestamp,
     sourceAuthor: sourceAuthorInput,
@@ -405,6 +451,18 @@ const importCountsSchema = z
 export const importResultSchema = z
   .object({
     project: projectSchema,
+    renumbered: z
+      .array(
+        z.object({
+          externalRef: z.string(),
+          sourceKey: z.string().nullable(),
+          key: z.string().meta({ example: "DEMO-12" }),
+        }),
+      )
+      .meta({
+        description:
+          "Issues created without the number their sourceKey asked for, because another issue in the project held it. Each is found by its sourceKey and has its new key here.",
+      }),
     created: importCountsSchema,
     updated: importCountsSchema,
     unchanged: importCountsSchema,

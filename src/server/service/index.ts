@@ -128,6 +128,14 @@ export type IssuePatch = {
   labels?: string[];
   /** replaces the issue's links */
   links?: LinkInput[];
+  /** added to the issue's labels; refused beside `labels` */
+  addLabels?: string[];
+  /** removed from the issue's labels, matched ignoring the case of A-Z; refused beside `labels` */
+  removeLabels?: string[];
+  /** added to the issue's links, a url already there taking the new title; refused beside `links` */
+  addLinks?: LinkInput[];
+  /** urls of links to remove; refused beside `links` */
+  removeLinks?: string[];
 };
 export type CommentInput = {
   issueId: string;
@@ -141,8 +149,15 @@ export type StatusUpdateInput = {
   externalRef?: string | null;
 };
 export type LabelInput = { projectId: string; name: string };
+/** An imported issue that could not keep its source key's number and took the project's next one. */
+export type Renumbered = {
+  externalRef: string;
+  sourceKey: string | null;
+  key: string;
+};
 export type ImportResult = {
   project: Project;
+  renumbered: Renumbered[];
   created: ImportCounts;
   updated: ImportCounts;
   unchanged: ImportCounts;
@@ -279,7 +294,11 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
     return found;
   }
 
-  /** The issue with this id, or else this key (TRL-12, the project key in any case). */
+  /**
+   * The issue with this id, else this key (TRL-12, the project key in any
+   * case), else this source key (JUS-187, any case): a trail key wins over a
+   * source key that looks the same.
+   */
   function resolveIssueRow(tx: Tx | Db, ref: string): IssueRow {
     const byId = tx.select().from(issue).where(eq(issue.id, ref)).get();
     if (byId) return byId;
@@ -297,12 +316,18 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
           ),
         )
         .get()?.issue;
-    if (!byKey) {
+    if (byKey) return byKey;
+    const bySourceKey = tx
+      .select()
+      .from(issue)
+      .where(eq(issue.sourceKey, ref.trim().toUpperCase()))
+      .get();
+    if (!bySourceKey) {
       throw new NotFoundError(
-        `no issue ${ref}: pass the id or key (like TRL-12) of an existing issue`,
+        `no issue ${ref}: pass the id, the key (like TRL-12) or the source key (like JUS-187, kept from an import) of an existing issue`,
       );
     }
-    return byKey;
+    return bySourceKey;
   }
 
   /** Each row with its key, labels and links, in the order given. */
@@ -423,19 +448,21 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
    * sourceKey, or with none its externalRef, is in the project's own key form
    * (JUS-187) keeps that number, so its key still resolves; the project's
    * sequence moves up to the highest kept, then numbers the rest after it by
-   * (createdAt, externalRef), whatever the payload order.
+   * (createdAt, externalRef), whatever the payload order. One whose number
+   * another issue already holds is numbered with the rest and listed in
+   * `renumbered`; its source key still finds it.
    */
   function importNumbers(
     tx: Tx,
     target: Project,
     rows: NormalIssue[],
-  ): Map<string, number> {
+  ): { numbers: Map<string, number>; renumbered: Renumbered[] } {
     const ownKey = new RegExp(`^${target.key}-([1-9]\\d*)$`);
     const numbers = new Map<string, number>();
     const keptBy = new Map<number, string>();
     const sequenced: NormalIssue[] = [];
+    const taken = new Set<string>();
     for (const row of rows) {
-      const field = row.sourceKey === undefined ? "externalRef" : "sourceKey";
       const number = Number(ownKey.exec(row.sourceKey ?? row.externalRef)?.[1]);
       if (!Number.isSafeInteger(number)) {
         sequenced.push(row);
@@ -454,9 +481,9 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
         .where(and(eq(issue.projectId, target.id), eq(issue.number, number)))
         .get();
       if (holder) {
-        throw new ConflictError(
-          `issue ${row.externalRef} keeps its number, but ${target.key}-${number} is already issue ${holder.id} ("${holder.title}", externalRef ${holder.externalRef ?? "none"}): import into a project without that issue, or send a different ${field}`,
-        );
+        taken.add(row.externalRef);
+        sequenced.push(row);
+        continue;
       }
       numbers.set(row.externalRef, number);
     }
@@ -474,10 +501,19 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
         a.createdAt.getTime() - b.createdAt.getTime() ||
         (a.externalRef < b.externalRef ? -1 : 1),
     );
+    const renumbered: Renumbered[] = [];
     for (const row of sequenced) {
-      numbers.set(row.externalRef, nextIssueNumber(tx, target.id));
+      const number = nextIssueNumber(tx, target.id);
+      numbers.set(row.externalRef, number);
+      if (taken.has(row.externalRef)) {
+        renumbered.push({
+          externalRef: row.externalRef,
+          sourceKey: row.sourceKey ?? null,
+          key: `${target.key}-${number}`,
+        });
+      }
     }
-    return numbers;
+    return { numbers, renumbered };
   }
 
   type Tally = Record<"created" | "updated" | "unchanged", ImportCounts>;
@@ -542,7 +578,7 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
       .get() as Project;
   }
 
-  /** The project's labels by `labelKey`, each payload name created when missing. */
+  /** The project's labels by `labelKey`: each payload name created when missing, renamed when only its case differs. */
   function importLabels(
     tx: Tx,
     projectId: string,
@@ -551,12 +587,23 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
   ): Map<string, Label> {
     const labels = new Map<string, Label>();
     for (const name of names) {
-      const found = findLabel(tx, projectId, name);
-      tally[found ? "unchanged" : "created"].labels++;
-      labels.set(
-        labelKey(name),
-        found ?? tx.insert(label).values({ projectId, name }).returning().get(),
-      );
+      let found = findLabel(tx, projectId, name);
+      if (!found) {
+        tally.created.labels++;
+        found = tx.insert(label).values({ projectId, name }).returning().get();
+      } else if (found.name !== name) {
+        // the payload's spelling wins, as it does for every other field
+        tally.updated.labels++;
+        found = tx
+          .update(label)
+          .set({ name })
+          .where(eq(label.id, found.id))
+          .returning()
+          .get() as Label;
+      } else {
+        tally.unchanged.labels++;
+      }
+      labels.set(labelKey(name), found);
     }
     return labels;
   }
@@ -581,6 +628,18 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
       row.completedAt ?? current?.completedAt ?? null,
       now,
     );
+    if (row.sourceKey !== undefined && row.sourceKey !== current?.sourceKey) {
+      const holder = tx
+        .select()
+        .from(issue)
+        .where(eq(issue.sourceKey, row.sourceKey))
+        .get();
+      if (holder) {
+        throw new ConflictError(
+          `issue ${row.externalRef} sends sourceKey ${row.sourceKey}, but issue ${holder.id} (externalRef ${holder.externalRef ?? "none"}) already has it: a source key names one issue, so send each issue its own Linear identifier`,
+        );
+      }
+    }
     if (!current) {
       const inserted = tx
         .insert(issue)
@@ -592,6 +651,7 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
           description: row.description ?? "",
           status: row.status,
           sourceStatus: row.sourceStatus,
+          sourceKey: row.sourceKey ?? null,
           priority: row.priority ?? 0,
           estimate: row.estimate ?? null,
           sourceAuthor: row.sourceAuthor ?? null,
@@ -613,6 +673,7 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
       description: row.description,
       status: row.status,
       sourceStatus: row.sourceStatus,
+      sourceKey: row.sourceKey,
       priority: row.priority,
       estimate: row.estimate,
       sourceAuthor: row.sourceAuthor,
@@ -959,22 +1020,80 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
         estimate: validEstimate(patch.estimate),
         priority: validPriority(patch.priority),
       };
+      if (
+        patch.labels !== undefined &&
+        (patch.addLabels !== undefined || patch.removeLabels !== undefined)
+      ) {
+        throw new ValidationError(
+          "labels replaces the whole set, so it cannot go with addLabels or removeLabels: send labels alone to replace the set, or addLabels and removeLabels to change part of it",
+        );
+      }
+      if (
+        patch.links !== undefined &&
+        (patch.addLinks !== undefined || patch.removeLinks !== undefined)
+      ) {
+        throw new ValidationError(
+          "links replaces the whole set, so it cannot go with addLinks or removeLinks: send links alone to replace the set, or addLinks and removeLinks to change part of it",
+        );
+      }
+      const addLabels =
+        patch.addLabels === undefined
+          ? undefined
+          : validLabelNames(patch.addLabels);
+      const removeKeys = new Set(
+        validLabelNames(patch.removeLabels ?? []).map(labelKey),
+      );
+      const addLinks =
+        patch.addLinks === undefined ? undefined : validLinks(patch.addLinks);
+      // a title the bot left out must not overwrite the one a link already has
+      const untitled = new Set(
+        (patch.addLinks ?? [])
+          .filter((l) => (l.title ?? "").trim() === "")
+          .map((l) => l.url.trim()),
+      );
+      const removeUrls = new Set(
+        (patch.removeLinks ?? []).map((u) => nonBlank(u, "link url")),
+      );
       const labelNames =
         patch.labels === undefined ? undefined : validLabelNames(patch.labels);
-      const links =
+      const replacementLinks =
         patch.links === undefined ? undefined : validLinks(patch.links);
       return commit((tx) => {
         const row = resolveIssueRow(tx, ref);
         const current = hydrateOne(tx, row);
         const changes = changesOf<IssueRow>(row, next);
         if ("assigneeId" in changes) requireAssignee(tx, next.assigneeId);
+        // the add and remove forms edit the set read here, under the write lock this transaction holds
+        const wantedLabels =
+          labelNames ??
+          (addLabels === undefined && removeKeys.size === 0
+            ? undefined
+            : validLabelNames([
+                ...current.labels.filter((n) => !removeKeys.has(labelKey(n))),
+                ...(addLabels ?? []),
+              ]));
         let labels: Label[] | undefined;
-        if (labelNames !== undefined) {
-          labels = labelsNamed(tx, row.projectId, labelNames);
+        if (wantedLabels !== undefined) {
+          labels = labelsNamed(tx, row.projectId, wantedLabels);
           const to = sortedNames(labels);
           if (!sameJson(current.labels, to)) {
             changes.labels = { from: current.labels, to };
           }
+        }
+        let links = replacementLinks;
+        if (
+          links === undefined &&
+          (addLinks !== undefined || removeUrls.size > 0)
+        ) {
+          const kept = current.links.filter((l) => !removeUrls.has(l.url));
+          for (const added of addLinks ?? []) {
+            const at = kept.findIndex((l) => l.url === added.url);
+            if (at === -1) kept.push(added);
+            else if (!untitled.has(added.url)) {
+              kept[at] = added;
+            }
+          }
+          links = kept;
         }
         if (links !== undefined && !sameJson(current.links, links)) {
           changes.links = { from: current.links, to: links };
@@ -1203,7 +1322,7 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
               .all(),
           ).map((i) => [i.externalRef, i]),
         );
-        const numbers = importNumbers(
+        const { numbers, renumbered } = importNumbers(
           tx,
           target,
           input.issues.filter((row) => !existing.has(row.externalRef)),
@@ -1230,6 +1349,7 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
             .from(project)
             .where(eq(project.id, target.id))
             .get() as Project,
+          renumbered,
           ...tally,
         };
         const wrote = [tally.created, tally.updated].some((counts) =>
@@ -1244,7 +1364,7 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
             subjectId: target.id,
             projectId: target.id,
             action: "project.imported",
-            payload: { externalRef: target.externalRef, ...tally },
+            payload: { externalRef: target.externalRef, ...tally, renumbered },
           },
         };
       });

@@ -498,7 +498,7 @@ test("whoami answers the key's bot and list_bots pages every bot with id, name a
 test("a service refusal is a tool error saying what to send instead", async () => {
   const client = await connect(bot.key);
   expect(await callError(client, "get_issue", { issueId: "NOPE-9" })).toBe(
-    "not_found: no issue NOPE-9: pass the id or key (like TRL-12) of an existing issue",
+    "not_found: no issue NOPE-9: pass the id, the key (like TRL-12) or the source key (like JUS-187, kept from an import) of an existing issue",
   );
   await call(client, "create_project", { key: "MCE", name: "errors" });
   expect(

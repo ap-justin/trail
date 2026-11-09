@@ -40,7 +40,7 @@ test("POST /issues/:id/comments on an unknown issue is a 404", async () => {
     error: {
       code: "not_found",
       message:
-        "no issue nope: pass the id or key (like TRL-12) of an existing issue",
+        "no issue nope: pass the id, the key (like TRL-12) or the source key (like JUS-187, kept from an import) of an existing issue",
     },
   });
 });

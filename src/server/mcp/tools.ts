@@ -38,7 +38,9 @@ const projectId = z
 const issueId = z
   .string()
   .min(1)
-  .describe("The issue's id or its key, like TRL-12.");
+  .describe(
+    "The issue's id, its key (like TRL-12) or its source key (like JUS-187, kept from an import). Looked up in that order, so a key beats a source key that looks the same.",
+  );
 const idempotencyKey = {
   idempotency_key: z
     .string()
@@ -180,7 +182,8 @@ export function registerTools(
   server.registerTool(
     "get_issue",
     {
-      description: "Get an issue by its id or key, like TRL-12.",
+      description:
+        "Get an issue by its id, key (like TRL-12) or source key (like JUS-187). The result carries its sourceKey.",
       inputSchema: z.strictObject({ issueId }),
       annotations: read,
     },
@@ -211,7 +214,7 @@ export function registerTools(
     "update_issue",
     {
       description:
-        "Change an issue: title, description, status (open, in_progress, done, canceled), assignee, estimate, priority, labels or links. Fields left out stay as they are; labels and links, when sent, replace the issue's whole set. Moving to done or canceled stamps completedAt; reopening clears it.",
+        "Change an issue: title, description, status (open, in_progress, done, canceled), assignee, estimate, priority, labels or links. Fields left out stay as they are. To change the issue's labels or links, either send labels or links to replace the whole set, or send addLabels, removeLabels, addLinks and removeLinks to change part of it without touching the rest, safe beside another bot's edit. Sending labels with addLabels or removeLabels, or links with addLinks or removeLinks, is refused. Moving to done or canceled stamps completedAt; reopening clears it.",
       inputSchema: issueUpdateSchema.extend({ issueId }),
       annotations: update,
     },
@@ -225,7 +228,7 @@ export function registerTools(
     "add_comment",
     {
       description:
-        "Add a comment to an issue, named by its id or key (like TRL-12).",
+        "Add a comment to an issue, named by its id, key (like TRL-12) or source key (like JUS-187).",
       inputSchema: commentCreateSchema.extend({ issueId, ...idempotencyKey }),
       annotations: create,
     },
@@ -376,7 +379,7 @@ export function registerTools(
     "import_project",
     {
       description:
-        "Bring a whole project over from Linear (or another tracker) in one call: the project with its issues, their comments, labels and links, and its status updates, each keyed by externalRef (Linear's id, a UUID). Send each issue's sourceKey (Linear's identifier, like JUS-187) so a new issue keeps that number when its prefix is the project's key. Send each issue's statusType (Linear's state.type) and status (its state name, kept as sourceStatus): statusType maps backlog/unstarted/triage → open, started → in_progress, completed → done, canceled/duplicate → canceled; without it, status names map Backlog/Todo/Triage → open, In Progress → in_progress, Done → done, Canceled/Duplicate → canceled. Rows are matched by externalRef, so a re-run never duplicates; it sets each matched row's fields, labels and links to the payload's values, replacing changes made in trail since the last import, and never deletes rows. An imported issue's number never changes. Returns per kind how many rows were created, updated and unchanged.",
+        "Bring a whole project over from Linear (or another tracker) in one call: the project with its issues, their comments, labels and links, and its status updates, each keyed by externalRef (Linear's id, a UUID). Send each issue's sourceKey (Linear's identifier, like JUS-187): trail stores it, so JUS-187 finds the issue in get_issue, update_issue and add_comment from then on, and a new issue keeps that number when its prefix is the project's key. If that number is taken by another issue, the new one gets the project's next number and is listed in the result's renumbered with its new key; nothing fails. Descriptions and comment bodies may be up to 1048576 characters and an issue may have up to 200 links. If any row is invalid, the error lists every failing row with its sourceKey or externalRef, and nothing is imported: fix all of them and send the import again. Send each issue's statusType (Linear's state.type) and status (its state name, kept as sourceStatus): statusType maps backlog/unstarted/triage → open, started → in_progress, completed → done, canceled/duplicate → canceled; without it, status names map Backlog/Todo/Triage → open, In Progress → in_progress, Done → done, Canceled/Duplicate → canceled. Rows are matched by externalRef, so a re-run never duplicates; it sets each matched row's fields, labels and links to the payload's values, replacing changes made in trail since the last import, and never deletes rows. An imported issue's number never changes; a label that differs from the project's only by case is renamed to the payload's spelling. Returns per kind how many rows were created, updated and unchanged, and renumbered.",
       inputSchema: importSchema,
       // a re-run overwrites bots' edits to matched rows
       annotations: { ...update, destructiveHint: true },

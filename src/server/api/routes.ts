@@ -81,7 +81,8 @@ export const issueParam = z.object({
     .min(1)
     .openapi({
       param: { name: "id", in: "path" },
-      description: "The issue's id or its key, like TRL-12.",
+      description:
+        "The issue's id, its key (like TRL-12) or its source key (like JUS-187, kept from an import). Looked up in that order, so a key beats a source key that looks the same.",
       example: "TRL-12",
     }),
 });
