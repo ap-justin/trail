@@ -71,6 +71,7 @@ import {
   validPriority,
   validProjectKey,
   validStatus,
+  withinIssueCap,
 } from "./validate.js";
 
 export type {
@@ -450,7 +451,8 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
    * sequence moves up to the highest kept, then numbers the rest after it by
    * (createdAt, externalRef), whatever the payload order. One whose number
    * another issue already holds is numbered with the rest and listed in
-   * `renumbered`; its source key still finds it.
+   * `renumbered` with its new key; its source key is the holder's key, which
+   * `resolveIssueRow` matches first, so it resolves to the holder.
    */
   function importNumbers(
     tx: Tx,
@@ -1068,10 +1070,13 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
           labelNames ??
           (addLabels === undefined && removeKeys.size === 0
             ? undefined
-            : validLabelNames([
-                ...current.labels.filter((n) => !removeKeys.has(labelKey(n))),
-                ...(addLabels ?? []),
-              ]));
+            : withinIssueCap(
+                validLabelNames([
+                  ...current.labels.filter((n) => !removeKeys.has(labelKey(n))),
+                  ...(addLabels ?? []),
+                ]),
+                "labels",
+              ));
         let labels: Label[] | undefined;
         if (wantedLabels !== undefined) {
           labels = labelsNamed(tx, row.projectId, wantedLabels);
@@ -1093,7 +1098,7 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
               kept[at] = added;
             }
           }
-          links = kept;
+          links = withinIssueCap(kept, "links");
         }
         if (links !== undefined && !sameJson(current.links, links)) {
           changes.links = { from: current.links, to: links };

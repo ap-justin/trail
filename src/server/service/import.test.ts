@@ -795,6 +795,49 @@ test("a sourceKey whose number another issue holds gets the next number and stil
   expect(service.getIssue(bot, key).sourceKey).toBe(holder.key);
 });
 
+test("re-running a payload that renumbered an issue matches it by externalRef, keeps its new number and lists nothing", () => {
+  const payload = linearProject();
+  service.importProject(bot, payload);
+  const holder = service.createIssue(bot, {
+    projectId: payload.key,
+    title: "by hand",
+  });
+  const rerunnable: ImportPayload = {
+    ...payload,
+    issues: [...(payload.issues ?? []), linearIssue("uuid-late", holder.key)],
+  };
+  const first = service.importProject(bot, rerunnable);
+  const newKey = `${payload.key}-${holder.number + 1}`;
+  expect(first.renumbered).toEqual([
+    { externalRef: "uuid-late", sourceKey: holder.key, key: newKey },
+  ]);
+  expect(first.created.issues).toBe(1);
+
+  const again = service.importProject(bot, rerunnable);
+  expect(again.renumbered).toEqual([]);
+  expect(again.created).toEqual(zero);
+  expect(again.updated).toEqual(zero);
+  expect(again.unchanged.issues).toBe((payload.issues ?? []).length + 1);
+  expect(service.getIssue(bot, newKey).externalRef).toBe("uuid-late");
+  expect(service.getIssue(bot, holder.key).id).toBe(holder.id);
+  expect(
+    service.createIssue(bot, { projectId: payload.key, title: "n" }).number,
+  ).toBe(holder.number + 2);
+});
+
+test("two payload issues keeping one number are refused, naming both, and nothing is written", () => {
+  const key = projectKey();
+  refused(
+    {
+      externalRef: `linear-${key}`,
+      key,
+      name: "collision",
+      issues: [linearIssue("uuid-a", `${key}-5`), linearIssue(`${key}-5`)],
+    },
+    `issues uuid-a and ${key}-5 both keep number ${key}-5: send each issue its own sourceKey`,
+  );
+});
+
 test("two issues sending one sourceKey are refused, naming both", () => {
   const payload = linearProject();
   refused(

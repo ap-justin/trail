@@ -40,9 +40,31 @@ function backUpOnce(sqlite: Db["$client"], backup: string): void {
   renameSync(partial, backup);
 }
 
+// journal `when` of 0004_issue_source_key_bot_name_ci, which makes bot names unique ignoring case
+const botNamesIgnoreCaseMigration = 1794187369175;
+
+/**
+ * Throws naming every group of bots 0004's index would reject, since SQLite's own
+ * UNIQUE failure names neither row. Renaming stays a person's call: the name is
+ * the bot's identity in every activity row.
+ */
+function refuseBotNamesClashingByCase(sqlite: Db["$client"]): void {
+  const clashes = sqlite
+    .prepare<[], string>(
+      "select group_concat(id || ' (' || display_name || ')', ', ') from actor where kind = 'bot' group by lower(display_name) having count(*) > 1",
+    )
+    .pluck()
+    .all();
+  if (clashes.length === 0) return;
+  throw new Error(
+    `${sqlite.name} has bots whose names differ only by case, which this build makes unique ignoring case: ${clashes.join("; ")}. Rename all but one bot in each group by hand (update actor set display_name = '<new name>' where id = '<id>'), then restart.`,
+  );
+}
+
 /**
  * Applies pending drizzle-kit migrations. Throws, leaving the file untouched,
- * when the file was migrated by a newer build than this one.
+ * when the file was migrated by a newer build than this one, or holds bots
+ * whose names differ only by case while 0004 is pending.
  */
 export function migrate(db: Db, folder = migrationsFolder): void {
   const sqlite = db.$client;
@@ -83,6 +105,13 @@ export function migrate(db: Db, folder = migrationsFolder): void {
         );
         for (const m of migrations) {
           if (last !== undefined && m.folderMillis <= last) continue;
+          // checked against the rows earlier steps leave (0002 renames exact twins); a fresh file has no bots
+          if (
+            last !== undefined &&
+            m.folderMillis === botNamesIgnoreCaseMigration
+          ) {
+            refuseBotNamesClashingByCase(sqlite);
+          }
           for (const statement of m.sql) sqlite.exec(statement);
           record.run(m.hash, m.folderMillis);
         }

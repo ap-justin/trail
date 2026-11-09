@@ -714,3 +714,91 @@ test("a create sent over REST and retried over MCP with the same idempotency key
     ),
   ).toEqual([first.id]);
 });
+
+test("update_issue edits part of the label and link sets over MCP, and refuses a full replace beside an add or remove", async () => {
+  const client = await connect(bot.key);
+  await call(client, "create_project", { key: "MUL", name: "partial sets" });
+  await call(client, "create_issue", {
+    projectId: "MUL",
+    title: "sets",
+    labels: ["keep", "drop"],
+    links: [{ url: "https://example.com/a", title: "A" }],
+  });
+
+  const labels = await call(client, "update_issue", {
+    issueId: "MUL-1",
+    removeLabels: ["DROP", "never-there"],
+    addLabels: ["added"],
+  });
+  expect(labels.labels).toEqual(["added", "keep"]);
+
+  const added = await call(client, "update_issue", {
+    issueId: "MUL-1",
+    addLinks: [{ url: "https://example.com/b", title: "B" }],
+  });
+  expect(added.links).toEqual([
+    { url: "https://example.com/a", title: "A" },
+    { url: "https://example.com/b", title: "B" },
+  ]);
+  const removed = await call(client, "update_issue", {
+    issueId: "MUL-1",
+    removeLinks: ["https://example.com/a"],
+  });
+  expect(removed.links).toEqual([{ url: "https://example.com/b", title: "B" }]);
+
+  expect(
+    await callError(client, "update_issue", {
+      issueId: "MUL-1",
+      labels: ["x"],
+      addLabels: ["y"],
+    }),
+  ).toMatch(
+    /^validation_failed: .*replaces the whole set, so it cannot go with addLabels or removeLabels: send labels alone to replace the set/,
+  );
+  expect(
+    (await call(client, "get_issue", { issueId: "MUL-1" })).labels,
+  ).toEqual(["added", "keep"]);
+});
+
+test("import_project's result lists an issue renumbered because its number was taken", async () => {
+  const client = await connect(bot.key);
+  const payload = {
+    externalRef: "lin-renum",
+    key: "MRN",
+    name: "renumber",
+    issues: [] as Body[],
+  };
+  await call(client, "import_project", payload);
+  const held = await call(client, "create_issue", {
+    projectId: "MRN",
+    title: "by hand",
+  });
+  const result = await call(client, "import_project", {
+    ...payload,
+    issues: [
+      {
+        externalRef: "uuid-renum",
+        sourceKey: held.key,
+        title: "late",
+        status: "Todo",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    ],
+  });
+  expect(result.renumbered).toEqual([
+    { externalRef: "uuid-renum", sourceKey: "MRN-1", key: "MRN-2" },
+  ]);
+  const again = await call(client, "import_project", {
+    ...payload,
+    issues: [
+      {
+        externalRef: "uuid-renum",
+        sourceKey: held.key,
+        title: "late",
+        status: "Todo",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    ],
+  });
+  expect(again.renumbered).toEqual([]);
+});

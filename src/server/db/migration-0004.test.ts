@@ -76,12 +76,21 @@ test("a live database keeps its issues with no source key, and bot names become 
   db.$client.close();
 });
 
-test("two bots whose names differ only by case fail the migration, leaving the file as it was", () => {
+test("two bots whose names differ only by case fail the migration naming both, leaving the file as it was", () => {
   const db = liveDb(`${live}
     insert into actor (id, kind, display_name, created_at) values ('b3', 'bot', 'tara', 0);
   `);
 
-  expect(() => migrate(db)).toThrow(/UNIQUE constraint failed/);
+  let message = "";
+  try {
+    migrate(db);
+  } catch (e) {
+    message = (e as Error).message;
+  }
+  expect(message).toContain("b1 (Tara)");
+  expect(message).toContain("b3 (tara)");
+  expect(message).not.toContain("fly-smoke");
+  expect(message).toMatch(/rename/i);
 
   const columns = rows(db, "select name from pragma_table_info('issue')");
   expect(columns).not.toContainEqual({ name: "source_key" });

@@ -10,6 +10,10 @@ import {
   IMPORT_TEXT_MAX,
   sourceStateTypes,
 } from "../server/service/import.js";
+import {
+  ISSUE_LABELS_MAX,
+  ISSUE_LINKS_MAX,
+} from "../server/service/validate.js";
 
 // Field docs go in .meta(), which both the OpenAPI spec and the MCP tools' JSON
 // Schema read; .openapi({ description }) reaches only the spec.
@@ -186,7 +190,7 @@ const text = z.string().max(64 * 1024);
 const projectRef = id.meta({
   description: "The project's id or its key, like TRL.",
 });
-const labelNames = z.array(labelName).max(50).meta({
+const labelNames = z.array(labelName).max(ISSUE_LABELS_MAX).meta({
   description:
     "Label names. A name matches the project's label ignoring the case of A-Z; a new name creates the label.",
 });
@@ -204,7 +208,7 @@ const links = z
         .meta({ description: "Defaults to the url." }),
     }),
   )
-  .max(50);
+  .max(ISSUE_LINKS_MAX);
 
 // the service's rule (service/validate.ts) before it uppercases, so the spec and MCP schema carry it
 const projectKey = z
@@ -323,8 +327,9 @@ const sourceAuthorInput = z
   });
 
 // An import row's values are checked by the service (service/import.ts), which reports every failing
-// row with its sourceKey or externalRef in one 422; a schema failure would stop at the first and name
-// no row. These schemas fix the shape, and `meta` carries the limits for the spec and the MCP tool.
+// row with its sourceKey or externalRef in one 422; a schema failure is reported by path
+// (issues.3.title) and names no row. These schemas fix the shape, and `meta` carries the limits for the
+// spec and the MCP tool. Fields still checked here are listed in the import route and tool descriptions.
 const importLinks = z
   .array(
     z.strictObject({
@@ -340,7 +345,7 @@ const importLinks = z
   .meta({ maxItems: IMPORT_LINKS_MAX });
 const importText = (what: string) =>
   z.string().meta({
-    description: `${what}, at most ${IMPORT_TEXT_MAX} characters (1 MiB).`,
+    description: `${what}, at most ${IMPORT_TEXT_MAX} characters.`,
     maxLength: IMPORT_TEXT_MAX,
   });
 
@@ -359,7 +364,7 @@ const importIssueSchema = z
     sourceKey: z.string().optional().meta({
       pattern: "^[A-Za-z0-9]{2,10}-[1-9]\\d*$",
       description:
-        "The issue's key in the system it came from (Linear's identifier, like JUS-187; a letter-or-digit prefix, a dash and a number). It is stored uppercased, and the issue is found by it as if it were the issue's id or key; a re-run sets it to the value sent. When its prefix is the project's key, a new issue keeps that number, so JUS-187 in Linear is JUS-187 in trail; if another issue already holds the number, the new one gets the project's next number and is listed in the result's renumbered. An imported issue's number never changes on a re-run. Unique across trail. Without it, an externalRef shaped like JUS-187 keeps its number instead.",
+        "The issue's key in the system it came from (Linear's identifier, like JUS-187; a letter-or-digit prefix, a dash and a number). It is stored uppercased, and the issue is found by it wherever an id or key is taken, after them: an id or key that looks the same wins; a re-run sets it to the value sent. When its prefix is the project's key, a new issue keeps that number, so JUS-187 in Linear is JUS-187 in trail; if another issue already holds the number, the new one gets the project's next number and is listed in the result's renumbered, and is reached by the key listed there, since its sourceKey finds the issue holding that key. An imported issue's number never changes on a re-run. Unique across trail. Without it, an externalRef shaped like JUS-187 keeps its number instead.",
       example: "JUS-187",
     }),
     title: z.string().meta({ description: "1 to 300 characters." }),
@@ -461,7 +466,7 @@ export const importResultSchema = z
       )
       .meta({
         description:
-          "Issues created without the number their sourceKey asked for, because another issue in the project held it. Each is found by its sourceKey and has its new key here.",
+          "Issues created without the number their sourceKey asked for, because another issue in the project held it. Each is reached by its key here: its sourceKey is the key of the issue that held the number, so it finds that issue.",
       }),
     created: importCountsSchema,
     updated: importCountsSchema,

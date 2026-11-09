@@ -219,8 +219,8 @@ test("POST /import with a duplicate issue externalRef is a 422 naming it", async
     },
   });
   expect(res.status).toBe(422);
-  expect(((await res.json()) as Body).error.message).toContain(
-    "issues lists externalRef lin-1 twice: send each row once, merged into one",
+  expect(((await res.json()) as Body).error.message).toBe(
+    "issues lists externalRef lin-1 twice: send each row once, merged into one. Nothing was imported: fix it and send the whole import again",
   );
 });
 

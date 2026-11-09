@@ -1,6 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { afterAll, expect, test } from "vitest";
+import { afterAll, describe, expect, test } from "vitest";
 import { createBot } from "../service/keys.js";
 import { projectKey, setupTestApp } from "../test-app.js";
 
@@ -37,6 +37,9 @@ async function tool(client: Client, name: string, args: Body = {}) {
 }
 
 let refs = 0;
+let sourceKeys = 0;
+/** A source key no other test in this file has used; they share one database and source keys are unique across it. */
+const freshSourceKey = (prefix = "JUS") => `${prefix}-${++sourceKeys}`;
 const issueRow = (sourceKey: string | undefined, extra: Body = {}) => ({
   externalRef: `uuid-${++refs}`,
   ...(sourceKey === undefined ? {} : { sourceKey }),
@@ -61,9 +64,12 @@ const get = async (path: string) => {
 
 test("an issue is found by its source key over REST and MCP, in any case, and every issue response shows it", async () => {
   const key = projectKey();
+  const five = freshSourceKey();
+  const six = freshSourceKey();
+  const seven = freshSourceKey();
   const demo = await importProject(key, [
-    issueRow("JUS-5"),
-    issueRow("jus-6", {
+    issueRow(five),
+    issueRow(six.toLowerCase(), {
       comments: [
         {
           externalRef: "c-1",
@@ -72,51 +78,51 @@ test("an issue is found by its source key over REST and MCP, in any case, and ev
         },
       ],
     }),
-    issueRow("JUS-7"),
+    issueRow(seven),
   ]);
   expect(demo.status).toBe(200);
 
-  const viaRest = await get("/issues/JUS-6");
+  const viaRest = await get(`/issues/${six}`);
   expect(viaRest.body).toMatchObject({
-    sourceKey: "JUS-6",
-    title: "issue jus-6",
+    sourceKey: six,
+    title: `issue ${six.toLowerCase()}`,
   });
-  expect((await get("/issues/jus-6")).body.id).toBe(viaRest.body.id);
-  expect((await get(`/issues/${viaRest.body.id}`)).body.sourceKey).toBe(
-    "JUS-6",
+  expect((await get(`/issues/${six.toLowerCase()}`)).body.id).toBe(
+    viaRest.body.id,
   );
+  expect((await get(`/issues/${viaRest.body.id}`)).body.sourceKey).toBe(six);
   const list = await get(`/issues?projectId=${key}`);
-  expect(list.body.items.map((i: Body) => i.sourceKey).sort()).toEqual([
-    "JUS-5",
-    "JUS-6",
-    "JUS-7",
-  ]);
-  const comments = await get("/issues/JUS-6/comments");
+  expect(list.body.items.map((i: Body) => i.sourceKey).sort()).toEqual(
+    [five, six, seven].sort(),
+  );
+  const comments = await get(`/issues/${six}/comments`);
   expect(comments.body.items).toHaveLength(1);
-  const patched = await request("PATCH", "/api/v1/issues/JUS-7", {
+  const patched = await request("PATCH", `/api/v1/issues/${seven}`, {
     json: { priority: 2 },
   });
-  expect(((await patched.json()) as Body).key).toBe(`${key}-3`);
-  expect((await get("/issues/JUS-99")).status).toBe(404);
+  const patchedBody = (await patched.json()) as Body;
+  expect(patchedBody.sourceKey).toBe(seven);
+  expect(patchedBody.priority).toBe(2);
+  expect((await get(`/issues/${freshSourceKey()}`)).status).toBe(404);
 
   const client = await connect(bot.key);
-  const viaMcp = await tool(client, "get_issue", { issueId: "JUS-6" });
+  const viaMcp = await tool(client, "get_issue", { issueId: six });
   expect(viaMcp.body).toMatchObject({
     id: viaRest.body.id,
-    sourceKey: "JUS-6",
+    sourceKey: six,
   });
   const commented = await tool(client, "add_comment", {
-    issueId: "jus-5",
+    issueId: five.toLowerCase(),
     body: "by source key",
   });
-  expect(commented.body.issueId).toBe((await get("/issues/JUS-5")).body.id);
+  expect(commented.body.issueId).toBe((await get(`/issues/${five}`)).body.id);
   const updated = await tool(client, "update_issue", {
-    issueId: "JUS-7",
+    issueId: seven,
     addLabels: ["seen"],
   });
   expect(updated.body.labels).toEqual(["seen"]);
   expect(
-    (await tool(client, "list_comments", { issueId: "JUS-6" })).body.items,
+    (await tool(client, "list_comments", { issueId: six })).body.items,
   ).toHaveLength(1);
 });
 
@@ -175,12 +181,22 @@ test("a re-import gives a taken number the project's next one and lists the renu
 
 test("a source key held by another issue is a 409 naming it", async () => {
   const key = projectKey();
-  await importProject(key, [issueRow("JUS-300")]);
-  const clash = await importProject(projectKey(), [issueRow("JUS-300")]);
+  const held = freshSourceKey();
+  await importProject(key, [issueRow(held)]);
+  const clashKey = projectKey();
+  const clash = await importProject(clashKey, [
+    issueRow(freshSourceKey()),
+    issueRow(held),
+  ]);
   expect(clash.status).toBe(409);
   expect(clash.body.error.message).toMatch(
-    /sourceKey JUS-300, but issue \S+ \(externalRef uuid-\d+\) already has it: .*own Linear identifier/,
+    new RegExp(
+      `sourceKey ${held}, but issue \\S+ \\(externalRef uuid-\\d+\\) already has it: .*own Linear identifier`,
+    ),
   );
+  // the failed import rolled back: the other project and its first row never landed, the holder is intact
+  expect((await get(`/issues?projectId=${clashKey}`)).status).toBe(404);
+  expect((await get(`/issues?projectId=${key}`)).body.items).toHaveLength(1);
 });
 
 test("bot names are unique ignoring case, and the refusal names the existing bot", () => {
@@ -286,8 +302,9 @@ test("an import takes a 600 KiB description and comment body and 200 links, whil
     url: `https://example.com/${i}`,
   }));
   const key = projectKey();
+  const bigKey = freshSourceKey();
   const res = await importProject(key, [
-    issueRow("JUS-1", {
+    issueRow(bigKey, {
       description: big,
       links,
       comments: [
@@ -301,7 +318,7 @@ test("an import takes a 600 KiB description and comment body and 200 links, whil
     comments: 1,
     links: 200,
   });
-  const issue = (await get("/issues/JUS-1")).body;
+  const issue = (await get(`/issues/${bigKey}`)).body;
   expect(issue.description).toHaveLength(600 * 1024);
   expect(issue.links).toHaveLength(200);
 
@@ -309,25 +326,35 @@ test("an import takes a 600 KiB description and comment body and 200 links, whil
     json: { projectId: key, title: "too long", description: big },
   });
   expect(create.status).toBe(422);
+  expect(((await create.json()) as Body).error.message).toMatch(
+    /^description: .*<=65536 characters/,
+  );
   const manyLinks = await request("POST", "/api/v1/issues", {
     json: { projectId: key, title: "too many", links: links.slice(0, 51) },
   });
   expect(manyLinks.status).toBe(422);
+  expect(((await manyLinks.json()) as Body).error.message).toMatch(/links.*50/);
 });
 
 test("an import lists every failing row with its sourceKey or externalRef, and writes nothing", async () => {
   const key = projectKey();
   const tooBig = "y".repeat(1024 * 1024 + 1);
+  const ok = freshSourceKey();
+  const big = freshSourceKey();
+  const links = freshSourceKey();
+  const comment = freshSourceKey();
+  const mcpBig = freshSourceKey();
+  const mcpTitle = freshSourceKey();
   const res = await importProject(key, [
-    issueRow("JUS-10"),
-    issueRow("JUS-11", { description: tooBig }),
+    issueRow(ok),
+    issueRow(big, { description: tooBig }),
     issueRow(undefined, { externalRef: "no-key", priority: 9 }),
-    issueRow("JUS-13", {
+    issueRow(links, {
       links: Array.from({ length: 201 }, (_, i) => ({
         url: `https://example.com/${i}`,
       })),
     }),
-    issueRow("JUS-14", {
+    issueRow(comment, {
       comments: [
         { externalRef: "c-1", body: "  ", createdAt: "2026-01-03T00:00:00Z" },
       ],
@@ -337,16 +364,20 @@ test("an import lists every failing row with its sourceKey or externalRef, and w
   const message: string = res.body.error.message;
   expect(message).toMatch(/^4 import problems/);
   expect(message).toMatch(
-    /- issue JUS-11 \(externalRef uuid-\d+\) description is 1048577 characters, over the limit of 1048576/,
+    new RegExp(
+      `- issue ${big} \\(externalRef uuid-\\d+\\) description is 1048577 characters, over the limit of 1048576`,
+    ),
   );
   expect(message).toMatch(/- issue no-key: priority must be 0/);
   expect(message).toMatch(
-    /- issue JUS-13 \(externalRef uuid-\d+\) lists 201 links, over the limit of 200/,
+    new RegExp(
+      `- issue ${links} \\(externalRef uuid-\\d+\\) lists 201 links, over the limit of 200`,
+    ),
   );
   expect(message).toMatch(
-    /- comment c-1 of issue JUS-14 .*body must not be empty/,
+    new RegExp(`- comment c-1 of issue ${comment} .*body must not be empty`),
   );
-  expect(message).not.toMatch(/JUS-10/);
+  expect(message).not.toMatch(new RegExp(ok));
   expect((await get(`/issues?projectId=${key}`)).status).toBe(404);
 
   const client = await connect(bot.key);
@@ -355,20 +386,21 @@ test("an import lists every failing row with its sourceKey or externalRef, and w
     key: projectKey(),
     name: "bad",
     issues: [
-      issueRow("JUS-20", { description: tooBig }),
-      issueRow("JUS-21", { title: " " }),
+      issueRow(mcpBig, { description: tooBig }),
+      issueRow(mcpTitle, { title: " " }),
     ],
   });
   expect(viaMcp.isError).toBe(true);
   expect(viaMcp.text).toMatch(/^validation_failed: 2 import problems/);
-  expect(viaMcp.text).toMatch(/JUS-20/);
-  expect(viaMcp.text).toMatch(/JUS-21/);
+  expect(viaMcp.text).toMatch(new RegExp(mcpBig));
+  expect(viaMcp.text).toMatch(new RegExp(mcpTitle));
 });
 
 test("a re-import whose label differs only by case renames the label, and the counts show just that", async () => {
   const key = projectKey();
+  const labelled = freshSourceKey();
   const issues = (label: string) => [
-    issueRow("JUS-30", { externalRef: "stable", labels: [label] }),
+    issueRow(labelled, { externalRef: "stable", labels: [label] }),
   ];
   const first = await importProject(key, issues("Bug"));
   expect(first.body.created.labels).toBe(1);
@@ -388,7 +420,58 @@ test("a re-import whose label differs only by case renames the label, and the co
   expect((await get(`/projects/${key}/labels`)).body.items).toMatchObject([
     { name: "bug" },
   ]);
-  expect((await get("/issues/JUS-30")).body.labels).toEqual(["bug"]);
+  expect((await get(`/issues/${labelled}`)).body.labels).toEqual(["bug"]);
   const third = await importProject(key, issues("bug"));
   expect(third.body.updated).toEqual(zero);
+});
+
+describe("addLabels and addLinks keep the 50-item caps of a full replace", () => {
+  const fifty = Array.from({ length: 50 }, (_, i) => i);
+
+  async function issueWith(json: Body) {
+    const project = (await importProject(projectKey(), [])).body.project.key;
+    const res = await request("POST", "/api/v1/issues", {
+      json: { projectId: project, title: "capped", ...json },
+    });
+    expect(res.status).toBe(201);
+    return ((await res.json()) as Body).id as string;
+  }
+  const patch = async (id: string, json: Body) => {
+    const res = await request("PATCH", `/api/v1/issues/${id}`, { json });
+    return { status: res.status, body: (await res.json()) as Body };
+  };
+
+  test("an addLabels that takes the set past 50 is a 422 and writes nothing", async () => {
+    const id = await issueWith({ labels: fifty.map((i) => `l${i}`) });
+    const over = await patch(id, { addLabels: ["one-more"] });
+    expect(over.status).toBe(422);
+    expect(over.body.error).toMatchObject({ code: "validation_failed" });
+    expect(over.body.error.message).toMatch(/51 labels.*50/);
+    expect((await get(`/issues/${id}`)).body.labels).toHaveLength(50);
+
+    // a swap that stays at 50, and re-adding a held name, are fine
+    const swap = await patch(id, {
+      removeLabels: ["l0"],
+      addLabels: ["L1", "new"],
+    });
+    expect(swap.status).toBe(200);
+    expect(swap.body.labels).toHaveLength(50);
+  });
+
+  test("an addLinks that takes the set past 50 is a 422 and writes nothing", async () => {
+    const url = (i: number | string) => `https://example.com/${i}`;
+    const id = await issueWith({ links: fifty.map((i) => ({ url: url(i) })) });
+    const over = await patch(id, { addLinks: [{ url: url("more") }] });
+    expect(over.status).toBe(422);
+    expect(over.body.error).toMatchObject({ code: "validation_failed" });
+    expect(over.body.error.message).toMatch(/51 links.*50/);
+    expect((await get(`/issues/${id}`)).body.links).toHaveLength(50);
+
+    const retitle = await patch(id, {
+      removeLinks: [url(0)],
+      addLinks: [{ url: url(1), title: "one" }, { url: url("more") }],
+    });
+    expect(retitle.status).toBe(200);
+    expect(retitle.body.links).toHaveLength(50);
+  });
 });
