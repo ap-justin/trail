@@ -22,7 +22,8 @@ kill_timeout = "20s"   # must stay above shutdown-timeout in litestream.yml
   force_https = true
   auto_stop_machines = "stop"
   auto_start_machines = true
-  min_machines_running = 0
+  # always on: a wake reads the Litestream binary from a slow disk before node starts (~7 s)
+  min_machines_running = 1
 
   [http_service.concurrency]
     type = "requests"
