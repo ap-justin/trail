@@ -1,7 +1,7 @@
 app = "trail-justin"
 primary_region = "sin"
 kill_signal = "SIGTERM"
-kill_timeout = "10s"
+kill_timeout = "20s"   # Litestream: 4 s node drain + up to 8 s final sync, under its 15 s shutdown-timeout
 
 [env]
   NODE_ENV = "production"
