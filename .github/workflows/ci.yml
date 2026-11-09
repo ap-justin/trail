@@ -28,6 +28,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: docker build -t trail .
       - run: docker run --rm trail node -e "require('better-sqlite3')(':memory:')"
+      - run: docker run --rm trail litestream version
       # boots the image on an empty data dir, as on a fresh Fly volume
       - run: |
           mkdir -p "$RUNNER_TEMP/data"
