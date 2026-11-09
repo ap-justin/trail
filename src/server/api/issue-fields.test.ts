@@ -65,7 +65,7 @@ test("an unknown issue key is a 404 that says what to pass", async () => {
     const { status, body } = await send("GET", `/issues/${ref}`);
     expect(status).toBe(404);
     expect(body.error.message).toBe(
-      `no issue ${ref}: pass the id or key (like TRL-12) of an existing issue`,
+      `no issue ${ref}: pass the id, the key (like TRL-12) or the source key (like JUS-187, kept from an import) of an existing issue`,
     );
   }
 });

@@ -50,6 +50,7 @@ test("POST /import upserts the project and answers the per-kind counts", async (
       externalRef: "P-JUS-9",
       createdBy: bot.actor.id,
     }),
+    renumbered: [],
     created: counts({ projects: 1, issues: 1, comments: 1, labels: 1 }),
     updated: counts({}),
     unchanged: counts({}),
@@ -77,7 +78,7 @@ test("POST /import upserts the project and answers the per-kind counts", async (
   expect(again.unchanged).toEqual(body.created);
 });
 
-test("POST /import keeps an issue's number from an externalRef in the project's key form; one already held is a 409", async () => {
+test("POST /import keeps an issue's number from an externalRef in the project's key form; one already held is renumbered", async () => {
   const keyed = {
     externalRef: "P-KEPT",
     key: "KPT",
@@ -104,12 +105,11 @@ test("POST /import keeps an issue's number from an externalRef in the project's 
       issues: [{ ...keyed.issues[0], externalRef: "KPT-188" }],
     },
   });
-  expect(res.status).toBe(409);
+  expect(res.status).toBe(200);
   const body = (await res.json()) as Body;
-  expect(body.error.code).toBe("conflict");
-  expect(body.error.message).toContain(
-    `issue KPT-188 keeps its number, but KPT-188 is already issue ${byHand.id}`,
-  );
+  expect(body.renumbered).toEqual([
+    { externalRef: "KPT-188", sourceKey: null, key: "KPT-189" },
+  ]);
 });
 
 test("POST /import with a status name that maps to nothing and no statusType is a 422 asking for statusType", async () => {
@@ -220,7 +220,7 @@ test("POST /import with a duplicate issue externalRef is a 422 naming it", async
   });
   expect(res.status).toBe(422);
   expect(((await res.json()) as Body).error.message).toBe(
-    "issues lists externalRef lin-1 twice: send each row once, merged into one",
+    "issues lists externalRef lin-1 twice: send each row once, merged into one. Nothing was imported: fix it and send the whole import again",
   );
 });
 

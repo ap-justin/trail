@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { and, asc, eq, or } from "drizzle-orm";
+import { and, asc, eq, or, sql } from "drizzle-orm";
 import type { Db } from "../db/client.js";
 import { actor, apiKey } from "../db/schema.js";
 import { ConflictError, NotFoundError, ValidationError } from "./errors.js";
@@ -35,7 +35,7 @@ function mintKey(tx: Tx, actorId: string): string {
 
 /**
  * Creates a bot and its key. The key is returned once and never stored. A bot's
- * name, and its label when it has one, are unique among bots.
+ * name (ignoring the case of A-Z), and its label when it has one, are unique among bots.
  */
 export function createBot(
   db: Db,
@@ -49,11 +49,16 @@ export function createBot(
       const twin = tx
         .select()
         .from(actor)
-        .where(and(eq(actor.kind, "bot"), eq(actor.displayName, name)))
+        .where(
+          and(
+            eq(actor.kind, "bot"),
+            sql`lower(${actor.displayName}) = lower(${name})`,
+          ),
+        )
         .get();
       if (twin) {
         throw new ConflictError(
-          `a bot named "${name}" already exists (${twin.id}): pick another name, or mint it another key with \`trail key create ${twin.label ?? twin.id}\``,
+          `a bot named "${twin.displayName}" already exists (${twin.id}), and bot names match ignoring the case of A-Z: pick another name than "${name}", or mint that bot another key with \`trail key create ${twin.label ?? twin.id}\``,
         );
       }
       if (label !== null) {

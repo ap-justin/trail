@@ -11,6 +11,23 @@ export type LinkInput = { url: string; title?: string };
 
 const projectKeyPattern = /^[A-Z0-9]{2,10}$/;
 
+/** Per-issue set sizes outside an import; the schema caps a full replace, `withinIssueCap` the merged add form. */
+export const ISSUE_LABELS_MAX = 50;
+export const ISSUE_LINKS_MAX = 50;
+
+export function withinIssueCap<T>(set: T[], what: "labels" | "links"): T[] {
+  const [max, remove] =
+    what === "labels"
+      ? [ISSUE_LABELS_MAX, "removeLabels"]
+      : [ISSUE_LINKS_MAX, "removeLinks"];
+  if (set.length > max) {
+    throw new ValidationError(
+      `the issue would have ${set.length} ${what}, over the limit of ${max}: remove some with ${remove} in the same patch`,
+    );
+  }
+  return set;
+}
+
 export function nonBlank(value: string, field: string): string {
   const trimmed = value.trim();
   if (trimmed === "") throw new ValidationError(`${field} must not be empty`);

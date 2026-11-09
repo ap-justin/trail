@@ -28,6 +28,9 @@ jobs:
       - uses: actions/checkout@v4
       - run: docker build -t trail .
       - run: docker run --rm trail node -e "require('better-sqlite3')(':memory:')"
+      - run: docker run --rm trail litestream version
+      # parses litestream.yml as Fly's boot does; a config it rejects crash-loops the Machine before node starts
+      - run: docker run --rm -e BUCKET_NAME=ci trail litestream databases -config /etc/litestream.yml
       # boots the image on an empty data dir, as on a fresh Fly volume
       - run: |
           mkdir -p "$RUNNER_TEMP/data"

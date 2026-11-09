@@ -42,6 +42,7 @@ test("POST /issues opens an unassigned issue and returns 201", async () => {
     externalRef: null,
     sourceAuthor: null,
     sourceStatus: null,
+    sourceKey: null,
     createdBy: bot.actor.id,
     createdAt: expect.any(String),
     updatedAt: expect.any(String),

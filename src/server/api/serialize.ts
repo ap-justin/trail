@@ -42,6 +42,7 @@ export function toIssue(row: Issue): IssueView {
     id: row.id,
     key: row.key,
     number: row.number,
+    sourceKey: row.sourceKey,
     projectId: row.projectId,
     title: row.title,
     description: row.description,
@@ -128,6 +129,7 @@ export function toPage<T, V>(page: Page<T>, view: (row: T) => V): PageView<V> {
 export function toImportResult(result: ImportResult): ImportResultView {
   return {
     project: toProject(result.project),
+    renumbered: result.renumbered,
     created: result.created,
     updated: result.updated,
     unchanged: result.unchanged,

@@ -10,7 +10,7 @@ import type { Service } from "../service/index.js";
 import { registerTools } from "./tools.js";
 
 const instructions =
-  "trail tracks projects, issues, comments and status updates. Every write is credited to the bot whose key calls this server. A project has a key like TRL and its issues keys like TRL-12: any argument naming a project or an issue takes its id or its key.";
+  "trail tracks projects, issues, comments and status updates. Every write is credited to the bot whose key calls this server. A project has a key like TRL and its issues keys like TRL-12: any argument naming a project takes its id or key, and any naming an issue takes its id, its key or the source key it kept from an import (JUS-187).";
 
 /**
  * Streamable HTTP at `/mcp`, stateless: each POST gets a fresh server and
