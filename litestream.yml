@@ -2,9 +2,10 @@
 # Credentials come from the app's secrets AWS_ACCESS_KEY_ID and
 # AWS_SECRET_ACCESS_KEY, set by `fly storage create`; BUCKET_NAME too.
 
-# Fly sends SIGTERM on stop; Litestream passes it to node, waits for the
-# drain (4 s), then ships the last WAL changes. Fly's kill_timeout
-# (fly.toml) must stay above shutdown-timeout.
+# Fly sends SIGTERM on stop; Litestream passes it to node, waits for node's
+# drain (deadlineMs in src/server/index.ts), then ships the last WAL changes.
+# The drain plus shutdown-sync-timeout must fit in shutdown-timeout, and
+# Fly's kill_timeout (fly.toml) must stay above shutdown-timeout.
 shutdown-timeout: 15s
 shutdown-sync-timeout: 8s
 

@@ -21,6 +21,6 @@ if (!(server instanceof Server)) throw new Error("expected an HTTP/1 server");
 onShutdownSignal({
   server,
   onClosed: () => db.$client.close(),
-  // under Fly's default kill_timeout (5 s), or the drain is killed mid-way
+  // plus shutdown-sync-timeout, under shutdown-timeout in litestream.yml, or the drain is killed mid-way
   deadlineMs: 4_000,
 });
