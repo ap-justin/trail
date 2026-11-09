@@ -1,5 +1,5 @@
 app = "trail-justin"
-primary_region = "sin"
+primary_region = "iad"
 kill_signal = "SIGTERM"
 kill_timeout = "20s"   # must stay above shutdown-timeout in litestream.yml
 
