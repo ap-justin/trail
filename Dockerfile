@@ -13,7 +13,6 @@ RUN pnpm build && pnpm prune --prod
 
 FROM node:26-bookworm-slim
 ENV NODE_ENV=production
-# Litestream v0.5.18, linux x86_64, pinned to the release's published sha256
 ADD --checksum=sha256:d3687b9fd0f2e9426bbd3da828429ff3f1dfc5c9b74d54fdf028e4ee510e7dea \
   https://github.com/benbjohnson/litestream/releases/download/v0.5.18/litestream-0.5.18-linux-x86_64.tar.gz \
   /tmp/litestream.tar.gz

@@ -3,8 +3,8 @@
 # AWS_SECRET_ACCESS_KEY, set by `fly storage create`; BUCKET_NAME too.
 
 # Fly sends SIGTERM on stop; Litestream passes it to node, waits for the
-# drain (4 s), then ships the last WAL changes. Fly's kill_timeout (20 s)
-# must stay above shutdown-timeout.
+# drain (4 s), then ships the last WAL changes. Fly's kill_timeout
+# (fly.toml) must stay above shutdown-timeout.
 shutdown-timeout: 15s
 shutdown-sync-timeout: 8s
 
