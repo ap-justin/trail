@@ -1,0 +1,14 @@
+language js
+
+// src/web may reach src/server and src/shared/schemas.ts through `import type` only.
+// `import { type X }` still loads the module under verbatimModuleSyntax, so it is flagged too.
+or {
+  `import $clause from $source` as $stmt where {
+    $stmt <: not r"import type\s.*"
+  },
+  `import $source` as $stmt,
+  `import($source)` as $stmt
+} where {
+  $source <: r".*/server/.*|.*shared/schemas.*",
+  register_diagnostic(span=$source, message="src/web may only `import type` from src/server and src/shared/schemas.ts: a value import bundles Drizzle and better-sqlite3 into the browser.", severity="error")
+}

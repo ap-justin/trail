@@ -1,6 +1,6 @@
 #!/bin/sh
 # Boots the built bundle (dist/) on a throwaway database and exercises it:
-# /health, unauthenticated 401s, a bearer key minted by the built CLI on
+# dist/web/index.html, /health, unauthenticated 401s, a bearer key minted by the built CLI on
 # /api/v1 and /mcp, and better-auth's mount answering sign-in with no GitHub app.
 # Run after `pnpm build`; `pnpm smoke` does both. Deliberately no --env-file:
 # a developer's .env must not leak into the check.
@@ -36,6 +36,8 @@ for _ in $(seq 50); do
   sleep 0.2
 done
 [ -n "$up" ] || { echo "server never answered /health" >&2; exit 1; }
+
+[ -f dist/web/index.html ] || { echo "dist/web/index.html missing: pnpm build must end with the SPA beside the server bundle" >&2; exit 1; }
 
 key=$(node dist/cli.js bot create smoke --key-only)
 [ -n "$key" ] || { echo "dist/cli.js printed no key" >&2; exit 1; }

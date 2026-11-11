@@ -10,6 +10,7 @@ An agent-first issue tracker. Bots create projects, issues, comments and progres
 ## Commands
 
 - `pnpm dev` runs the server with reload; `pnpm build` then `pnpm start` runs the bundle. Both read `DATABASE_PATH` and `PORT` (see `.env.example`).
+- The human UI is a Vite SPA in `src/web`. Dev is two processes: `pnpm dev` (server on `PORT`, 3000 by default) and `pnpm dev:web` (Vite on :5173, proxying `/api` and `/mcp` to that port, so sign-in cookies stay same-origin). `pnpm build` writes the server bundle to `dist/` and the SPA to `dist/web`. Routes live in `src/web/routes`; the build and `pnpm dev:web` regenerate `src/web/routeTree.gen.ts`, which is committed so `pnpm typecheck` stands alone. `src/web` imports server types with `import type` only; lint enforces it.
 - Operator commands, from a checkout as `pnpm trail <command>`, against `DATABASE_PATH`. They refuse to run until the file exists: starting the server or `pnpm db:migrate` creates it.
   - `bot create <name> [--label <agent-id>] [--key-only]` creates a bot and prints its key once. `--label` is the bot's id in the system that runs it; names (ignoring the case of A-Z) and labels are unique among bots. `--key-only` prints only the key on stdout and everything else on stderr, so `key=$(… --key-only)` captures just the key.
   - `key create <bot-id-or-label> [--key-only]` mints another key for an existing bot.

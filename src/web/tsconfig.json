@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    // node: type-only imports from src/shared/schemas.ts pull server modules into this program
+    "types": ["vite/client", "node"],
+    "jsx": "react-jsx",
+    "paths": { "@/*": ["./*"] }
+  },
+  "include": ["."],
+  "exclude": []
+}
