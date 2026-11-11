@@ -31,10 +31,11 @@ jobs:
       - run: docker run --rm trail litestream version
       # parses litestream.yml as Fly's boot does; a config it rejects crash-loops the Machine before node starts
       - run: docker run --rm -e BUCKET_NAME=ci trail litestream databases -config /etc/litestream.yml
-      # boots the image on an empty data dir, as on a fresh Fly volume
+      # boots the image on an empty data dir, as on a fresh Fly volume; the server needs
+      # TRAIL_OWNER_GITHUB and BETTER_AUTH_SECRET to start (sign-in itself stays off)
       - run: |
           mkdir -p "$RUNNER_TEMP/data"
-          docker run -d --name trail -p 8080:8080 -e PORT=8080 -e DATABASE_PATH=/data/trail.db -v "$RUNNER_TEMP/data:/data" trail
+          docker run -d --name trail -p 8080:8080 -e PORT=8080 -e DATABASE_PATH=/data/trail.db -e TRAIL_OWNER_GITHUB=ci-owner -e BETTER_AUTH_SECRET=ci-secret-ci-secret-ci-secret-ci-secret -v "$RUNNER_TEMP/data:/data" trail
           for i in $(seq 1 30); do curl -fsS localhost:8080/health && exit 0; sleep 1; done
           docker logs trail
           exit 1
