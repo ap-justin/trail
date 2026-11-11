@@ -21,6 +21,13 @@ export interface TrailAuth {
   resolveViewer(headers: Headers): Promise<Viewer>;
   /** Sets `c.var.viewer`, and passes on a refreshed session cookie. */
   viewer: MiddlewareHandler<ViewerEnv>;
+  /** The owner's GitHub login, lowercased. */
+  ownerLogin: string;
+  /**
+   * Whether the request's Origin is one better-auth trusts: BETTER_AUTH_URL's
+   * origin (and any trustedOrigins), or without it the request's own origin.
+   */
+  isTrustedOrigin(request: Request): Promise<boolean>;
 }
 
 // the routes that start or finish a GitHub sign-in
@@ -127,6 +134,15 @@ export function createAuth({
   }
 
   const trail: TrailAuth = {
+    ownerLogin: owner,
+    async isTrustedOrigin(request) {
+      const origin = request.headers.get("origin");
+      if (!origin) return false;
+      // without a baseURL better-auth trusts the origin it infers from each request
+      if (!config.BETTER_AUTH_URL)
+        return origin === new URL(request.url).origin;
+      return (await auth.$context).isTrustedOrigin(origin);
+    },
     async handler(request) {
       if (signInUnavailable && signInPath.test(new URL(request.url).pathname)) {
         const error = {

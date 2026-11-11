@@ -7,15 +7,19 @@ import type { Db } from "./db/client.js";
 import type { EventBus } from "./events/bus.js";
 import { mcpRoutes } from "./mcp/index.js";
 import { createService } from "./service/index.js";
+import { createWeb } from "./web/index.js";
 
 export function createApp({
   db,
   bus,
   auth,
+  shutdown,
 }: {
   db: Db;
   bus: EventBus;
   auth: TrailAuth;
+  /** aborted when the server starts to drain: ends every open event stream */
+  shutdown: AbortSignal;
 }) {
   const service = createService({ db, bus });
   const app = new Hono({
@@ -30,6 +34,7 @@ export function createApp({
   app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
   app.route("/api/v1", createApi({ db, service }));
   app.route("/mcp", mcpRoutes({ db, service }));
+  app.route("/api/web", createWeb({ db, service, bus, auth, shutdown }));
   // a sub-app's notFound never runs, so unknown /api/v1 routes land here too
   app.notFound(handleNotFound);
   app.onError(handleError);

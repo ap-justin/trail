@@ -8,12 +8,15 @@ import { afterAll, vi } from "vitest";
 import { createApp } from "./app.js";
 import { type AuthConfig, createAuth } from "./auth/auth.js";
 import { migrate, openDatabase } from "./db/client.js";
-import { user } from "./db/schema.js";
+import { invite, project, projectMember, user } from "./db/schema.js";
 import { type ActivityEvent, createEventBus } from "./events/bus.js";
 import { createBot } from "./service/keys.js";
 
 /** The owner's login in every test app. */
 export const TEST_OWNER = "trail-owner";
+
+/** The origin `app.request` gives a path-only request. */
+export const TEST_ORIGIN = "http://localhost";
 
 const testAuthConfig: AuthConfig = {
   TRAIL_OWNER_GITHUB: TEST_OWNER,
@@ -48,7 +51,8 @@ export function setupTestApp({
     config: { ...testAuthConfig, ...authOverrides },
     plugins: [testUtils()],
   });
-  const app = createApp({ db, bus, auth });
+  const shutdown = new AbortController();
+  const app = createApp({ db, bus, auth, shutdown: shutdown.signal });
   const bot = createBot(db, "tester");
 
   let githubIds = 1000;
@@ -99,7 +103,9 @@ export function setupTestApp({
 
   /**
    * Sends `json` as the body and the bot's key unless `key` overrides it (null
-   * sends none), and `cookie` as the Cookie header.
+   * sends none), and `cookie` as the Cookie header. A non-GET carries the app's
+   * own Origin, as a browser on the SPA sends it, unless `origin` overrides it
+   * (null sends none).
    */
   function request(
     method: string,
@@ -108,11 +114,18 @@ export function setupTestApp({
       json,
       key = bot.key,
       cookie,
-    }: { json?: unknown; key?: string | null; cookie?: string } = {},
+      origin = TEST_ORIGIN,
+    }: {
+      json?: unknown;
+      key?: string | null;
+      cookie?: string;
+      origin?: string | null;
+    } = {},
   ) {
     const headers: Record<string, string> = {};
     if (key !== null) headers.authorization = `Bearer ${key}`;
     if (cookie !== undefined) headers.cookie = cookie;
+    if (origin !== null && method !== "GET") headers.origin = origin;
     if (json !== undefined) headers["content-type"] = "application/json";
     return app.request(path, {
       method,
@@ -124,6 +137,29 @@ export function setupTestApp({
   /** A further bot with its own key; pass the key to `request` to write as it. */
   const addBot = (name: string) => createBot(db, name);
 
+  /** A project written straight to the database, created by the bot, with no activity event. */
+  const addProject = (name = "p") =>
+    db
+      .insert(project)
+      .values({ key: projectKey(), name, createdBy: bot.actor.id })
+      .returning()
+      .get();
+
+  /** Invites `login` to these projects and signs it in; returns the Cookie header. */
+  async function addMember(
+    login: string,
+    projectIds: string[],
+    account: { githubId?: number; name?: string } = {},
+  ): Promise<string> {
+    db.insert(invite)
+      .values({ username: login, invitedBy: bot.actor.id })
+      .run();
+    for (const projectId of projectIds) {
+      db.insert(projectMember).values({ username: login, projectId }).run();
+    }
+    return signIn(login, account);
+  }
+
   return {
     db,
     bus,
@@ -131,11 +167,14 @@ export function setupTestApp({
     auth,
     bot,
     addBot,
+    addProject,
+    addMember,
     published,
     request,
     owner: TEST_OWNER,
     signIn,
     viewerOf,
+    endStreams: () => shutdown.abort(),
   };
 }
 
@@ -191,3 +230,46 @@ export async function atFakeTimeAsync<T>(
 let keys = 0;
 /** A project key no other call in this test file has returned. */
 export const projectKey = () => `K${(++keys).toString(36).toUpperCase()}`;
+
+export type EventStreamMessage = {
+  id?: string;
+  data?: string;
+  comment?: string;
+};
+
+/** Reads an SSE response one message, or comment line, at a time. */
+export function readEventStream(res: Response) {
+  const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  /** The next message; null once the stream has ended. */
+  async function next(): Promise<EventStreamMessage | null> {
+    while (!buffer.includes("\n\n")) {
+      const { done, value } = await reader.read();
+      if (done) return null;
+      buffer += decoder.decode(value, { stream: true });
+    }
+    const end = buffer.indexOf("\n\n");
+    const block = buffer.slice(0, end);
+    buffer = buffer.slice(end + 2);
+    const message: EventStreamMessage = {};
+    for (const line of block.split("\n")) {
+      if (line.startsWith(": ")) message.comment = line.slice(2);
+      else if (line.startsWith("id: ")) message.id = line.slice(4);
+      else if (line.startsWith("data: ")) message.data = line.slice(6);
+    }
+    return message;
+  }
+  /** The next data message's parsed JSON with its id as `seq`, skipping comment lines. */
+  async function nextEntry() {
+    for (;;) {
+      const message = await next();
+      if (message === null) return null;
+      if (message.data !== undefined) {
+        // biome-ignore lint/suspicious/noExplicitAny: loose entries for field reads
+        return { seq: Number(message.id), ...JSON.parse(message.data) } as any;
+      }
+    }
+  }
+  return { next, nextEntry, cancel: () => reader.cancel() };
+}

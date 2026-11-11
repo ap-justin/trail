@@ -11,6 +11,7 @@
     "dev": "tsx watch --env-file-if-exists=.env src/server/index.ts",
     "build": "tsup",
     "start": "node --enable-source-maps --env-file-if-exists=.env dist/index.js",
+    "check": "pnpm lint && pnpm typecheck && pnpm test",
     "lint": "biome check",
     "format": "biome check --write",
     "smoke": "pnpm build && sh scripts/smoke.sh",

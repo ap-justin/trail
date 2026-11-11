@@ -16,9 +16,15 @@ if ("missing" in config.github) {
   );
 }
 const auth = createAuth({ db, config });
+const draining = new AbortController();
 const server = serve(
   {
-    fetch: createApp({ db, bus: createEventBus(), auth }).fetch,
+    fetch: createApp({
+      db,
+      bus: createEventBus(),
+      auth,
+      shutdown: draining.signal,
+    }).fetch,
     port: config.PORT,
   },
   (info) => {
@@ -30,6 +36,7 @@ if (!(server instanceof Server)) throw new Error("expected an HTTP/1 server");
 
 onShutdownSignal({
   server,
+  onDraining: () => draining.abort(),
   onClosed: () => db.$client.close(),
   // plus shutdown-sync-timeout, under shutdown-timeout in litestream.yml, or the drain is killed mid-way
   deadlineMs: 4_000,
