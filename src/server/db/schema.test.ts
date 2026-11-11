@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { and, asc, desc, eq, gt, lt, or } from "drizzle-orm";
 import { afterAll, expect, test } from "vitest";
 import { migrate, openDatabase } from "./client.js";
+import { newId } from "./id.js";
 import {
   activityEvent,
   actor,
@@ -723,6 +724,77 @@ test("a username is invited once, and its projects must exist", () => {
   expect(errorCode(member("once", "nope"))).toBe(
     "SQLITE_CONSTRAINT_FOREIGNKEY",
   );
+});
+
+test("an invite binds one GitHub id, never held by another invite", () => {
+  const pending = db
+    .insert(invite)
+    .values({ username: "binds", invitedBy: human.id })
+    .returning()
+    .get();
+  expect(pending.githubId).toBeNull();
+  const bind = (username: string, githubId: number) => () =>
+    db
+      .update(invite)
+      .set({ githubId })
+      .where(eq(invite.username, username))
+      .run();
+  bind("binds", 4001)();
+  db.insert(invite)
+    .values({ username: "binds-too", invitedBy: human.id })
+    .run();
+  expect(errorCode(bind("binds-too", 4001))).toBe("SQLITE_CONSTRAINT_UNIQUE");
+  expect(errorCode(bind("binds-too", 4002))).toBe("no error");
+});
+
+test("an invite's GitHub id, once bound, is never rewritten or cleared", () => {
+  db.insert(invite)
+    .values({ username: "pinned", invitedBy: human.id, githubId: 4101 })
+    .run();
+  const rebind = (githubId: number | null) => () =>
+    db
+      .update(invite)
+      .set({ githubId })
+      .where(eq(invite.username, "pinned"))
+      .run();
+  expect(errorCode(rebind(4102))).toBe("SQLITE_CONSTRAINT_TRIGGER");
+  expect(errorCode(rebind(null))).toBe("SQLITE_CONSTRAINT_TRIGGER");
+  expect(errorCode(rebind(4101))).toBe("no error");
+  expect(
+    db.select().from(invite).where(eq(invite.username, "pinned")).get()
+      ?.githubId,
+  ).toBe(4101);
+});
+
+test("one human at most is the owner, and a bot never is", () => {
+  const person = (isOwner: boolean, kind: "human" | "bot" = "human") =>
+    db
+      .insert(actor)
+      .values({ kind, displayName: `owner-${newId()}`, isOwner })
+      .returning();
+  expect(
+    db
+      .insert(actor)
+      .values({ kind: "human", displayName: "p" })
+      .returning()
+      .get().isOwner,
+  ).toBe(false);
+  expect(errorCode(() => person(true, "bot").get())).toBe(
+    "SQLITE_CONSTRAINT_CHECK",
+  );
+  expect(
+    errorCode(() =>
+      sqlite
+        .prepare(
+          "insert into actor (id, kind, display_name, is_owner, created_at) values ('o2', 'human', 'p', 2, 0)",
+        )
+        .run(),
+    ),
+  ).toBe("SQLITE_CONSTRAINT_CHECK");
+  const owner = person(true).get();
+  expect(owner.isOwner).toBe(true);
+  expect(errorCode(() => person(true).get())).toBe("SQLITE_CONSTRAINT_UNIQUE");
+  expect(errorCode(() => person(false).get())).toBe("no error");
 });
 
 test("removing an invite drops its projects and keeps the person's actor and writing", () => {

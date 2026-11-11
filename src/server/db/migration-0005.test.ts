@@ -14,15 +14,18 @@ import { type Db, migrate, openDatabase } from "./client.js";
 const dir = mkdtempSync(join(tmpdir(), "trail-0005-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
-// the shipped migrations cut back to 0004, the schema live databases hold
-function through0004(): string {
-  const folder = join(dir, "migrations-0004");
+// the shipped migrations up to `last`; later steps stay out, so their columns never
+// reach the rows this file compares
+function through(last: number): string {
+  const folder = join(dir, `migrations-${last}`);
   cpSync(fileURLToPath(new URL("./migrations", import.meta.url)), folder, {
     recursive: true,
   });
   const journalPath = join(folder, "meta", "_journal.json");
   const journal = JSON.parse(readFileSync(journalPath, "utf8"));
-  journal.entries = journal.entries.filter((e: { idx: number }) => e.idx <= 4);
+  journal.entries = journal.entries.filter(
+    (e: { idx: number }) => e.idx <= last,
+  );
   writeFileSync(journalPath, JSON.stringify(journal));
   return folder;
 }
@@ -45,7 +48,7 @@ const tables = [
 
 test("a live database keeps every row, and its humans start with no GitHub login", () => {
   const db = openDatabase(join(dir, "live.db"));
-  migrate(db, through0004());
+  migrate(db, through(4));
   db.$client.exec(`
     insert into actor (id, kind, display_name, github_id, label, created_at) values
       ('b1', 'bot', 'Tara', null, 'agt_1', 0), ('h1', 'human', 'Justin', 89639563, null, 0);
@@ -72,7 +75,7 @@ test("a live database keeps every row, and its humans start with no GitHub login
     );
   const before = allRows();
 
-  migrate(db);
+  migrate(db, through(5));
 
   expect(allRows()).toEqual(
     Object.fromEntries(
@@ -92,11 +95,11 @@ test("a live database keeps every row, and its humans start with no GitHub login
 
 test("an existing bot cannot be given a GitHub login after the migration", () => {
   const db = openDatabase(join(dir, "live-bot.db"));
-  migrate(db, through0004());
+  migrate(db, through(4));
   db.$client.exec(
     "insert into actor (id, kind, display_name, created_at) values ('b1', 'bot', 'Tara', 0)",
   );
-  migrate(db);
+  migrate(db, through(5));
   expect(() =>
     db.$client
       .prepare("update actor set github_login = 'tara' where id = 'b1'")

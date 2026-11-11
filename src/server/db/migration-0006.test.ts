@@ -14,15 +14,18 @@ import { type Db, migrate, openDatabase } from "./client.js";
 const dir = mkdtempSync(join(tmpdir(), "trail-0006-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
-// the shipped migrations cut back to 0005, the schema live databases hold
-function through0005(): string {
-  const folder = join(dir, "migrations-0005");
+// the shipped migrations up to `last`; later steps stay out, so their columns never
+// reach the rows this file compares
+function through(last: number): string {
+  const folder = join(dir, `migrations-${last}`);
   cpSync(fileURLToPath(new URL("./migrations", import.meta.url)), folder, {
     recursive: true,
   });
   const journalPath = join(folder, "meta", "_journal.json");
   const journal = JSON.parse(readFileSync(journalPath, "utf8"));
-  journal.entries = journal.entries.filter((e: { idx: number }) => e.idx <= 5);
+  journal.entries = journal.entries.filter(
+    (e: { idx: number }) => e.idx <= last,
+  );
   writeFileSync(journalPath, JSON.stringify(journal));
   return folder;
 }
@@ -31,7 +34,7 @@ const rows = (db: Db, sql: string) => db.$client.prepare(sql).all();
 
 test("a database holding 0005 data keeps every row and gains empty, STRICT auth tables", () => {
   const db = openDatabase(join(dir, "live.db"));
-  migrate(db, through0005());
+  migrate(db, through(5));
   db.$client.exec(`
     insert into actor (id, kind, display_name, github_id, github_login, created_at) values
       ('b1', 'bot', 'Tara', null, null, 0), ('h1', 'human', 'Justin', 89639563, 'justin', 0);
@@ -43,7 +46,7 @@ test("a database holding 0005 data keeps every row and gains empty, STRICT auth 
   const kept = ["actor", "project", "invite", "project_member"];
   const before = kept.map((t) => rows(db, `select * from ${t} order by 1`));
 
-  migrate(db);
+  migrate(db, through(6));
 
   expect(kept.map((t) => rows(db, `select * from ${t} order by 1`))).toEqual(
     before,

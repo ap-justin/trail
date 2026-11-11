@@ -127,7 +127,11 @@ const assigneeIds = (event: ActivityEvent) => {
  * the feed doesn't show, several for an `issue.updated` that changed several
  * fields. Every event must have a project.
  */
-export function entriesOf(db: Db, events: ActivityEvent[]): EntryView[] {
+export const entriesOf = (db: Db, events: ActivityEvent[]): EntryView[] =>
+  entriesByEvent(db, events).flat();
+
+/** `entriesOf`, kept apart per event: the i-th list holds the i-th event's entries. */
+export function entriesByEvent(db: Db, events: ActivityEvent[]): EntryView[][] {
   if (events.length === 0) return [];
   const commentIds = events
     .filter((e) => e.action === "comment.created")
@@ -183,7 +187,7 @@ export function entriesOf(db: Db, events: ActivityEvent[]): EntryView[] {
     ...events.flatMap(assigneeIds),
   ]);
 
-  return events.flatMap((event) => {
+  return events.map((event) => {
     const base = {
       createdAt: event.createdAt.toISOString(),
       actor: actorOf(event.actorId),

@@ -740,6 +740,7 @@ const githubUsername = z
   .string()
   .trim()
   .toLowerCase()
+  .max(39)
   .regex(
     /^[a-z0-9](?:-?[a-z0-9]){0,38}$/,
     "must be a GitHub username: up to 39 letters, digits and single inner hyphens",

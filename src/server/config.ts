@@ -13,35 +13,51 @@ const optional = z
 const serverSchema = databaseSchema
   .extend({
     PORT: z.coerce.number().int().min(0).max(65535).default(3000),
-    // the GitHub username whose sign-in is the owner, matched ignoring case
+    // the GitHub username whose first sign-in claims the owner, matched ignoring case;
+    // the same shape as actor.github_login's CHECK in db/schema.ts, so the claim can be stored
     TRAIL_OWNER_GITHUB: z
       .string()
-      .trim()
-      .min(1)
-      .transform((v) => v.toLowerCase()),
+      .max(39)
+      .toLowerCase()
+      .regex(
+        /^[a-z0-9](?:-?[a-z0-9])*$/,
+        "must be a GitHub username (letters, digits, single inner hyphens; no @)",
+      ),
     // signs session cookies and OAuth state; better-auth asks for 32+ characters
     BETTER_AUTH_SECRET: z.string().min(32),
-    // the public origin, e.g. https://trail.fly.dev: behind a TLS-terminating proxy
-    // the request URL says http, which would put http in GitHub's redirect_uri
+    // the public origin, e.g. https://trail.fly.dev, which GitHub sign-in needs: behind
+    // a TLS-terminating proxy the request URL says http, and so would the redirect_uri
     BETTER_AUTH_URL: optional.pipe(z.url().optional()),
     GITHUB_CLIENT_ID: optional,
     GITHUB_CLIENT_SECRET: optional,
   })
   .transform(({ GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, ...rest }) => ({
     ...rest,
-    github: githubOAuth(GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET),
+    github: githubOAuth({
+      GITHUB_CLIENT_ID,
+      GITHUB_CLIENT_SECRET,
+      BETTER_AUTH_URL: rest.BETTER_AUTH_URL,
+    }),
   }));
 
 export type GitHubOAuth =
   | { clientId: string; clientSecret: string }
   | { missing: string[] };
 
-function githubOAuth(clientId?: string, clientSecret?: string): GitHubOAuth {
-  if (clientId && clientSecret) return { clientId, clientSecret };
-  const missing: string[] = [];
-  if (!clientId) missing.push("GITHUB_CLIENT_ID");
-  if (!clientSecret) missing.push("GITHUB_CLIENT_SECRET");
-  return { missing };
+/** GitHub sign-in's credentials, or the variables it still needs. */
+function githubOAuth(
+  vars: Record<
+    "GITHUB_CLIENT_ID" | "GITHUB_CLIENT_SECRET" | "BETTER_AUTH_URL",
+    string | undefined
+  >,
+): GitHubOAuth {
+  const missing = Object.entries(vars)
+    .filter(([, value]) => !value)
+    .map(([name]) => name);
+  const { GITHUB_CLIENT_ID: clientId, GITHUB_CLIENT_SECRET: clientSecret } =
+    vars;
+  if (missing.length > 0 || !clientId || !clientSecret) return { missing };
+  return { clientId, clientSecret };
 }
 
 export type DatabaseConfig = z.infer<typeof databaseSchema>;

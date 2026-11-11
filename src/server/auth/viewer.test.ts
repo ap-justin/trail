@@ -6,7 +6,7 @@ import {
   project,
   projectMember,
 } from "../db/schema.js";
-import { projectKey, setupTestApp } from "../test-app.js";
+import { projectKey, setupTestApp, TEST_OWNER_ID } from "../test-app.js";
 
 const { db, bot, owner, signIn, viewerOf } = setupTestApp();
 
@@ -20,7 +20,9 @@ const addProject = () =>
 test("the owner signs in as owner and sees every project", async () => {
   const a = addProject();
   const b = addProject();
-  const viewer = await viewerOf(await signIn(owner));
+  const viewer = await viewerOf(
+    await signIn(owner, { githubId: TEST_OWNER_ID }),
+  );
   expect(viewer).toMatchObject({ kind: "owner", login: owner });
   expect(viewer.kind === "owner" && viewer.projects.map((p) => p.id)).toEqual(
     expect.arrayContaining([a.id, b.id]),
@@ -78,10 +80,11 @@ test("a GitHub login matches the invite and the owner ignoring case", async () =
     login: "grace",
     actor: { githubLogin: "grace" },
   });
-  expect(await viewerOf(await signIn(owner.toUpperCase()))).toMatchObject({
-    kind: "owner",
-    login: owner,
-  });
+  expect(
+    await viewerOf(
+      await signIn(owner.toUpperCase(), { githubId: TEST_OWNER_ID }),
+    ),
+  ).toMatchObject({ kind: "owner", login: owner });
 });
 
 test("with no cookie, or a cookie no session matches, the viewer is anonymous", async () => {
@@ -125,14 +128,17 @@ test("an account invited after it signed in is a member on its next request", as
   });
 });
 
-test("a renamed account is found by its GitHub id and answers to its new login", async () => {
-  invite("old-name");
+test("a renamed member keeps its access, and its projects, under the new login", async () => {
+  const mine = addProject();
+  invite("old-name", mine.id);
   await signIn("old-name", { githubId: 500 });
   const before = db.select().from(actor).where(eq(actor.githubId, 500)).get();
   const cookie = await signIn("new-name", { githubId: 500 });
-  expect(await viewerOf(cookie)).toEqual({
-    kind: "not_invited",
+  expect(await viewerOf(cookie)).toMatchObject({
+    kind: "member",
     login: "new-name",
+    actor: { id: before?.id, githubLogin: "new-name" },
+    projects: [{ id: mine.id }],
   });
   expect(db.select().from(actor).where(eq(actor.githubId, 500)).get()).toEqual({
     ...before,
@@ -140,16 +146,66 @@ test("a renamed account is found by its GitHub id and answers to its new login",
   });
 });
 
-test("a login another account gave up goes to the account that holds it now", async () => {
-  invite("taken");
+test("whoever registers a member's old login after a rename is not invited", async () => {
+  const mine = addProject();
+  invite("taken", mine.id);
   // 600 renames on GitHub and never signs in again, so its actor keeps the old login
   await signIn("taken", { githubId: 600 });
   const cookie = await signIn("taken", { githubId: 601 });
+  expect(await viewerOf(cookie)).toEqual({
+    kind: "not_invited",
+    login: "taken",
+  });
+  expect(db.select().from(actor).where(eq(actor.githubId, 601)).all()).toEqual(
+    [],
+  );
+});
+
+test("whoever registers the owner's old login after a rename is neither owner nor member", async () => {
+  // the owner renames on GitHub and has not signed in since
+  const cookie = await signIn(owner, { githubId: 700 });
+  expect(await viewerOf(cookie)).toEqual({ kind: "not_invited", login: owner });
+  expect(db.select().from(actor).where(eq(actor.githubId, 700)).all()).toEqual(
+    [],
+  );
+});
+
+test("a renamed owner is still the owner", async () => {
+  const cookie = await signIn("owner-renamed", { githubId: TEST_OWNER_ID });
+  expect(await viewerOf(cookie)).toMatchObject({
+    kind: "owner",
+    login: "owner-renamed",
+    actor: { githubId: TEST_OWNER_ID },
+  });
+});
+
+test("an owner's old login another account now holds is cleared from the owner's actor", async () => {
+  // TEST_OWNER_ID renamed in the test above; 701 now holds the owner's old login, invited under it
+  const stale = db
+    .select()
+    .from(actor)
+    .where(eq(actor.githubId, TEST_OWNER_ID))
+    .get();
+  expect(stale?.githubLogin).toBe("owner-renamed");
+  invite("owner-renamed");
+  const cookie = await signIn("owner-renamed", { githubId: 701 });
   expect(await viewerOf(cookie)).toMatchObject({
     kind: "member",
-    actor: { githubId: 601, githubLogin: "taken" },
+    actor: { githubId: 701, githubLogin: "owner-renamed" },
   });
   expect(
-    db.select().from(actor).where(eq(actor.githubId, 600)).get(),
-  ).toMatchObject({ githubLogin: null });
+    db.select().from(actor).where(eq(actor.githubId, TEST_OWNER_ID)).get(),
+  ).toMatchObject({ githubLogin: null, isOwner: true });
+});
+
+test("two accounts claiming one invite at once: exactly one gets it", async () => {
+  invite("contested");
+  const cookies = await Promise.all([
+    signIn("contested", { githubId: 800 }),
+    signIn("contested", { githubId: 801 }),
+  ]);
+  const kinds = await Promise.all(
+    cookies.map(async (c) => (await viewerOf(c)).kind),
+  );
+  expect(kinds.sort()).toEqual(["member", "not_invited"]);
 });

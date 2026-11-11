@@ -74,14 +74,23 @@ export const actor = sqliteTable(
     kind: text("kind", { enum: actorKinds }).notNull(),
     displayName: text("display_name").notNull(),
     githubId: integer("github_id").unique(),
-    // lowercased; matches invite.username, which is what grants a human its projects
+    // lowercased and current as of the last sign-in; access follows github_id, not this
     githubLogin: text("github_login"),
     // a bot's agent id in the system that runs it
     label: text("label"),
+    // the human who signed in first as TRAIL_OWNER_GITHUB
+    isOwner: integer("is_owner", { mode: "boolean" }).notNull().default(false),
     createdAt: createdAt(),
   },
   (t) => [
     check("actor_kind_check", oneOf(t.kind, actorKinds)),
+    check(
+      "actor_is_owner_check",
+      sql`${c(t.isOwner)} = 0 or (${c(t.isOwner)} = 1 and ${c(t.kind)} = 'human')`,
+    ),
+    uniqueIndex("actor_owner_unique")
+      .on(t.isOwner)
+      .where(sql`${c(t.isOwner)} = 1`),
     check("actor_display_name_check", sql`length(${c(t.displayName)}) > 0`),
     check(
       "actor_github_id_check",
@@ -161,9 +170,10 @@ export const project = sqliteTable(
 );
 
 /**
- * A person the owner let in, by lowercased GitHub username. Pending until a human
- * actor carries that github_login; deleting it revokes access and leaves the actor
- * and everything it wrote.
+ * A person the owner let in, by lowercased GitHub username. Pending until an
+ * account signs in under that username and binds github_id; from then on it is
+ * that account's, whatever its login. Deleting it revokes access and leaves the
+ * actor and everything it wrote.
  */
 export const invite = sqliteTable(
   "invite",
@@ -172,9 +182,19 @@ export const invite = sqliteTable(
     invitedBy: text("invited_by")
       .notNull()
       .references(() => actor.id),
+    // the account that first claimed the username; GitHub frees a username on
+    // rename, so access follows this id, not the name. Migration 0007's trigger
+    // refuses rewriting it once set; drizzle-kit doesn't see triggers, so a
+    // generated rebuild of invite drops it.
+    githubId: integer("github_id"),
     createdAt: createdAt(),
   },
-  (t) => [check("invite_username_check", githubLoginShape(t.username))],
+  (t) => [
+    check("invite_username_check", githubLoginShape(t.username)),
+    uniqueIndex("invite_github_id_unique")
+      .on(t.githubId)
+      .where(sql`${c(t.githubId)} is not null`),
+  ],
 );
 
 // the projects an invited person sees; an invite may hold none

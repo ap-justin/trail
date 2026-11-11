@@ -1,5 +1,5 @@
 import { createRoute } from "@hono/zod-openapi";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { type MeView, meSchema } from "../../shared/schemas.js";
 import { jsonContent } from "../api/routes.js";
 import type { Viewer } from "../auth/viewer.js";
@@ -13,12 +13,12 @@ const getMe = createRoute({
   responses: { 200: jsonContent(meSchema, "Who is signed in") },
 });
 
-/** The owner actor's name, or its GitHub login until it has signed in. */
+/** The owner actor's name, or the configured login until an account has claimed the owner. */
 export function ownerName(db: Db, ownerLogin: string): string {
   const row = db
     .select({ name: actor.displayName })
     .from(actor)
-    .where(and(eq(actor.kind, "human"), eq(actor.githubLogin, ownerLogin)))
+    .where(eq(actor.isOwner, true))
     .get();
   return row?.name ?? ownerLogin;
 }

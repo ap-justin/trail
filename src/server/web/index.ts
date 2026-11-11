@@ -43,6 +43,6 @@ export function createWeb({
   web.route("/", feedRoutes(db));
   web.route("/", searchRoutes(db));
   web.route("/", peopleRoutes(db));
-  web.route("/", eventRoutes(db, bus, shutdown));
+  web.route("/", eventRoutes(db, bus, auth, shutdown));
   return web;
 }

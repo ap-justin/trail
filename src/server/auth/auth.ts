@@ -1,4 +1,4 @@
-import { type BetterAuthPlugin, betterAuth } from "better-auth";
+import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { eq } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
@@ -30,19 +30,18 @@ export interface TrailAuth {
   isTrustedOrigin(request: Request): Promise<boolean>;
 }
 
+const noTokens = { accessToken: null, refreshToken: null, idToken: null };
+
 // the routes that start or finish a GitHub sign-in
 const signInPath = /^\/api\/auth\/(sign-in\/social|callback\/github)\/?$/;
 
 export function createAuth({
   db,
   config,
-  plugins = [],
 }: {
   db: Db;
   config: AuthConfig;
-  /** for tests: better-auth's `testUtils` */
-  plugins?: BetterAuthPlugin[];
-}) {
+}): TrailAuth {
   const owner = config.TRAIL_OWNER_GITHUB;
   const github = "clientId" in config.github ? config.github : null;
   const signInUnavailable =
@@ -50,7 +49,7 @@ export function createAuth({
       ? `GitHub sign-in is not configured: set ${config.github.missing.join(" and ")}`
       : null;
 
-  /** A better-auth user's login, and its actor (created or refreshed) while it is let in. */
+  /** A better-auth user's current login, and its access while it is let in. */
   function syncUser(userId: string) {
     const row = db.select().from(user).where(eq(user.id, userId)).get();
     if (!row) return null;
@@ -59,7 +58,7 @@ export function createAuth({
       login: row.githubLogin,
       name: row.name,
     };
-    return { login: row.githubLogin, letIn: syncActor(db, identity, owner) };
+    return { login: row.githubLogin, access: syncActor(db, identity, owner) };
   }
 
   const auth = betterAuth({
@@ -99,6 +98,11 @@ export function createAuth({
       ipAddress: { ipAddressHeaders: ["fly-client-ip"] },
     },
     databaseHooks: {
+      // trail never calls GitHub as a person, so their tokens are never kept
+      account: {
+        create: { before: async (row) => ({ data: { ...row, ...noTokens } }) },
+        update: { before: async (row) => ({ data: { ...row, ...noTokens } }) },
+      },
       session: {
         create: {
           // every sign-in creates a session
@@ -108,7 +112,6 @@ export function createAuth({
         },
       },
     },
-    plugins,
   });
 
   async function sessionOf(headers: Headers) {
@@ -123,13 +126,13 @@ export function createAuth({
     if (!userId) return { kind: "anonymous" };
     const synced = syncUser(userId);
     if (!synced) return { kind: "anonymous" };
-    if (!synced.letIn) return { kind: "not_invited", login: synced.login };
-    const { actor, isOwner } = synced.letIn;
+    const { login, access } = synced;
+    if (!access) return { kind: "not_invited", login };
     return {
-      kind: isOwner ? "owner" : "member",
-      login: synced.login,
-      actor,
-      projects: visibleProjects(db, synced.login, isOwner),
+      kind: access.isOwner ? "owner" : "member",
+      login,
+      actor: access.actor,
+      projects: visibleProjects(db, access),
     };
   }
 
@@ -167,6 +170,5 @@ export function createAuth({
     },
   };
 
-  // $context is for test-app.ts, whose testUtils plugin hangs its helpers there
-  return { ...trail, $context: auth.$context };
+  return trail;
 }

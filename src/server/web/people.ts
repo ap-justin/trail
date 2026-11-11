@@ -122,18 +122,27 @@ function invitees(db: Db | Tx, usernames?: string[]): PersonView[] {
     .where(inArray(projectMember.username, names))
     .orderBy(asc(project.key))
     .all();
-  const actors = db
-    .select({ login: actor.githubLogin, name: actor.displayName })
-    .from(actor)
-    .where(and(eq(actor.kind, "human"), inArray(actor.githubLogin, names)))
-    .all();
+  const claimedIds = invites.flatMap((i) =>
+    i.githubId === null ? [] : [i.githubId],
+  );
+  const actors =
+    claimedIds.length === 0
+      ? []
+      : db
+          .select({ githubId: actor.githubId, name: actor.displayName })
+          .from(actor)
+          .where(
+            and(eq(actor.kind, "human"), inArray(actor.githubId, claimedIds)),
+          )
+          .all();
   return invites.map((i) => {
-    const signedIn = actors.find((a) => a.login === i.username);
+    // claimed by the account with this id, whatever its login is now
+    const claimant = actors.find((a) => a.githubId === i.githubId);
     return {
       username: i.username,
       owner: false,
-      pending: !signedIn,
-      name: signedIn?.name ?? null,
+      pending: i.githubId === null,
+      name: claimant?.name ?? null,
       projects: memberships
         .filter((m) => m.username === i.username)
         .map(({ key, name }) => ({ key, name })),

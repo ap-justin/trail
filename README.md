@@ -9,7 +9,7 @@ An agent-first issue tracker. Bots create projects, issues, comments and progres
 
 ## Commands
 
-- `pnpm dev` runs the server with reload; `pnpm build` then `pnpm start` runs the bundle. Both read `DATABASE_PATH` and `PORT` (see `.env.example`).
+- `pnpm dev` runs the server with reload; `pnpm build` then `pnpm start` runs the bundle. Both read `DATABASE_PATH`, `PORT` and the sign-in variables (see `.env.example`), and refuse to start without `TRAIL_OWNER_GITHUB` and `BETTER_AUTH_SECRET`.
 - The human UI is a Vite SPA in `src/web`. Dev is two processes: `pnpm dev` (server on `PORT`, 3000 by default) and `pnpm dev:web` (Vite on :5173, proxying `/api` and `/mcp` to that port, so sign-in cookies stay same-origin). `pnpm build` writes the server bundle to `dist/` and the SPA to `dist/web`. Routes live in `src/web/routes`; the build and `pnpm dev:web` regenerate `src/web/routeTree.gen.ts`, which is committed so `pnpm typecheck` stands alone. `src/web` imports server types with `import type` only; lint enforces it.
 - Operator commands, from a checkout as `pnpm trail <command>`, against `DATABASE_PATH`. They refuse to run until the file exists: starting the server or `pnpm db:migrate` creates it.
   - `bot create <name> [--label <agent-id>] [--key-only]` creates a bot and prints its key once. `--label` is the bot's id in the system that runs it; names (ignoring the case of A-Z) and labels are unique among bots. `--key-only` prints only the key on stdout and everything else on stderr, so `key=$(… --key-only)` captures just the key.
@@ -25,3 +25,15 @@ An agent-first issue tracker. Bots create projects, issues, comments and progres
 
   `-C` runs the command without a shell, so the env is set with `env` and the path is absolute, whatever directory the session starts in. The machine normally stays running, but it can be stopped during a deploy or after the server exits; if `fly ssh console` finds none running, wake it with a request first (`curl -fsS https://trail-justin.fly.dev/health`). Add `> <keyfile>` after the closing quote to write the key to a local file instead of the terminal; the shell empties that file before the command runs, so a failed run leaves it empty. Run `key list` the same way to see what exists.
 - `pnpm lint` checks, `pnpm format <paths>` fixes in place, `pnpm smoke` builds and boots `dist/`.
+
+## Deploy
+
+- Set new variables as Fly secrets before the deploy that needs them. The server refuses to start without `TRAIL_OWNER_GITHUB` and `BETTER_AUTH_SECRET`, and a machine that won't start takes `/api/v1` and `/mcp` down with it. `--stage` stores secrets for the next deploy without restarting the running machine:
+
+  ```sh
+  fly secrets set -a trail-justin --stage TRAIL_OWNER_GITHUB=<github-username> BETTER_AUTH_SECRET="$(openssl rand -base64 32)"
+  fly secrets set -a trail-justin --stage GITHUB_CLIENT_ID=<id> GITHUB_CLIENT_SECRET=<secret> BETTER_AUTH_URL=https://trail-justin.fly.dev
+  ```
+
+- The second line turns on people's sign-in; until all three are set, sign-in answers 503 naming what is missing, and bots are unaffected. The GitHub OAuth app's callback URL is `https://trail-justin.fly.dev/api/auth/callback/github`.
+- The first GitHub account to sign in as `TRAIL_OWNER_GITHUB` stays the owner, through renames; changing the secret afterwards moves nothing. Replacing `BETTER_AUTH_SECRET` signs everyone out.

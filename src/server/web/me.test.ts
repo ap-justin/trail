@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { setupTestApp } from "../test-app.js";
+import { setupTestApp, TEST_OWNER_ID } from "../test-app.js";
 
 const { request, signIn, owner, addMember, addProject } = setupTestApp();
 
@@ -58,4 +58,19 @@ test("the owner is state owner and sees every project", async () => {
   const res = await me(await signIn(owner));
   expect(res.body).toMatchObject({ state: "owner", login: owner });
   expect(res.body.projects).toContainEqual({ key: a.key, name: a.name });
+});
+
+test("ownerName follows the owner's account, not its login: a renamed owner keeps its name, and whoever later takes the old login is not the owner", async () => {
+  await signIn(owner, { name: "Olive Owner" });
+  const renamed = await signIn("olive-renamed", { githubId: TEST_OWNER_ID });
+  const squatter = await signIn(owner, { githubId: 4242, name: "Mallory" });
+  expect((await me(renamed)).body).toMatchObject({
+    state: "owner",
+    login: "olive-renamed",
+    ownerName: "Olive Owner",
+  });
+  expect((await me(squatter)).body).toMatchObject({
+    state: "not_invited",
+    ownerName: "Olive Owner",
+  });
 });

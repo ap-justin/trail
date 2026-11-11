@@ -147,3 +147,26 @@ test.each([
     });
   },
 );
+
+test("an invite is pending until an account claims it, and then shows that account's name whatever its login becomes", async () => {
+  await people("POST", "/people", { username: "ren", projectKeys: [] });
+  await signIn("ren", { githubId: 7001, name: "Ren Original" });
+  await signIn("ren-new", { githubId: 7001, name: "Ren Renamed" });
+  // the account now holding ren-new already claimed "ren", so this invite stays unclaimed
+  await people("POST", "/people", { username: "ren-new", projectKeys: [] });
+  await signIn("ren-new", { githubId: 7001 });
+
+  const { body } = await people("GET", "/people");
+  const row = (username: string) =>
+    body.items.find((p: Body) => p.username === username);
+  expect(row("ren")).toMatchObject({ pending: false, name: "Ren Original" });
+  expect(row("ren-new")).toMatchObject({ pending: true, name: null });
+});
+
+test("a 77-character username that only fits the shape is a 422", async () => {
+  const res = await people("POST", "/people", {
+    username: `a${"-b".repeat(38)}`,
+    projectKeys: [],
+  });
+  expect(res.status).toBe(422);
+});

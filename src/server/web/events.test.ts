@@ -1,8 +1,20 @@
+import { desc, eq, max } from "drizzle-orm";
 import { afterEach, expect, test, vi } from "vitest";
+import { activityEvent } from "../db/schema.js";
 import { readEventStream, setupTestApp } from "../test-app.js";
 
-const { app, request, signIn, owner, addMember, addProject, addBot } =
-  setupTestApp();
+const {
+  app,
+  db,
+  bus,
+  bot,
+  request,
+  signIn,
+  owner,
+  addMember,
+  addProject,
+  addBot,
+} = setupTestApp();
 
 const ownerCookie = await signIn(owner);
 
@@ -135,4 +147,113 @@ test("an idle stream sends a comment line every 15 seconds", async () => {
   await vi.advanceTimersByTimeAsync(15_000);
   expect(await stream.next()).toEqual({ comment: "heartbeat" });
   await stream.cancel();
+});
+
+test("a member who renamed on GitHub keeps receiving its projects' entries", async () => {
+  const p = addProject("Renamed");
+  await addMember("before-rename", [p.id], { githubId: 8101 });
+  const stream = await openStream(
+    await signIn("after-rename", { githubId: 8101 }),
+  );
+  await file(p.id, "still mine");
+  expect(await stream.nextEntry()).toMatchObject({
+    issue: { title: "still mine" },
+  });
+  await stream.cancel();
+});
+
+const signOut = (cookie: string) =>
+  request("POST", "/api/auth/sign-out", { key: null, cookie, json: {} });
+
+test.each([
+  [
+    "the member signs out",
+    async () => {
+      const cookie = await addMember("signs-out", []);
+      return { cookie, revoke: () => signOut(cookie) };
+    },
+  ],
+  [
+    "the owner signs out",
+    async () => {
+      const cookie = await signIn(owner);
+      return { cookie, revoke: () => signOut(cookie) };
+    },
+  ],
+  [
+    "the member's invite is removed",
+    async () => {
+      const cookie = await addMember("uninvited", []);
+      const revoke = () =>
+        request("DELETE", "/api/web/people/uninvited", {
+          key: null,
+          cookie: ownerCookie,
+        });
+      return { cookie, revoke };
+    },
+  ],
+])("the stream ends at the next heartbeat once %s", async (_, setup) => {
+  const { cookie, revoke } = await setup();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const stream = await openStream(cookie);
+  await vi.advanceTimersByTimeAsync(15_000);
+  expect(await stream.next()).toEqual({ comment: "heartbeat" });
+  expect((await revoke()).status).toBeLessThan(300);
+  await vi.advanceTimersByTimeAsync(15_000);
+  expect(await stream.next()).toBeNull();
+});
+
+const newestSeq = () =>
+  db
+    .select({ seq: max(activityEvent.seq) })
+    .from(activityEvent)
+    .get()?.seq ?? 0;
+
+test("a resume more than 500 events back gets one reset event at the newest seq instead of the replay, then live entries", async () => {
+  const p = addProject("Busy");
+  db.transaction((tx) => {
+    for (let i = 0; i < 501; i++) {
+      tx.insert(activityEvent)
+        .values({
+          actorId: bot.actor.id,
+          subjectType: "project",
+          subjectId: p.id,
+          projectId: p.id,
+          action: "project.created",
+        })
+        .run();
+    }
+  });
+  const stream = await openStream(ownerCookie, { lastEventId: 0 });
+  expect(await stream.next()).toEqual({
+    event: "reset",
+    id: String(newestSeq()),
+    data: JSON.stringify({ reason: "too_far_behind" }),
+  });
+  await file(p.id, "after the reset");
+  expect(await stream.nextEntry()).toMatchObject({
+    issue: { title: "after the reset" },
+  });
+  await stream.cancel();
+});
+
+test("a client that falls 1000 events behind gets a reset event and the stream ends", async () => {
+  const p = addProject("Flood");
+  await file(p.id, "flood");
+  const event = db
+    .select()
+    .from(activityEvent)
+    .where(eq(activityEvent.projectId, p.id))
+    .orderBy(desc(activityEvent.seq))
+    .get();
+  if (!event) throw new Error("no event");
+  const stream = await openStream(ownerCookie);
+  // published in one turn, so none is written before the queue is over its cap
+  for (let i = 1; i <= 1001; i++) bus.publish({ ...event, seq: event.seq + i });
+  expect(await stream.next()).toEqual({
+    event: "reset",
+    id: String(event.seq + 1001),
+    data: JSON.stringify({ reason: "too_far_behind" }),
+  });
+  expect(await stream.next()).toBeNull();
 });

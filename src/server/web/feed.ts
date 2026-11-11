@@ -61,18 +61,20 @@ export function feedWhere(projectIds: string[], filters: FeedFilters) {
   ];
 }
 
-/** Shown events after `seq`, oldest first: what a stream resuming from `seq` missed. */
+/** Up to `limit` shown events after `seq`, oldest first: what a stream resuming from `seq` missed. */
 export function eventsAfter(
   db: Db,
   projectIds: string[],
   filters: FeedFilters,
   seq: number,
+  limit: number,
 ) {
   return db
     .select()
     .from(activityEvent)
     .where(and(...feedWhere(projectIds, filters), gt(activityEvent.seq, seq)))
     .orderBy(asc(activityEvent.seq))
+    .limit(limit)
     .all();
 }
 

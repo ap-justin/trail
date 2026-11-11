@@ -1,19 +1,17 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { TestHelpers } from "better-auth/plugins";
-import { testUtils } from "better-auth/plugins";
-import { eq } from "drizzle-orm";
 import { afterAll, vi } from "vitest";
 import { createApp } from "./app.js";
 import { type AuthConfig, createAuth } from "./auth/auth.js";
 import { migrate, openDatabase } from "./db/client.js";
-import { invite, project, projectMember, user } from "./db/schema.js";
+import { invite, project, projectMember } from "./db/schema.js";
 import { type ActivityEvent, createEventBus } from "./events/bus.js";
 import { createBot } from "./service/keys.js";
 
-/** The owner's login in every test app. */
+/** The owner's login in every test app, and the GitHub id `signIn` gives it. */
 export const TEST_OWNER = "trail-owner";
+export const TEST_OWNER_ID = 1;
 
 /** The origin `app.request` gives a path-only request. */
 export const TEST_ORIGIN = "http://localhost";
@@ -21,14 +19,79 @@ export const TEST_ORIGIN = "http://localhost";
 const testAuthConfig: AuthConfig = {
   TRAIL_OWNER_GITHUB: TEST_OWNER,
   BETTER_AUTH_SECRET: "test-secret-that-is-at-least-32-characters",
-  BETTER_AUTH_URL: undefined,
+  BETTER_AUTH_URL: TEST_ORIGIN,
   github: { clientId: "test-client-id", clientSecret: "test-client-secret" },
 };
 
+/** A GitHub account as GitHub's /user endpoint describes it. */
+export type GitHubAccount = { id: number; login: string; name: string | null };
+
+/**
+ * Replaces `fetch` until the test file ends: GitHub's token endpoint swaps an
+ * authorization code for that code's account's token, and its user and email
+ * endpoints answer for the account whose token is sent. Other URLs go to the
+ * real fetch. `issue(account)` returns a code GitHub would redirect back with.
+ */
+function fakeGitHub() {
+  const accounts = new Map<string, GitHubAccount>();
+  let codes = 0;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const request = new Request(input, init);
+    const token = request.headers
+      .get("authorization")
+      ?.replace(/^Bearer /i, "");
+    switch (request.url) {
+      case "https://github.com/login/oauth/access_token": {
+        const code =
+          new URLSearchParams(await request.text()).get("code") ?? "";
+        if (!accounts.has(code))
+          return Response.json({ error: "bad_verification_code" });
+        return Response.json({
+          access_token: code,
+          refresh_token: `refresh-${code}`,
+          token_type: "bearer",
+          scope: "read:user,user:email",
+        });
+      }
+      case "https://api.github.com/user": {
+        const account = accounts.get(token ?? "");
+        if (!account) return new Response(null, { status: 401 });
+        return Response.json({ ...account, email: null, avatar_url: "" });
+      }
+      case "https://api.github.com/user/emails": {
+        const account = accounts.get(token ?? "");
+        if (!account) return new Response(null, { status: 401 });
+        const email = `${account.id}@users.noreply.github.com`;
+        return Response.json([{ email, primary: true, verified: true }]);
+      }
+      default:
+        return realFetch(input, init);
+    }
+  };
+  afterAll(() => {
+    globalThis.fetch = realFetch;
+  });
+  return {
+    issue(account: GitHubAccount) {
+      const code = `code-${++codes}`;
+      accounts.set(code, account);
+      return code;
+    },
+  };
+}
+
+/** The `name=value` of the session cookie a response sets, or "". */
+export const sessionCookie = (res: Response) =>
+  res.headers
+    .getSetCookie()
+    .map((c) => c.split(";")[0] ?? "")
+    .find((c) => c.includes("session_token=")) ?? "";
+
 /**
  * The app over a fresh migrated SQLite file, removed after the test file, with
- * one bot and a `request` that sends its key, and `signIn` for a person without
- * GitHub. Call once at a test file's top level.
+ * one bot and a `request` that sends its key, and `signIn` for a person through
+ * the app's GitHub sign-in with GitHub faked. Call once at a test file's top level.
  */
 export function setupTestApp({
   auth: authOverrides = {},
@@ -52,7 +115,6 @@ export function setupTestApp({
   const auth = createAuth({
     db,
     config: { ...testAuthConfig, ...authOverrides },
-    plugins: [testUtils()],
   });
   const shutdown = new AbortController();
   const app = createApp({
@@ -63,47 +125,72 @@ export function setupTestApp({
     webDir,
   });
   const bot = createBot(db, "tester");
+  const github = fakeGitHub();
+
+  /**
+   * A browser's GitHub sign-in through the app's own routes, with GitHub faked
+   * as `account`: start it, then complete the callback. `replay` sends that
+   * callback again.
+   */
+  async function signInWithGitHub(account: GitHubAccount) {
+    const start = await app.request("/api/auth/sign-in/social", {
+      method: "POST",
+      headers: { origin: TEST_ORIGIN, "content-type": "application/json" },
+      body: JSON.stringify({ provider: "github", callbackURL: "/" }),
+    });
+    if (start.status !== 200) {
+      throw new Error(
+        `sign-in start gave ${start.status}: ${await start.text()}`,
+      );
+    }
+    const { url } = (await start.json()) as { url: string };
+    const state = new URL(url).searchParams.get("state") ?? "";
+    const stateCookies = start.headers
+      .getSetCookie()
+      .map((c) => c.split(";")[0])
+      .join("; ");
+    const code = github.issue(account);
+    const complete = () =>
+      app.request(
+        `/api/auth/callback/github?code=${code}&state=${encodeURIComponent(state)}`,
+        { headers: { cookie: stateCookies } },
+      );
+    const callback = await complete();
+    return {
+      authorizeURL: new URL(url),
+      callback,
+      cookie: sessionCookie(callback),
+      replay: complete,
+    };
+  }
 
   let githubIds = 1000;
   /**
-   * Signs in a GitHub account with no GitHub, as the callback would: the same
-   * `githubId` again is the same account, under a new login if it changed.
-   * Returns the session's Cookie header.
+   * Signs in through the GitHub callback as the account `githubId` currently
+   * named `login`; the same id again is the same account, renamed if the login
+   * differs. By default the owner's login is TEST_OWNER_ID and any other login
+   * a fresh account. Returns the session's Cookie header.
    */
   async function signIn(
     login: string,
     {
-      githubId = ++githubIds,
-      name = "",
-    }: { githubId?: number; name?: string } = {},
+      githubId = login.toLowerCase() === TEST_OWNER
+        ? TEST_OWNER_ID
+        : ++githubIds,
+      name = null,
+    }: { githubId?: number; name?: string | null } = {},
   ): Promise<string> {
-    const helpers = ((await auth.$context) as unknown as { test: TestHelpers })
-      .test;
-    const githubLogin = login.toLowerCase();
-    const known = db
-      .select()
-      .from(user)
-      .where(eq(user.githubId, githubId))
-      .get();
-    const userId = known
-      ? db
-          .update(user)
-          .set({ githubLogin, name: name || login })
-          .where(eq(user.id, known.id))
-          .returning()
-          .get().id
-      : (
-          await helpers.saveUser(
-            helpers.createUser({
-              email: `${githubId}@users.noreply.github.com`,
-              name: name || login,
-              githubId,
-              githubLogin,
-            }),
-          )
-        ).id;
-    const { headers } = await helpers.login({ userId });
-    return headers.get("cookie") ?? "";
+    const { callback, cookie } = await signInWithGitHub({
+      id: githubId,
+      login,
+      name,
+    });
+    if (!cookie) {
+      throw new Error(
+        `sign-in as ${login} made no session: ${callback.headers.get("location")}`,
+      );
+    }
+    return cookie;
   }
 
   /** The viewer a request with this Cookie header resolves to. */
@@ -182,6 +269,7 @@ export function setupTestApp({
     request,
     owner: TEST_OWNER,
     signIn,
+    signInWithGitHub,
     viewerOf,
     endStreams: () => shutdown.abort(),
   };
@@ -241,6 +329,7 @@ let keys = 0;
 export const projectKey = () => `K${(++keys).toString(36).toUpperCase()}`;
 
 export type EventStreamMessage = {
+  event?: string;
   id?: string;
   data?: string;
   comment?: string;
@@ -264,17 +353,18 @@ export function readEventStream(res: Response) {
     const message: EventStreamMessage = {};
     for (const line of block.split("\n")) {
       if (line.startsWith(": ")) message.comment = line.slice(2);
+      else if (line.startsWith("event: ")) message.event = line.slice(7);
       else if (line.startsWith("id: ")) message.id = line.slice(4);
       else if (line.startsWith("data: ")) message.data = line.slice(6);
     }
     return message;
   }
-  /** The next data message's parsed JSON with its id as `seq`, skipping comment lines. */
+  /** The next entry's parsed JSON with its id as `seq`, skipping comment lines and named events. */
   async function nextEntry() {
     for (;;) {
       const message = await next();
       if (message === null) return null;
-      if (message.data !== undefined) {
+      if (message.data !== undefined && message.event === undefined) {
         // biome-ignore lint/suspicious/noExplicitAny: loose entries for field reads
         return { seq: Number(message.id), ...JSON.parse(message.data) } as any;
       }
