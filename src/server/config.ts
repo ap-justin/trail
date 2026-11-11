@@ -12,7 +12,13 @@ const optional = z
 
 const serverSchema = databaseSchema
   .extend({
-    PORT: z.coerce.number().int().min(0).max(65535).default(3000),
+    // digits only: z.coerce.number() reads "" as 0, a random port
+    PORT: z
+      .string()
+      .regex(/^\d+$/, "must be a port number")
+      .default("3000")
+      .transform(Number)
+      .pipe(z.number().max(65535)),
     // the GitHub username whose first sign-in claims the owner, matched ignoring case;
     // the same shape as actor.github_login's CHECK in db/schema.ts, so the claim can be stored
     TRAIL_OWNER_GITHUB: z

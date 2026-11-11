@@ -1,6 +1,6 @@
 import { desc, eq, max } from "drizzle-orm";
 import { afterEach, expect, test, vi } from "vitest";
-import { activityEvent } from "../db/schema.js";
+import { activityEvent, session, user } from "../db/schema.js";
 import { readEventStream, setupTestApp } from "../test-app.js";
 
 const {
@@ -232,6 +232,40 @@ test("a signed-out member's stream ends within 15 seconds while bots keep writin
   expect(await stream.next()).toBeNull();
 });
 
+test("a stream's re-check leaves its session's expiry alone, and the stream ends once the session expires", async () => {
+  const cookie = await addMember("expiring", []);
+  const person = db
+    .select({ id: user.id })
+    .from(user)
+    .where(eq(user.githubLogin, "expiring"))
+    .get();
+  if (!person) throw new Error("no user");
+  const expiresAt = () =>
+    db
+      .select({ at: session.expiresAt })
+      .from(session)
+      .where(eq(session.userId, person.id))
+      .get()?.at;
+  const setExpiry = (at: Date) =>
+    db
+      .update(session)
+      .set({ expiresAt: at })
+      .where(eq(session.userId, person.id))
+      .run();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const stream = await openStream(cookie);
+  // within better-auth's update age of expiring, so a refreshing read would push it out
+  const soon = new Date(Date.now() + 3_600_000);
+  setExpiry(soon);
+  await vi.advanceTimersByTimeAsync(15_000);
+  expect(await stream.next()).toEqual({ comment: "heartbeat" });
+  expect(expiresAt()).toEqual(soon);
+
+  setExpiry(new Date(Date.now() - 1_000));
+  await vi.advanceTimersByTimeAsync(15_000);
+  expect(await stream.next()).toBeNull();
+});
+
 const newestSeq = () =>
   db
     .select({ seq: max(activityEvent.seq) })
@@ -266,6 +300,91 @@ test("a resume more than 500 events back gets one reset event at the newest seq 
   await stream.cancel();
 });
 
+/** `count` project events written after the current newest seq, returned in order. */
+const writeEvents = (projectId: string, count: number) =>
+  db.transaction((tx) => {
+    const rows = [];
+    for (let i = 0; i < count; i++) {
+      rows.push(
+        tx
+          .insert(activityEvent)
+          .values({
+            actorId: bot.actor.id,
+            subjectType: "project",
+            subjectId: projectId,
+            projectId,
+            action: "project.created",
+          })
+          .returning()
+          .get(),
+      );
+    }
+    return rows;
+  });
+
+test("a resume exactly 500 events back replays all 500, with no reset", async () => {
+  const p = addProject("ReplayCap");
+  const since = newestSeq();
+  const missed = writeEvents(p.id, 500);
+  const stream = await openStream(ownerCookie, { lastEventId: since });
+  for (const event of missed) {
+    expect(await stream.next()).toMatchObject({ id: String(event.seq) });
+  }
+  await file(p.id, "after the replay");
+  expect(await stream.nextEntry()).toMatchObject({
+    issue: { title: "after the replay" },
+  });
+  await stream.cancel();
+});
+
+test("a member's replay cap counts only the events it can see: 500 visible among 600 hidden replays", async () => {
+  const mine = addProject("CapMine");
+  const hidden = addProject("CapHidden");
+  const cookie = await addMember("capped", [mine.id]);
+  const since = newestSeq();
+  const visible = writeEvents(mine.id, 500);
+  writeEvents(hidden.id, 600);
+  const stream = await openStream(cookie, { lastEventId: since });
+  for (const event of visible) {
+    expect(await stream.next()).toMatchObject({ id: String(event.seq) });
+  }
+  await file(mine.id, "live after replay");
+  expect(await stream.nextEntry()).toMatchObject({
+    issue: { title: "live after replay" },
+  });
+  await stream.cancel();
+});
+
+test("a member's replay cap resets at 501 visible events", async () => {
+  const mine = addProject("CapMine501");
+  const cookie = await addMember("capped-over", [mine.id]);
+  const since = newestSeq();
+  writeEvents(mine.id, 501);
+  const stream = await openStream(cookie, { lastEventId: since });
+  expect(await stream.next()).toEqual({
+    event: "reset",
+    id: String(newestSeq()),
+    data: JSON.stringify({ reason: "too_far_behind" }),
+  });
+  await stream.cancel();
+});
+
+test("a client exactly 1000 events behind keeps its stream and gets every entry", async () => {
+  const p = addProject("QueueCap");
+  const stream = await openStream(ownerCookie);
+  const events = writeEvents(p.id, 1000);
+  // published in one turn, so none is written before the queue is full
+  for (const event of events) bus.publish(event);
+  for (const event of events) {
+    expect(await stream.next()).toMatchObject({ id: String(event.seq) });
+  }
+  await file(p.id, "after the flood");
+  expect(await stream.nextEntry()).toMatchObject({
+    issue: { title: "after the flood" },
+  });
+  await stream.cancel();
+});
+
 test("a client that falls 1000 events behind gets a reset event and the stream ends", async () => {
   const p = addProject("Flood");
   await file(p.id, "flood");
@@ -285,4 +404,30 @@ test("a client that falls 1000 events behind gets a reset event and the stream e
     data: JSON.stringify({ reason: "too_far_behind" }),
   });
   expect(await stream.next()).toBeNull();
+});
+
+const STREAMS_PER_PERSON = 5;
+
+test(`a person's stream past ${STREAMS_PER_PERSON} open at once is a 429, until one of theirs closes`, async () => {
+  const cookie = await addMember("many-tabs", []);
+  const open = [];
+  for (let i = 0; i < STREAMS_PER_PERSON; i++)
+    open.push(await openStream(cookie));
+
+  const refused = await app.request("/api/web/events", { headers: { cookie } });
+  expect(refused.status).toBe(429);
+  expect(await refused.json()).toEqual({
+    error: { code: "too_many_streams", message: expect.any(String) },
+  });
+  // another person's streams are counted apart
+  const others = await openStream(ownerCookie);
+  await others.cancel();
+
+  await open.pop()?.cancel();
+  await vi.waitFor(async () => {
+    const res = await app.request("/api/web/events", { headers: { cookie } });
+    expect(res.status).toBe(200);
+    open.push(readEventStream(res));
+  });
+  for (const stream of open) await stream.cancel();
 });

@@ -755,11 +755,15 @@ export const personUpdateSchema = z.strictObject({ projectKeys });
 
 export const webIssueCreateSchema = z.strictObject({
   projectKey: z.string().min(1).max(10),
-  title,
+  // trimmed before the length checks, which zod runs in order
+  title: z.string().trim().min(1).max(300),
   description: text.optional(),
 });
 
-export const webCommentCreateSchema = z.strictObject({ body: text.min(1) });
+export const webCommentCreateSchema = z.strictObject({
+  // checked, not trimmed: a body's leading indentation can be Markdown
+  body: text.refine((body) => body.trim() !== "", "must not be blank"),
+});
 
 export const webIssueListQuerySchema = pageQuerySchema.extend({
   status: issueStatusSchema.optional(),

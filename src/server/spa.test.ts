@@ -26,6 +26,8 @@ mkdirSync(join(root, "outside"));
 writeFileSync(join(root, "outside", "secret.txt"), SECRET);
 symlinkSync(join(root, "secret.txt"), join(webDir, "leak.txt"));
 symlinkSync(join(root, "outside"), join(webDir, "linked"));
+writeFileSync(join(webDir, ".env"), SECRET);
+writeFileSync(join(webDir, "assets", ".hidden.js"), SECRET);
 
 const { app } = setupTestApp({ webDir });
 
@@ -54,15 +56,19 @@ const html = {
   },
 };
 
-test.each(["/projects/anything", "/issues/TRL-1"])(
-  "a navigation to %s gets index.html for the SPA router",
-  async (path) => {
-    const res = await app.request(path, html);
-    expect(res.status).toBe(200);
-    expect(res.headers.get("cache-control")).toBe("no-cache");
-    expect(await res.text()).toBe(INDEX_HTML);
-  },
-);
+test.each([
+  "/projects/anything",
+  "/issues/TRL-1",
+  "/healthz",
+  "/apidocs",
+  "/mcp-setup",
+  "/assets-guide",
+])("a navigation to %s gets index.html for the SPA router", async (path) => {
+  const res = await app.request(path, html);
+  expect(res.status).toBe(200);
+  expect(res.headers.get("cache-control")).toBe("no-cache");
+  expect(await res.text()).toBe(INDEX_HTML);
+});
 
 test.each(["*/*", "application/json", "application/json, text/html;q=0.5"])(
   "a miss with accept %s stays the JSON 404",
@@ -77,7 +83,7 @@ test.each(["*/*", "application/json", "application/json, text/html;q=0.5"])(
   },
 );
 
-test.each(["/api/nope", "/api", "/mcpx", "/health/x", "/healthz"])(
+test.each(["/api/nope", "/api", "/api/", "/health/x"])(
   "%s stays the JSON 404 even for a navigation",
   async (path) => {
     const res = await app.request(path, html);
@@ -119,6 +125,33 @@ test.each([
   expect(res.status).toBe(404);
   expect(await res.text()).not.toContain(SECRET);
 });
+
+test.each(["*/*", html.headers.accept])(
+  "a missing file under /assets is the JSON 404 with no cache header, for accept %s",
+  async (accept) => {
+    const res = await app.request("/assets/index-old999.js", {
+      headers: { accept },
+    });
+    expect(res.status).toBe(404);
+    expect(res.headers.get("cache-control")).toBeNull();
+    expect(await res.json()).toEqual({
+      error: {
+        code: "not_found",
+        message: "no route GET /assets/index-old999.js",
+      },
+    });
+  },
+);
+
+test.each(["/.env", "/assets/.hidden.js"])(
+  "the dotfile %s is not served",
+  async (path) => {
+    for (const accept of ["*/*", html.headers.accept]) {
+      const res = await app.request(path, { headers: { accept } });
+      expect(await res.text()).not.toContain(SECRET);
+    }
+  },
+);
 
 test.each(["/assets/index-abc123.js", "/issues/TRL-1"])(
   "HEAD %s answers like GET with no body",

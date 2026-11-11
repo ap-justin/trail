@@ -57,3 +57,15 @@ test("GitHub sign-in is on only with its credentials and BETTER_AUTH_URL", () =>
 test("the CLI and db:migrate need only the database path", () => {
   expect(loadDatabaseConfig({}).DATABASE_PATH).toBe("./data/trail.db");
 });
+
+test("PORT defaults to 3000 and takes a port number", () => {
+  expect(loadConfig(required).PORT).toBe(3000);
+  expect(loadConfig({ ...required, PORT: "8080" }).PORT).toBe(8080);
+});
+
+test.each(["", " ", "abc", "80a", "1.5", "-1", "65536"])(
+  "the server refuses to start with PORT=%j",
+  (value) => {
+    expect(() => loadConfig({ ...required, PORT: value })).toThrow("PORT");
+  },
+);

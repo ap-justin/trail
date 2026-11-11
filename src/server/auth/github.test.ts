@@ -90,6 +90,63 @@ test("no GitHub token is stored, on the first sign-in or a later one", async () 
   ).toEqual([{ accessToken: null, refreshToken: null, idToken: null }]);
 });
 
+test("an account whose email another account signed in with still signs in, as itself", async () => {
+  await signInWithGitHub({
+    id: 9020,
+    login: "personal",
+    name: null,
+    email: "moved@example.com",
+  });
+  db.insert(invite).values({ username: "work", invitedBy: bot.actor.id }).run();
+  const { callback, cookie } = await signInWithGitHub({
+    id: 9021,
+    login: "work",
+    name: null,
+    email: "moved@example.com",
+  });
+  expect(callback.headers.get("location")).toBe("/");
+  expect(await viewerOf(cookie)).toMatchObject({
+    kind: "member",
+    login: "work",
+    actor: { githubId: 9021 },
+  });
+});
+
+test("a returning account whose row still holds a real email signs in, and so does a new account with that email", async () => {
+  await signIn("legacy", { githubId: 9030 });
+  db.update(user)
+    .set({ email: "shared@example.com" })
+    .where(eq(user.githubId, 9030))
+    .run();
+  const newcomer = await signInWithGitHub({
+    id: 9031,
+    login: "newcomer",
+    name: null,
+    email: "shared@example.com",
+  });
+  expect(await viewerOf(newcomer.cookie)).toEqual({
+    kind: "not_invited",
+    login: "newcomer",
+  });
+  const returning = await signInWithGitHub({
+    id: 9030,
+    login: "legacy",
+    name: null,
+    email: "shared@example.com",
+  });
+  expect(await viewerOf(returning.cookie)).toEqual({
+    kind: "not_invited",
+    login: "legacy",
+  });
+  expect(
+    db
+      .select({ email: user.email })
+      .from(user)
+      .where(eq(user.githubId, 9030))
+      .get(),
+  ).toEqual({ email: "9030@users.noreply.github.com" });
+});
+
 /** Where a callback sent the browser, resolved against the app's origin. */
 const redirectOf = (res: Response) =>
   new URL(res.headers.get("location") ?? "", TEST_ORIGIN);

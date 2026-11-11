@@ -22,12 +22,13 @@ function listFiles(dir: string, urlPrefix = ""): Map<string, string> {
 }
 
 /**
- * A browser loading a page outside /api, /mcp and /health: `accept` ranks
+ * A browser loading a page outside /api, /mcp, /health and /assets: `accept` ranks
  * text/html above JSON. A bare `*\/*` (curl, most HTTP clients) is not one, so
- * a bot's miss stays the JSON 404.
+ * a bot's miss stays the JSON 404. So does a missing asset: index.html under
+ * its URL would be cached as that asset for good.
  */
 const isNavigation = (c: Context) =>
-  !/^\/(api|mcp|health)/.test(c.req.path) &&
+  !/^\/(api|mcp|health|assets)(\/|$)/.test(c.req.path) &&
   accepts(c, {
     header: "Accept",
     supports: ["text/html", "application/json"],

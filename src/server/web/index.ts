@@ -5,7 +5,7 @@ import type { Db } from "../db/client.js";
 import type { EventBus } from "../events/bus.js";
 import type { Service } from "../service/index.js";
 import { createWebRouter, requireMember, requireOwnOrigin } from "./env.js";
-import { eventRoutes } from "./events.js";
+import { eventRoutes, type LiveStreams } from "./events.js";
 import { feedRoutes } from "./feed.js";
 import { issueRoutes } from "./issues.js";
 import { meRoutes } from "./me.js";
@@ -22,13 +22,13 @@ export function createWeb({
   service,
   bus,
   auth,
-  shutdown,
+  streams,
 }: {
   db: Db;
   service: Service;
   bus: EventBus;
   auth: TrailAuth;
-  shutdown: AbortSignal;
+  streams: LiveStreams;
 }) {
   const web = createWebRouter();
   web.onError(handleError);
@@ -43,6 +43,6 @@ export function createWeb({
   web.route("/", feedRoutes(db));
   web.route("/", searchRoutes(db));
   web.route("/", peopleRoutes(db));
-  web.route("/", eventRoutes(db, bus, auth, shutdown));
+  web.route("/", eventRoutes(db, bus, auth, streams));
   return web;
 }

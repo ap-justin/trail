@@ -37,10 +37,16 @@ const plan = (db: Db, sql: string) =>
     .map((r) => r.detail)
     .join("\n");
 
-const db = openDatabase(join(dir, "live.db"));
-afterAll(() => db.$client.close());
+const open: Db[] = [];
+afterAll(() => {
+  for (const db of open) db.$client.close();
+});
 
-test("a database holding 0007 activity keeps every event and gains both indexes", () => {
+let dbCount = 0;
+/** A fresh database at 0007 holding the activity events of two bots in two projects. */
+function seededAt7(): Db {
+  const db = openDatabase(join(dir, `live-${++dbCount}.db`));
+  open.push(db);
   migrate(db, through(7));
   db.$client.exec(`
     insert into actor (id, kind, display_name, label, created_at) values
@@ -54,6 +60,18 @@ test("a database holding 0007 activity keeps every event and gains both indexes"
       ('e2', 2, 'b2', 'issue', 'i1', 'p1', 'issue.updated', '{"status":{"from":"todo","to":"done"}}', 1),
       ('e3', 3, 'b2', 'project', 'p2', 'p2', 'project.created', '{}', 2);
   `);
+  return db;
+}
+
+/** The seeded database after 0008. */
+function seededAt8(): Db {
+  const db = seededAt7();
+  migrate(db, through(8));
+  return db;
+}
+
+test("a database holding 0007 activity keeps every event and gains both indexes", () => {
+  const db = seededAt7();
   const before = rows(db, "select * from activity_event order by seq");
 
   migrate(db, through(8));
@@ -75,6 +93,7 @@ test("a database holding 0007 activity keeps every event and gains both indexes"
 });
 
 test("an issue's timeline searches by subject in seq order, with no sort step", () => {
+  const db = seededAt8();
   const detail = plan(
     db,
     `select * from activity_event
@@ -86,6 +105,7 @@ test("an issue's timeline searches by subject in seq order, with no sort step", 
 });
 
 test("the bots acting in a set of projects probe each bot by actor and project", () => {
+  const db = seededAt8();
   const detail = plan(
     db,
     `select a.id from actor a

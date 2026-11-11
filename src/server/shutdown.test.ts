@@ -70,3 +70,28 @@ test("a second signal mid-drain dies at once without draining again", async () =
   expect(onClosed).not.toHaveBeenCalled();
   expect(proc.kill).toHaveBeenCalledExactlyOnceWith(4242, "SIGTERM");
 });
+
+test("a pending onClosed holds the re-raised signal until it settles", async () => {
+  const server = await holdingServer();
+  const proc = fakeProcess();
+  let finish = () => {};
+  const onClosed = vi.fn(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  onShutdownSignal({ server, onClosed, deadlineMs: 50, proc });
+
+  proc.emit("SIGTERM");
+  await vi.waitFor(() => expect(onClosed).toHaveBeenCalled(), {
+    timeout: 1000,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(proc.kill).not.toHaveBeenCalled();
+
+  finish();
+  await vi.waitFor(() =>
+    expect(proc.kill).toHaveBeenCalledExactlyOnceWith(4242, "SIGTERM"),
+  );
+});

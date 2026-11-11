@@ -17,7 +17,10 @@ export type AuthConfig = Pick<
 export interface TrailAuth {
   /** Serves `/api/auth/*`. */
   handler(request: Request): Promise<Response>;
-  /** Who the request's session cookie belongs to, read fresh from the database. */
+  /**
+   * Who the request's session cookie belongs to, read fresh from the database
+   * without sliding the session's expiry, so a caller polling it can't keep it alive.
+   */
   resolveViewer(headers: Headers): Promise<Viewer>;
   /** Sets `c.var.viewer`, and passes on a refreshed session cookie. */
   viewer: MiddlewareHandler<ViewerEnv>;
@@ -87,6 +90,9 @@ export function createAuth({
             // a renamed GitHub account brings its new login and name to the next sign-in
             overrideUserInfoOnSignIn: true,
             mapProfileToUser: (profile) => ({
+              // email is unique on better-auth's user row and trail never reads it: a real
+              // address moved between GitHub accounts would lock the second one out
+              email: `${profile.id}@users.noreply.github.com`,
               githubId: profile.id,
               githubLogin: profile.login.toLowerCase(),
             }),
@@ -119,12 +125,19 @@ export function createAuth({
     },
   });
 
-  async function sessionOf(headers: Headers) {
+  async function sessionOf(
+    headers: Headers,
+    query?: { disableRefresh: boolean },
+  ) {
     // no Authorization: a bot's key never makes a viewer, and better-auth has no bearer plugin here
     const cookieOnly = new Headers();
     const cookie = headers.get("cookie");
     if (cookie) cookieOnly.set("cookie", cookie);
-    return auth.api.getSession({ headers: cookieOnly, returnHeaders: true });
+    return auth.api.getSession({
+      headers: cookieOnly,
+      query,
+      returnHeaders: true,
+    });
   }
 
   function viewerFor(userId: string | undefined): Viewer {
@@ -162,7 +175,7 @@ export function createAuth({
       return auth.handler(request);
     },
     async resolveViewer(headers) {
-      const { response } = await sessionOf(headers);
+      const { response } = await sessionOf(headers, { disableRefresh: true });
       return viewerFor(response?.user.id);
     },
     viewer: async (c, next) => {

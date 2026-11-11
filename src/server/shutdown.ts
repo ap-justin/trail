@@ -13,8 +13,8 @@ const signals: Signal[] = ["SIGINT", "SIGTERM"];
 
 /**
  * On the first SIGINT or SIGTERM, runs `onDraining`, stops accepting
- * connections, cuts any still open after `deadlineMs`, runs `onClosed` and
- * dies by that signal. A second signal during the drain dies by it at once.
+ * connections, cuts any still open after `deadlineMs`, runs `onClosed` and,
+ * once it settles, dies by that signal. A second signal during the drain dies by it at once.
  */
 export function onShutdownSignal({
   server,
@@ -29,7 +29,7 @@ export function onShutdownSignal({
   >;
   /** ends the responses that never end on their own, such as event streams */
   onDraining?: () => void;
-  onClosed: () => void;
+  onClosed: () => void | Promise<void>;
   deadlineMs: number;
   proc?: SignalTarget;
 }) {
@@ -55,10 +55,13 @@ export function onShutdownSignal({
     // close() shuts only the connections idle at the call; a keep-alive one whose stream
     // onDraining is still ending goes idle later and would wait out keepAliveTimeout
     const sweep = setInterval(() => server.closeIdleConnections(), 50).unref();
-    server.close(() => {
+    server.close(async () => {
       clearInterval(sweep);
-      onClosed();
-      dieBy(signal);
+      try {
+        await onClosed();
+      } finally {
+        dieBy(signal);
+      }
     });
   }
 

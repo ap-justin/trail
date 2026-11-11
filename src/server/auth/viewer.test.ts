@@ -30,6 +30,12 @@ test("the owner signs in as owner and sees every project", async () => {
   );
 });
 
+/**
+ * Binds the owner to TEST_OWNER_ID by its first sign-in, as the tests that need
+ * an owner already bound do for themselves; a repeat sign-in is the same account.
+ */
+const bindOwner = () => signIn(owner, { githubId: TEST_OWNER_ID });
+
 const invite = (username: string, ...projectIds: string[]) => {
   db.insert(inviteTable).values({ username, invitedBy: bot.actor.id }).run();
   for (const projectId of projectIds) {
@@ -163,6 +169,7 @@ test("whoever registers a member's old login after a rename is not invited", asy
 });
 
 test("whoever registers the owner's old login after a rename is neither owner nor member", async () => {
+  await bindOwner();
   // the owner renames on GitHub and has not signed in since
   const cookie = await signIn(owner, { githubId: 700 });
   expect(await viewerOf(cookie)).toEqual({ kind: "not_invited", login: owner });
@@ -172,6 +179,7 @@ test("whoever registers the owner's old login after a rename is neither owner no
 });
 
 test("a renamed owner is still the owner", async () => {
+  await bindOwner();
   const cookie = await signIn("owner-renamed", { githubId: TEST_OWNER_ID });
   expect(await viewerOf(cookie)).toMatchObject({
     kind: "owner",
@@ -181,7 +189,9 @@ test("a renamed owner is still the owner", async () => {
 });
 
 test("an owner's old login another account now holds is cleared from the owner's actor", async () => {
-  // TEST_OWNER_ID renamed in the test above; 701 now holds the owner's old login, invited under it
+  await bindOwner();
+  // the owner renames on GitHub, then 701 holds the owner's old login, invited under it
+  await signIn("owner-renamed", { githubId: TEST_OWNER_ID });
   const stale = db
     .select()
     .from(actor)
@@ -212,6 +222,7 @@ test("two accounts claiming one invite at once: exactly one gets it", async () =
 });
 
 test("a signed-in request that changes nothing resolves while a bot holds the write lock", async () => {
+  await bindOwner();
   invite("steady");
   const member = await signIn("steady");
   const ownerCookie = await signIn("owner-steady", { githubId: TEST_OWNER_ID });

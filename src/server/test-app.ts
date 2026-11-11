@@ -8,6 +8,7 @@ import { migrate, openDatabase } from "./db/client.js";
 import { invite, project, projectMember } from "./db/schema.js";
 import { type ActivityEvent, createEventBus } from "./events/bus.js";
 import { createBot } from "./service/keys.js";
+import { LiveStreams } from "./web/events.js";
 
 /** The owner's login in every test app, and the GitHub id `signIn` gives it. */
 export const TEST_OWNER = "trail-owner";
@@ -23,14 +24,23 @@ const testAuthConfig: AuthConfig = {
   github: { clientId: "test-client-id", clientSecret: "test-client-secret" },
 };
 
-/** A GitHub account as GitHub's /user endpoint describes it. */
-export type GitHubAccount = { id: number; login: string; name: string | null };
+/**
+ * A GitHub account as GitHub's /user endpoint describes it, with the primary
+ * address /user/emails gives; GitHub's id-keyed noreply address by default.
+ */
+export type GitHubAccount = {
+  id: number;
+  login: string;
+  name: string | null;
+  email?: string;
+};
 
 /**
  * Replaces `fetch` until the test file ends: GitHub's token endpoint swaps an
  * authorization code for that code's account's token, and its user and email
- * endpoints answer for the account whose token is sent. Other URLs go to the
- * real fetch. `issue(account)` returns a code GitHub would redirect back with.
+ * endpoints answer for the account whose token is sent. A loopback URL goes to
+ * the real fetch; any other URL is an error, so no test reaches the network.
+ * `issue(account)` returns a code GitHub would redirect back with.
  */
 function fakeGitHub() {
   const accounts = new Map<string, GitHubAccount>();
@@ -62,11 +72,18 @@ function fakeGitHub() {
       case "https://api.github.com/user/emails": {
         const account = accounts.get(token ?? "");
         if (!account) return new Response(null, { status: 401 });
-        const email = `${account.id}@users.noreply.github.com`;
+        const email = account.email ?? `${account.id}@users.noreply.github.com`;
         return Response.json([{ email, primary: true, verified: true }]);
       }
       default:
-        return realFetch(input, init);
+        // a test's own server on the loopback is not the network
+        if (
+          ["127.0.0.1", "localhost", "[::1]"].includes(
+            new URL(request.url).hostname,
+          )
+        )
+          return realFetch(input, init);
+        throw new Error(`test fetch to an unfaked URL: ${request.url}`);
     }
   };
   afterAll(() => {
@@ -116,14 +133,8 @@ export function setupTestApp({
     db,
     config: { ...testAuthConfig, ...authOverrides },
   });
-  const shutdown = new AbortController();
-  const app = createApp({
-    db,
-    bus,
-    auth,
-    shutdown: shutdown.signal,
-    webDir,
-  });
+  const streams = new LiveStreams();
+  const app = createApp({ db, bus, auth, streams, webDir });
   const bot = createBot(db, "tester");
   const github = fakeGitHub();
 
@@ -271,7 +282,8 @@ export function setupTestApp({
     signIn,
     signInWithGitHub,
     viewerOf,
-    endStreams: () => shutdown.abort(),
+    /** Ends every event stream, as a drain does; resolves once each has stopped. */
+    endStreams: () => streams.end(),
   };
 }
 
@@ -280,8 +292,30 @@ export function setupTestApp({
 // written at real time. Ids minted in one millisecond sort randomly.
 let fakeNow = Date.now() - 3_600_000;
 
+/**
+ * Fakes the Date at `at`; the returned function undoes it, leaving the caller's
+ * own fake timers, if any, on as they were. Fake timers the caller has on
+ * without the Date cannot take one: installing a second clock would drop their
+ * pending timers.
+ */
+function pinDate(at: number): () => void {
+  if (!vi.isFakeTimers()) {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(at);
+    return () => vi.useRealTimers();
+  }
+  if (!(Date as { isFake?: boolean }).isFake) {
+    throw new Error(
+      'atFakeTime needs the Date faked: pass "Date" in toFake to the useFakeTimers that is on',
+    );
+  }
+  const callers = Date.now();
+  vi.setSystemTime(at);
+  return () => vi.setSystemTime(callers);
+}
+
 function stampEach<T>(count: number, stepMs: number, run: (i: number) => T) {
-  vi.useFakeTimers({ toFake: ["Date"] });
+  const unpin = pinDate(fakeNow);
   try {
     for (let i = 0; i < count; i++) {
       vi.setSystemTime(fakeNow);
@@ -289,7 +323,7 @@ function stampEach<T>(count: number, stepMs: number, run: (i: number) => T) {
       run(i);
     }
   } finally {
-    vi.useRealTimers();
+    unpin();
   }
   fakeNow += 1; // the next batch starts after this one, even at stepMs 0
 }
@@ -311,13 +345,12 @@ export async function atFakeTimeAsync<T>(
   const results: T[] = [];
   for (const write of writes) {
     // the Date stays faked until the write's promise settles
-    vi.useFakeTimers({ toFake: ["Date"] });
+    const unpin = pinDate(fakeNow);
     try {
-      vi.setSystemTime(fakeNow);
       fakeNow += stepMs;
       results.push(await write());
     } finally {
-      vi.useRealTimers();
+      unpin();
     }
   }
   fakeNow += 1;

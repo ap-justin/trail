@@ -137,3 +137,82 @@ test.each([
 ])("%s %s is not a route", async (method, path) => {
   expect((await web(method, path, {})).status).toBe(404);
 });
+
+test.each([
+  ["a title", () => "/issues", { projectKey: p.key, title: " \t\n " }, "title"],
+  [
+    "a comment",
+    async () => {
+      const filed = await web("POST", "/issues", {
+        projectKey: p.key,
+        title: "w",
+      });
+      return `/issues/${filed.body.key}/comments`;
+    },
+    { body: " \n\t " },
+    "body",
+  ],
+])(
+  "%s of only whitespace is the validator's 422 and writes nothing",
+  async (_, pathOf, json, field) => {
+    const path = await pathOf();
+    const before = db.select().from(activityEvent).all().length;
+    const { status, body } = await web("POST", path, json);
+    expect(status).toBe(422);
+    expect(body.error.code).toBe("validation_failed");
+    // the validator's message names the field's path; the service's check beyond it does not
+    expect(body.error.message).toMatch(new RegExp(`^${field}: `));
+    expect(db.select().from(activityEvent).all()).toHaveLength(before);
+  },
+);
+
+test.each([
+  ["empty", ""],
+  ["301 characters", "t".repeat(301)],
+])("a %s title is the validator's 422 and writes nothing", async (_, title) => {
+  const before = db.select().from(activityEvent).all().length;
+  const { status, body } = await web("POST", "/issues", {
+    projectKey: p.key,
+    title,
+  });
+  expect(status).toBe(422);
+  expect(body.error.code).toBe("validation_failed");
+  expect(body.error.message).toMatch(/^title: /);
+  expect(db.select().from(activityEvent).all()).toHaveLength(before);
+});
+
+test("a 300-character title is filed whole", async () => {
+  const title = "t".repeat(300);
+  const { status, body } = await web("POST", "/issues", {
+    projectKey: p.key,
+    title,
+  });
+  expect(status).toBe(201);
+  expect(body.title).toBe(title);
+});
+
+test("an empty comment body is the validator's 422 and writes nothing", async () => {
+  const filed = await web("POST", "/issues", { projectKey: p.key, title: "e" });
+  const before = db.select().from(activityEvent).all().length;
+  const { status, body } = await web(
+    "POST",
+    `/issues/${filed.body.key}/comments`,
+    { body: "" },
+  );
+  expect(status).toBe(422);
+  expect(body.error.code).toBe("validation_failed");
+  expect(body.error.message).toMatch(/^body: /);
+  expect(db.select().from(activityEvent).all()).toHaveLength(before);
+});
+
+test("a bot's bearer key is not a person's session: /api/web answers 401 and files nothing", async () => {
+  const before = db.select().from(activityEvent).all().length;
+  const res = await request("POST", "/api/web/issues", {
+    json: { projectKey: p.key, title: "from a bot" },
+  });
+  expect(res.status).toBe(401);
+  expect(await res.json()).toEqual({
+    error: { code: "unauthorized", message: expect.any(String) },
+  });
+  expect(db.select().from(activityEvent).all()).toHaveLength(before);
+});

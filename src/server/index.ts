@@ -7,6 +7,7 @@ import { loadConfig } from "./config.js";
 import { migrate, openDatabase } from "./db/client.js";
 import { createEventBus } from "./events/bus.js";
 import { onShutdownSignal } from "./shutdown.js";
+import { LiveStreams } from "./web/events.js";
 
 const config = loadConfig();
 const db = openDatabase(config.DATABASE_PATH);
@@ -25,16 +26,11 @@ const webDir = fileURLToPath(
     import.meta.url,
   ),
 );
-const draining = new AbortController();
+const streams = new LiveStreams();
 const server = serve(
   {
-    fetch: createApp({
-      db,
-      bus: createEventBus(),
-      auth,
-      shutdown: draining.signal,
-      webDir,
-    }).fetch,
+    fetch: createApp({ db, bus: createEventBus(), auth, streams, webDir })
+      .fetch,
     port: config.PORT,
   },
   (info) => {
@@ -46,8 +42,12 @@ if (!(server instanceof Server)) throw new Error("expected an HTTP/1 server");
 
 onShutdownSignal({
   server,
-  onDraining: () => draining.abort(),
-  onClosed: () => db.$client.close(),
+  onDraining: () => void streams.end(),
+  // a stream the deadline cut can still be mid-query: the database closes after its last
+  onClosed: async () => {
+    await streams.end();
+    db.$client.close();
+  },
   // plus shutdown-sync-timeout, under shutdown-timeout in litestream.yml, or the drain is killed mid-way
   deadlineMs: 4_000,
 });
