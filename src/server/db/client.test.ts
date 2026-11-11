@@ -33,6 +33,7 @@ test("migrate builds every table STRICT on an empty file", () => {
     )
     .all();
   expect(tables).toEqual([
+    { name: "account", strict: 1 },
     { name: "activity_event", strict: 1 },
     { name: "actor", strict: 1 },
     { name: "api_key", strict: 1 },
@@ -46,6 +47,9 @@ test("migrate builds every table STRICT on an empty file", () => {
     { name: "project", strict: 1 },
     { name: "project_member", strict: 1 },
     { name: "project_status_update", strict: 1 },
+    { name: "session", strict: 1 },
+    { name: "user", strict: 1 },
+    { name: "verification", strict: 1 },
   ]);
   db.$client.close();
 });

@@ -3,7 +3,7 @@ import { existsSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { loadConfig } from "./config.js";
+import { loadDatabaseConfig } from "./config.js";
 import { type Db, migrate, openDatabase } from "./db/client.js";
 import { ValidationError } from "./service/errors.js";
 import { createBot, createKey, listKeys, revokeKey } from "./service/keys.js";
@@ -78,7 +78,7 @@ export function runCli(argv: readonly string[], io: CliIo): number {
     }
     const input = command.parse(args, flags);
     const db = openDatabase(
-      existingDatabase(loadConfig(io.env ?? process.env).DATABASE_PATH),
+      existingDatabase(loadDatabaseConfig(io.env ?? process.env).DATABASE_PATH),
     );
     try {
       migrate(db);

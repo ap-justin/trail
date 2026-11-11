@@ -1,17 +1,37 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { TestHelpers } from "better-auth/plugins";
+import { testUtils } from "better-auth/plugins";
+import { eq } from "drizzle-orm";
 import { afterAll, vi } from "vitest";
 import { createApp } from "./app.js";
+import { type AuthConfig, createAuth } from "./auth/auth.js";
 import { migrate, openDatabase } from "./db/client.js";
+import { user } from "./db/schema.js";
 import { type ActivityEvent, createEventBus } from "./events/bus.js";
 import { createBot } from "./service/keys.js";
 
+/** The owner's login in every test app. */
+export const TEST_OWNER = "trail-owner";
+
+const testAuthConfig: AuthConfig = {
+  TRAIL_OWNER_GITHUB: TEST_OWNER,
+  BETTER_AUTH_SECRET: "test-secret-that-is-at-least-32-characters",
+  BETTER_AUTH_URL: undefined,
+  github: { clientId: "test-client-id", clientSecret: "test-client-secret" },
+};
+
 /**
  * The app over a fresh migrated SQLite file, removed after the test file, with
- * one bot and a `request` that sends its key. Call once at a test file's top level.
+ * one bot and a `request` that sends its key, and `signIn` for a person without
+ * GitHub. Call once at a test file's top level.
  */
-export function setupTestApp() {
+export function setupTestApp({
+  auth: authOverrides = {},
+}: {
+  auth?: Partial<AuthConfig>;
+} = {}) {
   const dir = mkdtempSync(join(tmpdir(), "trail-api-"));
   const db = openDatabase(join(dir, "trail.db"));
   migrate(db);
@@ -23,17 +43,76 @@ export function setupTestApp() {
   const bus = createEventBus();
   const published: ActivityEvent[] = [];
   bus.subscribe((event) => published.push(event));
-  const app = createApp({ db, bus });
+  const auth = createAuth({
+    db,
+    config: { ...testAuthConfig, ...authOverrides },
+    plugins: [testUtils()],
+  });
+  const app = createApp({ db, bus, auth });
   const bot = createBot(db, "tester");
 
-  /** Sends `json` as the body and the bot's key unless `key` overrides it (null sends none). */
+  let githubIds = 1000;
+  /**
+   * Signs in a GitHub account with no GitHub, as the callback would: the same
+   * `githubId` again is the same account, under a new login if it changed.
+   * Returns the session's Cookie header.
+   */
+  async function signIn(
+    login: string,
+    {
+      githubId = ++githubIds,
+      name = "",
+    }: { githubId?: number; name?: string } = {},
+  ): Promise<string> {
+    const helpers = ((await auth.$context) as unknown as { test: TestHelpers })
+      .test;
+    const githubLogin = login.toLowerCase();
+    const known = db
+      .select()
+      .from(user)
+      .where(eq(user.githubId, githubId))
+      .get();
+    const userId = known
+      ? db
+          .update(user)
+          .set({ githubLogin, name: name || login })
+          .where(eq(user.id, known.id))
+          .returning()
+          .get().id
+      : (
+          await helpers.saveUser(
+            helpers.createUser({
+              email: `${githubId}@users.noreply.github.com`,
+              name: name || login,
+              githubId,
+              githubLogin,
+            }),
+          )
+        ).id;
+    const { headers } = await helpers.login({ userId });
+    return headers.get("cookie") ?? "";
+  }
+
+  /** The viewer a request with this Cookie header resolves to. */
+  const viewerOf = (cookie: string) =>
+    auth.resolveViewer(new Headers({ cookie }));
+
+  /**
+   * Sends `json` as the body and the bot's key unless `key` overrides it (null
+   * sends none), and `cookie` as the Cookie header.
+   */
   function request(
     method: string,
     path: string,
-    { json, key = bot.key }: { json?: unknown; key?: string | null } = {},
+    {
+      json,
+      key = bot.key,
+      cookie,
+    }: { json?: unknown; key?: string | null; cookie?: string } = {},
   ) {
     const headers: Record<string, string> = {};
     if (key !== null) headers.authorization = `Bearer ${key}`;
+    if (cookie !== undefined) headers.cookie = cookie;
     if (json !== undefined) headers["content-type"] = "application/json";
     return app.request(path, {
       method,
@@ -45,7 +124,19 @@ export function setupTestApp() {
   /** A further bot with its own key; pass the key to `request` to write as it. */
   const addBot = (name: string) => createBot(db, name);
 
-  return { db, bus, app, bot, addBot, published, request };
+  return {
+    db,
+    bus,
+    app,
+    auth,
+    bot,
+    addBot,
+    published,
+    request,
+    owner: TEST_OWNER,
+    signIn,
+    viewerOf,
+  };
 }
 
 // One clock per test file, an hour in the past and only ever moving forward:

@@ -1,7 +1,7 @@
 #!/bin/sh
 # Boots the built bundle (dist/) on a throwaway database and exercises it:
-# /health, unauthenticated 401s, and a bearer key minted by the built CLI on
-# /api/v1 and /mcp.
+# /health, unauthenticated 401s, a bearer key minted by the built CLI on
+# /api/v1 and /mcp, and better-auth's mount answering sign-in with no GitHub app.
 # Run after `pnpm build`; `pnpm smoke` does both. Deliberately no --env-file:
 # a developer's .env must not leak into the check.
 set -eu
@@ -9,6 +9,8 @@ cd "$(dirname "$0")/.."
 
 dir=$(mktemp -d)
 export DATABASE_PATH="$dir/trail.db"
+export TRAIL_OWNER_GITHUB=smoke-owner
+export BETTER_AUTH_SECRET=smoke-secret-that-is-at-least-32-characters
 PORT=$(node -e 'const s=require("node:net").createServer().listen(0,()=>{console.log(s.address().port);s.close()})')
 export PORT
 base="http://127.0.0.1:$PORT"
@@ -55,4 +57,10 @@ code=$(mcp -H "Authorization: Bearer $key")
 [ "$code" = 200 ] && grep -q '"name":"trail"' "$dir/mcp.json" || {
   echo "/mcp initialize gave $code: $(cat "$dir/mcp.json")" >&2; exit 1;
 }
-echo "smoke ok: dist boots, migrates, mints a key and serves /api/v1 and /mcp on :$PORT"
+# no GITHUB_CLIENT_ID/SECRET here: sign-in is off, and says which variable is missing
+code=$(curl -s -o "$dir/auth.json" -w '%{http_code}' -X POST "$base/api/auth/sign-in/social" \
+  -H 'Content-Type: application/json' -H "Origin: $base" -d '{"provider":"github"}')
+[ "$code" = 503 ] && grep -q GITHUB_CLIENT_ID "$dir/auth.json" || {
+  echo "/api/auth/sign-in/social gave $code: $(cat "$dir/auth.json")" >&2; exit 1;
+}
+echo "smoke ok: dist boots, migrates, mints a key, serves /api/v1 and /mcp, and mounts /api/auth on :$PORT"

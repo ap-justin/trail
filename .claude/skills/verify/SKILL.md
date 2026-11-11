@@ -10,7 +10,7 @@ Run from the repo root.
 3. `pnpm smoke`: builds `dist/`, boots `node dist/index.js` on a throwaway database and a free port, checks `/health`, mints a key with the built `dist/cli.js`, and calls `/api/v1/projects` and `/mcp` with and without it. It catches a bad bundle, externals list or migrations copy.
 4. Live check of the dev server, against one database for both the CLI and the server:
    ```sh
-   export DATABASE_PATH=$(mktemp -d)/trail.db PORT=3000
+   export DATABASE_PATH=$(mktemp -d)/trail.db PORT=3000 TRAIL_OWNER_GITHUB=owner BETTER_AUTH_SECRET=verify-secret-verify-secret-verify-0
    pnpm -s db:migrate   # the CLI refuses a DATABASE_PATH with no file there
    export TRAIL_BOT_KEY=$(pnpm -s trail bot create verify | awk '$1 == "key" { print $2 }')
    # own session: pnpm, sh, tsx watch and the server child all share it. The inner sh execs pnpm, so the pid it

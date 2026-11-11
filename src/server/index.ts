@@ -1,6 +1,7 @@
 import { Server } from "node:http";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
+import { createAuth } from "./auth/auth.js";
 import { loadConfig } from "./config.js";
 import { migrate, openDatabase } from "./db/client.js";
 import { createEventBus } from "./events/bus.js";
@@ -9,8 +10,17 @@ import { onShutdownSignal } from "./shutdown.js";
 const config = loadConfig();
 const db = openDatabase(config.DATABASE_PATH);
 migrate(db);
+if ("missing" in config.github) {
+  console.warn(
+    `GitHub sign-in is off until ${config.github.missing.join(" and ")} is set; bots are unaffected`,
+  );
+}
+const auth = createAuth({ db, config });
 const server = serve(
-  { fetch: createApp({ db, bus: createEventBus() }).fetch, port: config.PORT },
+  {
+    fetch: createApp({ db, bus: createEventBus(), auth }).fetch,
+    port: config.PORT,
+  },
   (info) => {
     console.log(`trail listening on :${info.port}`);
   },
