@@ -5,9 +5,10 @@ import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv } from "vite";
 
 export default defineConfig(({ mode }) => {
-  // PORT from .env, as `pnpm dev` reads it; a variable already in the shell wins
+  // PORT from .env, as `pnpm dev` reads it; a variable already in the shell wins.
+  // `||`: a blank `PORT=` loads as "" and would leave the proxy target without a port.
   const env = loadEnv(mode, process.cwd(), "");
-  const api = `http://localhost:${env.PORT ?? 3000}`;
+  const api = `http://localhost:${env.PORT || 3000}`;
   return {
     root: "src/web",
     // the router plugin must precede react so it sees route files before JSX transforms

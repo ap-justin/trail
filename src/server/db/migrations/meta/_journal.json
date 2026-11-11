@@ -57,6 +57,13 @@
       "when": 1794379184385,
       "tag": "0007_pin_github_id",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1794388223971,
+      "tag": "0008_activity_event_lookup_idx",
+      "breakpoints": true
     }
   ]
 }

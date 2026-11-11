@@ -114,6 +114,16 @@ export function eventRoutes(
       };
       stream.onAbort(end);
       shutdown.addEventListener("abort", end);
+      // armed once per check, never by an event, so bus traffic can't postpone it
+      let checkDue = false;
+      let checkTimer: ReturnType<typeof setTimeout> | undefined;
+      const armCheck = () => {
+        checkTimer = setTimeout(() => {
+          checkDue = true;
+          wake();
+        }, HEARTBEAT_MS);
+      };
+      armCheck();
       const reset = (seq: number) =>
         stream.writeSSE({
           event: "reset",
@@ -165,23 +175,24 @@ export function eventRoutes(
             await reset(Math.max(newestSeq(db), queuedSeq));
             return;
           }
+          if (checkDue) {
+            checkDue = false;
+            if (!(await stillLetIn())) return;
+            await stream.write(": heartbeat\n\n");
+            armCheck();
+            continue;
+          }
           if (pending.length > 0) {
             await send(pending.splice(0));
             continue;
           }
-          const woken = await new Promise<boolean>((resolve) => {
-            const idle = setTimeout(() => resolve(false), HEARTBEAT_MS);
-            wake = () => {
-              clearTimeout(idle);
-              resolve(true);
-            };
+          await new Promise<void>((resolve) => {
+            wake = resolve;
           });
           wake = () => {};
-          if (woken || ended) continue;
-          if (!(await stillLetIn())) return;
-          await stream.write(": heartbeat\n\n");
         }
       } finally {
+        clearTimeout(checkTimer);
         unsubscribe();
         shutdown.removeEventListener("abort", end);
       }

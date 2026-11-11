@@ -81,6 +81,9 @@ export function createAuth({
           github: {
             clientId: github.clientId,
             clientSecret: github.clientSecret,
+            // without it GitHub signs straight back into its current account, so a
+            // not-invited person could never switch to the account that was invited
+            prompt: "select_account",
             // a renamed GitHub account brings its new login and name to the next sign-in
             overrideUserInfoOnSignIn: true,
             mapProfileToUser: (profile) => ({
@@ -93,6 +96,8 @@ export function createAuth({
     // one GitHub account is one user: never join a second account to a user by matching email
     account: { accountLinking: { enabled: false } },
     disabledPaths: ["/update-user", "/change-email", "/delete-user"],
+    // a failed GitHub callback lands on trail's sign-in page as ?error=<code>, not better-auth's own /api/auth/error
+    onAPIError: { errorURL: "/sign-in" },
     advanced: {
       // Fly's proxy sets it and overwrites any value the client sent
       ipAddress: { ipAddressHeaders: ["fly-client-ip"] },

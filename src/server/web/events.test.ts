@@ -149,6 +149,21 @@ test("an idle stream sends a comment line every 15 seconds", async () => {
   await stream.cancel();
 });
 
+test("a stream filtered to a quiet project still sends a comment line every 15 seconds while other projects are busy", async () => {
+  const quiet = addProject("Quiet");
+  const busy = addProject("Busy elsewhere");
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const stream = await openStream(ownerCookie, {
+    query: `?project=${quiet.key}`,
+  });
+  for (let i = 0; i < 3; i++) {
+    await vi.advanceTimersByTimeAsync(5_000);
+    await file(busy.id, `busy ${i}`);
+  }
+  expect(await stream.next()).toEqual({ comment: "heartbeat" });
+  await stream.cancel();
+});
+
 test("a member who renamed on GitHub keeps receiving its projects' entries", async () => {
   const p = addProject("Renamed");
   await addMember("before-rename", [p.id], { githubId: 8101 });
@@ -200,6 +215,20 @@ test.each([
   expect(await stream.next()).toEqual({ comment: "heartbeat" });
   expect((await revoke()).status).toBeLessThan(300);
   await vi.advanceTimersByTimeAsync(15_000);
+  expect(await stream.next()).toBeNull();
+});
+
+test("a signed-out member's stream ends within 15 seconds while bots keep writing elsewhere", async () => {
+  const watched = addProject("Watched");
+  const busy = addProject("Busy while signed out");
+  const cookie = await addMember("busy-signout", [watched.id]);
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const stream = await openStream(cookie);
+  expect((await signOut(cookie)).status).toBeLessThan(300);
+  for (let i = 0; i < 3; i++) {
+    await vi.advanceTimersByTimeAsync(5_000);
+    await file(busy.id, `while signed out ${i}`);
+  }
   expect(await stream.next()).toBeNull();
 });
 

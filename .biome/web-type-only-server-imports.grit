@@ -1,14 +1,22 @@
 language js
 
-// src/web may reach src/server and src/shared/schemas.ts through `import type` only.
-// `import { type X }` still loads the module under verbatimModuleSyntax, so it is flagged too.
+// src/web may reach src/server and src/shared/schemas.ts through `import type` / `export type` only.
+// `import { type X }` still loads the module under verbatimModuleSyntax, so it is flagged too;
+// so is `export { x } from` and `export * from`, which pull the module into the bundle the same way.
 or {
   `import $clause from $source` as $stmt where {
     $stmt <: not r"import type\s.*"
   },
   `import $source` as $stmt,
-  `import($source)` as $stmt
+  `import($source)` as $stmt,
+  `export { $names } from $source` as $stmt where {
+    $stmt <: not r"export type\s.*"
+  },
+  `export * from $source` as $stmt where { $stmt <: not r"export type\s.*" },
+  `export * as $ns from $source` as $stmt where {
+    $stmt <: not r"export type\s.*"
+  }
 } where {
   $source <: r".*/server/.*|.*shared/schemas.*",
-  register_diagnostic(span=$source, message="src/web may only `import type` from src/server and src/shared/schemas.ts: a value import bundles Drizzle and better-sqlite3 into the browser.", severity="error")
+  register_diagnostic(span=$source, message="src/web may only `import type` / `export type` from src/server and src/shared/schemas.ts: a value import or re-export bundles Drizzle and better-sqlite3 into the browser.", severity="error")
 }

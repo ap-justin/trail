@@ -103,3 +103,36 @@ describe("GET /feed", () => {
     expect(res.status).toBe(422);
   });
 });
+
+test("the bot filter lists each bot with an event in any visible project once, by name in binary order, and no human, hidden-only or idle bot", async () => {
+  const first = addProject("Bots first");
+  const second = addProject("Bots second");
+  const elsewhere = addProject("Bots elsewhere");
+  const beta = addBot("beta");
+  const alpha = addBot("Alpha");
+  const zed = addBot("Zed");
+  const hiddenOnly = addBot("hidden-only");
+  addBot("idle");
+  const cookie = await addMember("bot-watcher", [first.id, second.id]);
+  const file = (projectId: string, key: string) =>
+    v1("POST", "/issues", { projectId, title: "t" }, key);
+  await file(first.id, beta.key);
+  await file(second.id, beta.key);
+  await file(second.id, alpha.key);
+  await file(first.id, zed.key);
+  await file(elsewhere.id, hiddenOnly.key);
+  const byHuman = await request("POST", "/api/web/issues", {
+    key: null,
+    cookie,
+    json: { projectKey: first.key, title: "by a person" },
+  });
+  expect(byHuman.status).toBe(201);
+
+  const res = await request("GET", "/api/web/feed", { key: null, cookie });
+  const body = (await res.json()) as Body;
+  expect(body.filters.actors).toEqual([
+    { id: alpha.actor.id, name: "Alpha", kind: "bot" },
+    { id: zed.actor.id, name: "Zed", kind: "bot" },
+    { id: beta.actor.id, name: "beta", kind: "bot" },
+  ]);
+});

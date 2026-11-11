@@ -1,5 +1,16 @@
 import { createRoute } from "@hono/zod-openapi";
-import { and, asc, desc, eq, gt, inArray, lt, type SQL } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  exists,
+  gt,
+  inArray,
+  lt,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import {
   errorSchema,
   type FeedView,
@@ -122,12 +133,17 @@ function botsActingIn(db: Db, projectIds: string[]) {
     .where(
       and(
         eq(actor.kind, "bot"),
-        inArray(
-          actor.id,
+        // per bot, so the (actor_id, project_id) index answers it without walking the projects' history
+        exists(
           db
-            .selectDistinct({ id: activityEvent.actorId })
+            .select({ one: sql`1` })
             .from(activityEvent)
-            .where(inArray(activityEvent.projectId, projectIds)),
+            .where(
+              and(
+                eq(activityEvent.actorId, actor.id),
+                inArray(activityEvent.projectId, projectIds),
+              ),
+            ),
         ),
       ),
     )

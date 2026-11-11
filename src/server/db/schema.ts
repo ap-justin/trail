@@ -474,6 +474,10 @@ export const activityEvent = sqliteTable(
     uniqueIndex("activity_event_seq_unique").on(t.seq),
     index("activity_event_project_seq_idx").on(t.projectId, t.seq),
     index("activity_event_actor_seq_idx").on(t.actorId, t.seq),
+    // has this actor acted in any of these projects — one probe per bot
+    index("activity_event_actor_project_idx").on(t.actorId, t.projectId),
+    // one subject's history in order — an issue's timeline
+    index("activity_event_subject_seq_idx").on(t.subjectId, t.seq),
   ],
 );
 

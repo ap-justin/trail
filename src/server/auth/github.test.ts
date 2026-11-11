@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { expect, test } from "vitest";
 import { account, actor, invite, user } from "../db/schema.js";
-import { sessionCookie, setupTestApp } from "../test-app.js";
+import { sessionCookie, setupTestApp, TEST_ORIGIN } from "../test-app.js";
 
 const { app, db, bot, viewerOf, signIn, signInWithGitHub } = setupTestApp();
 
@@ -17,6 +17,15 @@ test("sign-in sends the browser to GitHub's authorize page with our redirect", a
   expect(authorizeURL.searchParams.get("redirect_uri")).toBe(
     "http://localhost/api/auth/callback/github",
   );
+});
+
+test("sign-in asks GitHub for its account chooser, so a different account can be picked", async () => {
+  const { authorizeURL } = await signInWithGitHub({
+    id: 9010,
+    login: "chooser",
+    name: null,
+  });
+  expect(authorizeURL.searchParams.get("prompt")).toBe("select_account");
 });
 
 test("an invited account signs in through GitHub and becomes a member with an actor", async () => {
@@ -81,12 +90,18 @@ test("no GitHub token is stored, on the first sign-in or a later one", async () 
   ).toEqual([{ accessToken: null, refreshToken: null, idToken: null }]);
 });
 
-test("a callback whose state was not issued to this browser makes no session", async () => {
+/** Where a callback sent the browser, resolved against the app's origin. */
+const redirectOf = (res: Response) =>
+  new URL(res.headers.get("location") ?? "", TEST_ORIGIN);
+
+test("a callback whose state was not issued to this browser makes no session and comes back to /sign-in", async () => {
   const res = await app.request(
     "/api/auth/callback/github?code=fake-code&state=forged",
   );
   expect(res.status).toBe(302);
-  expect(res.headers.get("location")).toMatch(/error=/);
+  const to = redirectOf(res);
+  expect(to.origin + to.pathname).toBe(`${TEST_ORIGIN}/sign-in`);
+  expect(to.searchParams.get("error")).toBeTruthy();
   expect(sessionCookie(res)).toBe("");
 });
 
@@ -100,4 +115,27 @@ test("a callback replayed with the same state makes no second session", async ()
   const again = await replay();
   expect(again.headers.get("location")).toMatch(/error=/);
   expect(sessionCookie(again)).toBe("");
+});
+
+test("pressing Cancel on GitHub's consent screen comes back to /sign-in with access_denied", async () => {
+  const start = await app.request("/api/auth/sign-in/social", {
+    method: "POST",
+    headers: { origin: TEST_ORIGIN, "content-type": "application/json" },
+    body: JSON.stringify({ provider: "github", callbackURL: "/" }),
+  });
+  const { url } = (await start.json()) as { url: string };
+  const state = new URL(url).searchParams.get("state") ?? "";
+  const cookie = start.headers
+    .getSetCookie()
+    .map((c) => c.split(";")[0])
+    .join("; ");
+  const res = await app.request(
+    `/api/auth/callback/github?error=access_denied&error_description=denied&state=${encodeURIComponent(state)}`,
+    { headers: { cookie } },
+  );
+  const to = redirectOf(res);
+  expect(res.status).toBe(302);
+  expect(to.origin + to.pathname).toBe(`${TEST_ORIGIN}/sign-in`);
+  expect(to.searchParams.get("error")).toBe("access_denied");
+  expect(sessionCookie(res)).toBe("");
 });

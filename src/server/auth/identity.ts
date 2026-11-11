@@ -38,6 +38,8 @@ export function syncActor(
   identity: GitHubIdentity,
   ownerLogin: string,
 ): Access | null {
+  const settled = readSettled(db, identity, ownerLogin);
+  if (settled !== undefined) return settled;
   const { githubId, login } = identity;
   // immediate: the claims below read then write, and two sign-ins must not both claim
   return db.transaction(
@@ -85,6 +87,50 @@ export function syncActor(
     },
     { behavior: "immediate" },
   );
+}
+
+/**
+ * The account's access when a plain read settles it with nothing to write: no
+ * claim open to it and its login already current. `undefined` means a write
+ * may be needed, and syncActor decides again inside its transaction. Keeps
+ * every signed-in request off SQLite's single write lock.
+ */
+function readSettled(
+  db: Db,
+  { githubId, login }: GitHubIdentity,
+  ownerLogin: string,
+): Access | null | undefined {
+  const row = db
+    .select()
+    .from(actor)
+    .where(and(eq(actor.githubId, githubId), eq(actor.kind, "human")))
+    .get();
+  if (row && row.githubLogin !== login) return undefined;
+  if (row?.isOwner) return { actor: humanActor(row, login), isOwner: true };
+
+  const bound = db
+    .select()
+    .from(invite)
+    .where(eq(invite.githubId, githubId))
+    .get();
+  if (bound) {
+    if (!row) return undefined;
+    return {
+      actor: humanActor(row, login),
+      isOwner: false,
+      inviteUsername: bound.username,
+    };
+  }
+
+  const ownerOpen =
+    login === ownerLogin &&
+    !db.select().from(actor).where(eq(actor.isOwner, true)).get();
+  const inviteOpen = db
+    .select()
+    .from(invite)
+    .where(and(eq(invite.username, login), isNull(invite.githubId)))
+    .get();
+  return ownerOpen || inviteOpen ? undefined : null;
 }
 
 function claimOwner(tx: Tx, actorId: string): boolean {

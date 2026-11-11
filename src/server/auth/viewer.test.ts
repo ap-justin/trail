@@ -1,3 +1,4 @@
+import Database from "better-sqlite3";
 import { eq } from "drizzle-orm";
 import { expect, test } from "vitest";
 import {
@@ -208,4 +209,26 @@ test("two accounts claiming one invite at once: exactly one gets it", async () =
     cookies.map(async (c) => (await viewerOf(c)).kind),
   );
   expect(kinds.sort()).toEqual(["member", "not_invited"]);
+});
+
+test("a signed-in request that changes nothing resolves while a bot holds the write lock", async () => {
+  invite("steady");
+  const member = await signIn("steady");
+  const ownerCookie = await signIn("owner-steady", { githubId: TEST_OWNER_ID });
+  const stranger = await signIn("steady-stranger");
+
+  const writer = new Database(db.$client.name);
+  writer.exec("BEGIN IMMEDIATE");
+  // fail at once instead of after busy_timeout if the resolve asks for the lock
+  const busyTimeout = db.$client.pragma("busy_timeout", { simple: true });
+  db.$client.pragma("busy_timeout = 0");
+  try {
+    expect((await viewerOf(member)).kind).toBe("member");
+    expect((await viewerOf(ownerCookie)).kind).toBe("owner");
+    expect((await viewerOf(stranger)).kind).toBe("not_invited");
+  } finally {
+    db.$client.pragma(`busy_timeout = ${busyTimeout}`);
+    writer.exec("ROLLBACK");
+    writer.close();
+  }
 });

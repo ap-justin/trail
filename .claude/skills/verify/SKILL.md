@@ -8,6 +8,7 @@ Run from the repo root.
 1. `pnpm lint && pnpm typecheck`. A lint failure on formatting or import order: `pnpm format <paths>` fixes in place (name the files you touched; a bare `pnpm format` reflows the whole tree).
 2. `pnpm test` (each test file opens its own temp SQLite file; no service to start).
 3. `pnpm smoke`: builds `dist/`, boots `node dist/index.js` on a throwaway database and a free port, checks `/health`, mints a key with the built `dist/cli.js`, and calls `/api/v1/projects` and `/mcp` with and without it. It catches a bad bundle, externals list or migrations copy.
+   Then `git diff --exit-code src/web/routeTree.gen.ts`: the build regenerates the committed route tree and CI fails on a stale one.
 4. Live check of the dev server, against one database for both the CLI and the server:
    ```sh
    export DATABASE_PATH=$(mktemp -d)/trail.db PORT=3000 TRAIL_OWNER_GITHUB=owner BETTER_AUTH_SECRET=verify-secret-verify-secret-verify-0
