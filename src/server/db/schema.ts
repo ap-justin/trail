@@ -48,6 +48,10 @@ const c = (column: AnySQLiteColumn) => sql.identifier(column.name);
 const oneOf = (column: AnySQLiteColumn, values: readonly string[]) =>
   sql`${c(column)} in (${sql.raw(values.map((v) => `'${v}'`).join(", "))})`;
 
+// a GitHub username, lowercased: 1-39 of a-z, 0-9 and single hyphens, no hyphen at either end
+const githubLoginShape = (column: AnySQLiteColumn) =>
+  sql`length(${c(column)}) between 1 and 39 and ${c(column)} not glob '*[^a-z0-9-]*' and ${c(column)} not glob '-*' and ${c(column)} not glob '*-' and ${c(column)} not glob '*--*'`;
+
 const id = () =>
   text("id")
     .primaryKey()
@@ -70,6 +74,8 @@ export const actor = sqliteTable(
     kind: text("kind", { enum: actorKinds }).notNull(),
     displayName: text("display_name").notNull(),
     githubId: integer("github_id").unique(),
+    // lowercased; matches invite.username, which is what grants a human its projects
+    githubLogin: text("github_login"),
     // a bot's agent id in the system that runs it
     label: text("label"),
     createdAt: createdAt(),
@@ -81,6 +87,13 @@ export const actor = sqliteTable(
       "actor_github_id_check",
       sql`${c(t.kind)} = 'human' or ${c(t.githubId)} is null`,
     ),
+    check(
+      "actor_github_login_check",
+      sql`${c(t.githubLogin)} is null or (${c(t.kind)} = 'human' and ${githubLoginShape(t.githubLogin)})`,
+    ),
+    uniqueIndex("actor_github_login_unique")
+      .on(t.githubLogin)
+      .where(sql`${c(t.githubLogin)} is not null`),
     // target of api_key's (actor_id, actor_kind) key, which pins keys to bots
     unique("actor_id_kind_unique").on(t.id, t.kind),
     // lower() folds ASCII only, like nocase: 'Équipe' and 'équipe' are two bots
@@ -144,6 +157,42 @@ export const project = sqliteTable(
     uniqueIndex("project_external_ref_unique")
       .on(t.externalRef)
       .where(sql`${c(t.externalRef)} is not null`),
+  ],
+);
+
+/**
+ * A person the owner let in, by lowercased GitHub username. Pending until a human
+ * actor carries that github_login; deleting it revokes access and leaves the actor
+ * and everything it wrote.
+ */
+export const invite = sqliteTable(
+  "invite",
+  {
+    username: text("username").primaryKey(),
+    invitedBy: text("invited_by")
+      .notNull()
+      .references(() => actor.id),
+    createdAt: createdAt(),
+  },
+  (t) => [check("invite_username_check", githubLoginShape(t.username))],
+);
+
+// the projects an invited person sees; an invite may hold none
+export const projectMember = sqliteTable(
+  "project_member",
+  {
+    username: text("username")
+      .notNull()
+      .references(() => invite.username, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => project.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    // the key serves "which projects can this username see"
+    primaryKey({ columns: [t.username, t.projectId] }),
+    index("project_member_project_username_idx").on(t.projectId, t.username),
   ],
 );
 

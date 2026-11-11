@@ -38,11 +38,13 @@ test("migrate builds every table STRICT on an empty file", () => {
     { name: "api_key", strict: 1 },
     { name: "comment", strict: 1 },
     { name: "idempotency_key", strict: 1 },
+    { name: "invite", strict: 1 },
     { name: "issue", strict: 1 },
     { name: "issue_label", strict: 1 },
     { name: "issue_link", strict: 1 },
     { name: "label", strict: 1 },
     { name: "project", strict: 1 },
+    { name: "project_member", strict: 1 },
     { name: "project_status_update", strict: 1 },
   ]);
   db.$client.close();

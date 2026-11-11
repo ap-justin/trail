@@ -10,12 +10,14 @@ import {
   apiKey,
   comment,
   idempotencyKey,
+  invite,
   issue,
   issueLabel,
   issueLink,
   label,
   project,
   projectHealths,
+  projectMember,
   projectStatusUpdate,
 } from "./schema.js";
 
@@ -657,4 +659,156 @@ test.each([
     expect(plan).toContain(index);
     expect(plan).not.toContain("TEMP B-TREE");
   }
+});
+
+test("a human carries a lowercased GitHub login, unique among actors; a bot carries none", () => {
+  const withLogin =
+    (githubLogin: string, kind: "human" | "bot" = "human") =>
+    () =>
+      db.insert(actor).values({ kind, displayName: "p", githubLogin }).run();
+  withLogin("octo-cat9")();
+  expect(errorCode(withLogin("octo-cat9"))).toBe("SQLITE_CONSTRAINT_UNIQUE");
+  expect(errorCode(withLogin("tara-bot", "bot"))).toBe(
+    "SQLITE_CONSTRAINT_CHECK",
+  );
+  expect(errorCode(withLogin("a".repeat(39)))).toBe("no error");
+});
+
+const malformedLogins = [
+  "",
+  "Octocat",
+  "-octocat",
+  "octocat-",
+  "octo--cat",
+  "octo_cat",
+  "octo.cat",
+  "a".repeat(40),
+];
+
+test.each(malformedLogins)("a GitHub login %j is rejected", (githubLogin) => {
+  expect(
+    errorCode(() =>
+      db
+        .insert(actor)
+        .values({ kind: "human", displayName: "p", githubLogin })
+        .run(),
+    ),
+  ).toBe("SQLITE_CONSTRAINT_CHECK");
+});
+
+test.each(malformedLogins)("an invite for %j is rejected", (username) => {
+  expect(
+    errorCode(() =>
+      db.insert(invite).values({ username, invitedBy: human.id }).run(),
+    ),
+  ).toBe("SQLITE_CONSTRAINT_CHECK");
+});
+
+test("a username is invited once, and its projects must exist", () => {
+  db.insert(invite).values({ username: "once", invitedBy: human.id }).run();
+  expect(
+    errorCode(() =>
+      db.insert(invite).values({ username: "once", invitedBy: human.id }).run(),
+    ),
+  ).toBe("SQLITE_CONSTRAINT_PRIMARYKEY");
+  const member = (username: string, projectId: string) => () =>
+    db.insert(projectMember).values({ username, projectId }).run();
+  member("once", proj.id)();
+  expect(errorCode(member("once", proj.id))).toBe(
+    "SQLITE_CONSTRAINT_PRIMARYKEY",
+  );
+  expect(errorCode(member("never-invited", proj.id))).toBe(
+    "SQLITE_CONSTRAINT_FOREIGNKEY",
+  );
+  expect(errorCode(member("once", "nope"))).toBe(
+    "SQLITE_CONSTRAINT_FOREIGNKEY",
+  );
+});
+
+test("removing an invite drops its projects and keeps the person's actor and writing", () => {
+  const other = db
+    .insert(project)
+    .values({ key: "MBR", name: "members", createdBy: bot.id })
+    .returning()
+    .get();
+  db.insert(invite).values({ username: "leaver", invitedBy: human.id }).run();
+  db.insert(projectMember)
+    .values([
+      { username: "leaver", projectId: proj.id },
+      { username: "leaver", projectId: other.id },
+    ])
+    .run();
+  const person = db
+    .insert(actor)
+    .values({ kind: "human", displayName: "Leaver", githubLogin: "leaver" })
+    .returning()
+    .get();
+  const filed = newIssue({ createdBy: person.id })();
+  db.insert(comment)
+    .values({ issueId: filed.id, authorId: person.id, body: "mine" })
+    .run();
+
+  db.delete(invite).where(eq(invite.username, "leaver")).run();
+
+  expect(
+    db
+      .select()
+      .from(projectMember)
+      .where(eq(projectMember.username, "leaver"))
+      .all(),
+  ).toEqual([]);
+  expect(
+    db.select().from(actor).where(eq(actor.id, person.id)).get(),
+  ).toMatchObject({ githubLogin: "leaver" });
+  expect(
+    db.select().from(issue).where(eq(issue.createdBy, person.id)).all(),
+  ).toHaveLength(1);
+  expect(
+    db.select().from(comment).where(eq(comment.authorId, person.id)).all(),
+  ).toHaveLength(1);
+});
+
+test("a project with issues cannot be deleted; one without drops its memberships", () => {
+  const empty = db
+    .insert(project)
+    .values({ key: "GONE", name: "gone", createdBy: bot.id })
+    .returning()
+    .get();
+  db.insert(invite).values({ username: "viewer", invitedBy: human.id }).run();
+  db.insert(projectMember)
+    .values([
+      { username: "viewer", projectId: proj.id },
+      { username: "viewer", projectId: empty.id },
+    ])
+    .run();
+
+  expect(
+    errorCode(() => db.delete(project).where(eq(project.id, proj.id)).run()),
+  ).toBe("SQLITE_CONSTRAINT_FOREIGNKEY");
+  db.delete(project).where(eq(project.id, empty.id)).run();
+
+  expect(
+    db
+      .select({ projectId: projectMember.projectId })
+      .from(projectMember)
+      .where(eq(projectMember.username, "viewer"))
+      .all(),
+  ).toEqual([{ projectId: proj.id }]);
+});
+
+test.each([
+  [
+    "a username's projects",
+    eq(projectMember.username, "viewer"),
+    "sqlite_autoindex_project_member_1",
+  ],
+  [
+    "a project's usernames",
+    eq(projectMember.projectId, proj.id),
+    "project_member_project_username_idx",
+  ],
+])("%s are read from an index alone", (_, where, index) => {
+  const plan = planOf(db.select().from(projectMember).where(where).toSQL());
+  expect(plan).toContain(index);
+  expect(plan).not.toContain("SCAN");
 });
