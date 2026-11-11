@@ -1,4 +1,5 @@
 import { Server } from "node:http";
+import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
 import { createAuth } from "./auth/auth.js";
@@ -16,6 +17,14 @@ if ("missing" in config.github) {
   );
 }
 const auth = createAuth({ db, config });
+// vite builds the SPA to dist/web, beside this module once bundled to dist/index.js;
+// under tsx this is src/server/index.ts, and `./web` there is the API's source
+const webDir = fileURLToPath(
+  new URL(
+    import.meta.url.endsWith(".ts") ? "../../dist/web" : "./web",
+    import.meta.url,
+  ),
+);
 const draining = new AbortController();
 const server = serve(
   {
@@ -24,6 +33,7 @@ const server = serve(
       bus: createEventBus(),
       auth,
       shutdown: draining.signal,
+      webDir,
     }).fetch,
     port: config.PORT,
   },

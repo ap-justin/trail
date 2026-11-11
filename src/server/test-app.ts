@@ -32,8 +32,11 @@ const testAuthConfig: AuthConfig = {
  */
 export function setupTestApp({
   auth: authOverrides = {},
+  webDir,
 }: {
   auth?: Partial<AuthConfig>;
+  /** the built SPA directory `createApp` serves; none by default */
+  webDir?: string;
 } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "trail-api-"));
   const db = openDatabase(join(dir, "trail.db"));
@@ -52,7 +55,13 @@ export function setupTestApp({
     plugins: [testUtils()],
   });
   const shutdown = new AbortController();
-  const app = createApp({ db, bus, auth, shutdown: shutdown.signal });
+  const app = createApp({
+    db,
+    bus,
+    auth,
+    shutdown: shutdown.signal,
+    webDir,
+  });
   const bot = createBot(db, "tester");
 
   let githubIds = 1000;

@@ -1,6 +1,6 @@
 #!/bin/sh
 # Boots the built bundle (dist/) on a throwaway database and exercises it:
-# dist/web/index.html, /health, unauthenticated 401s, a bearer key minted by the built CLI on
+# /health, the SPA's index.html and an asset of it from dist/web, unauthenticated 401s, a bearer key minted by the built CLI on
 # /api/v1 and /mcp, and better-auth's mount answering sign-in with no GitHub app.
 # Run after `pnpm build`; `pnpm smoke` does both. Deliberately no --env-file:
 # a developer's .env must not leak into the check.
@@ -38,6 +38,13 @@ done
 [ -n "$up" ] || { echo "server never answered /health" >&2; exit 1; }
 
 [ -f dist/web/index.html ] || { echo "dist/web/index.html missing: pnpm build must end with the SPA beside the server bundle" >&2; exit 1; }
+code=$(curl -s -o "$dir/index.html" -w '%{http_code}' "$base/")
+[ "$code" = 200 ] && cmp -s "$dir/index.html" dist/web/index.html || {
+  echo "/ gave $code, want 200 with dist/web/index.html" >&2; exit 1;
+}
+asset=$(grep -o '/assets/[^"]*\.js' dist/web/index.html | head -n 1)
+cache=$(curl -fsS -o /dev/null -D - "$base$asset" | tr -d '\r' | grep -i '^cache-control:' || true)
+echo "$cache" | grep -q immutable || { echo "$asset gave cache header '$cache', want immutable" >&2; exit 1; }
 
 key=$(node dist/cli.js bot create smoke --key-only)
 [ -n "$key" ] || { echo "dist/cli.js printed no key" >&2; exit 1; }
@@ -65,4 +72,4 @@ code=$(curl -s -o "$dir/auth.json" -w '%{http_code}' -X POST "$base/api/auth/sig
 [ "$code" = 503 ] && grep -q GITHUB_CLIENT_ID "$dir/auth.json" || {
   echo "/api/auth/sign-in/social gave $code: $(cat "$dir/auth.json")" >&2; exit 1;
 }
-echo "smoke ok: dist boots, migrates, mints a key, serves /api/v1 and /mcp, and mounts /api/auth on :$PORT"
+echo "smoke ok: dist boots, migrates, serves the SPA, mints a key, serves /api/v1 and /mcp, and mounts /api/auth on :$PORT"
