@@ -29,10 +29,18 @@ import {
   toWhoami,
 } from "../api/serialize.js";
 import { actorPhotoContentTypes } from "../db/schema.js";
-import { InvalidImageError, ServiceError } from "../service/errors.js";
+import {
+  InvalidImageError,
+  PayloadTooLargeError,
+  ServiceError,
+} from "../service/errors.js";
 import type { Service } from "../service/index.js";
 import type { KeyActor } from "../service/keys.js";
-import { PHOTO_ACCEPTS } from "../service/photos.js";
+import {
+  PHOTO_ACCEPTS,
+  PHOTO_MAX_BYTES,
+  photoTooLarge,
+} from "../service/photos.js";
 
 const projectId = z
   .string()
@@ -94,24 +102,32 @@ const dataUrlImageTypes: readonly string[] = [
   "image/jpg",
 ];
 
+/** The longest padded base64 a photo of `PHOTO_MAX_BYTES` encodes to. */
+const MAX_PHOTO_BASE64_LENGTH = Math.ceil(PHOTO_MAX_BYTES / 3) * 4;
+
 /** The bytes of `set_my_photo`'s data: strict base64 once whitespace is dropped, after an optional image data: URL prefix. */
 function photoBytes(data: string): Uint8Array {
-  const dataUrl = /^data:([^;,]*)(;[^,]*)?,/.exec(data);
-  let encoded = data;
+  let encoded = data.trimStart();
+  const dataUrl = /^data:([^;,]*)(;[^,]*)?,/.exec(encoded);
   if (dataUrl) {
     const [prefix, type = "", params = ""] = dataUrl;
+    // RFC 2397 puts any parameters, like name= or charset=, before ;base64
     if (
       !dataUrlImageTypes.includes(type.toLowerCase()) ||
-      params.toLowerCase() !== ";base64"
+      !params.toLowerCase().endsWith(";base64")
     ) {
       throw new InvalidImageError(
         `data declares ${type || "no type"}${params}: send ${PHOTO_ACCEPTS}, ${photoEncoding}`,
       );
     }
-    encoded = data.slice(prefix.length);
+    encoded = encoded.slice(prefix.length);
   }
   // `base64 file` wraps its output at 76 columns
   encoded = encoded.replace(/[\t\n\f\r ]/g, "");
+  // refused before decoding, so an oversized string never allocates its bytes
+  if (encoded.length > MAX_PHOTO_BASE64_LENGTH) {
+    throw new PayloadTooLargeError(photoTooLarge(null));
+  }
   const bytes = Buffer.from(encoded, "base64");
   // Buffer skips characters it can't decode; a round trip that differs means it did
   if (bytes.toString("base64") !== encoded) {

@@ -105,6 +105,18 @@ test.each(["image/jpg", "IMAGE/JPG"])(
 );
 
 test.each([
+  ["a name parameter", "data:image/png;name=avatar.png;base64,"],
+  ["a charset parameter", "data:image/png;charset=utf-8;base64,"],
+  ["leading whitespace", "\n  data:image/png;base64,"],
+])("a data: URL prefix with %s is accepted", async (_, prefix) => {
+  const { photoUrl } = await call(wide, "set_my_photo", {
+    data: `${prefix}${b64(PNG)}`,
+  });
+  const served = await request("GET", photoUrl);
+  expect(new Uint8Array(await served.arrayBuffer())).toEqual(PNG);
+});
+
+test.each([
   ["wrapped at 76 columns, as GNU base64 writes it", "\n"],
   ["wrapped with CRLF line ends", "\r\n"],
 ])("base64 %s stores the same bytes", async (_, eol) => {
@@ -142,6 +154,12 @@ test.each([
     /^payload_too_large: .*262144 bytes/,
   ],
   [
+    // the stray character would fail the decode; the length is refused before it
+    "base64 longer than any 256 KB photo encodes to, before decoding it",
+    `${"A".repeat(349528)}*AAA`,
+    /^payload_too_large: .*262144 bytes/,
+  ],
+  [
     "base64 with a stray character",
     `${b64(PNG).slice(0, -4)}*AAA`,
     /^invalid_image: data is not valid base64/,
@@ -155,6 +173,11 @@ test.each([
     "a data: URL of another type",
     `data:image/svg+xml;base64,${b64(PNG)}`,
     /^invalid_image: data declares image\/svg\+xml/,
+  ],
+  [
+    "a data: URL whose parameters don't end in base64",
+    `data:image/png;base64;name=a.png,${b64(PNG)}`,
+    /^invalid_image: data declares image\/png;base64;name=a.png/,
   ],
 ])("%s is refused and the photo kept", async (_, data, message) => {
   const { photoUrl } = await call(wide, "set_my_photo", { data: b64(PNG) });

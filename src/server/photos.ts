@@ -15,8 +15,7 @@ import { readActorPhoto } from "./service/photos.js";
  */
 const memberSession = (auth: TrailAuth) =>
   createMiddleware(async (c, next) => {
-    const { kind } = await auth.resolveViewer(c.req.raw.headers);
-    if (kind !== "member" && kind !== "owner") {
+    if (!(await auth.isLetIn(c.req.raw.headers))) {
       throw new HTTPException(401, {
         res: errorResponse(
           c,
@@ -54,6 +53,8 @@ export function photoRoutes({ db, auth }: { db: Db; auth: TrailAuth }) {
     return c.body(new Uint8Array(found.content), 200, {
       "Content-Type": found.contentType,
       "X-Content-Type-Options": "nosniff",
+      // a photo URL opened directly runs nothing, whatever its bytes turn out to be
+      "Content-Security-Policy": "default-src 'none'; sandbox",
       "Cache-Control": "private, max-age=31536000, immutable",
       "Content-Disposition": "inline",
     });

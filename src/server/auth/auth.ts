@@ -23,6 +23,12 @@ export interface TrailAuth {
    * without sliding the session's expiry, so a caller polling it can't keep it alive.
    */
   resolveViewer(headers: Headers): Promise<Viewer>;
+  /**
+   * Whether the request's session cookie belongs to the owner or an invited
+   * person: `resolveViewer`'s member/owner answer, read the same way without
+   * building the viewer, so it costs the session, its user and the access only.
+   */
+  isLetIn(headers: Headers): Promise<boolean>;
   /** Sets `c.var.viewer`, and passes on a refreshed session cookie. */
   viewer: MiddlewareHandler<ViewerEnv>;
   /** The owner's GitHub login, lowercased. */
@@ -184,6 +190,12 @@ export function createAuth({
     async resolveViewer(headers) {
       const { response } = await sessionOf(headers, { disableRefresh: true });
       return viewerFor(response?.user.id);
+    },
+    async isLetIn(headers) {
+      const { response } = await sessionOf(headers, { disableRefresh: true });
+      if (!response) return false;
+      const { githubId, githubLogin } = response.user;
+      return accessOf(db, githubId, githubLogin) !== null;
     },
     viewer: async (c, next) => {
       const { response, headers } = await sessionOf(c.req.raw.headers);

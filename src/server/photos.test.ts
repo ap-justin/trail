@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { beforeAll, beforeEach, expect, test } from "vitest";
+import { beforeAll, beforeEach, expect, test, vi } from "vitest";
 import { session } from "./db/schema.js";
 import { setupTestApp } from "./test-app.js";
 import { OTHER_PNG, WEBP } from "./test-images.js";
@@ -39,6 +39,9 @@ function expectServedWebp(res: Response) {
   expect(res.status).toBe(200);
   expect(res.headers.get("content-type")).toBe("image/webp");
   expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+  expect(res.headers.get("content-security-policy")).toBe(
+    "default-src 'none'; sandbox",
+  );
   expect(res.headers.get("cache-control")).toBe(
     "private, max-age=31536000, immutable",
   );
@@ -57,6 +60,23 @@ test("a signed-in member gets the photo, even one seeing no projects", async () 
     cookie: memberCookie,
   });
   expectServedWebp(res);
+});
+
+test("a member's photo request reads only the session, its user, the access and the photo", async () => {
+  const prepare = vi.spyOn(db.$client, "prepare");
+  try {
+    const res = await request("GET", photoUrl, {
+      key: null,
+      cookie: memberCookie,
+    });
+    expectServedWebp(res);
+    const tables = prepare.mock.calls.map(
+      ([sql]) => /\bfrom "(\w+)"/.exec(sql)?.[1],
+    );
+    expect(tables).toEqual(["session", "user", "actor", "invite", "actor_photo"]);
+  } finally {
+    prepare.mockRestore();
+  }
 });
 
 test("HEAD answers with the same headers", async () => {
