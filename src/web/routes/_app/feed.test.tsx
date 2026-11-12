@@ -270,7 +270,7 @@ describe("a project taken away while filtered to it", () => {
     await userEvent.click(
       screen.getByRole("combobox", { name: "Filter by project" }),
     );
-    await userEvent.click(screen.getByRole("option", { name: "trail" }));
+    await userEvent.click(await screen.findByRole("option", { name: "trail" }));
     await waitFor(() => expect(asked.at(-1)?.get("project")).toBe("TRL"));
     const filtered = FakeEventSource.current;
     expect(filtered.url).toBe("/api/web/events?project=TRL");
@@ -300,7 +300,7 @@ describe("a filter change with arrivals in flight", () => {
     await userEvent.click(
       screen.getByRole("combobox", { name: "Filter by bot" }),
     );
-    await userEvent.click(screen.getByRole("option", { name: "Kai" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Kai" }));
     await waitFor(() =>
       expect(FakeEventSource.current.url).toBe("/api/web/events?actor=a-kai"),
     );
@@ -340,9 +340,11 @@ describe("filters", () => {
     await userEvent.click(
       screen.getByRole("combobox", { name: "Filter by bot" }),
     );
-    const options = screen.getAllByRole("option").map((o) => o.textContent);
+    const options = (await screen.findAllByRole("option")).map(
+      (o) => o.textContent,
+    );
     expect(options).toEqual(["All bots", "Kai"]);
-    await userEvent.click(screen.getByRole("option", { name: "Kai" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Kai" }));
     await waitFor(() => expect(asked.at(-1)?.get("actor")).toBe("a-kai"));
     expect(FakeEventSource.current.url).toBe("/api/web/events?actor=a-kai");
     expect(FakeEventSource.opened[0]?.readyState).toBe(FakeEventSource.CLOSED);

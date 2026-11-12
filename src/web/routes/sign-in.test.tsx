@@ -120,6 +120,9 @@ describe("the return address", () => {
     await waitFor(() =>
       expect(router.state.location.pathname).toBe("/issues/TRL-14"),
     );
+    // the issue read is still in flight at the pathname change: wait for it to land so it
+    // cannot reach a later test's handlers
+    await screen.findByRole("heading", { name: issue().title });
   });
 
   test("a member on sign-in goes on to the return address", async () => {
@@ -131,6 +134,9 @@ describe("the return address", () => {
     await waitFor(() =>
       expect(router.state.location.pathname).toBe("/issues/TRL-14"),
     );
+    // the issue read is still in flight at the pathname change: wait for it to land so it
+    // cannot reach a later test's handlers
+    await screen.findByRole("heading", { name: issue().title });
   });
 });
 
