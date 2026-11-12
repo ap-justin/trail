@@ -56,9 +56,9 @@ jobs:
           key=$(docker exec -e DATABASE_PATH=/data/trail.db trail node /app/dist/cli.js bot create ci-bot --key-only)
           curl -fsS -H "Authorization: Bearer $key" localhost:8080/api/v1/whoami | jq -e '.name == "ci-bot"'
           test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8080/api/v1/whoami)" = 401
-          # the people's API: /me is mounted above the member guard and answers a signed-out viewer;
-          # /projects is behind it and answers 401. The guard covers the whole mount, so a 401 alone
-          # would also come from an unknown path; the /me 200 is what shows the routes are mounted.
+          # the people's API: /me sits above the member guard and answers a signed-out viewer, /projects
+          # sits behind it and answers 401; the guard covers the whole mount, so an unknown path is also
+          # a 401 and only the /me 200 shows the routes are mounted
           curl -fsS localhost:8080/api/web/me | jq -e '.state == "anonymous"'
           test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8080/api/web/projects)" = 401
           curl -fsS -X POST localhost:8080/mcp -H "Authorization: Bearer $key" \
