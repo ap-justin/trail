@@ -1,7 +1,13 @@
 import { eq } from "drizzle-orm";
 import { expect, test } from "vitest";
 import { account, actor, invite, user } from "../db/schema.js";
-import { sessionCookie, setupTestApp, TEST_ORIGIN } from "../test-app.js";
+import {
+  sessionCookie,
+  setupTestApp,
+  TEST_ORIGIN,
+  testAuthConfig,
+} from "../test-app.js";
+import { createAuth } from "./auth.js";
 
 const { app, db, bot, viewerOf, signIn, signInWithGitHub } = setupTestApp();
 
@@ -145,6 +151,27 @@ test("a returning account whose row still holds a real email signs in, and so do
       .where(eq(user.githubId, 9030))
       .get(),
   ).toEqual({ email: "9030@users.noreply.github.com" });
+});
+
+test("an account renamed since its sign-in does not claim the owner seat later named for its old login", async () => {
+  // 9040 signs in as heir and renames on GitHub; trail is then redeployed naming
+  // heir, the login's new holder, as the owner
+  const { cookie } = await signInWithGitHub({
+    id: 9040,
+    login: "heir",
+    name: null,
+  });
+  const redeployed = createAuth({
+    db,
+    config: { ...testAuthConfig, TRAIL_OWNER_GITHUB: "heir" },
+  });
+  expect(await redeployed.resolveViewer(new Headers({ cookie }))).toEqual({
+    kind: "not_invited",
+    login: "heir",
+  });
+  expect(db.select().from(actor).where(eq(actor.isOwner, true)).all()).toEqual(
+    [],
+  );
 });
 
 /** Where a callback sent the browser, resolved against the app's origin. */

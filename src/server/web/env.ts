@@ -22,7 +22,7 @@ export const requireMember = createMiddleware<WebEnv>(async (c, next) => {
       c,
       403,
       "not_invited",
-      `@${viewer.login} is not invited: ask the owner to invite this GitHub username`,
+      `@${viewer.login} is not invited: ask the owner to invite this GitHub username, then sign in again`,
     );
   }
   c.set("member", viewer);

@@ -5,7 +5,7 @@ import type { MiddlewareHandler } from "hono";
 import type { Config } from "../config.js";
 import type { Db } from "../db/client.js";
 import { account, session, user, verification } from "../db/schema.js";
-import { syncActor, visibleProjects } from "./identity.js";
+import { accessOf, syncActor, visibleProjects } from "./identity.js";
 import type { Viewer, ViewerEnv } from "./viewer.js";
 
 export type AuthConfig = Pick<
@@ -52,17 +52,8 @@ export function createAuth({
       ? `GitHub sign-in is not configured: set ${config.github.missing.join(" and ")}`
       : null;
 
-  /** A better-auth user's current login, and its access while it is let in. */
-  function syncUser(userId: string) {
-    const row = db.select().from(user).where(eq(user.id, userId)).get();
-    if (!row) return null;
-    const identity = {
-      githubId: row.githubId,
-      login: row.githubLogin,
-      name: row.name,
-    };
-    return { login: row.githubLogin, access: syncActor(db, identity, owner) };
-  }
+  const userRow = (userId: string) =>
+    db.select().from(user).where(eq(user.id, userId)).get();
 
   const auth = betterAuth({
     baseURL: config.BETTER_AUTH_URL,
@@ -116,9 +107,17 @@ export function createAuth({
       },
       session: {
         create: {
-          // every sign-in creates a session
+          // every sign-in creates a session, and only a sign-in claims: the GitHub callback
+          // rewrites the user row from the profile it just fetched before it gets here
           after: async ({ userId }) => {
-            syncUser(userId);
+            const row = userRow(userId);
+            if (!row) return;
+            const identity = {
+              githubId: row.githubId,
+              login: row.githubLogin,
+              name: row.name,
+            };
+            syncActor(db, identity, owner);
           },
         },
       },
@@ -142,9 +141,11 @@ export function createAuth({
 
   function viewerFor(userId: string | undefined): Viewer {
     if (!userId) return { kind: "anonymous" };
-    const synced = syncUser(userId);
-    if (!synced) return { kind: "anonymous" };
-    const { login, access } = synced;
+    const row = userRow(userId);
+    if (!row) return { kind: "anonymous" };
+    // the stored login may be one the account has since given up: show it, never claim with it
+    const login = row.githubLogin;
+    const access = accessOf(db, row.githubId, login);
     if (!access) return { kind: "not_invited", login };
     return {
       kind: access.isOwner ? "owner" : "member",

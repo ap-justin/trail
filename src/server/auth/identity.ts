@@ -32,14 +32,15 @@ const isUniqueViolation = (e: unknown) =>
  * username binds that invite. Later, a different account with the same login
  * gets neither. Creates the account's actor once it is let in and keeps its
  * login current; returns null while the account is not let in.
+ *
+ * Sign-in only: `identity` must be the GitHub profile that sign-in fetched. A
+ * login stored earlier may since have been freed and taken by someone else.
  */
 export function syncActor(
   db: Db,
   identity: GitHubIdentity,
   ownerLogin: string,
 ): Access | null {
-  const settled = readSettled(db, identity, ownerLogin);
-  if (settled !== undefined) return settled;
   const { githubId, login } = identity;
   // immediate: the claims below read then write, and two sign-ins must not both claim
   return db.transaction(
@@ -90,47 +91,33 @@ export function syncActor(
 }
 
 /**
- * The account's access when a plain read settles it with nothing to write: no
- * claim open to it and its login already current. `undefined` means a write
- * may be needed, and syncActor decides again inside its transaction. Keeps
- * every signed-in request off SQLite's single write lock.
+ * The access a GitHub account already holds, by its id alone: the owner seat
+ * or an invite its sign-in claimed. Reads only, so every signed-in request stays
+ * off SQLite's single write lock and claims nothing; `login` is the one shown.
  */
-function readSettled(
+export function accessOf(
   db: Db,
-  { githubId, login }: GitHubIdentity,
-  ownerLogin: string,
-): Access | null | undefined {
+  githubId: number,
+  login: string,
+): Access | null {
   const row = db
     .select()
     .from(actor)
     .where(and(eq(actor.githubId, githubId), eq(actor.kind, "human")))
     .get();
-  if (row && row.githubLogin !== login) return undefined;
-  if (row?.isOwner) return { actor: humanActor(row, login), isOwner: true };
-
+  if (!row) return null;
+  if (row.isOwner) return { actor: humanActor(row, login), isOwner: true };
   const bound = db
     .select()
     .from(invite)
     .where(eq(invite.githubId, githubId))
     .get();
-  if (bound) {
-    if (!row) return undefined;
-    return {
-      actor: humanActor(row, login),
-      isOwner: false,
-      inviteUsername: bound.username,
-    };
-  }
-
-  const ownerOpen =
-    login === ownerLogin &&
-    !db.select().from(actor).where(eq(actor.isOwner, true)).get();
-  const inviteOpen = db
-    .select()
-    .from(invite)
-    .where(and(eq(invite.username, login), isNull(invite.githubId)))
-    .get();
-  return ownerOpen || inviteOpen ? undefined : null;
+  if (!bound) return null;
+  return {
+    actor: humanActor(row, login),
+    isOwner: false,
+    inviteUsername: bound.username,
+  };
 }
 
 function claimOwner(tx: Tx, actorId: string): boolean {

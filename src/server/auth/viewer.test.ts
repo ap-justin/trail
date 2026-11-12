@@ -125,13 +125,70 @@ test("a project added to a member shows on its next request", async () => {
   });
 });
 
-test("an account invited after it signed in is a member on its next request", async () => {
-  const cookie = await signIn("late");
+test("an account invited after it signed in is a member once it signs in again", async () => {
+  const cookie = await signIn("late", { githubId: 400 });
   expect((await viewerOf(cookie)).kind).toBe("not_invited");
   invite("late");
-  expect(await viewerOf(cookie)).toMatchObject({
+  expect(await viewerOf(cookie)).toEqual({
+    kind: "not_invited",
+    login: "late",
+  });
+  expect(db.select().from(actor).where(eq(actor.githubId, 400)).all()).toEqual(
+    [],
+  );
+  expect(await viewerOf(await signIn("late", { githubId: 400 }))).toMatchObject(
+    { kind: "member", actor: { githubId: 400, githubLogin: "late" } },
+  );
+});
+
+test("an account renamed since its sign-in does not claim an invite later made for its old login", async () => {
+  // 410 signs in as alice, then renames on GitHub and frees alice; 411 registers it
+  const stale = await signIn("alice", { githubId: 410 });
+  invite("alice");
+  expect(await viewerOf(stale)).toEqual({
+    kind: "not_invited",
+    login: "alice",
+  });
+  expect(
+    db
+      .select()
+      .from(inviteTable)
+      .where(eq(inviteTable.username, "alice"))
+      .get(),
+  ).toMatchObject({ githubId: null });
+  expect(db.select().from(actor).where(eq(actor.githubId, 410)).all()).toEqual(
+    [],
+  );
+  expect(
+    await viewerOf(await signIn("alice", { githubId: 411 })),
+  ).toMatchObject({
     kind: "member",
-    actor: { githubLogin: "late" },
+    actor: { githubId: 411, githubLogin: "alice" },
+  });
+  expect((await viewerOf(stale)).kind).toBe("not_invited");
+});
+
+test("a member's request under its old login leaves the login with the account now holding it", async () => {
+  invite("bea");
+  invite("bea-new");
+  // 420 is bea, renames to bea-renamed and has not signed in since; 421 renames bea-new to bea
+  const stale = await signIn("bea", { githubId: 420 });
+  await signIn("bea-new", { githubId: 421 });
+  const current = await signIn("bea", { githubId: 421 });
+  expect(await viewerOf(stale)).toMatchObject({
+    kind: "member",
+    actor: { githubId: 420 },
+  });
+  expect(
+    db
+      .select({ githubId: actor.githubId, githubLogin: actor.githubLogin })
+      .from(actor)
+      .where(eq(actor.githubLogin, "bea"))
+      .all(),
+  ).toEqual([{ githubId: 421, githubLogin: "bea" }]);
+  expect(await viewerOf(current)).toMatchObject({
+    kind: "member",
+    actor: { githubId: 421, githubLogin: "bea" },
   });
 });
 

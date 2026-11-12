@@ -17,7 +17,7 @@ export const TEST_OWNER_ID = 1;
 /** The origin `app.request` gives a path-only request. */
 export const TEST_ORIGIN = "http://localhost";
 
-const testAuthConfig: AuthConfig = {
+export const testAuthConfig: AuthConfig = {
   TRAIL_OWNER_GITHUB: TEST_OWNER,
   BETTER_AUTH_SECRET: "test-secret-that-is-at-least-32-characters",
   BETTER_AUTH_URL: TEST_ORIGIN,

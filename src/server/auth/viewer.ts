@@ -4,7 +4,8 @@ export type { HumanActor, VisibleProject };
 
 /**
  * Who a request comes from, by its session cookie. Resolved on every request,
- * so a removed invite or project takes effect on the next one.
+ * so a removed invite or project takes effect on the next one; an invite is
+ * only claimed at sign-in, so a new one waits for the account's next sign-in.
  */
 export type Viewer =
   /** no valid session */
