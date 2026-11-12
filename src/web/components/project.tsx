@@ -450,7 +450,7 @@ export function ProjectView(props: ProjectViewProps) {
           <ToggleGroupItem
             key={value}
             value={value}
-            className="-mb-px h-10 rounded-none border-b-2 border-transparent px-0 font-normal text-muted-foreground hover:bg-transparent aria-pressed:border-foreground aria-pressed:bg-transparent aria-pressed:text-foreground"
+            className="-mb-px h-10 min-w-10 rounded-none border-b-2 border-transparent px-0 font-normal text-muted-foreground hover:bg-transparent aria-pressed:border-foreground aria-pressed:bg-transparent aria-pressed:text-foreground"
           >
             {label}
           </ToggleGroupItem>

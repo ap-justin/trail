@@ -223,7 +223,7 @@ function NewIssueForm({
             render={
               <Button
                 variant="outline"
-                className="max-lg:h-10 max-lg:flex-1 lg:px-3"
+                className="max-lg:h-11 max-lg:flex-1 lg:px-3"
               />
             }
           >
@@ -234,7 +234,7 @@ function NewIssueForm({
             aria-disabled={pending || undefined}
             aria-busy={pending || undefined}
             aria-describedby={ids.status}
-            className="max-lg:h-10 max-lg:flex-1 lg:px-3"
+            className="max-lg:h-11 max-lg:flex-1 lg:px-3"
           >
             {pending ? "Creating…" : "Create issue"}
           </Button>
