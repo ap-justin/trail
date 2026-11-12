@@ -104,6 +104,12 @@ test("tools/list offers one tool per operation, none naming who writes", async (
       "update_issue",
       "update_project",
       "whoami",
+      "create_webhook",
+      "list_webhooks",
+      "update_webhook",
+      "rotate_webhook_secret",
+      "delete_webhook",
+      "test_webhook",
     ].sort(),
   );
   for (const tool of tools) {

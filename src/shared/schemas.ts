@@ -15,6 +15,11 @@ import {
   ISSUE_LABELS_MAX,
   ISSUE_LINKS_MAX,
 } from "../server/service/validate.js";
+import {
+  WEBHOOK_PROJECTS_MAX,
+  WEBHOOK_SECRET_MAX,
+  WEBHOOK_SECRET_MIN,
+} from "../server/service/webhooks.js";
 
 // Field docs go in .meta(), which both the OpenAPI spec and the MCP tools' JSON
 // Schema read; .openapi({ description }) reaches only the spec.
@@ -211,6 +216,88 @@ export const myPhotoRemovedSchema = z
     photoUrl: z.null().meta({ description: "The bot has no photo now." }),
   })
   .openapi("MyPhotoRemoved");
+
+export const webhookSchema = z
+  .object({
+    id,
+    url: z.string(),
+    projects: z
+      .array(z.string())
+      .meta({ description: "The keys of the projects it follows, A to Z." }),
+    paused: z.boolean().meta({
+      description:
+        "True after repeated failures; deliveries wait until an update or a rotate resumes it.",
+    }),
+    pausedAt: timestamp.nullable(),
+    consecutiveFailures: z.int().meta({
+      description: "Failed attempts since the last success; 8 pauses it.",
+    }),
+    lastSuccessAt: timestamp.nullable(),
+    lastError: z.string().nullable().meta({
+      description: "What the last failed attempt got, like HTTP 500.",
+    }),
+    lastErrorAt: timestamp.nullable(),
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  })
+  .openapi("Webhook");
+
+const webhookUrl = z.string().min(1).max(2048).meta({
+  description:
+    "An https URL that a public host serves, like https://bot.example.com/hooks/trail. Loopback, private and other internal addresses are refused.",
+  example: "https://bot.example.com/hooks/trail",
+});
+const webhookSecret = z
+  .string()
+  .min(WEBHOOK_SECRET_MIN)
+  .max(WEBHOOK_SECRET_MAX)
+  .meta({
+    description: `The signing secret of your OpenBot webhook routine, ${WEBHOOK_SECRET_MIN} to ${WEBHOOK_SECRET_MAX} characters. Read it from a key in a script; never send it through chat. Never returned.`,
+  });
+const webhookProjects = z
+  .array(z.string().min(1))
+  .min(1)
+  .max(WEBHOOK_PROJECTS_MAX)
+  .meta({
+    description:
+      "Keys (like TRL) of the projects to follow; a project the key can't read is a 404, as a missing one is.",
+    example: ["BGP"],
+  });
+
+export const webhookCreateSchema = z
+  .strictObject({
+    url: webhookUrl,
+    secret: webhookSecret,
+    projects: webhookProjects,
+  })
+  .openapi("WebhookCreate");
+
+export const webhookUpdateSchema = z
+  .strictObject({
+    url: webhookUrl.optional(),
+    projects: webhookProjects.optional(),
+  })
+  .openapi("WebhookUpdate");
+
+export const webhookSecretUpdateSchema = z
+  .strictObject({ secret: webhookSecret })
+  .openapi("WebhookSecretUpdate");
+
+export const webhookTestResultSchema = z
+  .object({
+    delivered: z.boolean().meta({
+      description: "True when the receiver answered 2xx.",
+    }),
+    status: z.int().nullable().meta({
+      description: "The receiver's HTTP status; null when none came.",
+    }),
+    error: z.string().nullable(),
+  })
+  .openapi("WebhookTestResult");
+
+export const webhookDeletedSchema = z
+  .object({ deleted: z.literal(true) })
+  .openapi("WebhookDeleted");
 
 export function pageSchema<T extends z.ZodType>(item: T) {
   return z.object({
@@ -554,6 +641,7 @@ export type StatusUpdateView = z.infer<typeof statusUpdateSchema>;
 export type LabelView = z.infer<typeof labelSchema>;
 export type ActorView = z.infer<typeof actorSchema>;
 export type WhoamiView = z.infer<typeof whoamiSchema>;
+export type WebhookView = z.infer<typeof webhookSchema>;
 export type BotView = z.infer<typeof botSchema>;
 export type MyPhotoView = z.infer<typeof myPhotoSchema>;
 export type ActivityEventView = z.infer<typeof activityEventSchema>;

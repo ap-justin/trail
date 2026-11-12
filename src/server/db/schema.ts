@@ -580,6 +580,121 @@ export const activityEvent = sqliteTable(
   ],
 );
 
+export const webhookDeliveryStatuses = [
+  "pending",
+  "delivered",
+  "failed",
+] as const;
+export type WebhookDeliveryStatus = (typeof webhookDeliveryStatuses)[number];
+
+/**
+ * A bot's webhook: an https URL that receives signed POSTs for every activity
+ * event of its projects. It belongs to the bot, not to the key that made it, so
+ * a key rotation keeps it.
+ */
+export const webhookSubscription = sqliteTable(
+  "webhook_subscription",
+  {
+    id: id(),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => actor.id),
+    url: text("url").notNull(),
+    // the signing secret, AES-256-GCM under a key derived from the server's own secret (service/webhooks.ts);
+    // never the plain secret, and never read back out through the API
+    secretCipher: text("secret_cipher").notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    // set after repeated failures; deliveries wait while it is set, and the bot's update clears it
+    pausedAt: integer("paused_at", { mode: "timestamp_ms" }),
+    // failed attempts since the last success, across deliveries
+    consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+    lastSuccessAt: integer("last_success_at", { mode: "timestamp_ms" }),
+    lastError: text("last_error"),
+    lastErrorAt: integer("last_error_at", { mode: "timestamp_ms" }),
+  },
+  (t) => [
+    check("webhook_subscription_url_check", sql`length(${c(t.url)}) > 0`),
+    check(
+      "webhook_subscription_failures_check",
+      sql`${c(t.consecutiveFailures)} >= 0`,
+    ),
+    unique("webhook_subscription_actor_url_unique").on(t.actorId, t.url),
+  ],
+);
+
+// the projects a subscription follows
+export const webhookSubscriptionProject = sqliteTable(
+  "webhook_subscription_project",
+  {
+    subscriptionId: text("subscription_id")
+      .notNull()
+      .references(() => webhookSubscription.id, { onDelete: "cascade" }),
+    // no cascade, as on api_key_project: deleting a project must not quietly empty a subscription
+    projectId: text("project_id")
+      .notNull()
+      .references(() => project.id),
+  },
+  (t) => [
+    primaryKey({ columns: [t.subscriptionId, t.projectId] }),
+    // an event's project finds the subscriptions that follow it
+    index("webhook_subscription_project_project_idx").on(
+      t.projectId,
+      t.subscriptionId,
+    ),
+  ],
+);
+
+/**
+ * The outbox: one row per event per subscription, written in the transaction
+ * that commits the event, so a restart loses nothing. `id` is the delivery id
+ * the receiver sees, the same on every retry.
+ */
+export const webhookDelivery = sqliteTable(
+  "webhook_delivery",
+  {
+    id: id(),
+    subscriptionId: text("subscription_id")
+      .notNull()
+      .references(() => webhookSubscription.id, { onDelete: "cascade" }),
+    eventId: text("event_id")
+      .notNull()
+      .references(() => activityEvent.id),
+    // the event's seq: a subscription's deliveries go out in this order
+    seq: integer("seq").notNull(),
+    // trail.<action>
+    type: text("type").notNull(),
+    status: text("status", { enum: webhookDeliveryStatuses })
+      .notNull()
+      .default("pending"),
+    // the JSON sent, built at the first attempt so a retry sends the same bytes
+    body: text("body"),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: integer("next_attempt_at", {
+      mode: "timestamp_ms",
+    }).notNull(),
+    lastStatus: integer("last_status"),
+    lastError: text("last_error"),
+    createdAt: createdAt(),
+    deliveredAt: integer("delivered_at", { mode: "timestamp_ms" }),
+  },
+  (t) => [
+    check(
+      "webhook_delivery_status_check",
+      oneOf(t.status, webhookDeliveryStatuses),
+    ),
+    check("webhook_delivery_attempts_check", sql`${c(t.attempts)} >= 0`),
+    unique("webhook_delivery_subscription_event_unique").on(
+      t.subscriptionId,
+      t.eventId,
+    ),
+    // the head of a subscription's queue: its oldest pending delivery
+    index("webhook_delivery_pending_idx")
+      .on(t.subscriptionId, t.seq)
+      .where(sql`${c(t.status)} = 'pending'`),
+  ],
+);
+
 // better-auth's tables, as `npx auth@latest generate` emits them for the drizzle adapter,
 // plus the unique github_id. better-auth writes every column itself; a person's identity
 // in trail is the actor row, which the sign-in links by github_id.

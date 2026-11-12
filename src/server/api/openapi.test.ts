@@ -41,6 +41,13 @@ test("GET /api/v1/openapi.json serves the spec without a key", async () => {
       "POST /projects",
       "POST /projects/{id}/labels",
       "POST /projects/{id}/status-updates",
+      "GET /webhooks",
+      "POST /webhooks",
+      "GET /webhooks/{id}",
+      "PATCH /webhooks/{id}",
+      "DELETE /webhooks/{id}",
+      "PUT /webhooks/{id}/secret",
+      "POST /webhooks/{id}/ping",
     ].sort(),
   );
   expect(spec.components.securitySchemes).toEqual({
@@ -96,6 +103,15 @@ test("the spec lists the error statuses each operation can return", async () => 
     "POST /projects/{id}/status-updates": withConflict(
       withForbidden(withNotFound(write("201"))),
     ),
+    "GET /webhooks": withForbidden(list),
+    "POST /webhooks": withConflict(withForbidden(withNotFound(write("201")))),
+    "GET /webhooks/{id}": withForbidden(withNotFound(list)),
+    "PATCH /webhooks/{id}": withConflict(
+      withForbidden(withNotFound(write("200"))),
+    ),
+    "DELETE /webhooks/{id}": withForbidden(withNotFound(list)),
+    "PUT /webhooks/{id}/secret": withForbidden(withNotFound(write("200"))),
+    "POST /webhooks/{id}/ping": withForbidden(withNotFound(list)),
   });
 });
 

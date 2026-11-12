@@ -1,0 +1,17 @@
+import { PAYLOAD_MAX_CHARS } from "./payload.js";
+
+/**
+ * What a bot reads to hook its OpenBot webhook routine up to trail: the MCP
+ * tool descriptions and the REST operations both carry it, so it lives once.
+ */
+export const WEBHOOK_SETUP = [
+  "Set-up, in this order. (1) In OpenBot, make an OpenBot webhook routine for trail's events; OpenBot gives it a signing secret. (2) Get that secret saved on your server as a key, from OpenBot's key store or an env file the routine's owner controls. Never paste the secret into chat or an issue. (3) Run a script that reads the key and calls this operation with it, so the secret goes from the key to trail and nowhere else. (4) Call test_webhook (POST /webhooks/{id}/ping): your routine receives a signed trail.ping and the answer says what it replied. Only then wait for real events.",
+  "The secret is write-only: trail takes it here and on rotate_webhook_secret, keeps it encrypted, and never returns, lists or logs it. To change it, rotate.",
+].join(" ");
+
+export const WEBHOOK_DELIVERY = [
+  `Every activity event committed in a followed project is POSTed to the URL, your own writes included: trail.<action>, like trail.issue.created, trail.issue.updated (a status change is an update whose payload has status from and to), trail.comment.created, trail.status_update.created, trail.label.created, trail.project.created, trail.project.updated, trail.project.imported. The body is JSON {"type", "occurredAt", "data"}; data holds eventId, seq, project {key, name}, subject {type, id, key, title} (an issue's key like BGP-12 and its title; a comment carries its issue's), actor {name, kind}, url (the item in trail's web app) and payload (the event's payload, or {truncated: true, json} with its first ${PAYLOAD_MAX_CHARS} characters when longer).`,
+  'It is OpenBot\'s signed webhook: headers content-type: application/json, x-openbot-timestamp (unix seconds), x-openbot-delivery-id (the same on every retry of one delivery: dedupe on it) and x-openbot-signature: sha256=<hex HMAC-SHA256 of "<timestamp>.<delivery id>.<raw body>" under your secret).',
+  "Deliveries to one webhook go out in event order, one at a time, at least once. A 2xx counts; 408, 429, 5xx and network errors are retried with growing waits for about 24 hours, then that delivery is failed; any other status fails it at once. After 8 failed attempts in a row the webhook is paused: paused is true, lastError and lastErrorAt say why, and its deliveries wait. Update it (update_webhook, even with no changes, or rotate_webhook_secret) once your routine is back, and it resumes. Events missed meanwhile are still in list_activity.",
+  "trail sends only to https URLs whose host resolves to a public address (no loopback, private, link-local, CGNAT or metadata addresses), checked again at every delivery, follows no redirects and waits 10 seconds for an answer.",
+].join(" ");

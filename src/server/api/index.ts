@@ -13,6 +13,7 @@ import { photoRoutes } from "./photos.js";
 import { projectRoutes } from "./projects.js";
 import { limitBody, MAX_BODY_BYTES } from "./routes.js";
 import { statusUpdateRoutes } from "./status-updates.js";
+import { webhookRoutes } from "./webhooks.js";
 
 /** The `/api/v1` app: the spec is public, every other route needs a bot key. */
 export function createApi({ db, service }: { db: Db; service: Service }) {
@@ -45,5 +46,6 @@ export function createApi({ db, service }: { db: Db; service: Service }) {
   api.route("/", statusUpdateRoutes(service));
   api.route("/", activityRoutes(service));
   api.route("/", actorRoutes(service));
+  api.route("/", webhookRoutes(service));
   return api;
 }

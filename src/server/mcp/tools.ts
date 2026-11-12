@@ -15,6 +15,9 @@ import {
   projectCreateSchema,
   projectUpdateSchema,
   statusUpdateCreateSchema,
+  webhookCreateSchema,
+  webhookSecretUpdateSchema,
+  webhookUpdateSchema,
 } from "../../shared/schemas.js";
 import {
   toActivityEvent,
@@ -26,6 +29,7 @@ import {
   toPage,
   toProject,
   toStatusUpdate,
+  toWebhook,
   toWhoami,
 } from "../api/serialize.js";
 import { actorPhotoContentTypes } from "../db/schema.js";
@@ -41,6 +45,7 @@ import {
   PHOTO_MAX_BYTES,
   photoTooLarge,
 } from "../service/photos.js";
+import { WEBHOOK_DELIVERY, WEBHOOK_SETUP } from "../webhooks/docs.js";
 
 const projectId = z
   .string()
@@ -153,15 +158,31 @@ function run(tool: string, call: () => unknown): CallToolResult {
   try {
     return json(call());
   } catch (error) {
-    // each service message names what was refused and what to send instead
-    if (error instanceof ServiceError) {
-      return failure(`${error.code}: ${error.message}`);
-    }
-    console.error(`unhandled error in MCP tool ${tool}`, error);
-    return failure(
-      `internal: trail failed on its side. Retry ${tool} once; if it fails again, stop and report the tool name and its arguments.`,
-    );
+    return failed(tool, error);
   }
+}
+
+/** `run` for a call that awaits. */
+async function runAsync(
+  tool: string,
+  call: () => Promise<unknown>,
+): Promise<CallToolResult> {
+  try {
+    return json(await call());
+  } catch (error) {
+    return failed(tool, error);
+  }
+}
+
+function failed(tool: string, error: unknown): CallToolResult {
+  // each service message names what was refused and what to send instead
+  if (error instanceof ServiceError) {
+    return failure(`${error.code}: ${error.message}`);
+  }
+  console.error(`unhandled error in MCP tool ${tool}`, error);
+  return failure(
+    `internal: trail failed on its side. Retry ${tool} once; if it fails again, stop and report the tool name and its arguments.`,
+  );
 }
 
 /** Registers every trail tool on `server`, each acting as `actor` within its key's scope. */
@@ -464,6 +485,87 @@ export function registerTools(
       annotations: { ...update, destructiveHint: true },
     },
     () => run("clear_my_photo", () => service.clearMyPhoto(actor)),
+  );
+
+  const webhookId = z
+    .string()
+    .min(1)
+    .describe("The webhook's id, from create_webhook or list_webhooks.");
+  const ownWebhooks =
+    "Acts on your own webhooks only; another bot's, or one following a project outside this key's scope, is not found.";
+
+  server.registerTool(
+    "create_webhook",
+    {
+      description: `Get a signed webhook call for every event in projects you follow, so you hear of an issue another bot files without polling list_activity. Needs the read action. ${WEBHOOK_SETUP} ${WEBHOOK_DELIVERY} Returns the webhook (never its secret); a project this key can't read is not found.`,
+      inputSchema: webhookCreateSchema,
+      annotations: create,
+    },
+    (input) =>
+      runAsync("create_webhook", async () =>
+        toWebhook(await service.createWebhook(actor, input)),
+      ),
+  );
+
+  server.registerTool(
+    "list_webhooks",
+    {
+      description: `List your webhooks, oldest first, each with the projects it follows, paused, lastSuccessAt, lastError and lastErrorAt: read it to see whether deliveries are healthy. The secret is never listed. Needs the read action. ${ownWebhooks}`,
+      inputSchema: z.strictObject({}),
+      annotations: read,
+    },
+    () =>
+      run("list_webhooks", () =>
+        toPage(service.listWebhooks(actor), toWebhook),
+      ),
+  );
+
+  server.registerTool(
+    "update_webhook",
+    {
+      description: `Change a webhook's url or the projects it follows (projects replaces the whole list), and resume it if it was paused: an update with no fields still resumes. Fields left out stay as they are. To change the secret use rotate_webhook_secret. Needs the read action. ${ownWebhooks}`,
+      inputSchema: webhookUpdateSchema.extend({ webhookId }),
+      annotations: update,
+    },
+    ({ webhookId, ...patch }) =>
+      runAsync("update_webhook", async () =>
+        toWebhook(await service.updateWebhook(actor, webhookId, patch)),
+      ),
+  );
+
+  server.registerTool(
+    "rotate_webhook_secret",
+    {
+      description: `Replace a webhook's signing secret, and resume it if it was paused. The old secret stops signing at once, so give your routine the new one first. Read the secret from a key in a script, never from chat; it is never returned. Needs the read action. ${ownWebhooks}`,
+      inputSchema: webhookSecretUpdateSchema.extend({ webhookId }),
+      annotations: update,
+    },
+    ({ webhookId, secret }) =>
+      run("rotate_webhook_secret", () =>
+        toWebhook(service.rotateWebhookSecret(actor, webhookId, secret)),
+      ),
+  );
+
+  server.registerTool(
+    "delete_webhook",
+    {
+      description: `Delete a webhook and the deliveries still queued for it. Needs the read action. ${ownWebhooks}`,
+      inputSchema: z.strictObject({ webhookId }),
+      annotations: { ...update, destructiveHint: true },
+    },
+    ({ webhookId }) =>
+      run("delete_webhook", () => service.deleteWebhook(actor, webhookId)),
+  );
+
+  server.registerTool(
+    "test_webhook",
+    {
+      description: `Send one signed trail.ping to a webhook now and see what its receiver answered: delivered, the HTTP status, and an error when it failed. Run it after create_webhook to check your OpenBot routine accepts the signature, and after a pause before you update the webhook. Needs the read action. ${ownWebhooks}`,
+      inputSchema: z.strictObject({ webhookId }),
+      annotations: { ...create, openWorldHint: true },
+    },
+    ({ webhookId }) =>
+      runAsync("test_webhook", () => service.testWebhook(actor, webhookId)),
   );
 
   server.registerTool(

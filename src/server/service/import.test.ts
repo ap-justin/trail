@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterAll, expect, test } from "vitest";
 import { migrate, openDatabase } from "../db/client.js";
 import { createEventBus } from "../events/bus.js";
-import { atFakeTime, projectKey } from "../test-app.js";
+import { atFakeTime, projectKey, testWebhooks } from "../test-app.js";
 import {
   createService,
   type ImportComment,
@@ -22,7 +22,11 @@ afterAll(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-const service = createService({ db, bus: createEventBus() });
+const service = createService({
+  db,
+  bus: createEventBus(),
+  webhooks: testWebhooks,
+});
 const bot = createBot(db, "migrator").actor;
 
 let refs = 0;

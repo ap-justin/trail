@@ -72,6 +72,13 @@ curl -fsS "$base/api/web/me" | grep -q '"state":"anonymous"' || { echo "/api/web
 code=$(curl -s -o /dev/null -w '%{http_code}' "$base/api/web/projects")
 [ "$code" = 401 ] || { echo "unauthenticated /api/web/projects gave $code, want 401" >&2; exit 1; }
 
+# webhooks: the route and its address check are in the bundle; an internal URL is refused before anything is stored
+code=$(curl -s -o "$dir/hook.json" -w '%{http_code}' -X POST "$base/api/v1/webhooks" \
+  -H "Authorization: Bearer $key" -H 'Content-Type: application/json' \
+  -d '{"url":"https://127.0.0.1/hook","secret":"smoke-webhook-secret-0123","projects":["NONE"]}')
+[ "$code" = 404 ] || { echo "POST /api/v1/webhooks for a missing project gave $code, want 404: $(cat "$dir/hook.json")" >&2; exit 1; }
+curl -fsS -H "Authorization: Bearer $key" "$base/api/v1/webhooks" | grep -q '"items":\[\]' || { echo "GET /api/v1/webhooks did not list none" >&2; exit 1; }
+
 # /mcp loads the MCP SDK from node_modules at runtime, outside the bundle
 initialize='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"smoke","version":"1"}}}'
 mcp() {
