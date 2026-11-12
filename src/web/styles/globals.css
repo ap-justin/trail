@@ -6,51 +6,82 @@
 
 @custom-variant dark (&:is(.dark *));
 
-@theme inline {
-  --font-heading: var(--font-sans);
+/*
+ * The design system's closed set: values from the "trail-tokens" guideline and the
+ * approved frames on the doop canvas ltdlIxhvr2. Each `initial` drops Tailwind's
+ * stock scale, so a class outside the set (`text-gray-500`, `text-2xl`, `rounded-3xl`,
+ * `shadow-sm`) compiles to nothing; design-system.test.ts sweeps the rest.
+ */
+@theme {
+  --color-*: initial;
+  --text-*: initial;
+  --radius-*: initial;
+  --shadow-*: initial;
+  --ease-*: initial;
+
   --font-sans: "Geist Variable", sans-serif;
   --font-mono: "Geist Mono Variable", monospace;
-  --color-sidebar-ring: var(--sidebar-ring);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar: var(--sidebar);
-  --color-chart-5: var(--chart-5);
-  --color-chart-4: var(--chart-4);
-  --color-chart-3: var(--chart-3);
-  --color-chart-2: var(--chart-2);
-  --color-chart-1: var(--chart-1);
-  --color-ring: var(--ring);
-  --color-input: var(--input);
-  --color-border: var(--border);
-  --color-destructive: var(--destructive);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-accent: var(--accent);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-muted: var(--muted);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-secondary: var(--secondary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-primary: var(--primary);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-popover: var(--popover);
-  --color-card-foreground: var(--card-foreground);
-  --color-card: var(--card);
-  --color-foreground: var(--foreground);
+  --font-heading: var(--font-sans);
+
+  /* badges and labels · keys, URLs, meta · body · dialog title · page titles · 404 figure */
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 16px;
+  --text-lg: 18px;
+  --text-xl: 20px;
+  --text-display: 28px;
+
+  /* badge · controls and chips · cards and menus · dialog · pill */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 6px;
+  --radius-xl: 8px;
+  --radius-2xl: 10px;
+  --radius-4xl: 9999px;
+
+  --shadow-md: 0 4px 16px oklch(0 0 0 / 12%);
+  --shadow-lg: 0 4px 16px oklch(0 0 0 / 12%);
+  /* the New issue dialog, from its 1440 frame */
+  --shadow-xl: 0 10px 30px oklch(0 0 0 / 25%);
+
+  --ease-out: ease-out;
+  /* what a bare `transition-colors` / `transition-opacity` runs on */
+  --default-transition-timing-function: var(--ease-out);
+}
+
+@theme inline {
   --color-background: var(--background);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-success-muted: var(--success-muted);
+  --color-warning: var(--warning);
+  --color-warning-muted: var(--warning-muted);
+  --color-destructive: var(--destructive);
+  --color-destructive-muted: var(--destructive-muted);
+  --color-bot: var(--bot);
+  --color-bot-muted: var(--bot-muted);
+  --color-highlight: var(--highlight);
 }
 
 :root {
+  color-scheme: light;
+
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -62,30 +93,40 @@
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
+  --muted-foreground: oklch(0.5 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+
+  /* bots only: badge, square avatar */
+  --bot: oklch(0.48 0.17 265);
+  --bot-muted: oklch(0.95 0.03 265);
+  /* a feed row received over SSE in the last 2 seconds */
+  --highlight: oklch(0.97 0.02 265);
+  /* status and health ink; each -muted is the surface its ink sits on (the Reconnecting banner) */
+  --success: oklch(0.5 0.13 150);
+  --success-muted: oklch(0.96 0.04 150);
+  --warning: oklch(0.55 0.13 65);
+  --warning-muted: oklch(0.97 0.05 85);
+  --destructive: oklch(0.54 0.21 27);
+  --destructive-muted: oklch(0.96 0.02 25);
+
+  --duration-press: 100ms;
+  --duration-menu: 120ms;
+  --duration-dialog: 150ms;
+  --duration-row: 200ms;
+  --duration-sheet: 200ms;
+  --duration-highlight: 2s;
+
+  /* behind the New issue dialog, from its 1440 frame; one value for both themes */
+  --scrim: oklch(0 0 0 / 50%);
 }
 
 .dark {
+  color-scheme: dark;
+
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
@@ -96,37 +137,124 @@
   --primary-foreground: oklch(0.205 0 0);
   --secondary: oklch(0.269 0 0);
   --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
+  --muted: oklch(0.22 0 0);
+  --muted-foreground: oklch(0.7 0 0);
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+
+  --bot: oklch(0.76 0.12 265);
+  --bot-muted: oklch(0.27 0.06 265);
+  --highlight: oklch(0.2 0.03 265);
+  --success: oklch(0.75 0.14 150);
+  --success-muted: oklch(0.27 0.05 150);
+  --warning: oklch(0.78 0.13 75);
+  --warning-muted: oklch(0.3 0.05 75);
+  --destructive: oklch(0.7 0.18 25);
+  --destructive-muted: oklch(0.28 0.06 25);
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
-  body {
-    @apply bg-background text-foreground;
-  }
+  /* anchor jumps and focus-into-view clear the sticky top bar and, below lg, the fixed tab bar */
   html {
-    @apply font-sans;
+    @apply scroll-pt-12 font-sans max-lg:scroll-pb-14;
+  }
+  body {
+    @apply bg-background text-sm text-foreground antialiased;
+    line-height: 1.45;
+  }
+}
+
+/* a row that arrived over SSE: slides in and its highlight fades over the 2s it is fresh */
+@keyframes row-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+@keyframes row-enter-reduced {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes highlight-fade {
+  from {
+    background-color: var(--highlight);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+
+@utility row-fresh {
+  animation:
+    row-enter var(--duration-row) ease-out,
+    highlight-fade var(--duration-highlight) ease-out forwards;
+
+  @media (prefers-reduced-motion: reduce) {
+    animation:
+      row-enter-reduced var(--duration-row) ease-out,
+      highlight-fade var(--duration-highlight) ease-out forwards;
+  }
+}
+
+/*
+ * Menus and select popups open from their trigger at scale(0.96), opacity only under
+ * reduced motion. Unlayered on purpose: it must beat the stock components' tw-animate
+ * utilities (zoom-in-95, slide-in-from-*), which sit in the utilities layer.
+ */
+[data-slot="dropdown-menu-content"],
+[data-slot="dropdown-menu-sub-content"],
+[data-slot="select-content"],
+[data-slot="popover-content"] {
+  --tw-animation-duration: var(--duration-menu);
+  --tw-ease: ease-out;
+  --tw-enter-scale: 0.96;
+  --tw-exit-scale: 0.96;
+  --tw-enter-translate-x: 0;
+  --tw-enter-translate-y: 0;
+  --tw-exit-translate-x: 0;
+  --tw-exit-translate-y: 0;
+
+  @media (prefers-reduced-motion: reduce) {
+    --tw-enter-scale: 1;
+    --tw-exit-scale: 1;
+  }
+}
+
+/*
+ * The dialog opens at scale(0.98) over the scrim at 1024px and up; below, it is a
+ * full-screen sheet that slides up. Reduced motion keeps the fade alone. Unlayered for
+ * the same reason as the menus above.
+ */
+[data-slot="dialog-overlay"] {
+  --tw-animation-duration: var(--duration-dialog);
+  --tw-ease: ease-out;
+  background-color: var(--scrim);
+  backdrop-filter: none;
+}
+[data-slot="dialog-content"] {
+  --tw-animation-duration: var(--duration-dialog);
+  --tw-ease: ease-out;
+  --tw-enter-scale: 0.98;
+  --tw-exit-scale: 0.98;
+
+  @media (width < 64rem) {
+    --tw-animation-duration: var(--duration-sheet);
+    --tw-enter-scale: 1;
+    --tw-exit-scale: 1;
+  }
+  @media (width < 64rem) and (prefers-reduced-motion: no-preference) {
+    --tw-enter-translate-y: 100%;
+    --tw-exit-translate-y: 100%;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    --tw-enter-scale: 1;
+    --tw-exit-scale: 1;
   }
 }
