@@ -82,6 +82,9 @@ test("a key limited to reading one project still sets and clears its own photo",
   const reader = await connect(scoped.key);
   const { photoUrl } = await call(reader, "set_my_photo", { data: b64(PNG) });
   expect((await call(reader, "whoami")).photoUrl).toBe(photoUrl);
+  const served = await request("GET", photoUrl, { key: scoped.key });
+  expect(served.status).toBe(200);
+  expect(new Uint8Array(await served.arrayBuffer())).toEqual(PNG);
   await call(reader, "clear_my_photo");
 });
 

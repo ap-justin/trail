@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { beforeAll, beforeEach, expect, test } from "vitest";
-import { session } from "./db/schema.js";
+import { invite, session } from "./db/schema.js";
+import { createBot, revokeKey } from "./service/keys.js";
 import { setupTestApp } from "./test-app.js";
 import { OTHER_PNG, PNG, WEBP } from "./test-images.js";
 
@@ -97,7 +98,7 @@ test.each([
 ])(
   "%s is a 401 with no key or session, not the 404 a signed-in caller gets",
   async (_, urlOf) => {
-    const [, , actor = "", hash = ""] = photoUrl.split("/");
+    const [, , , actor = "", hash = ""] = photoUrl.split("/");
     const url = urlOf(actor, hash);
     expect((await request("GET", url, { key: null })).status).toBe(401);
     expect((await request("GET", url)).status).toBe(404);
@@ -122,11 +123,49 @@ test("a stale hash, an actor without a photo and an unknown actor are 404s", asy
   );
 });
 
+const sessionToken = (cookie: string) =>
+  decodeURIComponent(cookie.split("=")[1] ?? "").split(".")[0] ?? "";
+
+test("a revoked bot key is a 401, though the same key read the photo before", async () => {
+  const doomed = createBot(db, "doomed");
+  expect((await request("GET", photoUrl, { key: doomed.key })).status).toBe(
+    200,
+  );
+  revokeKey(db, doomed.key.split("_")[1] ?? "");
+  expect((await request("GET", photoUrl, { key: doomed.key })).status).toBe(
+    401,
+  );
+});
+
+test("a member removed while their session is live is a 401", async () => {
+  const cookie = await addMember("member-removed", []);
+  expect((await request("GET", photoUrl, { key: null, cookie })).status).toBe(
+    200,
+  );
+  db.delete(invite).where(eq(invite.username, "member-removed")).run();
+  expect((await request("GET", photoUrl, { key: null, cookie })).status).toBe(
+    401,
+  );
+});
+
+test("an expired session is a 401", async () => {
+  const cookie = await addMember("member-expired", []);
+  expect((await request("GET", photoUrl, { key: null, cookie })).status).toBe(
+    200,
+  );
+  db.update(session)
+    .set({ expiresAt: new Date(Date.now() - 60_000) })
+    .where(eq(session.token, sessionToken(cookie)))
+    .run();
+  expect((await request("GET", photoUrl, { key: null, cookie })).status).toBe(
+    401,
+  );
+});
+
 /** A fresh member whose session is an hour from expiry, past better-auth's updateAge. */
 async function dueSession(login: string) {
   const cookie = await addMember(login, []);
-  const token =
-    decodeURIComponent(cookie.split("=")[1] ?? "").split(".")[0] ?? "";
+  const token = sessionToken(cookie);
   const dueAt = new Date(Date.now() + 3_600_000);
   dueAt.setMilliseconds(0);
   db.update(session)

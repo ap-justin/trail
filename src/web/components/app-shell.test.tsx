@@ -85,6 +85,9 @@ test("the viewer's photo loads lazily in the sidebar's account menu (hidden belo
   renderShell(viewer);
   const trigger = screen.getByRole("button", { name: "Account: Maya Chen" });
   expect(trigger.querySelector("img")).toHaveAttribute("loading", "lazy");
+  // the sheet shows the sidebar only from lg up, so below it the lazy img never renders or fetches
+  const sidebar = trigger.closest("aside");
+  expect(sidebar).toHaveClass("hidden", "lg:flex");
   expect(trigger.querySelector("img")).toHaveAttribute(
     "src",
     "/api/photos/a-maya/77b2",

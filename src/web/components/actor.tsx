@@ -57,8 +57,8 @@ function initials(actor: Pick<WebActorView, "name" | "kind">): string {
  * loads and stay when it fails; once it loads they go, so a transparent photo never
  * shows them through.
  * Decorative: the name always sits beside it.
- * `loading="eager"` for an avatar at the top of its screen (the account panel); the
- * sidebar's account menu is display:none below lg, so it and lists keep the lazy default.
+ * `loading="eager"` for an avatar at the top of its screen (the account panel); lists
+ * keep the lazy default.
  */
 export function ActorAvatar({
   actor,
@@ -80,8 +80,9 @@ export function ActorAvatar({
   const photoUrl =
     actor.photoUrl && actor.photoUrl !== failedUrl ? actor.photoUrl : null;
   const photoShown = photoUrl !== null && photoUrl === loadedUrl;
-  // a cached photo is complete before its load event fires; taking it at attach (before
-  // paint) spares a frame of initials. Rerun per URL: src is updated by the time refs attach.
+  // a photo this page already loaded is complete at attach, before its load event; taking it
+  // then skips a frame of initials. After a hard reload it isn't, so initials may show for a
+  // frame. Rerun per URL: relies on React setting the new src before it attaches refs.
   const takeIfComplete = useCallback(
     (img: HTMLImageElement | null) => {
       if (img?.complete && img.naturalWidth > 0) setLoadedUrl(photoUrl);

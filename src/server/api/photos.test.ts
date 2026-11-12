@@ -77,9 +77,12 @@ test("a key limited to reading one project still sets and clears its own photo",
   });
   const set = await putPhoto(JPEG, "image/jpeg", scoped.key);
   expect(set.status).toBe(200);
-  expect((await whoami(scoped.key)).photoUrl).toBe(
-    ((await set.json()) as Body).photoUrl,
-  );
+  const { photoUrl } = (await set.json()) as Body;
+  expect((await whoami(scoped.key)).photoUrl).toBe(photoUrl);
+  const served = await request("GET", photoUrl, { key: scoped.key });
+  expect(served.status).toBe(200);
+  expect(served.headers.get("content-type")).toBe("image/jpeg");
+  expect(new Uint8Array(await served.arrayBuffer())).toEqual(JPEG);
   const cleared = await request("DELETE", "/api/v1/me/photo", {
     key: scoped.key,
   });

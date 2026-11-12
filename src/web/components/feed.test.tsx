@@ -57,6 +57,7 @@ describe("actor photos", () => {
       kaiWithPhoto.photoUrl,
     );
     expect(rowFor("e2").querySelector("img")).toBeNull();
+    expect(within(rowFor("e2")).getByText("K")).toBeInTheDocument();
   });
 });
 
