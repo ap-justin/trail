@@ -21,3 +21,12 @@ test("a failed sign-in start shows its message above the button, announced", () 
     Node.DOCUMENT_POSITION_FOLLOWING,
   );
 });
+
+test("the sign-in card shows the mark beside the wordmark", () => {
+  render(<SignInView onSignIn={vi.fn()} />);
+  const main = screen.getByRole("main");
+  const mark = main.querySelector("svg");
+  expect(mark).toHaveAttribute("aria-hidden", "true");
+  expect(mark?.querySelectorAll("rect")).toHaveLength(3);
+  expect(mark?.nextElementSibling).toHaveTextContent("trail.");
+});

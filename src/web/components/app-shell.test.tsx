@@ -472,3 +472,32 @@ test("a breadcrumb heading is a nav, not an h1, so the page's own h1 stands alon
     screen.getAllByRole("navigation", { name: "Breadcrumb" }),
   ).toHaveLength(2);
 });
+
+/** The mark's svg (three pills) and the wordmark beside it, inside `scope`. */
+function expectLogoIn(scope: HTMLElement) {
+  const mark = scope.querySelector(
+    "svg[aria-hidden='true'][viewBox='0 4 60 52']",
+  );
+  expect(mark?.querySelectorAll("rect")).toHaveLength(3);
+  expect(mark?.nextElementSibling).toHaveTextContent("trail.");
+}
+
+describe("the logo", () => {
+  test("the sidebar and the top bar each carry the mark and wordmark", () => {
+    renderShell(owner);
+    expectLogoIn(sidebarNav().closest("aside") as HTMLElement);
+    expectLogoIn(screen.getByRole("banner"));
+  });
+
+  test("a page with a back link has no logo in the top bar; the sidebar keeps its own", () => {
+    renderAt({
+      section: null,
+      projectKey: "TRL",
+      back: { href: "/projects/TRL", label: "Back to trail" },
+    });
+    expect(
+      screen.getByRole("banner").querySelector("svg[viewBox='0 4 60 52']"),
+    ).toBeNull();
+    expectLogoIn(sidebarNav().closest("aside") as HTMLElement);
+  });
+});

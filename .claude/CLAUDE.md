@@ -26,7 +26,7 @@ The stack lives in `package.json`; the seats below are the product brief's (deci
 - **Tokens** — `src/web/styles/globals.css`: the closed set, transcribed from the doop guideline `trail-tokens` (canvas `ltdlIxhvr2`). Tailwind's stock colour, type, radius, shadow and easing scales are `initial`, so an off-system class compiles to nothing; `src/web/styles/design-system.test.ts` sweeps `src/web/components` for literal values and undrawn class names.
 - **Layout** — 232px sidebar + 48px top bar at `lg` (1024px) and up; top bar + 56px bottom tab bar below. Feed column 880px.
 - **Signature** — indigo (`--bot`) only for bots: badge and rounded-square avatar; people are neutral with round avatars. Keys, URLs and `@usernames` in Geist Mono.
-- **Mark** — the top pill of the trail mark (`src/web/components/logo.tsx`) is the one place indigo appears outside bots, as the owner chose in the C · Wake mark; everywhere else indigo stays bots-only.
+- **Mark** — the top pill of the trail mark (`src/web/components/logo.tsx`) and the wordmark's period are the only places indigo appears outside bots, as the owner chose in the C · Wake mark; everywhere else indigo stays bots-only.
 - **Motion** — exact properties, `ease-out`, under 300ms; every animation has a reduced-motion version with no movement; skeletons never pulse.
 - **Theme** — a `dark` class on `<html>`; `src/web/public/theme-init.js` sets it before paint (the CSP allows no inline script).
 
