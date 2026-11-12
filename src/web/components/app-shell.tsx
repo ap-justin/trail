@@ -10,7 +10,14 @@ import {
   UserIcon,
   UsersIcon,
 } from "lucide-react";
-import { type ReactNode, type Ref, useId, useRef, useState } from "react";
+import {
+  type ReactNode,
+  type Ref,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react";
 import { ActorAvatar } from "@/components/actor";
 import { AppLink, type AppLinkProps } from "@/components/app-link";
 import { KeyText, Wordmark } from "@/components/text";
@@ -52,6 +59,11 @@ export type AppShellProps = {
   projectKey?: string;
   /** The page title or breadcrumb: in the top bar at 1440, under it at 375. Null draws no heading. */
   heading: ReactNode;
+  /**
+   * `breadcrumb` draws the heading as a Breadcrumb nav rather than an h1, for a page whose
+   * content carries its own h1 (an issue: the breadcrumb here, the title in the page).
+   */
+  headingKind?: "title" | "breadcrumb";
   /** Beside the heading, such as the feed's Live indicator. */
   headingAccessory?: ReactNode;
   /**
@@ -262,8 +274,8 @@ function AccountMenu({
 
 /**
  * The box and its results slot, as one search landmark that Escape and a followed result
- * end. The results hide while focus is outside the landmark (a click elsewhere moves it
- * there too) and come back when the box takes focus again, query intact.
+ * end. The results hide on a press outside the landmark or focus moving out of it, and come
+ * back when the box takes focus again, query intact.
  */
 function SearchBox({
   query,
@@ -285,11 +297,26 @@ function SearchBox({
   className?: string;
 }) {
   const [open, setOpen] = useState(true);
+  const landmark = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!landmark.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    return () => document.removeEventListener("pointerdown", closeOutside);
+  }, [open]);
+
   return (
     <search
+      ref={landmark}
       className={cn("relative", className)}
       onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+        // null is Safari pressing a result (links take no focus on click) as well as a press
+        // on nothing focusable; the pointerdown listener decides those, so the click lands
+        const to = event.relatedTarget;
+        if (to && !event.currentTarget.contains(to)) setOpen(false);
       }}
       onKeyDown={(event) => {
         if (event.key === "Escape") onEnd("escape");
@@ -323,6 +350,24 @@ function SearchBox({
       </div>
       {open && results && <div className={resultsClassName}>{results}</div>}
     </search>
+  );
+}
+
+function ShellHeading({
+  kind,
+  className,
+  children,
+}: {
+  kind: "title" | "breadcrumb";
+  className: string;
+  children: ReactNode;
+}) {
+  return kind === "breadcrumb" ? (
+    <nav aria-label="Breadcrumb" className={className}>
+      {children}
+    </nav>
+  ) : (
+    <h1 className={className}>{children}</h1>
   );
 }
 
@@ -364,6 +409,7 @@ export function AppShell({
   section,
   projectKey,
   heading,
+  headingKind = "title",
   headingAccessory,
   back,
   searchValue,
@@ -419,7 +465,12 @@ export function AppShell({
                   <ChevronLeftIcon aria-hidden="true" className="size-4" />
                 </AppLink>
                 {heading != null && (
-                  <h1 className="truncate font-medium">{heading}</h1>
+                  <ShellHeading
+                    kind={headingKind}
+                    className="truncate font-medium"
+                  >
+                    {heading}
+                  </ShellHeading>
                 )}
               </div>
             ) : (
@@ -427,7 +478,12 @@ export function AppShell({
             )}
             <div className="hidden min-w-0 flex-1 items-center gap-2 lg:flex">
               {heading != null && (
-                <h1 className="truncate font-medium">{heading}</h1>
+                <ShellHeading
+                  kind={headingKind}
+                  className="truncate font-medium"
+                >
+                  {heading}
+                </ShellHeading>
               )}
               {headingAccessory}
             </div>
@@ -481,7 +537,9 @@ export function AppShell({
         </header>
         {heading != null && !back && (
           <div className="flex items-center gap-2 px-4 pt-3 lg:hidden">
-            <h1 className="font-medium">{heading}</h1>
+            <ShellHeading kind={headingKind} className="font-medium">
+              {heading}
+            </ShellHeading>
             {headingAccessory}
           </div>
         )}

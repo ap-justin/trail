@@ -34,7 +34,10 @@ export type IssueViewProps = {
   commentError: ReactNode;
 };
 
-/** The shell heading on an issue page: `Projects / trail / TRL-14` at 1440, the key below. */
+/**
+ * The shell heading on an issue page, as `headingKind="breadcrumb"` (the title is the h1):
+ * `Projects / trail / TRL-14` at 1440, the key below.
+ */
 export function IssueBreadcrumb({
   issueKey,
   project,

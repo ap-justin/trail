@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, test, vi } from "vitest";
@@ -195,6 +195,47 @@ describe("search", () => {
     ).not.toBeInTheDocument();
   });
 
+  // Safari focuses no link on press: the box blurs with no relatedTarget before the click
+  test("a pressed result survives the box blurring to nowhere, and the click follows it", async () => {
+    const onSearch = vi.fn();
+    render(<SearchingShell onSearch={onSearch} />);
+    await userEvent.type(searchBox(), "team");
+    const link = screen.getByRole("link", { name: /TRL-14/ });
+    link.addEventListener("click", (event) => event.preventDefault());
+
+    fireEvent.pointerDown(link);
+    fireEvent.mouseDown(link);
+    fireEvent.focusOut(searchBox(), { relatedTarget: null });
+    fireEvent.pointerUp(link);
+    fireEvent.mouseUp(link);
+
+    expect(link).toBeInTheDocument();
+    fireEvent.click(link);
+    expect(onSearch).toHaveBeenLastCalledWith("");
+  });
+
+  test("a press outside the search closes the results", async () => {
+    render(<SearchingShell onSearch={vi.fn()} />);
+    await userEvent.type(searchBox(), "team");
+    fireEvent.pointerDown(screen.getByText("page"));
+    expect(
+      screen.queryByRole("list", { name: "Search results" }),
+    ).not.toBeInTheDocument();
+    expect(searchBox()).toHaveValue("team");
+  });
+
+  test("tabbing past the results closes them", async () => {
+    const user = userEvent.setup();
+    render(<SearchingShell onSearch={vi.fn()} />);
+    await user.type(searchBox(), "team");
+    await user.tab();
+    expect(screen.getByRole("link", { name: /TRL-14/ })).toHaveFocus();
+    await user.tab();
+    expect(
+      screen.queryByRole("list", { name: "Search results" }),
+    ).not.toBeInTheDocument();
+  });
+
   test("the caller can clear the box from outside", () => {
     const shell = (value: string) => (
       <ThemeProvider>
@@ -294,4 +335,31 @@ test("back: a chevron link in the top bar, beside the heading", () => {
     screen.getAllByRole("heading", { level: 1, name: "TRL-14" }),
   ).toHaveLength(2);
   expect(document.querySelector("header + div h1")).toBeNull();
+});
+
+test("a breadcrumb heading is a nav, not an h1, so the page's own h1 stands alone", () => {
+  render(
+    <ThemeProvider>
+      <AppShell
+        viewer={owner}
+        projects={[]}
+        section={null}
+        heading="TRL-14"
+        headingKind="breadcrumb"
+        back={{ href: "/projects/TRL", label: "Back to trail" }}
+        onSearch={vi.fn()}
+        onNewIssue={vi.fn()}
+        onSignOut={vi.fn()}
+      >
+        <h1>Team access</h1>
+      </AppShell>
+    </ThemeProvider>,
+  );
+  expect(screen.getAllByRole("heading", { level: 1 })).toEqual([
+    screen.getByRole("heading", { name: "Team access" }),
+  ]);
+  // top bar at 1440 and at 375; CSS shows one
+  expect(
+    screen.getAllByRole("navigation", { name: "Breadcrumb" }),
+  ).toHaveLength(2);
 });

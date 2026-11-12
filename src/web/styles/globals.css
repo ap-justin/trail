@@ -160,8 +160,9 @@
   * {
     @apply border-border outline-ring/50;
   }
+  /* anchor jumps and focus-into-view clear the sticky top bar and, below lg, the fixed tab bar */
   html {
-    @apply font-sans;
+    @apply scroll-pt-12 font-sans max-lg:scroll-pb-14;
   }
   body {
     @apply bg-background text-sm text-foreground antialiased;
