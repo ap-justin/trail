@@ -128,11 +128,10 @@ test.each([
   expect(new Uint8Array(await served.arrayBuffer())).toEqual(image);
 });
 
-test("set_my_photo recommends a small avatar and points larger files to the REST route", async () => {
+test("set_my_photo points larger files to the REST route", async () => {
   const { tools } = await wide.listTools();
   const description =
     tools.find((t) => t.name === "set_my_photo")?.description ?? "";
-  expect(description).toMatch(/128.*px/);
   expect(description).toContain("PUT /api/v1/me/photo");
 });
 

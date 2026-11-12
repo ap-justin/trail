@@ -1,5 +1,5 @@
 import { BotIcon, UserIcon } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import type { WebActorView } from "@/lib/api-types";
 import { cn } from "@/lib/utils";
@@ -57,8 +57,8 @@ function initials(actor: Pick<WebActorView, "name" | "kind">): string {
  * loads and stay when it fails; once it loads they go, so a transparent photo never
  * shows them through.
  * Decorative: the name always sits beside it.
- * `loading="eager"` for avatars that are always on screen (the shell's account menu
- * and panel); lists keep the lazy default.
+ * `loading="eager"` for an avatar at the top of its screen (the account panel); the
+ * sidebar's account menu is display:none below lg, so it and lists keep the lazy default.
  */
 export function ActorAvatar({
   actor,
@@ -80,6 +80,14 @@ export function ActorAvatar({
   const photoUrl =
     actor.photoUrl && actor.photoUrl !== failedUrl ? actor.photoUrl : null;
   const photoShown = photoUrl !== null && photoUrl === loadedUrl;
+  // a cached photo is complete before its load event fires; taking it at attach (before
+  // paint) spares a frame of initials. Rerun per URL: src is updated by the time refs attach.
+  const takeIfComplete = useCallback(
+    (img: HTMLImageElement | null) => {
+      if (img?.complete && img.naturalWidth > 0) setLoadedUrl(photoUrl);
+    },
+    [photoUrl],
+  );
   return (
     <span
       aria-hidden="true"
@@ -100,6 +108,7 @@ export function ActorAvatar({
       )}
       {photoUrl && (
         <img
+          ref={takeIfComplete}
           src={photoUrl}
           alt=""
           loading={loading}

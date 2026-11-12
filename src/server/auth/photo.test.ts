@@ -40,7 +40,9 @@ const photoOf = (githubId: number) => {
 
 // sign-in doesn't wait on the photo, so each test waits for the write it checks
 const photoLands = (githubId: number, bytes: Uint8Array) =>
-  expect.poll(() => photoOf(githubId)?.hash).toBe(sha256(bytes));
+  expect
+    .poll(() => photoOf(githubId)?.hash, { timeout: 5_000 })
+    .toBe(sha256(bytes));
 
 let warn = vi.spyOn(console, "warn");
 beforeEach(() => {

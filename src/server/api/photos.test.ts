@@ -11,7 +11,8 @@ import {
   WEBP,
 } from "../test-images.js";
 
-const { app, db, bot, request, addBot, addProject } = setupTestApp();
+const { app, db, bot, request, addBot, addProject, owner, signIn } =
+  setupTestApp();
 const scopeProject = addProject("scoped");
 
 // biome-ignore lint/suspicious/noExplicitAny: loose response bodies for field reads
@@ -111,8 +112,15 @@ test("bytes of exactly 256 KB are stored and one byte more is a 413", async () =
 
 test.each([
   ["an SVG", SVG, "image/png"],
+  ["an SVG sent as image/svg+xml", SVG, "image/svg+xml"],
   ["a text file labelled image/png", TEXT, "image/png"],
+  [
+    "a text file sent as application/x-www-form-urlencoded",
+    TEXT,
+    "application/x-www-form-urlencoded",
+  ],
   ["an empty body", new Uint8Array(), "image/png"],
+  ["an empty body sent without a Content-Type", new Uint8Array(), null],
 ])(
   "%s is a 422 invalid_image that leaves the photo as it was",
   async (_, body, type) => {
@@ -128,6 +136,31 @@ test.each([
     expect((await whoami(kept.key)).photoUrl).toBe(photoUrl);
   },
 );
+
+test("a PUT streamed without a Content-Length over the limit is a 413", async () => {
+  const body = pngOfSize(262145);
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (let i = 0; i < body.length; i += 65536)
+        controller.enqueue(body.slice(i, i + 65536));
+      controller.close();
+    },
+  });
+  const res = await app.request("/api/v1/me/photo", {
+    method: "PUT",
+    headers: {
+      authorization: `Bearer ${bot.key}`,
+      "content-type": "image/png",
+    },
+    body: stream,
+    duplex: "half",
+  });
+  expect(res.status).toBe(413);
+  const { error } = (await res.json()) as Body;
+  expect(error.code).toBe("payload_too_large");
+  // the middleware's wording, so the stream was counted rather than decoded by the service
+  expect(error.message).toMatch(/^the photo is over the limit/);
+});
 
 test("a JPEG labelled image/png is stored as a JPEG", async () => {
   const res = await putPhoto(JPEG, "image/png");
@@ -155,20 +188,6 @@ test.each([
   expect(new Uint8Array(await served.arrayBuffer())).toEqual(PNG);
 });
 
-test.each([
-  ["an SVG sent as image/svg+xml", SVG, "image/svg+xml"],
-  [
-    "a text file sent as application/x-www-form-urlencoded",
-    TEXT,
-    "application/x-www-form-urlencoded",
-  ],
-  ["an empty body sent without a Content-Type", new Uint8Array(), null],
-])("%s is a 422 invalid_image", async (_, body, type) => {
-  const res = await putPhoto(body, type);
-  expect(res.status).toBe(422);
-  expect(((await res.json()) as Body).error.code).toBe("invalid_image");
-});
-
 test("without a key the photo routes are a 401", async () => {
   const set = await app.request("/api/v1/me/photo", {
     method: "PUT",
@@ -179,4 +198,19 @@ test("without a key the photo routes are a 401", async () => {
   expect(
     (await request("DELETE", "/api/v1/me/photo", { key: null })).status,
   ).toBe(401);
+});
+
+test("a signed-in person cannot set or clear a photo", async () => {
+  const cookie = await signIn(owner);
+  const set = await app.request("/api/v1/me/photo", {
+    method: "PUT",
+    headers: { cookie, "content-type": "image/png" },
+    body: PNG,
+  });
+  expect(set.status).toBe(401);
+  const clear = await request("DELETE", "/api/v1/me/photo", {
+    key: null,
+    cookie,
+  });
+  expect(clear.status).toBe(401);
 });

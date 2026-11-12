@@ -73,7 +73,7 @@ test("the current section is marked for assistive tech", () => {
   }
 });
 
-test("the viewer's photo, always on screen, loads eagerly in the account menu and panel", () => {
+test("the viewer's photo loads lazily in the sidebar's account menu (hidden below lg) and eagerly atop the account panel", () => {
   const viewer: ShellViewer = {
     name: "Maya Chen",
     login: "mayachen",
@@ -82,7 +82,7 @@ test("the viewer's photo, always on screen, loads eagerly in the account menu an
   };
   renderShell(viewer);
   const trigger = screen.getByRole("button", { name: "Account: Maya Chen" });
-  expect(trigger.querySelector("img")).toHaveAttribute("loading", "eager");
+  expect(trigger.querySelector("img")).toHaveAttribute("loading", "lazy");
   expect(trigger.querySelector("img")).toHaveAttribute(
     "src",
     "/api/photos/a-maya/77b2",

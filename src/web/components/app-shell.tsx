@@ -233,7 +233,6 @@ function AccountMenu({
             kind: "human",
             photoUrl: viewer.photoUrl,
           }}
-          loading="eager"
         />
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate font-medium">{viewer.name}</span>

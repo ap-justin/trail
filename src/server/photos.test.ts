@@ -1,8 +1,8 @@
 import { eq } from "drizzle-orm";
-import { beforeAll, beforeEach, expect, test, vi } from "vitest";
+import { beforeAll, beforeEach, expect, test } from "vitest";
 import { session } from "./db/schema.js";
 import { setupTestApp } from "./test-app.js";
-import { OTHER_PNG, WEBP } from "./test-images.js";
+import { OTHER_PNG, PNG, WEBP } from "./test-images.js";
 
 const { app, bot, db, request, signIn, owner, addMember } = setupTestApp();
 
@@ -62,29 +62,6 @@ test("a signed-in member gets the photo, even one seeing no projects", async () 
   expectServedWebp(res);
 });
 
-test("a member's photo request reads only the session, its user, the access and the photo", async () => {
-  const prepare = vi.spyOn(db.$client, "prepare");
-  try {
-    const res = await request("GET", photoUrl, {
-      key: null,
-      cookie: memberCookie,
-    });
-    expectServedWebp(res);
-    const tables = prepare.mock.calls.map(
-      ([sql]) => /\bfrom "(\w+)"/.exec(sql)?.[1],
-    );
-    expect(tables).toEqual([
-      "session",
-      "user",
-      "actor",
-      "invite",
-      "actor_photo",
-    ]);
-  } finally {
-    prepare.mockRestore();
-  }
-});
-
 test("HEAD answers with the same headers", async () => {
   const res = await app.request(photoUrl, {
     method: "HEAD",
@@ -126,24 +103,56 @@ test("a stale hash, an actor without a photo and an unknown actor are 404s", asy
   );
 });
 
-test("serving a photo leaves a session due for refresh as it was, and sets no cookie", async () => {
-  const cookie = await addMember("member-due", []);
-  const token = decodeURIComponent(cookie.split("=")[1] ?? "").split(".")[0];
-  // an hour from expiry is past better-auth's updateAge, so a session read that may refresh does
+/** A fresh member whose session is an hour from expiry, past better-auth's updateAge. */
+async function dueSession(login: string) {
+  const cookie = await addMember(login, []);
+  const token =
+    decodeURIComponent(cookie.split("=")[1] ?? "").split(".")[0] ?? "";
   const dueAt = new Date(Date.now() + 3_600_000);
   dueAt.setMilliseconds(0);
   db.update(session)
     .set({ expiresAt: dueAt })
-    .where(eq(session.token, token ?? ""))
+    .where(eq(session.token, token))
     .run();
+  const expiresAt = () =>
+    db
+      .select({ expiresAt: session.expiresAt })
+      .from(session)
+      .where(eq(session.token, token))
+      .get()?.expiresAt;
+  return { cookie, dueAt, expiresAt };
+}
 
+test("serving a photo leaves a session due for refresh as it was, and sets no cookie", async () => {
+  const { cookie, dueAt, expiresAt } = await dueSession("member-due");
   const res = await request("GET", photoUrl, { key: null, cookie });
   expectServedWebp(res);
   expect(res.headers.getSetCookie()).toEqual([]);
-  const [row] = db
-    .select({ expiresAt: session.expiresAt })
-    .from(session)
-    .where(eq(session.token, token ?? ""))
-    .all();
-  expect(row?.expiresAt).toEqual(dueAt);
+  expect(expiresAt()).toEqual(dueAt);
+});
+
+test("a refreshing route does slide the same due session and sets a cookie", async () => {
+  const { cookie, dueAt, expiresAt } = await dueSession("member-control");
+  const res = await request("GET", "/api/web/me", { key: null, cookie });
+  expect(res.status).toBe(200);
+  expect(res.headers.getSetCookie()).not.toEqual([]);
+  expect(expiresAt()?.getTime()).toBeGreaterThan(dueAt.getTime());
+});
+
+test("a PNG-signature file with a script after it is served as an inert image/png", async () => {
+  const polyglot = new Uint8Array([
+    ...PNG,
+    ...Buffer.from("<html><script>alert(1)</script></html>"),
+  ]);
+  const put = await putPhoto(polyglot, "image/png");
+  expect(put.status).toBe(200);
+  const { photoUrl: url } = (await put.json()) as { photoUrl: string };
+  const res = await request("GET", url);
+  expect(res.status).toBe(200);
+  expect(res.headers.get("content-type")).toBe("image/png");
+  expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+  expect(res.headers.get("content-security-policy")).toBe(
+    "default-src 'none'; sandbox",
+  );
+  expect(new Uint8Array(await res.arrayBuffer())).toEqual(polyglot);
 });

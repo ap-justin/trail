@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { ActorAvatar, ActorBadge } from "@/components/actor";
 import { NotFoundPanel } from "@/components/states";
 import { PriorityLabel } from "@/components/status";
@@ -184,6 +184,64 @@ describe("ActorAvatar", () => {
       expect(avatar).toHaveTextContent(letters);
     },
   );
+
+  describe("an image already complete when it attaches (the browser had it cached)", () => {
+    // jsdom never decodes, so its img is never complete; stand in for a cached photo
+    function stubCompleteImages() {
+      vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(
+        true,
+      );
+      vi.spyOn(
+        HTMLImageElement.prototype,
+        "naturalWidth",
+        "get",
+      ).mockReturnValue(64);
+    }
+    afterEach(() => vi.restoreAllMocks());
+
+    test.each([
+      ["bot", "Kai", "K"],
+      ["human", "Maya Chen", "MC"],
+    ] as const)(
+      "%s: no initials from the first paint, without waiting for load",
+      (kind, name, letters) => {
+        stubCompleteImages();
+        const { container } = render(
+          <ActorAvatar actor={{ name, kind, photoUrl: photo }} />,
+        );
+        expect(container.firstElementChild).not.toHaveTextContent(letters);
+        expect(container.querySelector("img")).toHaveAttribute("src", photo);
+      },
+    );
+
+    test("a cached new URL is shown straight away too", () => {
+      const { container, rerender } = render(
+        <ActorAvatar actor={{ name: "Kai", kind: "bot", photoUrl: photo }} />,
+      );
+      expect(container.firstElementChild).toHaveTextContent("K");
+      stubCompleteImages();
+      rerender(
+        <ActorAvatar
+          actor={{
+            name: "Kai",
+            kind: "bot",
+            photoUrl: "/api/photos/a-new/9c0d",
+          }}
+        />,
+      );
+      expect(container.firstElementChild).not.toHaveTextContent("K");
+    });
+
+    test("a complete image that decoded to nothing (broken) keeps the initials", () => {
+      vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(
+        true,
+      );
+      const { container } = render(
+        <ActorAvatar actor={{ name: "Kai", kind: "bot", photoUrl: photo }} />,
+      );
+      expect(container.firstElementChild).toHaveTextContent("K");
+    });
+  });
 
   test("a photo that fails to load falls back to initials; a new photo gets its own try", () => {
     const { container, rerender } = render(
