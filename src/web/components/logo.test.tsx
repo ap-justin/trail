@@ -7,7 +7,14 @@ test("Logo is one aria-hidden mark of three pills, one of them the bot head, bes
   expect(container.querySelectorAll("svg")).toHaveLength(1);
   expect(container.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
   expect(container.querySelectorAll("svg rect")).toHaveLength(3);
-  expect(container.querySelectorAll("svg rect.fill-bot")).toHaveLength(1);
+  const pills = [...container.querySelectorAll("svg rect")];
+  const head = pills.filter((r) => r.getAttribute("y") === "4");
+  expect(head).toHaveLength(1);
+  expect(head[0]).toHaveClass("fill-bot");
+  for (const body of pills.filter((r) => r !== head[0])) {
+    expect(body).toHaveClass("fill-foreground");
+    expect(body).not.toHaveClass("fill-bot");
+  }
   expect(container).toHaveTextContent("trail.");
 });
 

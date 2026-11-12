@@ -17,11 +17,11 @@ const componentFiles = sweptDirs.flatMap((dir) =>
     .map((f) => join(dir, f)),
 );
 
-/** Class-name tokens: every string literal, minus import paths and non-class JSX attributes. */
+/** Class-name tokens: every string literal, minus import paths and non-class JSX attributes. `className` and any `*ClassName` prop (`markClassName`) carry classes. */
 function classTokens(source: string): string[] {
   const stripped = source
     .replace(/from\s+"[^"]*"/g, "")
-    .replace(/\b(?!className\b)[\w-]+="[^"]*"/g, "");
+    .replace(/\b(?![\w-]*[cC]lassName\b)[\w-]+="[^"]*"/g, "");
   const literals = stripped.match(/"[^"\n]*"|`[^`]*`/g) ?? [];
   return literals.flatMap((l) => l.slice(1, -1).split(/\s+/).filter(Boolean));
 }
@@ -71,6 +71,19 @@ describe("components and app chrome stay inside the design system", () => {
       "shadow-sm",
     ]);
     expect(drawn).toEqual([null, null, null, null, null]);
+  });
+});
+
+describe("the class collector", () => {
+  test("reads classes passed through any *ClassName prop, not other attributes", () => {
+    const tokens = classTokens(
+      '<Logo className="a-1" markClassName="h-[18px]" wordmarkClassName="w-[2rem]" href="x-y" />',
+    );
+    expect(tokens).toEqual(["a-1", "h-[18px]", "w-[2rem]"]);
+    expect(tokens.filter((t) => literalValue.test(t))).toEqual([
+      "h-[18px]",
+      "w-[2rem]",
+    ]);
   });
 });
 
