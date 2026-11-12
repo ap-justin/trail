@@ -132,10 +132,13 @@ test("lists show a scoped key only its projects and their issues", async () => {
   const b = await hiddenProject();
   const projects = await everyItem("/projects?limit=1", scoped.key);
   expect(projects.map((p) => p.key)).toEqual([a.key]);
-  const issues = await everyItem("/issues?limit=1", scoped.key);
-  expect(issues.map((i) => i.key)).toEqual([issueA]);
   const all = await everyItem("/issues", (await unscopedKey()).key);
+  const inA = all.filter((i) => i.projectId === a.id).map((i) => i.key);
+  // the unscoped list is live: it holds the hidden issue and A's own
   expect(all.map((i) => i.key)).toContain(b.issue.key);
+  expect(inA).toContain(issueA);
+  const issues = await everyItem("/issues?limit=1", scoped.key);
+  expect(issues.map((i) => i.key)).toEqual(inA);
 });
 
 test("a scoped key's activity pages past hidden and projectless events, newest first and oldest first", async () => {
@@ -248,7 +251,7 @@ test.each(["read", "issues", "comments", "status_updates", "admin"])(
       const res = await send(row, only.key);
       const body = (await res.json()) as Body;
       if (row.action === action) {
-        expect(res.status, row.route).toBeLessThan(300);
+        expect([200, 201], row.route).toContain(res.status);
       } else {
         expect([res.status, body.error?.code], row.route).toEqual([
           403,
@@ -307,6 +310,38 @@ test("a key scoped to A with read, issues and comments writes issues and comment
     json: { body: "on it" },
   });
   expect(commented.status).toBe(201);
+});
+
+test("a key scoped to A with the status_updates and admin actions posts, labels and patches A", async () => {
+  const manager = createBot(db, "scoped manager", {
+    scope: { projects: [a.key], actions: ["read", "status_updates", "admin"] },
+  });
+  const as = (method: string, path: string, json: unknown) =>
+    request(method, `/api/v1/projects/${a.key}${path}`, {
+      key: manager.key,
+      json,
+    });
+
+  const posted = await as("POST", "/status-updates", {
+    body: "scoped update",
+    health: "at_risk",
+  });
+  expect(posted.status).toBe(201);
+  const updates = await as("GET", "/status-updates", undefined);
+  expect(
+    ((await updates.json()) as Body).items.map((u: Body) => u.body),
+  ).toContain("scoped update");
+
+  const labelled = await as("POST", "/labels", { name: "scoped label" });
+  expect(labelled.status).toBe(201);
+  const labels = await as("GET", "/labels", undefined);
+  expect(
+    ((await labels.json()) as Body).items.map((l: Body) => l.name),
+  ).toContain("scoped label");
+
+  const patched = await as("PATCH", "", { description: "set by manager" });
+  expect(patched.status).toBe(200);
+  expect(((await patched.json()) as Body).description).toBe("set by manager");
 });
 
 test("a key with an action list and no project list reaches every project", async () => {
@@ -368,6 +403,10 @@ test("a key limited to projects imports into them, and an import outside them is
     json: { ...imported("ext-inside", inside), name: "renamed" },
   });
   expect(again.status).toBe(200);
+  const renamed = await request("GET", `/api/v1/projects/${inside}`, {
+    key: unscoped.key,
+  });
+  expect(((await renamed.json()) as Body).name).toBe("renamed");
 
   const refusal = {
     error: {
@@ -477,4 +516,90 @@ test("a hidden issue named by its source key answers as a missing source key doe
   expect((await lookup((await unscopedKey()).key)).status).toBe(200);
   expect(await lookup(scoped.key)).toEqual(missing);
   expect(missing.status).toBe(404);
+});
+
+test("an import whose source key a hidden issue holds is refused naming nothing of it, and a visible holder is still named", async () => {
+  const unscoped = await unscopedKey();
+  const withIssue = (
+    externalRef: string,
+    key: string,
+    issueRef: string,
+    sourceKey: string,
+  ) => ({
+    externalRef,
+    key,
+    name: "imported",
+    issues: [
+      {
+        externalRef: issueRef,
+        sourceKey,
+        title: "t",
+        status: "Todo",
+        createdAt: "2026-01-02T03:04:05.000Z",
+      },
+    ],
+  });
+  const inside = projectKey();
+  const held = {
+    hidden: await seed(
+      "POST",
+      "/api/v1/import",
+      withIssue(`ext-${projectKey()}`, projectKey(), "hid-501", "LIN-501"),
+    ),
+    visible: await seed(
+      "POST",
+      "/api/v1/import",
+      withIssue(`ext-${inside}`, inside, "vis-502", "LIN-502"),
+    ),
+  };
+  expect(held.hidden.created.issues).toBe(1);
+  expect(held.visible.created.issues).toBe(1);
+  const holderId = async (sourceKey: string) =>
+    (
+      (await (
+        await request("GET", `/api/v1/issues/${sourceKey}`, {
+          key: unscoped.key,
+        })
+      ).json()) as Body
+    ).id as string;
+  const hiddenId = await holderId("LIN-501");
+  const visibleId = await holderId("LIN-502");
+
+  const importer = createBot(db, "scoped source-key importer", {
+    scope: { projects: [inside], actions: ["admin"] },
+  });
+  const attempt = async (key: string, sourceKey: string) => {
+    const res = await request("POST", "/api/v1/import", {
+      key,
+      json: withIssue(`ext-${inside}`, inside, "new-503", sourceKey),
+    });
+    return { status: res.status, body: await res.text() };
+  };
+  const named = (id: string, ref: string, sourceKey: string) =>
+    JSON.stringify({
+      error: {
+        code: "conflict",
+        message: `issue new-503 sends sourceKey ${sourceKey}, but issue ${id} (externalRef ${ref}) already has it: a source key names one issue, so send each issue its own Linear identifier`,
+      },
+    });
+
+  const hidden = await attempt(importer.key, "LIN-501");
+  expect(hidden.status).toBe(409);
+  expect(hidden.body).not.toContain(hiddenId);
+  expect(hidden.body).not.toContain("hid-501");
+  expect(JSON.parse(hidden.body)).toEqual({
+    error: {
+      code: "conflict",
+      message:
+        "issue new-503 sends sourceKey LIN-501, but another issue already has it: a source key names one issue, so send each issue its own Linear identifier",
+    },
+  });
+  expect(await attempt(importer.key, "LIN-502")).toEqual({
+    status: 409,
+    body: named(visibleId, "vis-502", "LIN-502"),
+  });
+  expect(await attempt(unscoped.key, "LIN-501")).toEqual({
+    status: 409,
+    body: named(hiddenId, "hid-501", "LIN-501"),
+  });
 });

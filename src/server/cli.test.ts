@@ -5,7 +5,7 @@ import { join, relative } from "node:path";
 import { afterAll, expect, test } from "vitest";
 import { runCli } from "./cli.js";
 import { migrate, openDatabase } from "./db/client.js";
-import { project } from "./db/schema.js";
+import { actor, project } from "./db/schema.js";
 import { createBot, listKeys, resolveKey } from "./service/keys.js";
 
 const dir = mkdtempSync(join(tmpdir(), "trail-cli-"));
@@ -213,7 +213,10 @@ test.each([
   "a scope with %s is refused like other validation failures, minting nothing",
   (_, flags, reason) => {
     const keyCount = () => withDb((db) => listKeys(db).length);
+    const actorCount = () =>
+      withDb((db) => db.select().from(actor).all().length);
     const before = keyCount();
+    const actors = actorCount();
     for (const argv of [
       ["bot", "create", "never scoped", ...flags],
       ["key", "create", "agent-quiet", ...flags],
@@ -225,6 +228,8 @@ test.each([
       expect(stderr).toMatch(/\nUsage:/);
     }
     expect(keyCount()).toBe(before);
+    // a refused mint leaves no orphaned bot row, which a key count can't see
+    expect(actorCount()).toBe(actors);
     expect(run("key", "create", "never scoped").code).toBe(1);
   },
 );

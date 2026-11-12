@@ -708,8 +708,15 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
         .where(eq(issue.sourceKey, row.sourceKey))
         .get();
       if (holder) {
+        const visible = visibleIdsOf(actor);
+        // source keys are unique across projects, so the 409 itself still tells a scoped key the
+        // key is taken somewhere; only a holder the key can see is named
+        const who =
+          visible === null || visible.includes(holder.projectId)
+            ? `issue ${holder.id} (externalRef ${holder.externalRef ?? "none"})`
+            : "another issue";
         throw new ConflictError(
-          `issue ${row.externalRef} sends sourceKey ${row.sourceKey}, but issue ${holder.id} (externalRef ${holder.externalRef ?? "none"}) already has it: a source key names one issue, so send each issue its own Linear identifier`,
+          `issue ${row.externalRef} sends sourceKey ${row.sourceKey}, but ${who} already has it: a source key names one issue, so send each issue its own Linear identifier`,
         );
       }
     }

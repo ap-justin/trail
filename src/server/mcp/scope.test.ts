@@ -144,9 +144,19 @@ test("list tools show a scoped key only its projects, their issues and their act
   expect(
     (await call(ivy, "list_projects")).items.map((p: Body) => p.key),
   ).toEqual([a.key]);
+  const everyIssue = await call(wide, "list_issues", { limit: 200 });
+  expect(everyIssue.nextCursor).toBeNull();
+  const inA = everyIssue.items
+    .filter((i: Body) => i.projectId === a.id)
+    .map((i: Body) => i.key);
+  // the unscoped list is live: it holds the hidden issue and A's own
+  expect(everyIssue.items.map((i: Body) => i.key)).toContain(b.issue.key);
+  expect(inA).toContain(issueA);
   expect(
-    (await call(ivy, "list_issues")).items.map((i: Body) => i.key),
-  ).toEqual([issueA]);
+    (await call(ivy, "list_issues", { limit: 200 })).items.map(
+      (i: Body) => i.key,
+    ),
+  ).toEqual(inA);
   const all = (await call(wide, "list_activity", { limit: 200 })).items;
   expect(all.some((e: Body) => e.projectId === b.project.id)).toBe(true);
 
@@ -164,6 +174,22 @@ test("list tools show a scoped key only its projects, their issues and their act
       .map((e: Body) => e.id)
       .reverse(),
   );
+});
+
+test("a key scoped to A writes issues and comments in A", async () => {
+  const filed = await call(ivy, "create_issue", {
+    projectId: a.key,
+    title: "by ivy",
+  });
+  expect(filed).toMatchObject({ title: "by ivy", projectId: a.id });
+  const updated = await call(ivy, "update_issue", {
+    issueId: filed.key,
+    status: "in_progress",
+  });
+  expect(updated.status).toBe("in_progress");
+  await call(ivy, "add_comment", { issueId: filed.key, body: "on it" });
+  const comments = await call(wide, "list_comments", { issueId: filed.key });
+  expect(comments.items.map((c: Body) => c.body)).toEqual(["on it"]);
 });
 
 /** Each tool a key's actions gate, with the action it needs and its arguments in project A. */
@@ -234,4 +260,72 @@ test("whoami reports a scoped key's projects and actions", async () => {
     projects: [a.key],
     actions: ["read", "issues", "comments"],
   });
+});
+
+test("import_project refuses a source key a hidden issue holds naming nothing of it, and still names a visible holder", async () => {
+  const withIssue = (
+    externalRef: string,
+    key: string,
+    issueRef: string,
+    sourceKey: string,
+  ) => ({
+    externalRef,
+    key,
+    name: "imported",
+    issues: [
+      {
+        externalRef: issueRef,
+        sourceKey,
+        title: "t",
+        status: "Todo",
+        createdAt: "2026-01-02T03:04:05.000Z",
+      },
+    ],
+  });
+  const inside = projectKey();
+  await call(
+    wide,
+    "import_project",
+    withIssue(`ext-${projectKey()}`, projectKey(), "hid-601", "LIN-601"),
+  );
+  await call(
+    wide,
+    "import_project",
+    withIssue(`ext-${inside}`, inside, "vis-602", "LIN-602"),
+  );
+  const hiddenId = (await call(wide, "get_issue", { issueId: "LIN-601" })).id;
+  const visibleId = (await call(wide, "get_issue", { issueId: "LIN-602" })).id;
+
+  const importer = await connect(
+    createBot(db, "mcp scoped source-key importer", {
+      scope: { projects: [inside], actions: ["admin"] },
+    }).key,
+  );
+  const attempt = (client: Client, sourceKey: string) =>
+    raw(
+      client,
+      "import_project",
+      withIssue(`ext-${inside}`, inside, "new-603", sourceKey),
+    );
+  const refused = (holder: string, sourceKey: string) => ({
+    content: [
+      {
+        type: "text",
+        text: `conflict: issue new-603 sends sourceKey ${sourceKey}, but ${holder} already has it: a source key names one issue, so send each issue its own Linear identifier`,
+      },
+    ],
+    isError: true,
+  });
+
+  const hidden = await attempt(importer, "LIN-601");
+  const [first] = hidden.content as { text: string }[];
+  expect(first?.text).not.toContain(hiddenId);
+  expect(first?.text).not.toContain("hid-601");
+  expect(hidden).toEqual(refused("another issue", "LIN-601"));
+  expect(await attempt(importer, "LIN-602")).toEqual(
+    refused(`issue ${visibleId} (externalRef vis-602)`, "LIN-602"),
+  );
+  expect(await attempt(wide, "LIN-601")).toEqual(
+    refused(`issue ${hiddenId} (externalRef hid-601)`, "LIN-601"),
+  );
 });

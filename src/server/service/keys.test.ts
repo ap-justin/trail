@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, test } from "vitest";
 import { migrate, openDatabase } from "../db/client.js";
-import { apiKey, project } from "../db/schema.js";
+import { actor, apiKey, project } from "../db/schema.js";
 import { NotFoundError, ValidationError } from "./errors.js";
 import {
   authenticateKey,
@@ -152,9 +152,14 @@ describe("a key's scope", () => {
         "no project with key NOPE, ZZ: scope the key to the keys of existing projects, like TRL",
       ),
     );
-    expect(listKeys(db).some((k) => k.displayName === "refused bot")).toBe(
-      false,
-    );
+    // listKeys joins api_key, so an orphaned bot row is only visible on actor
+    expect(
+      db
+        .select()
+        .from(actor)
+        .all()
+        .some((a) => a.displayName === "refused bot"),
+    ).toBe(false);
   });
 
   test("an unknown action is refused, listing the five", () => {
