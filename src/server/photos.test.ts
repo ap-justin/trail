@@ -147,6 +147,41 @@ test("a revoked bot key is a 401, though the same key read the photo before", as
   );
 });
 
+test("a revoked or unknown bot key sent with a signed-in member's cookie still reads the photo through the session", async () => {
+  const doomed = createBot(db, "doomed-with-cookie");
+  revokeKey(db, doomed.key.split("_")[1] ?? "");
+  for (const key of [doomed.key, "trail_00000000_nope"]) {
+    const res = await request("GET", photoUrl, { key, cookie: memberCookie });
+    expectServedWebp(res);
+  }
+  // the cookie is what answers: the same revoked key alone stays a 401
+  expect((await request("GET", photoUrl, { key: doomed.key })).status).toBe(
+    401,
+  );
+});
+
+test("one actor's real hash under another actor's id is a 404, though each reads its own photo", async () => {
+  const other = createBot(db, "photo-neighbour");
+  const put = await app.request("/api/v1/me/photo", {
+    method: "PUT",
+    headers: {
+      authorization: `Bearer ${other.key}`,
+      "content-type": "image/png",
+    },
+    body: OTHER_PNG,
+  });
+  const otherUrl = ((await put.json()) as { photoUrl: string }).photoUrl;
+  const hashOfBot = photoUrl.split("/").at(-1);
+
+  expect((await request("GET", otherUrl)).status).toBe(200);
+  expect((await request("GET", photoUrl)).status).toBe(200);
+  const crossed = await request(
+    "GET",
+    `/api/photos/${other.actor.id}/${hashOfBot}`,
+  );
+  expect(crossed.status).toBe(404);
+});
+
 test("a member removed while their session is live is a 401", async () => {
   const cookie = await addMember("member-removed", []);
   expect((await request("GET", photoUrl, { key: null, cookie })).status).toBe(

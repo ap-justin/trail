@@ -196,6 +196,13 @@ describe("ActorAvatar", () => {
         "naturalWidth",
         "get",
       ).mockReturnValue(64);
+      vi.spyOn(
+        HTMLImageElement.prototype,
+        "currentSrc",
+        "get",
+      ).mockImplementation(function (this: HTMLImageElement) {
+        return this.src;
+      });
     }
     afterEach(() => vi.restoreAllMocks());
 
@@ -230,6 +237,35 @@ describe("ActorAvatar", () => {
         />,
       );
       expect(container.firstElementChild).not.toHaveTextContent("K");
+    });
+
+    test("a new URL still fetching keeps the initials, though the old photo still reads complete", () => {
+      stubCompleteImages();
+      const { container, rerender } = render(
+        <ActorAvatar actor={{ name: "Kai", kind: "bot", photoUrl: photo }} />,
+      );
+      const avatar = container.firstElementChild;
+      const img = container.querySelector("img");
+      if (!img) throw new Error("no img");
+      expect(avatar).not.toHaveTextContent("K");
+      // until the new request lands, complete and naturalWidth describe the old photo
+      const oldSrc = img.src;
+      vi.spyOn(HTMLImageElement.prototype, "currentSrc", "get").mockReturnValue(
+        oldSrc,
+      );
+      rerender(
+        <ActorAvatar
+          actor={{
+            name: "Kai",
+            kind: "bot",
+            photoUrl: "/api/photos/a-new/9c0d",
+          }}
+        />,
+      );
+      expect(container.querySelector("img")).toBe(img);
+      expect(avatar).toHaveTextContent("K");
+      fireEvent.load(img);
+      expect(avatar).not.toHaveTextContent("K");
     });
 
     test("a complete image that decoded to nothing (broken) keeps the initials", () => {

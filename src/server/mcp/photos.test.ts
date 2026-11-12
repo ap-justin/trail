@@ -131,14 +131,24 @@ test.each([
   expect(new Uint8Array(await served.arrayBuffer())).toEqual(image);
 });
 
-test("a 256 KB photo wrapped at 76 columns is accepted: line breaks are stripped before the length check", async () => {
+test("a 256 KB photo wrapped at 76 columns with CRLF behind a data: URL is accepted: line breaks are stripped before the length check", async () => {
   const image = pngOfSize(262144);
-  const wrapped = `${(b64(image).match(/.{1,76}/g) ?? []).join("\n")}\n`;
+  const lines = b64(image).match(/.{1,76}/g) ?? [];
+  const wrapped = ` data:image/png;base64,${lines.join("\r\n")}\r\n`;
   // the wrapped text is over the base64 cap, so only stripping first lets it through
   expect(wrapped.length).toBeGreaterThan(349528);
   const { photoUrl } = await call(wide, "set_my_photo", { data: wrapped });
   const served = await request("GET", photoUrl);
   expect(new Uint8Array(await served.arrayBuffer())).toEqual(image);
+});
+
+test("a small photo padded with a megabyte of whitespace is refused on its raw length", async () => {
+  const { photoUrl } = await call(wide, "set_my_photo", { data: b64(PNG) });
+  const padded = `${b64(PNG)}${" ".repeat(1024 * 1024)}`;
+  expect(await refusal(wide, "set_my_photo", { data: padded })).toMatch(
+    /^payload_too_large: .*262144 bytes/,
+  );
+  expect((await call(wide, "whoami")).photoUrl).toBe(photoUrl);
 });
 
 test("set_my_photo points larger files to the REST route", async () => {

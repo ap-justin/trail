@@ -105,8 +105,15 @@ const dataUrlImageTypes: readonly string[] = [
 /** The longest padded base64 a photo of `PHOTO_MAX_BYTES` encodes to. */
 const MAX_PHOTO_BASE64_LENGTH = Math.ceil(PHOTO_MAX_BYTES / 3) * 4;
 
+/** The longest raw `data` read at all: room for CRLF wrapping, a data: URL prefix and stray whitespace around the largest photo. */
+const MAX_PHOTO_DATA_LENGTH = MAX_PHOTO_BASE64_LENGTH * 2;
+
 /** The bytes of `set_my_photo`'s data: strict base64 once whitespace is dropped, after an optional image data: URL prefix. */
 function photoBytes(data: string): Uint8Array {
+  // /mcp takes bodies far larger than any photo; refuse those before trimming or stripping copies them
+  if (data.length > MAX_PHOTO_DATA_LENGTH) {
+    throw new PayloadTooLargeError(photoTooLarge(null));
+  }
   let encoded = data.trimStart();
   const dataUrl = /^data:([^;,]*)(;[^,]*)?,/.exec(encoded);
   if (dataUrl) {

@@ -84,14 +84,14 @@ test("the viewer's photo shows in the sidebar's account menu (hidden below lg) a
   };
   renderShell(viewer);
   const trigger = screen.getByRole("button", { name: "Account: Maya Chen" });
-  // the sheet shows the sidebar only from lg up, so below it the img never renders or fetches;
-  // the sidebar's explicit loading="lazy" is ActorAvatar's default and unobservable in jsdom
+  // the sheet shows the sidebar only from lg up, so below it the img never renders; lazy keeps it from fetching
   const sidebar = trigger.closest("aside");
   expect(sidebar).toHaveClass("hidden", "lg:flex");
   expect(trigger.querySelector("img")).toHaveAttribute(
     "src",
     "/api/photos/a-maya/77b2",
   );
+  expect(trigger.querySelector("img")).toHaveAttribute("loading", "lazy");
 
   const { container } = render(
     <ThemeProvider>
