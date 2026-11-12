@@ -228,6 +228,41 @@ test.each([
   },
 );
 
+// 10 bytes of JPEG would base64 to 14 characters plus padding; real files are longer
+const LONG_JPEG = new Uint8Array([...JPEG, ...new Uint8Array(20).fill(0x41)]);
+test.each([
+  ["a WebP", WEBP],
+  ["a JPEG", LONG_JPEG],
+])(
+  "%s sent as base64 text is a 422 asking for the raw bytes and naming set_my_photo, and nothing is stored",
+  async (_, image) => {
+    const kept = addBot(`b64-${projectKey()}`);
+    const { photoUrl } = (await (
+      await putPhoto(PNG, "image/png", kept.key)
+    ).json()) as Body;
+    const text = Buffer.from(image).toString("base64");
+    for (const body of [text, `data:image/x;base64,${text}`]) {
+      const res = await putPhoto(encoder.encode(body), "text/plain", kept.key);
+      expect(res.status).toBe(422);
+      const { error } = (await res.json()) as Body;
+      expect(error.code).toBe("invalid_image");
+      expect(error.message).toMatch(/not JSON or base64/);
+      expect(error.message).toMatch(/set_my_photo/);
+    }
+    expect((await whoami(kept.key)).photoUrl).toBe(photoUrl);
+  },
+);
+
+test("a raw PNG labelled multipart/form-data is refused as a form, not stored", async () => {
+  const kept = addBot(`raw-form-${projectKey()}`);
+  const res = await putPhoto(PNG, "multipart/form-data; boundary=x", kept.key);
+  expect(res.status).toBe(422);
+  const { error } = (await res.json()) as Body;
+  expect(error.code).toBe("invalid_image");
+  expect(error.message).toMatch(/multipart form/);
+  expect((await whoami(kept.key)).photoUrl).toBeNull();
+});
+
 test("text sent with no form Content-Type is refused without the curl -d hint", async () => {
   const res = await putPhoto(TEXT, "application/octet-stream");
   expect(res.status).toBe(422);
@@ -299,6 +334,8 @@ test.each([
   ["application/octet-stream", "application/octet-stream"],
   ["image/jpg", "image/jpg"],
   ["image/gif", "image/gif"],
+  ["application/json", "application/json"],
+  ["application/vnd.api+json", "application/vnd.api+json"],
   ["no Content-Type", null],
 ])("a PNG sent as %s is stored as a PNG", async (_, type) => {
   const res = await putPhoto(PNG, type);

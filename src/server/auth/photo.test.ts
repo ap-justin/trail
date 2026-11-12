@@ -13,7 +13,7 @@ import {
 import { actor, actorPhoto } from "../db/schema.js";
 import { PHOTO_MAX_BYTES } from "../service/photos.js";
 import { setupTestApp, TEST_OWNER, TEST_OWNER_ID } from "../test-app.js";
-import { JPEG, PNG, TEXT } from "../test-images.js";
+import { JPEG, PNG, pngOfSize, TEXT } from "../test-images.js";
 
 /** What the stubbed avatar fetch answers next; each test sets its own. */
 let answer: (init: RequestInit | undefined) => Promise<Response>;
@@ -279,6 +279,77 @@ test("a GitHub that never answers is given up on once the fetch's timeout fires"
     timeout?.fire();
     await photoGivenUp("patient");
     expect(photoOf(7600)).toBeUndefined();
+  } finally {
+    timeoutSpy.mockRestore();
+  }
+});
+
+test.each([
+  [
+    "declared content-length",
+    7950,
+    () =>
+      new Response(pngOfSize(PHOTO_MAX_BYTES), {
+        headers: { "content-length": String(PHOTO_MAX_BYTES) },
+      }),
+  ],
+  ["no content-length", 7953, () => new Response(pngOfSize(PHOTO_MAX_BYTES))],
+])(
+  "a photo of exactly the limit with %s is stored",
+  async (_, githubId, make) => {
+    answer = async () => make();
+    await addMember(`edge-${githubId}`, [], { githubId });
+    await photoLands(githubId, pngOfSize(PHOTO_MAX_BYTES));
+  },
+);
+
+test("a photo one byte over the limit, declared or streamed, is refused", async () => {
+  answer = async () =>
+    new Response(pngOfSize(PHOTO_MAX_BYTES + 1), {
+      headers: { "content-length": String(PHOTO_MAX_BYTES + 1) },
+    });
+  await addMember("over-declared", [], { githubId: 7951 });
+  await photoGivenUp("over-declared");
+  expect(photoOf(7951)).toBeUndefined();
+
+  answer = async () => new Response(pngOfSize(PHOTO_MAX_BYTES + 1));
+  await addMember("over-streamed", [], { githubId: 7952 });
+  await photoGivenUp("over-streamed");
+  expect(photoOf(7952)).toBeUndefined();
+});
+
+test("a body that stalls after the headers is abandoned when the timeout fires, and sign-in succeeds", async () => {
+  // as the timeout test above: signals the test fires itself, since AbortSignal.timeout is out of fake timers' reach
+  const fires = new Map<AbortSignal, () => void>();
+  const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockImplementation(() => {
+    const controller = new AbortController();
+    fires.set(controller.signal, () =>
+      controller.abort(new DOMException("timed out", "TimeoutError")),
+    );
+    return controller.signal;
+  });
+  try {
+    // as fetch does, the body stream errors when the signal it was handed aborts
+    answer = async (init) =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(PNG);
+            const signal = init?.signal;
+            signal?.addEventListener("abort", () =>
+              controller.error(signal.reason),
+            );
+          },
+        }),
+        { status: 200 },
+      );
+    // addMember signs the member in: it returning is sign-in succeeding while the body hangs
+    await addMember("stalled", [], { githubId: 7960 });
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining("stalled"));
+    fires.get(calls[0]?.init?.signal as AbortSignal)?.();
+    await photoGivenUp("stalled");
+    expect(photoOf(7960)).toBeUndefined();
   } finally {
     timeoutSpy.mockRestore();
   }

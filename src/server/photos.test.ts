@@ -91,6 +91,7 @@ test.each([
     cookie: asOutsider ? outsiderCookie : undefined,
   });
   expect(res.status).toBe(401);
+  expect(res.headers.get("cache-control") ?? "").not.toContain("immutable");
   expect(((await res.json()) as { error: { code: string } }).error.code).toBe(
     "unauthorized",
   );
@@ -128,9 +129,24 @@ test("a stale hash, an actor without a photo and an unknown actor are 404s", asy
   await request("DELETE", "/api/v1/me/photo");
   const gone = await request("GET", replaced.photoUrl);
   expect(gone.status).toBe(404);
+  expect(gone.headers.get("cache-control") ?? "").not.toContain("immutable");
   expect(((await gone.json()) as { error: { code: string } }).error.code).toBe(
     "not_found",
   );
+});
+
+test("setting the first photo again after another gives back the first URL, serving its bytes", async () => {
+  const first = photoUrl;
+  await putPhoto(OTHER_PNG, "image/png");
+  expect((await request("GET", first)).status).toBe(404);
+
+  const back = (await (await putPhoto(WEBP, "image/webp")).json()) as {
+    photoUrl: string;
+  };
+  expect(back.photoUrl).toBe(first);
+  const res = await request("GET", first);
+  expectServedWebp(res);
+  expect(new Uint8Array(await res.arrayBuffer())).toEqual(WEBP);
 });
 
 const sessionToken = (cookie: string) =>

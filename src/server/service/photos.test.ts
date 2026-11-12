@@ -68,6 +68,23 @@ test("a replacing photo stores its own bytes and type under its own hash", () =>
   ).toBeNull();
 });
 
+test("setting A, then B, then A again gives A back its original URL and bytes", () => {
+  const { actor } = createBot(db, "round-trip");
+  const first = setActorPhoto(db, actor.id, PNG).photoUrl;
+  const hashOf = (url: string) => url.split("/").at(-1) ?? "";
+  setActorPhoto(db, actor.id, JPEG);
+  expect(readActorPhoto(db, actor.id, hashOf(first))).toBeNull();
+
+  expect(setActorPhoto(db, actor.id, PNG).photoUrl).toBe(first);
+  expect(readActorPhoto(db, actor.id, hashOf(first))).toEqual({
+    content: Buffer.from(PNG),
+    contentType: "image/png",
+  });
+  expect(
+    db.select().from(actorPhoto).where(eq(actorPhoto.actorId, actor.id)).all(),
+  ).toHaveLength(1);
+});
+
 // the literal 262144 is the schema's CHECK bound; a service limit drifting from it surfaces here
 test("a photo of exactly 262144 bytes is stored whole, and one byte more is refused", () => {
   const { actor } = createBot(db, "biggest");
