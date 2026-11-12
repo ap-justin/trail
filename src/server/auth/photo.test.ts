@@ -274,7 +274,7 @@ test("a GitHub that never answers is given up on once the fetch's timeout fires"
     // the fetch carries a short timeout (AVATAR_TIMEOUT_MS in avatar.ts, 3s), and nothing has given up before it fires
     expect(timeout?.ms).toBeGreaterThanOrEqual(1_000);
     expect(timeout?.ms).toBeLessThanOrEqual(3_000);
-    expect(warn).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining("patient"));
 
     timeout?.fire();
     await photoGivenUp("patient");

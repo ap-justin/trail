@@ -179,6 +179,55 @@ test("a PNG stripped of its line breaks, as curl -d sends it, is a 422 naming --
   expect((await whoami(kept.key)).photoUrl).toBe(photoUrl);
 });
 
+const encoder = new TextEncoder();
+const base64Png = Buffer.from(OTHER_PNG).toString("base64");
+test.each([
+  [
+    "set_my_photo's JSON shape",
+    JSON.stringify({ data: base64Png }),
+    "application/json",
+  ],
+  [
+    "JSON with a charset",
+    JSON.stringify({ data: base64Png }),
+    "application/json; charset=utf-8",
+  ],
+  ["base64 text", base64Png, "text/plain"],
+  [
+    "base64 wrapped at 76 columns, as `base64 me.png` prints it",
+    `${base64Png.match(/.{1,76}/g)?.join("\n")}\n`,
+    "application/octet-stream",
+  ],
+  [
+    "URL-safe base64",
+    base64Png.replaceAll("+", "-").replaceAll("/", "_"),
+    "text/plain",
+  ],
+  ["a data: URL", `data:image/png;base64,${base64Png}`, "text/plain"],
+  [
+    "base64 posted with curl -d",
+    base64Png,
+    "application/x-www-form-urlencoded",
+  ],
+])(
+  "a PNG sent as %s is a 422 asking for the raw bytes and naming set_my_photo, and nothing is stored",
+  async (_, body, type) => {
+    const kept = addBot(`encoded-${projectKey()}`);
+    const { photoUrl } = (await (
+      await putPhoto(PNG, "image/png", kept.key)
+    ).json()) as Body;
+    const res = await putPhoto(encoder.encode(body), type, kept.key);
+    expect(res.status).toBe(422);
+    const { error } = (await res.json()) as Body;
+    expect(error.code).toBe("invalid_image");
+    expect(error.message).toMatch(/raw bytes/);
+    expect(error.message).toMatch(/not JSON or base64/);
+    expect(error.message).toMatch(/set_my_photo/);
+    expect(error.message).not.toMatch(/convert|curl -d/);
+    expect((await whoami(kept.key)).photoUrl).toBe(photoUrl);
+  },
+);
+
 test("text sent with no form Content-Type is refused without the curl -d hint", async () => {
   const res = await putPhoto(TEXT, "application/octet-stream");
   expect(res.status).toBe(422);

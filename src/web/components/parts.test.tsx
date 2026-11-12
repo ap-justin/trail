@@ -101,7 +101,7 @@ describe("ActorAvatar", () => {
     },
   );
 
-  test("a bot without a photo, or whose photo failed, has no frame", () => {
+  test("a bot without a photo has no frame; one whose loaded photo then fails drops the img and the frame", () => {
     const { container } = render(
       <>
         <ActorAvatar actor={{ name: "Kai", kind: "bot", photoUrl: null }} />
@@ -113,10 +113,15 @@ describe("ActorAvatar", () => {
     expect(bare).not.toHaveClass("border-bot");
     const img = failing?.querySelector("img");
     if (!img) throw new Error("no img");
+    // framed first, so only the error handler can take the frame away
+    fireEvent.load(img);
+    expect(failing).toHaveClass("border", "border-bot");
     fireEvent.error(img);
+    expect(failing?.querySelector("img")).toBeNull();
     expect(failing).not.toHaveClass("border");
     expect(failing).not.toHaveClass("border-bot");
     expect(failing).toHaveClass("bg-bot-muted", "text-bot");
+    expect(failing).toHaveTextContent("K");
   });
 
   test("a bot's frame shows only while its photo is shown: not while loading, not after a failure", () => {
@@ -244,6 +249,40 @@ describe("ActorAvatar", () => {
         />,
       );
       expect(avatar).toHaveTextContent(letters);
+    },
+  );
+
+  test.each([
+    ["bot", "Kai", "K"],
+    ["human", "Maya Chen", "MC"],
+  ] as const)(
+    "%s: the img loads hidden behind the initials, unframed, and shows only once loaded",
+    (kind, name, letters) => {
+      const { container } = render(
+        <>
+          <ActorAvatar actor={{ name, kind, photoUrl: photo }} />
+          <ActorAvatar actor={{ name, kind, photoUrl: photo }} />
+        </>,
+      );
+      const [loading, failing] = container.children;
+      const img = loading?.querySelector("img");
+      if (!img) throw new Error("no img");
+      // a partly decoded photo would otherwise paint over the initials
+      expect(img).toHaveClass("opacity-0");
+      expect(loading).toHaveTextContent(letters);
+      expect(loading).not.toHaveClass("border");
+
+      fireEvent.load(img);
+      expect(img).not.toHaveClass("opacity-0");
+      expect(loading).not.toHaveTextContent(letters);
+      if (kind === "bot") expect(loading).toHaveClass("border", "border-bot");
+
+      const broken = failing?.querySelector("img");
+      if (!broken) throw new Error("no img");
+      fireEvent.error(broken);
+      expect(failing?.querySelector("img")).toBeNull();
+      expect(failing).toHaveTextContent(letters);
+      expect(failing).not.toHaveClass("border");
     },
   );
 

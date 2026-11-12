@@ -118,7 +118,12 @@ export function ActorAvatar({
           loading={loading}
           onLoad={() => setLoadedUrl(photoUrl)}
           onError={() => setFailedUrl(photoUrl)}
-          className="col-start-1 row-start-1 size-full object-cover"
+          // hidden, not unmounted, until shown: it still has to load, and a photo the
+          // browser draws as its bytes arrive would cover the initials half-drawn, unframed
+          className={cn(
+            "col-start-1 row-start-1 size-full object-cover",
+            !photoShown && "opacity-0",
+          )}
         />
       )}
     </span>
