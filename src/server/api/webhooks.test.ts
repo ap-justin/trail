@@ -185,7 +185,7 @@ test("a key limited to one project can't subscribe to another: a 404, as for a m
   );
   const ok = await create({ url: "https://bot.example.com/ivy" }, scoped.key);
   expect(ok.status).toBe(201);
-  // the broader key of the same... another bot's wider webhook is invisible to ivy
+  // another bot's wider webhook is invisible to ivy
   const wide = await create({
     url: "https://bot.example.com/wide",
     projects: [a.key, b.key],
