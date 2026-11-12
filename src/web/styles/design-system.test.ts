@@ -10,12 +10,20 @@ import { beforeAll, describe, expect, test } from "vitest";
 const stylesDir = resolve("src/web/styles");
 const css = readFileSync(join(stylesDir, "globals.css"), "utf8");
 const webDir = resolve("src/web");
+const shadcnDir = resolve("src/web/components/ui");
 const sweptDirs = [resolve("src/web/components"), resolve("src/web/app")];
-const componentFiles = sweptDirs.flatMap((dir) =>
-  readdirSync(dir)
-    .filter((f) => f.endsWith(".tsx") && !f.endsWith(".test.tsx"))
-    .map((f) => join(dir, f)),
-);
+const componentFiles = sweptDirs.flatMap((dir) => sourceFiles(dir));
+
+/** Every non-test .ts/.tsx under `dir`, subdirectories included, minus components/ui. */
+function sourceFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) return path === shadcnDir ? [] : sourceFiles(path);
+    return /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)
+      ? [path]
+      : [];
+  });
+}
 
 /** Class-name tokens: every string literal, minus import paths and non-class JSX attributes. `className` and any `*ClassName` prop (`markClassName`) carry classes. */
 function classTokens(source: string): string[] {
