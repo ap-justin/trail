@@ -91,6 +91,7 @@ import {
   type VisibleIds,
 } from "./visible.js";
 import {
+  countOwn,
   enqueueDeliveries,
   insertSubscription,
   resume,
@@ -1864,19 +1865,20 @@ export function createService({
       requireAction(actor, "read", "create a webhook");
       validSecret(input.secret);
       const projectIds = webhookProjectIds(actor, input.projects);
-      const count = db
-        .select({ id: webhookSubscription.id })
-        .from(webhookSubscription)
-        .where(eq(webhookSubscription.actorId, actor.id))
-        .all().length;
-      if (count >= WEBHOOKS_PER_BOT_MAX) {
-        throw new ConflictError(
-          `this bot already has ${count} webhooks, the most allowed: delete one you no longer use, or add the project to one you have with update_webhook`,
-        );
-      }
+      const refuseAtLimit = (from: Db | Tx) => {
+        const count = countOwn(from, actor.id);
+        if (count >= WEBHOOKS_PER_BOT_MAX) {
+          throw new ConflictError(
+            `this bot already has ${count} webhooks, the most allowed: delete one you no longer use, or add the project to one you have with update_webhook`,
+          );
+        }
+      };
+      refuseAtLimit(db);
       const { url } = await checkedUrl(input.url);
       return db.transaction(
         (tx) => {
+          // again under the write lock: creates sent together all passed the check above
+          refuseAtLimit(tx);
           const twin = tx
             .select({ id: webhookSubscription.id })
             .from(webhookSubscription)
@@ -1940,7 +1942,7 @@ export function createService({
       requireAction(actor, "read", "update a webhook", () =>
         ownWebhook(actor, id),
       );
-      const { view } = ownWebhook(actor, id);
+      ownWebhook(actor, id);
       const projectIds =
         patch.projects === undefined
           ? undefined
@@ -1951,7 +1953,9 @@ export function createService({
           : (await checkedUrl(patch.url)).url.href;
       return db.transaction(
         (tx) => {
-          if (url !== undefined && url !== view.url) {
+          // again under the write lock: a delete during the DNS lookup is a 404, not an FK failure
+          const current = ownWebhook(actor, id, tx).view;
+          if (url !== undefined && url !== current.url) {
             const twin = tx
               .select({ id: webhookSubscription.id })
               .from(webhookSubscription)

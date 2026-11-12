@@ -6,9 +6,10 @@ import {
   type Server,
 } from "node:http";
 import { type AddressInfo, createServer as createTcpServer } from "node:net";
-import { afterAll, beforeAll, expect, test } from "vitest";
+import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import { webhookDelivery, webhookSubscription } from "../db/schema.js";
 import { projectKey, setupTestApp, testWebhookSettings } from "../test-app.js";
+import { deriveSecretKey, sealSecret } from "./secret.js";
 import { sendWebhook, type Transport } from "./send.js";
 import { BACKOFF_MS, createWebhookWorker } from "./worker.js";
 
@@ -862,6 +863,275 @@ test("rotating the secret of a paused webhook resumes it, and what waited goes o
   });
   expect(rotated).toMatchObject({ paused: false, consecutiveFailures: 0 });
   advance(HOUR);
+  await until(w, () => received.length === 1);
+  expect(received[0]?.headers["x-openbot-signature"]).toBe(
+    signatureOf(received[0] as Received, next),
+  );
+});
+
+/** Makes SQLite abort the delivery updates `when` matches, until the returned function drops the trigger. */
+function failDeliveryUpdates(when: string) {
+  db.$client.exec(
+    `create trigger fail_delivery_update before update on webhook_delivery when ${when} begin select raise(abort, 'disk on fire'); end`,
+  );
+  return () => db.$client.exec("drop trigger if exists fail_delivery_update");
+}
+const quiet = () => vi.spyOn(console, "error").mockImplementation(() => {});
+
+test("a delivery whose outcome can't be written is sent again only after a wait, and other webhooks still deliver", async () => {
+  reset();
+  const key = await newProject();
+  const broken = await subscribe([key], "https://bot.example.com/unrecorded");
+  await subscribe([key], "https://bot.example.com/healthy");
+  const logged = quiet();
+  // the body cache is written, the attempt's outcome is not
+  const restore = failDeliveryUpdates(
+    `new.subscription_id = '${broken.id}' and new.attempts <> old.attempts`,
+  );
+  try {
+    await api("POST", "/issues", { projectId: key, title: "one" });
+    const w = worker();
+    await w.tick();
+    await w.tick();
+    await w.tick();
+    expect(sentTo.filter((p) => p === "/unrecorded")).toHaveLength(1);
+    expect(sentTo.filter((p) => p === "/healthy")).toHaveLength(1);
+    expect(logged).toHaveBeenCalledWith(
+      "webhook delivery crashed",
+      expect.any(String),
+      expect.anything(),
+    );
+    // once the wait is up it is sent again, under the same id
+    advance(SECOND);
+    await w.tick();
+    expect(sentTo.filter((p) => p === "/unrecorded")).toHaveLength(2);
+  } finally {
+    restore();
+    logged.mockRestore();
+  }
+});
+
+test("a delivery that crashes before it is sent is recorded as a retryable failure and waits out its backoff", async () => {
+  reset();
+  const key = await newProject();
+  const hook = await subscribe([key], "https://bot.example.com/unbuildable");
+  const logged = quiet();
+  // the body can't be cached, so the attempt throws before any request
+  const restore = failDeliveryUpdates(
+    `new.subscription_id = '${hook.id}' and new.body is not null`,
+  );
+  try {
+    await api("POST", "/issues", { projectId: key, title: "one" });
+    const w = worker({ backoffMs: [MINUTE] });
+    await w.tick();
+    await w.tick();
+    expect(sends).toBe(0);
+    const row = rows().find((r) => r.subscriptionId === hook.id);
+    expect(row).toMatchObject({
+      status: "pending",
+      attempts: 1,
+      lastError: "internal error",
+    });
+    expect((row?.nextAttemptAt.getTime() ?? 0) - clock).toBe(MINUTE);
+    expect(sub(hook.id)?.consecutiveFailures).toBe(1);
+  } finally {
+    restore();
+    logged.mockRestore();
+  }
+});
+
+test("a pass that fails is logged, never rejected, and stopping still settles", async () => {
+  reset();
+  const key = await newProject();
+  const hook = await subscribe([key], "https://bot.example.com/unexpirable");
+  statuses.push(503);
+  await api("POST", "/issues", { projectId: key, title: "old" });
+  const w = worker({ giveUpMs: HOUR, pauseAfter: 1000 });
+  await w.tick();
+  const logged = quiet();
+  // the expiry sweep itself throws
+  const restore = failDeliveryUpdates(
+    `new.subscription_id = '${hook.id}' and new.status = 'failed'`,
+  );
+  try {
+    advance(2 * HOUR);
+    await expect(w.tick()).resolves.toBeUndefined();
+    expect(logged).toHaveBeenCalledWith(
+      "webhook pass failed",
+      expect.anything(),
+    );
+    w.start();
+    await expect(w.stop()).resolves.toBeUndefined();
+  } finally {
+    restore();
+    logged.mockRestore();
+  }
+});
+
+/** A transport that holds every request to `path` until `release()`, and sends the rest on. */
+function holding(path: string) {
+  let release = () => {};
+  const released = new Promise<void>((done) => {
+    release = done;
+  });
+  const held: string[] = [];
+  const transport: Transport = async (call) => {
+    if (call.url.pathname !== path) return settings.transport(call);
+    held.push(call.headers["x-openbot-delivery-id"] ?? "");
+    await released;
+    return settings.transport(call);
+  };
+  return { transport, held, release };
+}
+/** The titles a webhook's receiver got, in arrival order. */
+const titles = (hook: Body) => {
+  const mine = new Set(
+    rows()
+      .filter((r) => r.subscriptionId === hook.id)
+      .map((r) => r.id),
+  );
+  return received
+    .filter((r) => mine.has(String(r.headers["x-openbot-delivery-id"])))
+    .map((r) => JSON.parse(r.body).data.subject.title);
+};
+
+test("a slow receiver doesn't hold up another webhook's deliveries", async () => {
+  reset();
+  const key = await newProject();
+  const slowHook = await subscribe([key], "https://bot.example.com/slow");
+  const fastHook = await subscribe([key], "https://bot.example.com/fast");
+  const slow = holding("/slow");
+  const w = worker({ settings: { ...settings, transport: slow.transport } });
+  await api("POST", "/issues", { projectId: key, title: "one" });
+  const first = w.tick();
+  await vi.waitFor(() => expect(titles(fastHook)).toEqual(["one"]));
+  // the slow receiver still has "one"; the fast one's next event goes out anyway
+  await api("POST", "/issues", { projectId: key, title: "two" });
+  const second = w.tick();
+  await vi.waitFor(() => expect(titles(fastHook)).toEqual(["one", "two"]));
+  expect(slow.held).toHaveLength(1);
+  slow.release();
+  await Promise.all([first, second]);
+  await w.tick();
+  expect(titles(slowHook)).toEqual(["one", "two"]);
+});
+
+test("the bus wakes the worker after the write that published, not inside it", async () => {
+  reset();
+  const key = await newProject();
+  await subscribe([key], "https://bot.example.com/deferred");
+  let lookups = 0;
+  const w = worker({
+    pollMs: 60_000,
+    settings: {
+      ...settings,
+      resolve: async () => {
+        lookups++;
+        return resolveTo;
+      },
+    },
+  });
+  w.start();
+  await w.tick();
+  // subscribers run in order, so this one sees what the worker's did during the publish
+  const duringPublish: number[] = [];
+  const off = bus.subscribe(() => duringPublish.push(lookups));
+  try {
+    await api("POST", "/issues", { projectId: key, title: "deferred" });
+    await vi.waitFor(() => expect(received).toHaveLength(1));
+    expect(duringPublish).toEqual([0]);
+  } finally {
+    off();
+    await w.stop();
+  }
+});
+
+test("an event during a send in flight doesn't send the head twice, and goes out after it", async () => {
+  reset();
+  const key = await newProject();
+  const hook = await subscribe([key], "https://bot.example.com/overlap");
+  const slow = holding("/overlap");
+  const w = worker({
+    pollMs: 60_000,
+    settings: { ...settings, transport: slow.transport },
+  });
+  await api("POST", "/issues", { projectId: key, title: "first" });
+  w.start();
+  try {
+    await vi.waitFor(() => expect(slow.held).toHaveLength(1));
+    // the bus wakes it and a pass runs too, both while "first" is in flight
+    await api("POST", "/issues", { projectId: key, title: "second" });
+    void w.tick();
+    await new Promise((done) => setImmediate(done));
+    expect(slow.held).toHaveLength(1);
+    slow.release();
+    await vi.waitFor(() => expect(received).toHaveLength(2));
+    await w.tick();
+    expect(titles(hook)).toEqual(["first", "second"]);
+    expect(
+      new Set(received.map((r) => r.headers["x-openbot-delivery-id"])).size,
+    ).toBe(2);
+  } finally {
+    await w.stop();
+  }
+});
+
+test("a stop between the receiver's answer and the row's update sends that delivery again under the same id", async () => {
+  reset();
+  const key = await newProject();
+  const hook = await subscribe([key], "https://bot.example.com/answered");
+  await api("POST", "/issues", { projectId: key, title: "twice" });
+  // the receiver gets it and answers 200, but the worker is stopped before it can record that
+  const stopping: Transport = async (call) => {
+    void first.stop();
+    return settings.transport({ ...call, signal: undefined });
+  };
+  const first = worker({ settings: { ...settings, transport: stopping } });
+  await first.tick();
+  expect(received).toHaveLength(1);
+  expect(rows().find((r) => r.subscriptionId === hook.id)).toMatchObject({
+    status: "pending",
+    attempts: 0,
+  });
+
+  await worker().tick();
+  expect(received).toHaveLength(2);
+  expect(received[1]?.headers["x-openbot-delivery-id"]).toBe(
+    received[0]?.headers["x-openbot-delivery-id"],
+  );
+  expect(rows().find((r) => r.subscriptionId === hook.id)).toMatchObject({
+    status: "delivered",
+    attempts: 1,
+  });
+});
+
+test("a stored secret that can't be read sends nothing and says to rotate, until the bot rotates it", async () => {
+  reset();
+  const key = await newProject();
+  const hook = await subscribe([key], "https://bot.example.com/stranded");
+  // sealed under a server secret this server no longer has
+  db.update(webhookSubscription)
+    .set({
+      secretCipher: sealSecret(
+        deriveSecretKey("an-earlier-server-secret-of-32-characters"),
+        hook.id,
+        SECRET,
+      ),
+    })
+    .run();
+  await api("POST", "/issues", { projectId: key, title: "stranded" });
+  const w = worker({ pauseAfter: 1000 });
+  await w.tick();
+  advance(SECOND);
+  await w.tick();
+  expect(sends).toBe(0);
+  const row = rows().find((r) => r.subscriptionId === hook.id);
+  expect(row).toMatchObject({ status: "pending", attempts: 2 });
+  expect(row?.lastError).toMatch(/rotate_webhook_secret/);
+  expect(sub(hook.id)?.consecutiveFailures).toBe(2);
+
+  const next = "whsec_after_restore_0123456789";
+  await api("PUT", `/webhooks/${hook.id}/secret`, { secret: next });
   await until(w, () => received.length === 1);
   expect(received[0]?.headers["x-openbot-signature"]).toBe(
     signatureOf(received[0] as Received, next),

@@ -147,7 +147,8 @@ export function setProjects(
 /**
  * Clears a pause and lets the deliveries that waited go out at once. The time
  * paused doesn't count toward their retry window: the worker measures it from
- * `created_at`, so that moves forward by the pause.
+ * `created_at`, so that moves forward by the part of the pause each delivery
+ * waited through.
  */
 export function resume(tx: Tx, subscriptionId: string, now: number) {
   const pausedAt = tx
@@ -159,11 +160,14 @@ export function resume(tx: Tx, subscriptionId: string, now: number) {
     .set({ pausedAt: null, consecutiveFailures: 0 })
     .where(eq(webhookSubscription.id, subscriptionId))
     .run();
-  const pausedFor = pausedAt ? Math.max(0, now - pausedAt.getTime()) : 0;
+  // an unpaused subscription's deliveries keep their backoff
+  if (!pausedAt) return;
+  // two-argument max() is SQLite's scalar max, not the aggregate
+  const waitedThrough = sql`max(0, ${now} - max(${webhookDelivery.createdAt}, ${pausedAt.getTime()}))`;
   tx.update(webhookDelivery)
     .set({
       nextAttemptAt: new Date(now),
-      createdAt: sql`${webhookDelivery.createdAt} + ${pausedFor}`,
+      createdAt: sql`${webhookDelivery.createdAt} + ${waitedThrough}`,
     })
     .where(
       and(
@@ -204,7 +208,7 @@ export function enqueueDeliveries(
     .run();
 }
 
-export const countOwn = (db: Db, actorId: string): number =>
+export const countOwn = (db: Db | Tx, actorId: string): number =>
   db
     .select({ n: sql<number>`count(*)` })
     .from(webhookSubscription)

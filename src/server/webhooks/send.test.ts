@@ -214,6 +214,31 @@ describe("sendWebhook over the real transport", () => {
   });
 });
 
+test("a shutdown cuts a lookup that hasn't answered, and nothing is sent", async () => {
+  let sent = 0;
+  const shutdown = new AbortController();
+  const result = sendWebhook(
+    {
+      ...defaultSendDeps,
+      resolve: () => new Promise(() => {}),
+      transport: async () => {
+        sent++;
+        return { status: 200 };
+      },
+    },
+    {
+      url: "https://bot.example.com/hook",
+      secret: "s",
+      deliveryId: "d",
+      body: "{}",
+    },
+    shutdown.signal,
+  );
+  shutdown.abort();
+  expect(await result).toMatchObject({ ok: false, retryable: true });
+  expect(sent).toBe(0);
+});
+
 describe("sendWebhook's status classes", () => {
   const send = (status: number) =>
     sendWebhook(

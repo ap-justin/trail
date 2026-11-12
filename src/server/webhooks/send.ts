@@ -87,6 +87,19 @@ function describe(error: unknown): string {
   return "request failed";
 }
 
+/** `resolve`, cut short when `signal` aborts: a DNS lookup takes no signal of its own. */
+const resolveUntil =
+  (resolve: Resolve, signal: AbortSignal): Resolve =>
+  (host) =>
+    new Promise((done, fail) => {
+      signal.throwIfAborted();
+      const onAbort = () => fail(signal.reason);
+      signal.addEventListener("abort", onAbort, { once: true });
+      resolve(host)
+        .then(done, fail)
+        .finally(() => signal.removeEventListener("abort", onAbort));
+    });
+
 /**
  * Signs and sends one webhook, checking the URL's address first. Never throws:
  * a refused address and a network error are retryable failures, as are every
@@ -99,7 +112,10 @@ export async function sendWebhook(
 ): Promise<SendResult> {
   let deadline: AbortSignal | undefined;
   try {
-    const { url, address } = await checkWebhookUrl(call.url, deps.resolve);
+    const { url, address } = await checkWebhookUrl(
+      call.url,
+      signal ? resolveUntil(deps.resolve, signal) : deps.resolve,
+    );
     const headers = signedHeaders({
       secret: call.secret,
       deliveryId: call.deliveryId,

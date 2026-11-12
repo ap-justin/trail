@@ -57,15 +57,18 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
   const pauseAfter = options.pauseAfter ?? WEBHOOK_PAUSE_AFTER;
   const pollMs = options.pollMs ?? POLL_MS;
 
-  let running: Promise<void> | null = null;
-  let again = false;
+  /** each subscription with a run in flight; a subscription never has two, so its order holds */
+  const runs = new Map<string, Promise<void>>();
+  let woken = false;
   let stopped = true;
   let unsubscribe: (() => void) | null = null;
   let timer: NodeJS.Timeout | null = null;
   const abort = new AbortController();
+  /** deliveries whose crash couldn't be recorded, by id: not tried again before `until` */
+  const held = new Map<string, { crashes: number; until: number }>();
 
   /** Fails what an unpaused subscription couldn't deliver in the window; a paused one's deliveries wait. */
-  function expire(now: number) {
+  function expire(now: number, subscriptionId?: string) {
     db.update(webhookDelivery)
       .set({
         status: "failed",
@@ -74,6 +77,9 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
       .where(
         and(
           eq(webhookDelivery.status, "pending"),
+          subscriptionId === undefined
+            ? undefined
+            : eq(webhookDelivery.subscriptionId, subscriptionId),
           lt(webhookDelivery.createdAt, new Date(now - giveUpMs)),
           sql`${webhookDelivery.subscriptionId} in (select id from webhook_subscription where paused_at is null)`,
         ),
@@ -82,7 +88,7 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
   }
 
   /** Each unpaused subscription's oldest pending delivery, when it is due. */
-  function dueHeads(now: number): Delivery[] {
+  function dueHeads(now: number, subscriptionId?: string): Delivery[] {
     const heads = db
       .select({ delivery: webhookDelivery })
       .from(webhookDelivery)
@@ -93,6 +99,9 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
       .where(
         and(
           eq(webhookDelivery.status, "pending"),
+          subscriptionId === undefined
+            ? undefined
+            : eq(webhookDelivery.subscriptionId, subscriptionId),
           sql`${webhookSubscription.pausedAt} is null`,
           sql`${webhookDelivery.seq} = (select min(d.seq) from webhook_delivery d where d.subscription_id = ${webhookDelivery.subscriptionId} and d.status = 'pending')`,
         ),
@@ -205,42 +214,91 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
     // a shutdown aborts the request: the delivery stays pending for the next start
     if (abort.signal.aborted) return;
     record(delivery, result, settings.now());
+    held.delete(delivery.id);
   }
 
-  async function drain() {
-    for (;;) {
-      const now = settings.now();
-      expire(now);
-      const heads = dueHeads(now);
-      if (heads.length === 0) return;
-      await Promise.all(
-        heads.map((d) =>
-          attempt(d).catch((error) =>
-            console.error("webhook delivery crashed", d.id, error),
-          ),
-        ),
+  /**
+   * Turns a throw inside an attempt into a retryable failure, so the backoff
+   * applies; when even that can't be written the delivery is held here instead,
+   * or the next round would pick it straight back up.
+   */
+  function crashed(delivery: Delivery, error: unknown) {
+    console.error("webhook delivery crashed", delivery.id, error);
+    const now = settings.now();
+    try {
+      record(
+        delivery,
+        { ok: false, status: null, error: "internal error", retryable: true },
+        now,
       );
-      if (abort.signal.aborted) return;
+      held.delete(delivery.id);
+    } catch (recordError) {
+      console.error(
+        "webhook delivery crash not recorded",
+        delivery.id,
+        recordError,
+      );
+      const crashes = (held.get(delivery.id)?.crashes ?? 0) + 1;
+      const wait = backoff[Math.min(crashes - 1, backoff.length - 1)] ?? 0;
+      held.set(delivery.id, { crashes, until: now + wait });
     }
   }
 
-  /** Runs a pass now, or right after the one in progress; resolves when that pass is done. */
-  function tick(): Promise<void> {
-    if (running) {
-      again = true;
-      return running;
-    }
-    running = (async () => {
-      try {
-        do {
-          again = false;
-          await drain();
-        } while (again && !abort.signal.aborted);
-      } finally {
-        running = null;
+  function due(now: number, subscriptionId?: string): Delivery[] {
+    expire(now, subscriptionId);
+    return dueHeads(now, subscriptionId).filter(
+      (d) => (held.get(d.id)?.until ?? 0) <= now,
+    );
+  }
+
+  /** Sends one subscription's queue in order, a delivery at a time, until its head isn't due. */
+  async function run(first: Delivery) {
+    const id = first.subscriptionId;
+    try {
+      let next: Delivery | undefined = first;
+      while (next) {
+        const delivery: Delivery = next;
+        await attempt(delivery).catch((error) => crashed(delivery, error));
+        // a macrotask turn between attempts, so a run can never starve the event loop
+        await new Promise((done) => setImmediate(done));
+        if (abort.signal.aborted) return;
+        next = due(settings.now(), id)[0];
       }
-    })();
-    return running;
+    } catch (error) {
+      console.error("webhook pass failed", error);
+    } finally {
+      // in the same turn as the last lookup, so a pass can't skip a head this run didn't see
+      runs.delete(id);
+    }
+  }
+
+  /**
+   * Starts a run for each subscription with a due head and none in flight;
+   * resolves when every run is done. Never rejects.
+   */
+  function tick(): Promise<void> {
+    if (!abort.signal.aborted) {
+      try {
+        for (const head of due(settings.now())) {
+          if (!runs.has(head.subscriptionId)) {
+            runs.set(head.subscriptionId, run(head));
+          }
+        }
+      } catch (error) {
+        console.error("webhook pass failed", error);
+      }
+    }
+    return Promise.all(runs.values()).then(() => {});
+  }
+
+  /** A pass after the current turn, so a bus event's publisher never runs the worker's queries; wakes coalesce. */
+  function wake() {
+    if (woken) return;
+    woken = true;
+    setImmediate(() => {
+      woken = false;
+      void tick();
+    });
   }
 
   return {
@@ -249,18 +307,18 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
     start() {
       if (!stopped) return;
       stopped = false;
-      unsubscribe = bus.subscribe((_: ActivityEvent) => void tick());
+      unsubscribe = bus.subscribe((_: ActivityEvent) => wake());
       timer = setInterval(() => void tick(), pollMs);
       timer.unref();
       void tick();
     },
-    /** Stops sending, cuts requests in flight (their deliveries stay pending) and waits for the pass to end. */
+    /** Stops sending, cuts requests in flight (their deliveries stay pending) and waits for every run to end. */
     async stop() {
       stopped = true;
       unsubscribe?.();
       if (timer) clearInterval(timer);
       abort.abort();
-      await running;
+      await Promise.all(runs.values());
     },
   };
 }

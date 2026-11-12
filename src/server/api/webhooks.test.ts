@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { beforeEach, expect, test } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
 import { webhookSubscription } from "../db/schema.js";
 import { createBot, createKey } from "../service/keys.js";
 import { setupTestApp } from "../test-app.js";
@@ -9,11 +9,24 @@ const sent: { url: string; headers: Record<string, string>; body: string }[] =
   [];
 let answer = 200;
 let resolveTo = ["93.184.216.34"];
+// while set, every DNS lookup waits on it: requests pile up inside the lookup's await
+let dnsGate: Promise<void> | null = null;
+let lookups = 0;
+const holdDns = () => {
+  let release = () => {};
+  dnsGate = new Promise((r) => {
+    release = r;
+  });
+  return release;
+};
 const { db, request, addProject, addBot, addMember, signIn, owner } =
   setupTestApp({
     webhooks: {
-      resolve: async (host) =>
-        host === "internal.example.test" ? ["10.0.0.5"] : resolveTo,
+      resolve: async (host) => {
+        lookups++;
+        await dnsGate;
+        return host === "internal.example.test" ? ["10.0.0.5"] : resolveTo;
+      },
       transport: async ({ url, headers, body }) => {
         sent.push({ url: url.href, headers, body });
         return { status: answer };
@@ -37,6 +50,8 @@ beforeEach(() => {
   sent.length = 0;
   answer = 200;
   resolveTo = ["93.184.216.34"];
+  dnsGate = null;
+  lookups = 0;
 });
 
 // every body this file reads, to prove no secret ever shows in one
@@ -257,6 +272,126 @@ test("the same URL twice is a 409 naming the first", async () => {
   expect(again.body.error.message).toContain(first.body.id);
 });
 
+test("moving a webhook onto another of the bot's URLs is a 409 naming it; its own URL, or another bot's, is fine", async () => {
+  const first = (await create({ url: "https://bot.example.com/one" })).body.id;
+  const second = (await create({ url: "https://bot.example.com/two" })).body.id;
+  const onto = await call("PATCH", `/webhooks/${second}`, {
+    json: { url: "https://bot.example.com/one" },
+  });
+  expect(onto.status).toBe(409);
+  expect(onto.body.error.message).toContain(first);
+  // the host is case-insensitive, so this is the same URL
+  const shouted = await call("PATCH", `/webhooks/${second}`, {
+    json: { url: "https://BOT.example.com/one" },
+  });
+  expect(shouted.status).toBe(409);
+  expect((await call("GET", `/webhooks/${second}`)).body.url).toBe(
+    "https://bot.example.com/two",
+  );
+
+  const same = await call("PATCH", `/webhooks/${second}`, {
+    json: { url: "https://bot.example.com/two" },
+  });
+  expect(same.status).toBe(200);
+
+  const other = addBot("erin");
+  const theirs = (
+    await create({ url: "https://bot.example.com/elsewhere" }, other.key)
+  ).body.id;
+  const shared = await call("PATCH", `/webhooks/${theirs}`, {
+    json: { url: "https://bot.example.com/one" },
+    key: other.key,
+  });
+  expect(shared.status).toBe(200);
+  expect(shared.body.url).toBe("https://bot.example.com/one");
+});
+
+test("a key without read is refused on its bot's own webhook, and told nothing about another bot's", async () => {
+  const holder = createBot(db, "keyholder");
+  const mine = (
+    await create({ url: "https://bot.example.com/keyholder" }, holder.key)
+  ).body.id as string;
+  const theirs = (await create({ url: "https://bot.example.com/other" })).body
+    .id as string;
+  const noRead = createKey(db, holder.actor.id, { actions: ["issues"] }).key;
+  const routes = (id: string) =>
+    [
+      ["GET", `/webhooks/${id}`, undefined],
+      ["PATCH", `/webhooks/${id}`, { projects: [a.key] }],
+      ["PUT", `/webhooks/${id}/secret`, { secret: NEW_SECRET }],
+      ["POST", `/webhooks/${id}/ping`, undefined],
+      ["DELETE", `/webhooks/${id}`, undefined],
+    ] as const;
+  for (const [method, path, json] of routes(mine)) {
+    const res = await call(method, path, { json, key: noRead });
+    expect(res.status, `${method} own`).toBe(403);
+    expect(res.body.error.code).toBe("forbidden_action");
+  }
+  for (const [method, path, json] of routes(theirs)) {
+    const foreign = await call(method, path, { json, key: noRead });
+    const missing = await call(method, path.replace(theirs, "no-such"), {
+      json,
+      key: noRead,
+    });
+    expect(foreign.status, `${method} foreign`).toBe(404);
+    expect(foreign.body).toEqual({
+      error: {
+        code: "not_found",
+        message: missing.body.error.message.replace("no-such", theirs),
+      },
+    });
+  }
+  expect(sent).toEqual([]);
+  expect(
+    (await call("GET", `/webhooks/${mine}`, { key: holder.key })).body,
+  ).toMatchObject({ id: mine, projects: [a.key] });
+});
+
+test("a key narrower than a webhook can't change, rotate or ping it", async () => {
+  const wideBot = createBot(db, "wide-writer");
+  const wide = (
+    await create(
+      { projects: [a.key, b.key], url: "https://bot.example.com/wide-w" },
+      wideBot.key,
+    )
+  ).body.id as string;
+  const narrow = createKey(db, wideBot.actor.id, { projects: [a.key] }).key;
+  for (const [method, path, json] of [
+    ["PATCH", `/webhooks/${wide}`, { projects: [a.key] }],
+    ["PUT", `/webhooks/${wide}/secret`, { secret: NEW_SECRET }],
+    ["POST", `/webhooks/${wide}/ping`, undefined],
+  ] as const) {
+    const res = await call(method, path, { json, key: narrow });
+    expect(res.status, method).toBe(404);
+  }
+  expect(sent).toEqual([]);
+  expect(
+    (await call("GET", `/webhooks/${wide}`, { key: wideBot.key })).body
+      .projects,
+  ).toEqual([a.key, b.key].sort());
+});
+
+test("a scoped key adding a project it can't see on update gets the same 404 as on create", async () => {
+  const scoped = createBot(db, "bg-june", {
+    scope: { projects: [a.key], actions: ["read"] },
+  });
+  const id = (await create({ url: "https://bot.example.com/june" }, scoped.key))
+    .body.id;
+  const hidden = await call("PATCH", `/webhooks/${id}`, {
+    json: { projects: [a.key, b.key] },
+    key: scoped.key,
+  });
+  const onCreate = await create(
+    { url: "https://bot.example.com/june2", projects: [b.key] },
+    scoped.key,
+  );
+  expect(hidden.status).toBe(404);
+  expect(hidden.body).toEqual(onCreate.body);
+  expect(
+    (await call("GET", `/webhooks/${id}`, { key: scoped.key })).body.projects,
+  ).toEqual([a.key]);
+});
+
 test("a bot at its webhook limit gets a 409 conflict, not a validation failure", async () => {
   const busy = createBot(db, "busy");
   for (let i = 0; i < 20; i++) {
@@ -273,6 +408,39 @@ test("a bot at its webhook limit gets a 409 conflict, not a validation failure",
   expect(over.status).toBe(409);
   expect(over.body.error.code).toBe("conflict");
   expect(over.body.error.message).toContain("20 webhooks");
+});
+
+test("creates sent at once by a bot one short of its limit make one webhook, not several", async () => {
+  const racer = createBot(db, "racer");
+  for (let i = 0; i < 19; i++) {
+    await create({ url: `https://bot.example.com/racer/${i}` }, racer.key);
+  }
+  const release = holdDns();
+  const racing = [0, 1, 2].map((i) =>
+    create({ url: `https://bot.example.com/racer/x${i}` }, racer.key),
+  );
+  await vi.waitFor(() => expect(lookups).toBe(19 + 3));
+  release();
+  const statuses = (await Promise.all(racing)).map((r) => r.status).sort();
+  expect(statuses).toEqual([201, 409, 409]);
+  const listed = await call("GET", "/webhooks", { key: racer.key });
+  expect(listed.body.items).toHaveLength(20);
+});
+
+test("a webhook deleted while its update waits on DNS is a 404, and nothing is left behind", async () => {
+  const id = (await create({ url: "https://bot.example.com/vanishing" })).body
+    .id;
+  const release = holdDns();
+  const updating = call("PATCH", `/webhooks/${id}`, {
+    json: { url: "https://bot.example.com/moved", projects: [a.key, b.key] },
+  });
+  await vi.waitFor(() => expect(lookups).toBe(2));
+  expect((await call("DELETE", `/webhooks/${id}`)).status).toBe(200);
+  release();
+  const updated = await updating;
+  expect(updated.status).toBe(404);
+  expect(updated.body.error.code).toBe("not_found");
+  expect((await call("GET", "/webhooks")).body.items).toEqual([]);
 });
 
 test("an empty projects list and an unknown field are 422s", async () => {
