@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   type AnySQLiteColumn,
+  blob,
   check,
   foreignKey,
   index,
@@ -47,6 +48,12 @@ export const apiKeyActions = [
   "admin",
 ] as const;
 export type ApiKeyAction = (typeof apiKeyActions)[number];
+export const actorPhotoContentTypes = [
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+] as const;
+export type ActorPhotoContentType = (typeof actorPhotoContentTypes)[number];
 
 // Unqualified column name for CHECKs and index predicates: drizzle renders a column as
 // "table"."col", which fails in the `__new_<table>` copy drizzle-kit builds for a rebuild.
@@ -147,6 +154,39 @@ export const actor = sqliteTable(
     uniqueIndex("actor_bot_label_unique")
       .on(t.label)
       .where(sql`${c(t.kind)} = 'bot' and ${c(t.label)} is not null`),
+  ],
+);
+
+// a table of its own, so reading an actor never reads the image bytes
+export const actorPhoto = sqliteTable(
+  "actor_photo",
+  {
+    actorId: text("actor_id")
+      .primaryKey()
+      .references(() => actor.id, { onDelete: "cascade" }),
+    contentType: text("content_type", {
+      enum: actorPhotoContentTypes,
+    }).notNull(),
+    // lowercase hex sha256 of content
+    hash: text("hash").notNull(),
+    updatedAt: updatedAt(),
+    // last: a row stores columns in this order, and reading any column after
+    // the blob walks its whole overflow-page chain
+    content: blob("content", { mode: "buffer" }).notNull(),
+  },
+  (t) => [
+    check(
+      "actor_photo_content_type_check",
+      oneOf(t.contentType, actorPhotoContentTypes),
+    ),
+    check(
+      "actor_photo_content_check",
+      sql`length(${c(t.content)}) between 1 and 262144`,
+    ),
+    check(
+      "actor_photo_hash_check",
+      sql`length(${c(t.hash)}) = 64 and ${c(t.hash)} not glob '*[^0-9a-f]*'`,
+    ),
   ],
 );
 

@@ -98,6 +98,9 @@ function fakeGitHub() {
   };
 }
 
+// never answers, so an unrelated sign-in neither stores a photo nor logs a failed fetch
+const noAvatar: typeof fetch = () => new Promise(() => {});
+
 /** The `name=value` of the session cookie a response sets, or "". */
 export const sessionCookie = (res: Response) =>
   res.headers
@@ -112,9 +115,12 @@ export const sessionCookie = (res: Response) =>
  */
 export function setupTestApp({
   auth: authOverrides = {},
+  avatarFetch = noAvatar,
   webDir,
 }: {
   auth?: Partial<AuthConfig>;
+  /** answers sign-in's GitHub photo fetch; by default never, so no photo and no warning */
+  avatarFetch?: typeof fetch;
   /** the built SPA directory `createApp` serves; none by default */
   webDir?: string;
 } = {}) {
@@ -132,6 +138,7 @@ export function setupTestApp({
   const auth = createAuth({
     db,
     config: { ...testAuthConfig, ...authOverrides },
+    avatarFetch,
   });
   const streams = new LiveStreams();
   const app = createApp({ db, bus, auth, streams, webDir });

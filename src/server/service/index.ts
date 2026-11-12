@@ -3,6 +3,7 @@ import {
   asc,
   desc,
   eq,
+  getTableColumns,
   gt,
   inArray,
   isNotNull,
@@ -14,6 +15,7 @@ import type { Db } from "../db/client.js";
 import type { ApiKeyAction } from "../db/schema.js";
 import {
   activityEvent,
+  actorPhoto,
   actor as actorTable,
   comment,
   type IssueStatus,
@@ -58,6 +60,7 @@ import {
   page,
   pageLimit,
 } from "./paging.js";
+import { clearActorPhoto, photoUrl, setActorPhoto } from "./photos.js";
 import type { Tx } from "./tx.js";
 import {
   completedAtOf,
@@ -98,6 +101,8 @@ export type { Link, LinkInput } from "./validate.js";
  * carries none, and /api/web applies their visibility before calling.
  */
 export type ActingActor = Pick<Actor, "id" | "kind"> & { scope?: KeyScope };
+/** An actor with the URL of its photo, null without one. */
+export type ActorWithPhoto = Actor & { photoUrl: string | null };
 export type Project = typeof project.$inferSelect;
 type IssueRow = typeof issue.$inferSelect;
 /** An issue with its key (as in TRL-12), label names A–Z, and links in the order set. */
@@ -268,7 +273,24 @@ const visibleIdsOf = (actor: ActingActor): VisibleIds =>
 const sameJson = (a: unknown, b: unknown) =>
   JSON.stringify(a) === JSON.stringify(b);
 
+type ActorWithHash = Actor & { photoHash: string | null };
+
+const withPhotoUrl = ({
+  photoHash,
+  ...row
+}: ActorWithHash): ActorWithPhoto => ({
+  ...row,
+  photoUrl: photoUrl(row.id, photoHash),
+});
+
 export function createService({ db, bus }: { db: Db; bus: EventBus }) {
+  /** Actors with their photo's hash; the bytes stay in actor_photo. */
+  const selectWithPhotoHash = () =>
+    db
+      .select({ ...getTableColumns(actorTable), photoHash: actorPhoto.hash })
+      .from(actorTable)
+      .leftJoin(actorPhoto, eq(actorPhoto.actorId, actorTable.id));
+
   /**
    * Runs `write` and the activity event it returns in one immediate
    * transaction, then publishes the committed event. `write` returns a null
@@ -1623,32 +1645,42 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
       );
     },
 
-    /** The calling actor, as stored; actors are never deleted, so the row is there. */
-    whoami(actor: ActingActor): Actor {
-      return db
-        .select()
-        .from(actorTable)
-        .where(eq(actorTable.id, actor.id))
-        .get() as Actor;
+    /** The calling actor, as stored, with its photo URL; actors are never deleted, so the row is there. */
+    whoami(actor: ActingActor): ActorWithPhoto {
+      return withPhotoUrl(
+        selectWithPhotoHash()
+          .where(eq(actorTable.id, actor.id))
+          .get() as ActorWithHash,
+      );
     },
 
     /** Every bot, oldest first. */
-    listBots(actor: ActingActor, query: PageQuery = {}): Page<Actor> {
+    listBots(actor: ActingActor, query: PageQuery = {}): Page<ActorWithPhoto> {
       requireAction(actor, "admin", "list bots");
-      return page(
+      const found = page(
         actorTable,
         "asc",
         query,
         [eq(actorTable.kind, "bot")],
         (where, orderBy, limit) =>
-          db
-            .select()
-            .from(actorTable)
+          selectWithPhotoHash()
             .where(where)
             .orderBy(...orderBy)
             .limit(limit)
             .all(),
       );
+      return { ...found, items: found.items.map(withPhotoUrl) };
+    },
+
+    /** Stores the calling actor's photo; see `setActorPhoto` for what it refuses. Any key may. */
+    setMyPhoto(actor: ActingActor, bytes: Uint8Array): { photoUrl: string } {
+      return setActorPhoto(db, actor.id, bytes);
+    },
+
+    /** Removes the calling actor's photo, if it has one. Any key may. */
+    clearMyPhoto(actor: ActingActor): { photoUrl: null } {
+      clearActorPhoto(db, actor.id);
+      return { photoUrl: null };
     },
 
     /**

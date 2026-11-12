@@ -14,16 +14,13 @@ export const MAX_BODY_BYTES = 1024 * 1024;
 export const IMPORT_MAX_BODY_BYTES = 16 * 1024 * 1024;
 
 /** Refuses a body over `maxSize` bytes with a 413 in the shared error shape. */
-export const limitBody = (maxSize: number) =>
+export const limitBody = (
+  maxSize: number,
+  message = `request body exceeds ${maxSize} bytes`,
+) =>
   bodyLimit({
     maxSize,
-    onError: (c) =>
-      errorResponse(
-        c,
-        413,
-        "payload_too_large",
-        `request body exceeds ${maxSize} bytes`,
-      ),
+    onError: (c) => errorResponse(c, 413, "payload_too_large", message),
   });
 
 /** The error responses every authenticated read documents beside its own. */

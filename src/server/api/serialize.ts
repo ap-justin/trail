@@ -14,6 +14,7 @@ import type {
 import type { ActivityEvent } from "../events/bus.js";
 import type {
   Actor,
+  ActorWithPhoto,
   Comment,
   ImportResult,
   Issue,
@@ -120,12 +121,17 @@ export function toActor(row: Actor): ActorView {
   };
 }
 
-export function toWhoami(row: Actor, scope: KeyScope): WhoamiView {
-  return { ...toActor(row), scope: scopeView(scope) };
+export function toWhoami(row: ActorWithPhoto, scope: KeyScope): WhoamiView {
+  return { ...toActor(row), scope: scopeView(scope), photoUrl: row.photoUrl };
 }
 
-export function toBot(row: Actor): BotView {
-  return { id: row.id, name: row.displayName, label: row.label };
+export function toBot(row: ActorWithPhoto): BotView {
+  return {
+    id: row.id,
+    name: row.displayName,
+    label: row.label,
+    photoUrl: row.photoUrl,
+  };
 }
 
 export function toPage<T, V>(page: Page<T>, view: (row: T) => V): PageView<V> {

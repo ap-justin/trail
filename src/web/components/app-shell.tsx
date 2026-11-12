@@ -45,6 +45,7 @@ export type ShellViewer = {
   /** The GitHub login, without the @. */
   login: string;
   isOwner: boolean;
+  photoUrl: string | null;
 };
 
 export type ShellSection = "feed" | "projects" | "people" | "account";
@@ -226,7 +227,15 @@ function AccountMenu({
         aria-label={`Account: ${viewer.name}`}
         className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/25 aria-expanded:bg-muted"
       >
-        <ActorAvatar actor={{ name: viewer.name, kind: "human" }} />
+        <ActorAvatar
+          actor={{
+            name: viewer.name,
+            kind: "human",
+            photoUrl: viewer.photoUrl,
+          }}
+          // the sidebar is display:none below lg, and a lazy img that never renders never fetches
+          loading="lazy"
+        />
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate font-medium">{viewer.name}</span>
           {viewer.isOwner ? (

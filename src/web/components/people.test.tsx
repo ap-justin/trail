@@ -7,7 +7,7 @@ import {
   parseUsername,
   type RowMutation,
 } from "@/components/people";
-import { allProjects, people } from "@/test/fixtures";
+import { allProjects, people, photoUrlFor } from "@/test/fixtures";
 
 function renderPeople(overrides: Partial<PeopleViewProps> = {}) {
   const props: PeopleViewProps = {
@@ -36,6 +36,48 @@ const row = (username: string) => {
 };
 
 describe("people list", () => {
+  test("a person with a photo shows it; one without shows initials", () => {
+    renderPeople({
+      people: people.map((p) =>
+        p.username === "mayachen"
+          ? { ...p, photoUrl: photoUrlFor("a-maya", "77") }
+          : p,
+      ),
+    });
+    const avatar = (username: string) =>
+      document.querySelector(`[data-username="${username}"] [data-actor-kind]`);
+    expect(avatar("mayachen")?.querySelector("img")).toHaveAttribute(
+      "src",
+      photoUrlFor("a-maya", "77"),
+    );
+    expect(avatar("justinsalas")).toHaveTextContent("JS");
+    expect(avatar("justinsalas")?.querySelector("img")).toBeNull();
+  });
+
+  test("a pending invite shows a dashed ? circle; a signed-in person with no name still shows ?", () => {
+    renderPeople({
+      people: people.map((p) =>
+        p.username === "mayachen" ? { ...p, name: null } : p,
+      ),
+    });
+    const pending = document.querySelector(
+      '[data-username="kai-dev"] .border-dashed',
+    );
+    expect(pending).toHaveTextContent("?");
+    expect(pending).toHaveClass("rounded-full");
+    expect(
+      document.querySelector('[data-username="kai-dev"] [data-actor-kind]'),
+    ).toBeNull();
+
+    const unnamed = document.querySelector(
+      '[data-username="mayachen"] [data-actor-kind]',
+    );
+    expect(unnamed).toHaveTextContent("?");
+    expect(
+      document.querySelector('[data-username="mayachen"] .border-dashed'),
+    ).toBeNull();
+  });
+
   test("the owner row comes first and has no actions", () => {
     renderPeople();
     const items = screen.getAllByRole("listitem");

@@ -1,8 +1,9 @@
-import { inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import type { WebActorView } from "../../shared/schemas.js";
 import type { VisibleProject } from "../auth/viewer.js";
 import type { Db } from "../db/client.js";
-import { actor } from "../db/schema.js";
+import { actor, actorPhoto } from "../db/schema.js";
+import { photoUrl } from "../service/photos.js";
 import { noProject } from "../service/visible.js";
 import type { Member } from "./env.js";
 
@@ -15,6 +16,25 @@ export function visibleProject(member: Member, key: string): VisibleProject {
 
 export const visibleIds = (member: Member) => member.projects.map((p) => p.id);
 
+/** Actors as the web shows them, each with its photo's hash and never its bytes; map rows with `toWebActor`. */
+export const selectWebActors = (db: Db) =>
+  db
+    .select({
+      id: actor.id,
+      name: actor.displayName,
+      kind: actor.kind,
+      photoHash: actorPhoto.hash,
+    })
+    .from(actor)
+    .leftJoin(actorPhoto, eq(actorPhoto.actorId, actor.id));
+
+export const toWebActor = ({
+  photoHash,
+  ...row
+}: Omit<WebActorView, "photoUrl"> & {
+  photoHash: string | null;
+}): WebActorView => ({ ...row, photoUrl: photoUrl(row.id, photoHash) });
+
 /** The actors with these ids, by id; actors are never deleted, so every id is there. */
 export function actorsById(
   db: Db,
@@ -24,11 +44,7 @@ export function actorsById(
   const rows =
     wanted.length === 0
       ? []
-      : db
-          .select({ id: actor.id, name: actor.displayName, kind: actor.kind })
-          .from(actor)
-          .where(inArray(actor.id, wanted))
-          .all();
-  const byId = new Map(rows.map((r) => [r.id, r]));
+      : selectWebActors(db).where(inArray(actor.id, wanted)).all();
+  const byId = new Map(rows.map((r) => [r.id, toWebActor(r)]));
   return (id) => byId.get(id) as WebActorView;
 }

@@ -81,8 +81,8 @@ describe("GET /feed", () => {
     const { body } = await feed();
     expect(body.filters).toEqual({
       actors: [
-        { id: loud.actor.id, name: "loud", kind: "bot" },
-        { id: expect.any(String), name: "tester", kind: "bot" },
+        { id: loud.actor.id, name: "loud", kind: "bot", photoUrl: null },
+        { id: expect.any(String), name: "tester", kind: "bot", photoUrl: null },
       ],
       projects: [{ key: visible.key, name: "Visible" }],
     });
@@ -131,8 +131,8 @@ test("the bot filter lists each bot with an event in any visible project once, b
   const res = await request("GET", "/api/web/feed", { key: null, cookie });
   const body = (await res.json()) as Body;
   expect(body.filters.actors).toEqual([
-    { id: alpha.actor.id, name: "Alpha", kind: "bot" },
-    { id: zed.actor.id, name: "Zed", kind: "bot" },
-    { id: beta.actor.id, name: "beta", kind: "bot" },
+    { id: alpha.actor.id, name: "Alpha", kind: "bot", photoUrl: null },
+    { id: zed.actor.id, name: "Zed", kind: "bot", photoUrl: null },
+    { id: beta.actor.id, name: "beta", kind: "bot", photoUrl: null },
   ]);
 });

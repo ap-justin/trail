@@ -12,12 +12,19 @@ import {
 import { handleNotFound } from "../api/errors.js";
 import { jsonBody, jsonContent } from "../api/routes.js";
 import type { Db } from "../db/client.js";
-import { actor, invite, project, projectMember } from "../db/schema.js";
+import {
+  actor,
+  actorPhoto,
+  invite,
+  project,
+  projectMember,
+} from "../db/schema.js";
 import {
   ConflictError,
   NotFoundError,
   ValidationError,
 } from "../service/errors.js";
+import { photoUrl, photoUrlOf } from "../service/photos.js";
 import type { Tx } from "../service/tx.js";
 import { createWebRouter, type WebEnv } from "./env.js";
 
@@ -129,8 +136,14 @@ function invitees(db: Db | Tx, usernames?: string[]): PersonView[] {
     claimedIds.length === 0
       ? []
       : db
-          .select({ githubId: actor.githubId, name: actor.displayName })
+          .select({
+            id: actor.id,
+            githubId: actor.githubId,
+            name: actor.displayName,
+            photoHash: actorPhoto.hash,
+          })
           .from(actor)
+          .leftJoin(actorPhoto, eq(actorPhoto.actorId, actor.id))
           .where(
             and(eq(actor.kind, "human"), inArray(actor.githubId, claimedIds)),
           )
@@ -143,6 +156,7 @@ function invitees(db: Db | Tx, usernames?: string[]): PersonView[] {
       owner: false,
       pending: i.githubId === null,
       name: claimant?.name ?? null,
+      photoUrl: claimant ? photoUrl(claimant.id, claimant.photoHash) : null,
       projects: memberships
         .filter((m) => m.username === i.username)
         .map(({ key, name }) => ({ key, name })),
@@ -166,6 +180,7 @@ export function peopleRoutes(db: Db) {
         owner: true,
         pending: false,
         name: owner.actor.displayName,
+        photoUrl: photoUrlOf(db, owner.actor.id),
         projects: owner.projects.map(({ key, name }) => ({ key, name })),
         invitedAt: null,
       };

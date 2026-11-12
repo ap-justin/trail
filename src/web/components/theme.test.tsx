@@ -32,7 +32,12 @@ function Probe() {
   return <output>{`${choice}:${resolved}`}</output>;
 }
 
-const viewer = { name: "Maya Chen", login: "mayachen", isOwner: false };
+const viewer = {
+  name: "Maya Chen",
+  login: "mayachen",
+  isOwner: false,
+  photoUrl: null,
+};
 
 function renderAccount() {
   render(

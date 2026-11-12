@@ -788,7 +788,7 @@ describe("paging and filters", () => {
 
 test("whoami is the calling actor's row, label included", () => {
   const labelled = createBot(db, "whoami bot", { label: "agent-whoami" }).actor;
-  expect(service.whoami(labelled)).toEqual(labelled);
+  expect(service.whoami(labelled)).toEqual({ ...labelled, photoUrl: null });
   expect(service.whoami(human)).toMatchObject({
     id: human.id,
     kind: "human",
@@ -813,6 +813,6 @@ test("listBots pages every bot oldest first, never a human", () => {
   const ids = all.map((a) => a.id);
   expect(ids.indexOf(first.id)).toBe(0);
   expect(ids.indexOf(labelled.id)).toBe(1);
-  expect(all[1]).toEqual(labelled);
+  expect(all[1]).toEqual({ ...labelled, photoUrl: null });
   expect(ids).toContain(bot.id);
 });

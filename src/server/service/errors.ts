@@ -41,3 +41,15 @@ export class IdempotencyKeyReusedError extends ServiceError {
   readonly code = "idempotency_key_reused";
   override readonly name = "IdempotencyKeyReusedError";
 }
+
+/** A photo whose bytes are not a PNG, JPEG or WebP. */
+export class InvalidImageError extends ServiceError {
+  readonly code = "invalid_image";
+  override readonly name = "InvalidImageError";
+}
+
+/** A value over its size limit that no body limit caught first: a photo sent over MCP. */
+export class PayloadTooLargeError extends ServiceError {
+  readonly code = "payload_too_large";
+  override readonly name = "PayloadTooLargeError";
+}

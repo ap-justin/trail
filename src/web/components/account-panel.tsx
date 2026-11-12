@@ -21,7 +21,15 @@ export function AccountPanel({
   return (
     <div className="flex flex-col p-4">
       <div className="flex items-center gap-2">
-        <ActorAvatar actor={{ name: viewer.name, kind: "human" }} size="lg" />
+        <ActorAvatar
+          actor={{
+            name: viewer.name,
+            kind: "human",
+            photoUrl: viewer.photoUrl,
+          }}
+          size="lg"
+          loading="eager"
+        />
         <div className="flex min-w-0 flex-1 flex-col">
           <span className="truncate font-medium">{viewer.name}</span>
           <KeyText className="truncate font-normal">@{viewer.login}</KeyText>

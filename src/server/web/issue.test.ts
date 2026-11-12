@@ -18,7 +18,12 @@ async function get(path: string) {
 const v1 = (method: string, path: string, json?: unknown, key?: string) =>
   request(method, `/api/v1${path}`, { json, key });
 
-const tester = { id: bot.actor.id, name: "tester", kind: "bot" };
+const tester = {
+  id: bot.actor.id,
+  name: "tester",
+  kind: "bot",
+  photoUrl: null,
+};
 
 test("an issue reads with its fields, its people as actors, and a timeline oldest first with one entry per changed field", async () => {
   const p = addProject("Detail");
@@ -80,7 +85,12 @@ test("an issue reads with its fields, its people as actors, and a timeline oldes
     updatedAt: expect.any(String),
     completedAt: null,
   });
-  const workerActor = { id: worker.actor.id, name: "worker", kind: "bot" };
+  const workerActor = {
+    id: worker.actor.id,
+    name: "worker",
+    kind: "bot",
+    photoUrl: null,
+  };
   const issue = { key: `${p.key}-1`, title: "Fix it now" };
   const project = { key: p.key, name: "Detail" };
   expect(
@@ -198,6 +208,7 @@ test("an imported issue is found by its source key and credits the importing bot
     id: importer.actor.id,
     name: "importer",
     kind: "bot",
+    photoUrl: null,
   };
   expect(body).toMatchObject({
     key: "ALIAS-1",

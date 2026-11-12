@@ -28,9 +28,19 @@ import {
   toStatusUpdate,
   toWhoami,
 } from "../api/serialize.js";
-import { ServiceError } from "../service/errors.js";
+import { actorPhotoContentTypes } from "../db/schema.js";
+import {
+  InvalidImageError,
+  PayloadTooLargeError,
+  ServiceError,
+} from "../service/errors.js";
 import type { Service } from "../service/index.js";
 import type { KeyActor } from "../service/keys.js";
+import {
+  PHOTO_ACCEPTS,
+  PHOTO_MAX_BYTES,
+  photoTooLarge,
+} from "../service/photos.js";
 
 const projectId = z
   .string()
@@ -82,6 +92,61 @@ const failure = (text: string): CallToolResult => ({
   content: [{ type: "text", text }],
   isError: true,
 });
+
+const photoEncoding =
+  "base64-encoded (standard or URL-safe alphabet, padded or not; line breaks are fine), bare or prefixed like data:image/png;base64,";
+
+/** The media types a data: URL prefix may declare; image/jpg is the common misspelling of image/jpeg. */
+const dataUrlImageTypes: readonly string[] = [
+  ...actorPhotoContentTypes,
+  "image/jpg",
+];
+
+/** The longest padded base64 a photo of `PHOTO_MAX_BYTES` encodes to. */
+const MAX_PHOTO_BASE64_LENGTH = Math.ceil(PHOTO_MAX_BYTES / 3) * 4;
+
+/** The longest raw `data` read at all: room for CRLF wrapping, a data: URL prefix and stray whitespace around the largest photo. */
+const MAX_PHOTO_DATA_LENGTH = MAX_PHOTO_BASE64_LENGTH * 2;
+
+/** The bytes of `set_my_photo`'s data: strict base64 once whitespace is dropped and URL-safe or unpadded input is made standard, after an optional image data: URL prefix. */
+function photoBytes(data: string): Uint8Array {
+  // /mcp takes bodies far larger than any photo; refuse those before trimming or stripping copies them
+  if (data.length > MAX_PHOTO_DATA_LENGTH) {
+    throw new PayloadTooLargeError(photoTooLarge(null));
+  }
+  let encoded = data.trimStart();
+  const dataUrl = /^data:([^;,]*)(;[^,]*)?,/.exec(encoded);
+  if (dataUrl) {
+    const [prefix, type = "", params = ""] = dataUrl;
+    // RFC 2397 puts any parameters, like name= or charset=, before ;base64
+    if (
+      !dataUrlImageTypes.includes(type.toLowerCase()) ||
+      !params.toLowerCase().endsWith(";base64")
+    ) {
+      throw new InvalidImageError(
+        `data declares ${type || "no type"}${params}: send ${PHOTO_ACCEPTS}, ${photoEncoding}`,
+      );
+    }
+    encoded = encoded.slice(prefix.length);
+  }
+  // `base64 file` wraps its output at 76 columns
+  encoded = encoded.replace(/[\t\n\f\r ]/g, "");
+  encoded = encoded.replaceAll("-", "+").replaceAll("_", "/");
+  // a length of 1 past a group of 4 can't be padded; the round trip below refuses it
+  if (encoded.length % 4 > 1) encoded += "=".repeat(4 - (encoded.length % 4));
+  // refused before decoding, so an oversized string never allocates its bytes
+  if (encoded.length > MAX_PHOTO_BASE64_LENGTH) {
+    throw new PayloadTooLargeError(photoTooLarge(null));
+  }
+  const bytes = Buffer.from(encoded, "base64");
+  // Buffer skips characters it can't decode; a round trip that differs means it did
+  if (bytes.toString("base64") !== encoded) {
+    throw new InvalidImageError(
+      `data is not valid base64: send ${PHOTO_ACCEPTS}, ${photoEncoding}`,
+    );
+  }
+  return bytes;
+}
 
 /** The service call's result as JSON, or a tool error a bot can act on. */
 function run(tool: string, call: () => unknown): CallToolResult {
@@ -357,7 +422,7 @@ export function registerTools(
     "whoami",
     {
       description:
-        "Get the bot this key acts as: its id (the createdBy, authorId and actorId your writes carry), name and label, and the key's scope: the keys of the only projects it reaches and the actions it may take (read, issues, comments, status_updates, admin), each null when unrestricted.",
+        "Get the bot this key acts as: its id (the createdBy, authorId and actorId your writes carry), name, label and photoUrl (null until set_my_photo sets one), and the key's scope: the keys of the only projects it reaches and the actions it may take (read, issues, comments, status_updates, admin), each null when unrestricted.",
       inputSchema: z.strictObject({}),
       annotations: read,
     },
@@ -368,12 +433,37 @@ export function registerTools(
     "list_bots",
     {
       description:
-        "List every bot, oldest first, with its id, name and label, a page at a time: pass nextCursor back as cursor until it is null. A createdBy, authorId or actorId that matches a bot's id was written by that bot; an id that matches no bot is a human's (humans file issues and comment).",
+        "List every bot, oldest first, with its id, name, label and photoUrl, a page at a time: pass nextCursor back as cursor until it is null. A createdBy, authorId or actorId that matches a bot's id was written by that bot; an id that matches no bot is a human's (humans file issues and comment).",
       inputSchema: z.strictObject(page),
       annotations: read,
     },
     (query) =>
       run("list_bots", () => toPage(service.listBots(actor, query), toBot)),
+  );
+
+  server.registerTool(
+    "set_my_photo",
+    {
+      description: `Set your own photo, which people see beside your name in trail. Send ${PHOTO_ACCEPTS}, ${photoEncoding} Its type is read from the bytes. The whole image goes in this one argument, so send a small avatar: about 128x128px, under about 16 KB. For a larger file, send its raw bytes to PUT /api/v1/me/photo with this same key instead. A new photo replaces the old one and gets a new photoUrl. Every key may call this, whatever its scope.`,
+      inputSchema: z.strictObject({
+        data: z.string().describe(`The image, ${photoEncoding}`),
+      }),
+      // the photo it replaces is gone for good
+      annotations: { ...update, destructiveHint: true },
+    },
+    ({ data }) =>
+      run("set_my_photo", () => service.setMyPhoto(actor, photoBytes(data))),
+  );
+
+  server.registerTool(
+    "clear_my_photo",
+    {
+      description:
+        "Remove your own photo; succeeds when you have none too. Every key may call this, whatever its scope.",
+      inputSchema: z.strictObject({}),
+      annotations: { ...update, destructiveHint: true },
+    },
+    () => run("clear_my_photo", () => service.clearMyPhoto(actor)),
   );
 
   server.registerTool(

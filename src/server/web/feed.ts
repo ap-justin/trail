@@ -18,7 +18,12 @@ import {
 import { amongVisible } from "../service/visible.js";
 import { entriesOf, shownEvent } from "./entries.js";
 import { createWebRouter, type Member } from "./env.js";
-import { visibleIds, visibleProject } from "./visible.js";
+import {
+  selectWebActors,
+  toWebActor,
+  visibleIds,
+  visibleProject,
+} from "./visible.js";
 
 const getFeed = createRoute({
   method: "get",
@@ -117,9 +122,7 @@ function feedPage(
 
 /** The bots with an event in these projects, A to Z. */
 function botsActingIn(db: Db, projectIds: string[]) {
-  return db
-    .select({ id: actor.id, name: actor.displayName, kind: actor.kind })
-    .from(actor)
+  return selectWebActors(db)
     .where(
       and(
         eq(actor.kind, "bot"),
@@ -138,7 +141,8 @@ function botsActingIn(db: Db, projectIds: string[]) {
       ),
     )
     .orderBy(asc(actor.displayName))
-    .all();
+    .all()
+    .map(toWebActor);
 }
 
 export function feedRoutes(db: Db) {

@@ -2,9 +2,13 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, test, vi } from "vitest";
+import { sessionOf } from "@/app/chrome";
+import { AccountPanel } from "@/components/account-panel";
 import { AppShell, type ShellViewer } from "@/components/app-shell";
 import { SearchResults } from "@/components/search-results";
 import { ThemeProvider } from "@/components/theme-provider";
+import type { MeView } from "@/lib/api-types";
+import { photoUrlFor } from "@/test/fixtures";
 
 function renderShell(viewer: ShellViewer) {
   render(
@@ -29,7 +33,12 @@ const mainNavs = () => screen.getAllByRole("navigation", { name: "Main" });
 
 describe("People nav", () => {
   test("the owner sees People in the sidebar and the tab bar", () => {
-    renderShell({ name: "Justin Salas", login: "justin", isOwner: true });
+    renderShell({
+      name: "Justin Salas",
+      login: "justin",
+      isOwner: true,
+      photoUrl: null,
+    });
     for (const nav of mainNavs()) {
       expect(within(nav).getByRole("link", { name: "People" })).toHaveAttribute(
         "href",
@@ -39,7 +48,12 @@ describe("People nav", () => {
   });
 
   test("a member sees no People item anywhere", () => {
-    renderShell({ name: "Maya Chen", login: "mayachen", isOwner: false });
+    renderShell({
+      name: "Maya Chen",
+      login: "mayachen",
+      isOwner: false,
+      photoUrl: null,
+    });
     expect(mainNavs()).toHaveLength(2);
     expect(
       screen.queryByRole("link", { name: "People" }),
@@ -48,7 +62,12 @@ describe("People nav", () => {
 });
 
 test("the current section is marked for assistive tech", () => {
-  renderShell({ name: "Maya Chen", login: "mayachen", isOwner: false });
+  renderShell({
+    name: "Maya Chen",
+    login: "mayachen",
+    isOwner: false,
+    photoUrl: null,
+  });
   for (const nav of mainNavs()) {
     expect(within(nav).getByRole("link", { name: "Feed" })).toHaveAttribute(
       "aria-current",
@@ -57,10 +76,62 @@ test("the current section is marked for assistive tech", () => {
   }
 });
 
+test("the viewer's photo shows in the sidebar's account menu (hidden below lg) and loads eagerly atop the account panel", () => {
+  const viewer: ShellViewer = {
+    name: "Maya Chen",
+    login: "mayachen",
+    isOwner: false,
+    photoUrl: photoUrlFor("a-maya", "77"),
+  };
+  renderShell(viewer);
+  const trigger = screen.getByRole("button", { name: "Account: Maya Chen" });
+  // the sheet shows the sidebar only from lg up, so below it the img never renders; lazy keeps it from fetching
+  const sidebar = trigger.closest("aside");
+  expect(sidebar).toHaveClass("hidden", "lg:flex");
+  expect(trigger.querySelector("img")).toHaveAttribute(
+    "src",
+    photoUrlFor("a-maya", "77"),
+  );
+  expect(trigger.querySelector("img")).toHaveAttribute("loading", "lazy");
+
+  const { container } = render(
+    <ThemeProvider>
+      <AccountPanel viewer={viewer} onSignOut={vi.fn()} />
+    </ThemeProvider>,
+  );
+  expect(container.querySelector("img")).toHaveAttribute("loading", "eager");
+  expect(container.querySelector("img")).toHaveAttribute(
+    "src",
+    photoUrlFor("a-maya", "77"),
+  );
+});
+
+test("the shell's viewer carries the photo URL `/me` gives the signed-in actor", () => {
+  const me: MeView = {
+    state: "member",
+    login: "mayachen",
+    actor: {
+      id: "a-maya",
+      name: "Maya Chen",
+      kind: "human",
+      photoUrl: photoUrlFor("a-maya", "77"),
+    },
+    projects: [],
+    ownerName: "Justin Salas",
+  };
+  expect(sessionOf(me)?.viewer).toEqual({
+    name: "Maya Chen",
+    login: "mayachen",
+    isOwner: false,
+    photoUrl: photoUrlFor("a-maya", "77"),
+  });
+});
+
 const owner: ShellViewer = {
   name: "Justin Salas",
   login: "justin",
   isOwner: true,
+  photoUrl: null,
 };
 
 test("no heading draws no h1, so a page's own heading stands alone", () => {

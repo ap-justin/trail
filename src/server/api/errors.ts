@@ -8,7 +8,9 @@ import {
   ForbiddenError,
   ForbiddenScopeError,
   IdempotencyKeyReusedError,
+  InvalidImageError,
   NotFoundError,
+  PayloadTooLargeError,
   ServiceError,
   ValidationError,
 } from "../service/errors.js";
@@ -35,6 +37,8 @@ function statusOf(error: ServiceError): ContentfulStatusCode {
   if (error instanceof ValidationError) return 422;
   if (error instanceof ConflictError) return 409;
   if (error instanceof IdempotencyKeyReusedError) return 422;
+  if (error instanceof InvalidImageError) return 422;
+  if (error instanceof PayloadTooLargeError) return 413;
   return 400;
 }
 

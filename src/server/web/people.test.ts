@@ -39,6 +39,7 @@ test("the owner invites a username, lowercased, to projects; it is pending until
       owner: false,
       pending: true,
       name: null,
+      photoUrl: null,
       projects: [
         { key: alpha.key, name: "Alpha" },
         { key: beta.key, name: "Beta" },
@@ -55,6 +56,7 @@ test("the owner invites a username, lowercased, to projects; it is pending until
     owner: true,
     pending: false,
     name: "Olive Owner",
+    photoUrl: null,
     projects: expect.arrayContaining([{ key: alpha.key, name: "Alpha" }]),
     invitedAt: null,
   });

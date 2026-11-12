@@ -46,7 +46,12 @@ test("a member gets its actor and exactly its projects; the owner's display name
     body: {
       state: "member",
       login: "ada",
-      actor: { id: expect.any(String), name: "Ada Lovelace", kind: "human" },
+      actor: {
+        id: expect.any(String),
+        name: "Ada Lovelace",
+        kind: "human",
+        photoUrl: null,
+      },
       projects: [{ key: mine.key, name: "Mine" }],
       ownerName: "Olive Owner",
     },

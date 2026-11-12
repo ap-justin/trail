@@ -2,6 +2,7 @@ import { desc, eq, max } from "drizzle-orm";
 import { afterEach, expect, test, vi } from "vitest";
 import { activityEvent, session, user } from "../db/schema.js";
 import { readEventStream, setupTestApp } from "../test-app.js";
+import { OTHER_PNG, PNG } from "../test-images.js";
 
 const {
   app,
@@ -59,6 +60,81 @@ test("a member's stream delivers its projects' entries with the event's seq as i
   });
   expect(entry?.seq).toBeGreaterThan(0);
   await stream.cancel();
+});
+
+test("a pictured bot's streamed entry carries its photoUrl", async () => {
+  const p = addProject("Pictured");
+  const pictured = addBot("pictured");
+  const put = await app.request("/api/v1/me/photo", {
+    method: "PUT",
+    headers: {
+      authorization: `Bearer ${pictured.key}`,
+      "content-type": "image/png",
+    },
+    body: PNG,
+  });
+  expect(put.status).toBe(200);
+  const { photoUrl } = (await put.json()) as { photoUrl: string };
+  const stream = await openStream(ownerCookie);
+  await file(p.id, "with a face", pictured.key);
+  const entry = await stream.nextEntry();
+  expect(entry?.actor).toMatchObject({ name: "pictured", photoUrl });
+  expect(photoUrl).toMatch(/^\/api\/photos\//);
+  await stream.cancel();
+});
+
+test("a replayed and a live entry show the author's current photo, replaced then cleared, not the one at filing time", async () => {
+  const p = addProject("Shifting");
+  const shifter = addBot("shifter");
+  const putPhoto = async (body: Uint8Array) => {
+    const res = await app.request("/api/v1/me/photo", {
+      method: "PUT",
+      headers: {
+        authorization: `Bearer ${shifter.key}`,
+        "content-type": "image/png",
+      },
+      body,
+    });
+    expect(res.status).toBe(200);
+    return ((await res.json()) as { photoUrl: string }).photoUrl;
+  };
+  const first = await putPhoto(PNG);
+  const live = await openStream(ownerCookie);
+  await file(p.id, "filed under the first photo", shifter.key);
+  const filed = await live.nextEntry();
+  expect(filed?.actor).toMatchObject({ photoUrl: first });
+  await live.cancel();
+  const before = (filed?.seq ?? 0) - 1;
+
+  const replay = async () => {
+    const stream = await openStream(ownerCookie, { lastEventId: before });
+    const entry = await stream.nextEntry();
+    await stream.cancel();
+    return entry;
+  };
+
+  const second = await putPhoto(OTHER_PNG);
+  expect(second).not.toBe(first);
+  expect((await replay())?.actor).toMatchObject({ photoUrl: second });
+  const afterReplace = await openStream(ownerCookie);
+  await file(p.id, "filed under the second", shifter.key);
+  expect((await afterReplace.nextEntry())?.actor).toMatchObject({
+    photoUrl: second,
+  });
+  await afterReplace.cancel();
+
+  const cleared = await app.request("/api/v1/me/photo", {
+    method: "DELETE",
+    headers: { authorization: `Bearer ${shifter.key}` },
+  });
+  expect(cleared.status).toBe(200);
+  expect((await replay())?.actor).toMatchObject({ photoUrl: null });
+  const afterClear = await openStream(ownerCookie);
+  await file(p.id, "filed with no photo", shifter.key);
+  expect((await afterClear.nextEntry())?.actor).toMatchObject({
+    photoUrl: null,
+  });
+  await afterClear.cancel();
 });
 
 test("an event that changed several fields arrives as several entries under one id", async () => {

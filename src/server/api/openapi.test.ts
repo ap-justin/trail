@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import { setupTestApp } from "../test-app.js";
+import { PNG } from "../test-images.js";
 
 const { app, bot, request } = setupTestApp();
 
@@ -29,6 +30,9 @@ test("GET /api/v1/openapi.json serves the spec without a key", async () => {
       "GET /projects/{id}/labels",
       "GET /projects/{id}/status-updates",
       "GET /whoami",
+      "GET /photos/{actorId}/{hash}",
+      "DELETE /me/photo",
+      "PUT /me/photo",
       "PATCH /issues/{id}",
       "PATCH /projects/{id}",
       "POST /import",
@@ -75,6 +79,9 @@ test("the spec lists the error statuses each operation can return", async () => 
     "GET /projects/{id}/labels": withForbidden(withNotFound(list)),
     "GET /projects/{id}/status-updates": withForbidden(withNotFound(list)),
     "GET /whoami": ["200", "401"],
+    "GET /photos/{actorId}/{hash}": ["200", "401", "404"],
+    "DELETE /me/photo": ["200", "401"],
+    "PUT /me/photo": ["200", "401", "413", "422"],
     "PATCH /issues/{id}": withForbidden(withNotFound(write("200"))),
     "PATCH /projects/{id}": withForbidden(withNotFound(write("200"))),
     "POST /import": withConflict(withForbidden(write("200"))),
@@ -210,4 +217,106 @@ test("an import issue's statusType advertises Linear's seven state types", async
       ],
     }),
   );
+});
+
+test("PUT /me/photo takes a body of any media type as raw bytes, in 3.1 form", async () => {
+  const res = await request("GET", "/api/v1/openapi.json", { key: null });
+  const spec = (await res.json()) as {
+    paths: Record<string, Record<string, { requestBody: { content: object } }>>;
+  };
+  const content = spec.paths["/me/photo"]?.put?.requestBody.content as Record<
+    string,
+    unknown
+  >;
+  expect(content).toEqual({
+    "image/png": {},
+    "image/jpeg": {},
+    "image/webp": {},
+    "*/*": {},
+  });
+});
+
+test("setting a photo answers a URL that is never null; removing one answers null", async () => {
+  const res = await request("GET", "/api/v1/openapi.json", { key: null });
+  type Schema = {
+    $ref?: string;
+    type?: string | string[];
+    properties?: Record<string, Schema>;
+    required?: string[];
+  };
+  type Operation = {
+    responses: Record<
+      string,
+      { content: { "application/json": { schema: Schema } } }
+    >;
+  };
+  const spec = (await res.json()) as {
+    paths: Record<string, Record<string, Operation>>;
+    components: { schemas: Record<string, Schema> };
+  };
+  const okBody = (method: string) => {
+    const schema =
+      spec.paths["/me/photo"]?.[method]?.responses["200"]?.content[
+        "application/json"
+      ].schema;
+    const name = schema?.$ref?.split("/").at(-1) ?? "";
+    return spec.components.schemas[name] ?? schema;
+  };
+
+  const set = okBody("put");
+  expect(set?.properties?.photoUrl?.type).toBe("string");
+  expect(set?.required).toEqual(["photoUrl"]);
+  const cleared = okBody("delete");
+  expect(cleared?.properties?.photoUrl?.type).toBe("null");
+  expect(cleared?.required).toEqual(["photoUrl"]);
+});
+
+test("the photo route is documented under its own /api server, and the documented URL serves the image", async () => {
+  const res = await request("GET", "/api/v1/openapi.json", { key: null });
+  type Operation = {
+    servers?: { url: string }[];
+    security?: unknown;
+    parameters?: { name: string; in: string; required?: boolean }[];
+    responses: Record<string, { content?: Record<string, unknown> }>;
+  };
+  const spec = (await res.json()) as {
+    servers: { url: string }[];
+    paths: Record<string, Record<string, Operation>>;
+  };
+  const path = "/photos/{actorId}/{hash}";
+  const op = spec.paths[path]?.get;
+  expect(op?.servers).toEqual([{ url: "/api" }]);
+  expect(op?.security).toBeUndefined();
+  expect(op?.parameters?.map((p) => [p.in, p.name, p.required]).sort()).toEqual(
+    [
+      ["path", "actorId", true],
+      ["path", "hash", true],
+    ],
+  );
+  expect(Object.keys(op?.responses["200"]?.content ?? {}).sort()).toEqual([
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+  ]);
+  expect(Object.keys(op?.responses["404"]?.content ?? {})).toEqual([
+    "application/json",
+  ]);
+
+  const put = await app.request("/api/v1/me/photo", {
+    method: "PUT",
+    headers: {
+      authorization: `Bearer ${bot.key}`,
+      "content-type": "image/png",
+    },
+    body: PNG,
+  });
+  const { photoUrl } = (await put.json()) as { photoUrl: string };
+  const [, , , actorId, hash] = photoUrl.split("/");
+  const documented = `${op?.servers?.[0]?.url}${path}`
+    .replace("{actorId}", actorId ?? "")
+    .replace("{hash}", hash ?? "");
+  expect(documented).toBe(photoUrl);
+  const served = await request("GET", documented);
+  expect(served.status).toBe(200);
+  expect(served.headers.get("content-type")).toBe("image/png");
 });
