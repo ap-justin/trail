@@ -1,0 +1,2 @@
+CREATE INDEX `activity_event_actor_project_idx` ON `activity_event` (`actor_id`,`project_id`);--> statement-breakpoint
+CREATE INDEX `activity_event_subject_seq_idx` ON `activity_event` (`subject_id`,`seq`);

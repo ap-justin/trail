@@ -35,8 +35,8 @@ const createStatusUpdate = createRoute({
   },
   responses: {
     201: jsonContent(statusUpdateSchema, "The created status update"),
+    ...forbiddenError("status_updates"),
     ...writeErrors,
-    ...forbiddenError,
     ...notFoundError,
     ...conflictError,
   },
@@ -53,6 +53,7 @@ const listStatusUpdates = createRoute({
       pageSchema(statusUpdateSchema),
       "A page of status updates",
     ),
+    ...forbiddenError("read"),
     ...readErrors,
     ...notFoundError,
   },

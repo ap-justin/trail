@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -21,6 +24,8 @@ jobs:
       - run: pnpm test
       # builds dist, then boots it: a bad bundle, externals list or migrations copy fails here
       - run: pnpm smoke
+      # the build regenerates the committed route tree; a diff means it was committed stale
+      - run: git diff --exit-code src/web/routeTree.gen.ts
 
   image:
     runs-on: ubuntu-latest
@@ -31,18 +36,31 @@ jobs:
       - run: docker run --rm trail litestream version
       # parses litestream.yml as Fly's boot does; a config it rejects crash-loops the Machine before node starts
       - run: docker run --rm -e BUCKET_NAME=ci trail litestream databases -config /etc/litestream.yml
-      # boots the image on an empty data dir, as on a fresh Fly volume
+      # boots the image on an empty data dir, as on a fresh Fly volume; the server needs
+      # TRAIL_OWNER_GITHUB and BETTER_AUTH_SECRET to start (sign-in itself stays off)
       - run: |
           mkdir -p "$RUNNER_TEMP/data"
-          docker run -d --name trail -p 8080:8080 -e PORT=8080 -e DATABASE_PATH=/data/trail.db -v "$RUNNER_TEMP/data:/data" trail
+          docker run -d --name trail -p 8080:8080 -e PORT=8080 -e DATABASE_PATH=/data/trail.db -e TRAIL_OWNER_GITHUB=ci-owner -e BETTER_AUTH_SECRET=ci-secret-ci-secret-ci-secret-ci-secret -v "$RUNNER_TEMP/data:/data" trail
           for i in $(seq 1 30); do curl -fsS localhost:8080/health && exit 0; sleep 1; done
           docker logs trail
           exit 1
+      # the image serves the SPA: `/` and one hashed asset, so a Dockerfile that drops dist/web fails here
+      - run: |
+          curl -fsS localhost:8080/ > "$RUNNER_TEMP/index.html"
+          grep -q '<div id="root"' "$RUNNER_TEMP/index.html"
+          asset=$(grep -oE '/assets/[^"]+\.js' "$RUNNER_TEMP/index.html" | head -n1)
+          test -n "$asset"
+          curl -fsS -o /dev/null "localhost:8080$asset"
       # a key minted by the image's CLI works over REST and MCP; no key is a 401
       - run: |
           key=$(docker exec -e DATABASE_PATH=/data/trail.db trail node /app/dist/cli.js bot create ci-bot --key-only)
           curl -fsS -H "Authorization: Bearer $key" localhost:8080/api/v1/whoami | jq -e '.name == "ci-bot"'
           test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8080/api/v1/whoami)" = 401
+          # the people's API: /me sits above the member guard and answers a signed-out viewer, /projects
+          # sits behind it and answers 401; the guard covers the whole mount, so an unknown path is also
+          # a 401 and only the /me 200 shows the routes are mounted
+          curl -fsS localhost:8080/api/web/me | jq -e '.state == "anonymous"'
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8080/api/web/projects)" = 401
           curl -fsS -X POST localhost:8080/mcp -H "Authorization: Bearer $key" \
             -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
             -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"whoami","arguments":{}}}' \

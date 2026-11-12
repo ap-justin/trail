@@ -10,7 +10,9 @@
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
     "skipLibCheck": true,
-    "noEmit": true
+    "noEmit": true,
+    "paths": { "@/*": ["./src/web/*"] }
   },
-  "include": ["src", "*.config.ts"]
+  "include": ["src", "*.config.ts"],
+  "exclude": ["src/web"]
 }

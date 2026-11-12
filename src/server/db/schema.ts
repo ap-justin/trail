@@ -39,14 +39,53 @@ export type ActorKind = (typeof actorKinds)[number];
 export type IssueStatus = (typeof issueStatuses)[number];
 export type ProjectHealth = (typeof projectHealths)[number];
 export type ActivitySubjectType = (typeof activitySubjectTypes)[number];
+export const apiKeyActions = [
+  "read",
+  "issues",
+  "comments",
+  "status_updates",
+  "admin",
+] as const;
+export type ApiKeyAction = (typeof apiKeyActions)[number];
 
 // Unqualified column name for CHECKs and index predicates: drizzle renders a column as
 // "table"."col", which fails in the `__new_<table>` copy drizzle-kit builds for a rebuild.
 const c = (column: AnySQLiteColumn) => sql.identifier(column.name);
 
 // the enum check is spelled from the same tuple the TS type comes from
+const literals = (values: readonly string[]) =>
+  sql.raw(values.map((v) => `'${v}'`).join(", "));
 const oneOf = (column: AnySQLiteColumn, values: readonly string[]) =>
-  sql`${c(column)} in (${sql.raw(values.map((v) => `'${v}'`).join(", "))})`;
+  sql`${c(column)} in (${literals(values)})`;
+
+// A non-empty JSON array of distinct members of `values`. CHECK allows no subquery, so no
+// json_each: distinct members of an n-value set number at most n, so the check reads
+// slots 0..n-1 by path. Each term stays non-null, since a CHECK passes on NULL.
+const jsonSetOf = (column: AnySQLiteColumn, values: readonly string[]) => {
+  const col = c(column);
+  const length = sql`json_array_length(${col})`;
+  const slot = (i: number) =>
+    sql`json_extract(${col}, ${sql.raw(`'$[${i}]'`)})`;
+  const slots = values.map((_, i) => i);
+  const members = slots.map(
+    (i) =>
+      sql`(${length} <= ${sql.raw(String(i))} or ifnull(${slot(i)}, '') in (${literals(values)}))`,
+  );
+  const distinct = slots.flatMap((i) =>
+    slots
+      .filter((j) => j > i)
+      .map(
+        (j) =>
+          sql`(${length} <= ${sql.raw(String(j))} or ${slot(i)} <> ${slot(j)})`,
+      ),
+  );
+  // CASE, not AND: json_type and json_array_length raise on malformed JSON, and only CASE fixes the order
+  return sql`${col} is null or case when not json_valid(${col}) then 0 when json_type(${col}) <> 'array' then 0 else ${length} between 1 and ${sql.raw(String(values.length))} and ${sql.join([...members, ...distinct], sql` and `)} end`;
+};
+
+// a GitHub username, lowercased: 1-39 of a-z, 0-9 and single hyphens, no hyphen at either end
+const githubLoginShape = (column: AnySQLiteColumn) =>
+  sql`length(${c(column)}) between 1 and 39 and ${c(column)} not glob '*[^a-z0-9-]*' and ${c(column)} not glob '-*' and ${c(column)} not glob '*-' and ${c(column)} not glob '*--*'`;
 
 const id = () =>
   text("id")
@@ -70,17 +109,35 @@ export const actor = sqliteTable(
     kind: text("kind", { enum: actorKinds }).notNull(),
     displayName: text("display_name").notNull(),
     githubId: integer("github_id").unique(),
+    // lowercased and current as of the last sign-in; access follows github_id, not this
+    githubLogin: text("github_login"),
     // a bot's agent id in the system that runs it
     label: text("label"),
+    // the human who signed in first as TRAIL_OWNER_GITHUB
+    isOwner: integer("is_owner", { mode: "boolean" }).notNull().default(false),
     createdAt: createdAt(),
   },
   (t) => [
     check("actor_kind_check", oneOf(t.kind, actorKinds)),
+    check(
+      "actor_is_owner_check",
+      sql`${c(t.isOwner)} = 0 or (${c(t.isOwner)} = 1 and ${c(t.kind)} = 'human')`,
+    ),
+    uniqueIndex("actor_owner_unique")
+      .on(t.isOwner)
+      .where(sql`${c(t.isOwner)} = 1`),
     check("actor_display_name_check", sql`length(${c(t.displayName)}) > 0`),
     check(
       "actor_github_id_check",
       sql`${c(t.kind)} = 'human' or ${c(t.githubId)} is null`,
     ),
+    check(
+      "actor_github_login_check",
+      sql`${c(t.githubLogin)} is null or (${c(t.kind)} = 'human' and ${githubLoginShape(t.githubLogin)})`,
+    ),
+    uniqueIndex("actor_github_login_unique")
+      .on(t.githubLogin)
+      .where(sql`${c(t.githubLogin)} is not null`),
     // target of api_key's (actor_id, actor_kind) key, which pins keys to bots
     unique("actor_id_kind_unique").on(t.id, t.kind),
     // lower() folds ASCII only, like nocase: 'Équipe' and 'équipe' are two bots
@@ -106,6 +163,9 @@ export const apiKey = sqliteTable(
     hash: text("hash").notNull(),
     createdAt: createdAt(),
     revokedAt: integer("revoked_at", { mode: "timestamp_ms" }),
+    // what the key may do; null is every action. Adding an action rewrites the check,
+    // a rebuild of this table
+    actions: text("actions", { mode: "json" }).$type<ApiKeyAction[]>(),
   },
   (t) => [
     foreignKey({
@@ -114,6 +174,7 @@ export const apiKey = sqliteTable(
     }),
     check("api_key_actor_kind_check", sql`${c(t.actorKind)} = 'bot'`),
     check("api_key_hash_check", sql`length(${c(t.hash)}) = 64`),
+    check("api_key_actions_check", jsonSetOf(t.actions, apiKeyActions)),
   ],
 );
 
@@ -144,6 +205,73 @@ export const project = sqliteTable(
     uniqueIndex("project_external_ref_unique")
       .on(t.externalRef)
       .where(sql`${c(t.externalRef)} is not null`),
+  ],
+);
+
+// the projects a key may touch; a key with no rows touches every project
+export const apiKeyProject = sqliteTable(
+  "api_key_project",
+  {
+    apiKeyId: text("api_key_id")
+      .notNull()
+      .references(() => apiKey.id, { onDelete: "cascade" }),
+    // no cascade: deleting a project must not quietly widen or empty a key's scope.
+    // no action, not restrict, which SQLite reports as SQLITE_CONSTRAINT_TRIGGER
+    projectId: text("project_id")
+      .notNull()
+      .references(() => project.id),
+  },
+  (t) => [
+    // the key serves "which projects may this key touch"
+    primaryKey({ columns: [t.apiKeyId, t.projectId] }),
+    index("api_key_project_project_key_idx").on(t.projectId, t.apiKeyId),
+  ],
+);
+
+/**
+ * A person the owner let in, by lowercased GitHub username. Pending until an
+ * account signs in under that username and binds github_id; from then on it is
+ * that account's, whatever its login. Deleting it revokes access and leaves the
+ * actor and everything it wrote.
+ */
+export const invite = sqliteTable(
+  "invite",
+  {
+    username: text("username").primaryKey(),
+    invitedBy: text("invited_by")
+      .notNull()
+      .references(() => actor.id),
+    // the account that first claimed the username; GitHub frees a username on
+    // rename, so access follows this id, not the name. Migration 0007's trigger
+    // refuses rewriting it once set; drizzle-kit doesn't see triggers, so a
+    // generated rebuild of invite drops it.
+    githubId: integer("github_id"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check("invite_username_check", githubLoginShape(t.username)),
+    uniqueIndex("invite_github_id_unique")
+      .on(t.githubId)
+      .where(sql`${c(t.githubId)} is not null`),
+  ],
+);
+
+// the projects an invited person sees; an invite may hold none
+export const projectMember = sqliteTable(
+  "project_member",
+  {
+    username: text("username")
+      .notNull()
+      .references(() => invite.username, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => project.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    // the key serves "which projects can this username see"
+    primaryKey({ columns: [t.username, t.projectId] }),
+    index("project_member_project_username_idx").on(t.projectId, t.username),
   ],
 );
 
@@ -405,5 +533,102 @@ export const activityEvent = sqliteTable(
     uniqueIndex("activity_event_seq_unique").on(t.seq),
     index("activity_event_project_seq_idx").on(t.projectId, t.seq),
     index("activity_event_actor_seq_idx").on(t.actorId, t.seq),
+    // has this actor acted in any of these projects — one probe per bot
+    index("activity_event_actor_project_idx").on(t.actorId, t.projectId),
+    // one subject's history in order — an issue's timeline
+    index("activity_event_subject_seq_idx").on(t.subjectId, t.seq),
   ],
+);
+
+// better-auth's tables, as `npx auth@latest generate` emits them for the drizzle adapter,
+// plus the unique github_id. better-auth writes every column itself; a person's identity
+// in trail is the actor row, which the sign-in links by github_id.
+
+export const user = sqliteTable("user", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  email: text("email").notNull().unique(),
+  emailVerified: integer("email_verified", { mode: "boolean" })
+    .default(false)
+    .notNull(),
+  image: text("image"),
+  createdAt: integer("created_at", { mode: "timestamp_ms" })
+    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+    .notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+    .$onUpdate(() => new Date())
+    .notNull(),
+  // GitHub's numeric user id and lowercased login, refreshed from the profile on every sign-in
+  githubId: integer("github_id").notNull().unique(),
+  githubLogin: text("github_login").notNull(),
+});
+
+export const session = sqliteTable(
+  "session",
+  {
+    id: text("id").primaryKey(),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    token: text("token").notNull().unique(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .$onUpdate(() => new Date())
+      .notNull(),
+    ipAddress: text("ip_address"),
+    userAgent: text("user_agent"),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+  },
+  (t) => [index("session_userId_idx").on(t.userId)],
+);
+
+export const account = sqliteTable(
+  "account",
+  {
+    id: text("id").primaryKey(),
+    accountId: text("account_id").notNull(),
+    providerId: text("provider_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    accessToken: text("access_token"),
+    refreshToken: text("refresh_token"),
+    idToken: text("id_token"),
+    accessTokenExpiresAt: integer("access_token_expires_at", {
+      mode: "timestamp_ms",
+    }),
+    refreshTokenExpiresAt: integer("refresh_token_expires_at", {
+      mode: "timestamp_ms",
+    }),
+    scope: text("scope"),
+    password: text("password"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (t) => [index("account_userId_idx").on(t.userId)],
+);
+
+export const verification = sqliteTable(
+  "verification",
+  {
+    id: text("id").primaryKey(),
+    identifier: text("identifier").notNull(),
+    value: text("value").notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (t) => [index("verification_identifier_idx").on(t.identifier)],
 );

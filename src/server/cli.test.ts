@@ -5,7 +5,8 @@ import { join, relative } from "node:path";
 import { afterAll, expect, test } from "vitest";
 import { runCli } from "./cli.js";
 import { migrate, openDatabase } from "./db/client.js";
-import { resolveKey } from "./service/keys.js";
+import { actor, project } from "./db/schema.js";
+import { createBot, listKeys, resolveKey } from "./service/keys.js";
 
 const dir = mkdtempSync(join(tmpdir(), "trail-cli-"));
 const DATABASE_PATH = join(dir, "trail.db");
@@ -127,6 +128,131 @@ test.each([
   expect(withDb((db) => resolveKey(db, quiet.stdout.trim()))).toEqual(bot);
 });
 
+// the projects a scoped key can name
+withDb((db) => {
+  const { actor } = createBot(db, "project owner");
+  db.insert(project)
+    .values(
+      ["BGP", "ATL"].map((key) => ({ key, name: key, createdBy: actor.id })),
+    )
+    .run();
+});
+
+const scopeOf = (key: string) =>
+  withDb((db) => listKeys(db).find((k) => k.prefix === key.slice(6, 14)))
+    ?.scope;
+
+test("key create --projects --actions mints a key with that scope, project keys in any case", () => {
+  const first = createdKey(run("bot", "create", "scoped later").stdout);
+  const bot = withDb((db) => resolveKey(db, first));
+  if (!bot) throw new Error("first key did not resolve");
+  const { code, stdout } = run(
+    "key",
+    "create",
+    bot.id,
+    "--projects",
+    "bgp,ATL",
+    "--actions",
+    "read,issues,comments",
+  );
+  expect(code).toBe(0);
+  const key = createdKey(stdout);
+  expect(withDb((db) => resolveKey(db, key))).toEqual(bot);
+  expect(scopeOf(key)).toEqual({
+    projects: ["ATL", "BGP"],
+    actions: ["read", "issues", "comments"],
+  });
+  expect(scopeOf(first)).toEqual({ projects: null, actions: null });
+  expect(stdout).toMatch(
+    /^actor {2}\S+\nkey {4}\S+\nscope {2}projects ATL,BGP; actions read,issues,comments\n$/,
+  );
+});
+
+test("bot create --projects --key-only prints the key alone on stdout, its scope on stderr", () => {
+  const { code, stdout, stderr } = run(
+    "bot",
+    "create",
+    "bg-ivy",
+    "--projects",
+    "BGP",
+    "--key-only",
+  );
+  expect(code).toBe(0);
+  expect(stdout).toMatch(/^trail_[0-9a-f]{8}_[A-Za-z0-9_-]{43}\n$/);
+  expect(withDb((db) => resolveKey(db, stdout.trim()))).toMatchObject({
+    displayName: "bg-ivy",
+  });
+  expect(scopeOf(stdout)).toEqual({ projects: ["BGP"], actions: null });
+  expect(stderr).toMatch(
+    /^actor {2}\S+\nscope {2}projects BGP; all actions\n/m,
+  );
+});
+
+test("bot create --actions alone limits only the actions", () => {
+  const { code, stdout } = run("bot", "create", "reader", "--actions", "read");
+  expect(code).toBe(0);
+  expect(scopeOf(createdKey(stdout))).toEqual({
+    projects: null,
+    actions: ["read"],
+  });
+  expect(stdout).toMatch(/^scope {2}all projects; actions read$/m);
+});
+
+test.each([
+  [
+    "an unknown project key",
+    ["--projects", "BGP,nope"],
+    /^trail: no project with key NOPE: /,
+  ],
+  [
+    "an unknown action",
+    ["--actions", "read,delete"],
+    /^trail: unknown action "delete": /,
+  ],
+])(
+  "a scope with %s is refused like other validation failures, minting nothing",
+  (_, flags, reason) => {
+    const keyCount = () => withDb((db) => listKeys(db).length);
+    const actorCount = () =>
+      withDb((db) => db.select().from(actor).all().length);
+    const before = keyCount();
+    const actors = actorCount();
+    for (const argv of [
+      ["bot", "create", "never scoped", ...flags],
+      ["key", "create", "agent-quiet", ...flags],
+    ]) {
+      const { code, stdout, stderr } = run(...argv);
+      expect(code).toBe(2);
+      expect(stdout).toBe("");
+      expect(stderr).toMatch(reason);
+      expect(stderr).toMatch(/\nUsage:/);
+    }
+    expect(keyCount()).toBe(before);
+    // a refused mint leaves no orphaned bot row, which a key count can't see
+    expect(actorCount()).toBe(actors);
+    expect(run("key", "create", "never scoped").code).toBe(1);
+  },
+);
+
+test.each([
+  ["--projects ''", ["--projects", ""]],
+  ["--actions ,", ["--actions", ","]],
+  ["--actions with a blank entry", ["--actions=read,,issues"]],
+])("%s is a usage error before the database is opened", (_, flags) => {
+  const missing = join(dir, "missing", "trail.db");
+  const { code, stdout, stderr } = runAt(missing, [
+    "key",
+    "create",
+    "agent-quiet",
+    ...flags,
+  ]);
+  expect(code).toBe(2);
+  expect(stdout).toBe("");
+  expect(stderr).toMatch(
+    /^trail: --(projects|actions) takes a comma-separated list/,
+  );
+});
+
 test("key create for no such bot exits 1", () => {
   const { code, stdout, stderr } = run("key", "create", "agent-nobody");
   expect(code).toBe(1);
@@ -134,7 +260,7 @@ test("key create for no such bot exits 1", () => {
   expect(stderr).toMatch(/^trail: no bot with id or label agent-nobody/);
 });
 
-test("key list shows each key's prefix, bot, label and times, never the key or its hash", () => {
+test("key list shows each key's prefix, bot, label, times and scope, never the key or its hash", () => {
   const key = createdKey(
     run("bot", "create", "listed", "--label", "agent-listed").stdout,
   );
@@ -152,12 +278,31 @@ test("key list shows each key's prefix, bot, label and times, never the key or i
   expect(stdout).not.toContain(key.slice(15));
   expect(stdout).not.toContain(hash);
   const header = stdout.split("\n")[0];
-  expect(header).toMatch(/^prefix\s+actor\s+name\s+label\s+created\s+revoked$/);
+  expect(header).toMatch(
+    /^prefix\s+actor\s+name\s+label\s+created\s+revoked\s+projects\s+actions$/,
+  );
   const line = stdout.split("\n").find((l) => l.startsWith(prefix));
   expect(line).toMatch(
     new RegExp(
-      `^${prefix}\\s+\\S+\\s+listed\\s+agent-listed\\s+\\d{4}-\\d\\d-\\d\\dT\\S+Z\\s+\\d{4}-\\d\\d-\\d\\dT\\S+Z$`,
+      `^${prefix}\\s+\\S+\\s+listed\\s+agent-listed\\s+\\d{4}-\\d\\d-\\d\\dT\\S+Z\\s+\\d{4}-\\d\\d-\\d\\dT\\S+Z\\s+all projects\\s+all actions$`,
     ),
+  );
+
+  const scoped = run(
+    "bot",
+    "create",
+    "listed scoped",
+    "--projects",
+    "atl,bgp",
+    "--actions",
+    "comments,read",
+    "--key-only",
+  ).stdout;
+  const scopedLine = run("key", "list")
+    .stdout.split("\n")
+    .find((l) => l.startsWith(scoped.slice(6, 14)));
+  expect(scopedLine).toMatch(
+    /\s+-\s+\d{4}-\d\d-\d\dT\S+Z\s+-\s+ATL,BGP\s+read,comments$/,
   );
 });
 

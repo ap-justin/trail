@@ -3,10 +3,17 @@ import { existsSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { loadConfig } from "./config.js";
+import { loadDatabaseConfig } from "./config.js";
 import { type Db, migrate, openDatabase } from "./db/client.js";
 import { ValidationError } from "./service/errors.js";
-import { createBot, createKey, listKeys, revokeKey } from "./service/keys.js";
+import {
+  createBot,
+  createKey,
+  type KeyScopeInput,
+  type KeyScopeView,
+  listKeys,
+  revokeKey,
+} from "./service/keys.js";
 
 interface Output {
   write(chunk: string): unknown;
@@ -19,24 +26,37 @@ export interface CliIo {
 }
 
 const usage = `Usage:
-  trail bot create <name> [--label <agent-id>] [--key-only]
+  trail bot create <name> [--label <agent-id>] [<scope>] [--key-only]
                                    create a bot and print its key once
-  trail key create <bot-id-or-label> [--key-only]
+  trail key create <bot-id-or-label> [<scope>] [--key-only]
                                    mint another key for an existing bot
-  trail key list                   list every key's prefix, bot and times
+  trail key list                   list every key's prefix, bot, times and scope
   trail key revoke <prefix>        revoke a key by its prefix or the full key
 
   --label <agent-id>  the bot's id in the system that runs it, unique among bots
+  --projects <keys>   scope: limit the key to these projects, like BGP,ATL
+  --actions <actions> scope: limit the key to these of read, issues, comments,
+                      status_updates and admin, like read,issues,comments
   --key-only          print only the key on stdout; the rest goes to stderr
+
+  <scope> is --projects, --actions or both. A key without --projects reaches
+  every project; without --actions it has every action.
 `;
 
 const options = {
   help: { type: "boolean", short: "h" },
   label: { type: "string" },
+  projects: { type: "string" },
+  actions: { type: "string" },
   "key-only": { type: "boolean" },
 } as const;
 
-type Flags = { label?: string; "key-only"?: boolean };
+type Flags = {
+  label?: string;
+  projects?: string;
+  actions?: string;
+  "key-only"?: boolean;
+};
 
 class UsageError extends Error {}
 
@@ -78,7 +98,7 @@ export function runCli(argv: readonly string[], io: CliIo): number {
     }
     const input = command.parse(args, flags);
     const db = openDatabase(
-      existingDatabase(loadConfig(io.env ?? process.env).DATABASE_PATH),
+      existingDatabase(loadDatabaseConfig(io.env ?? process.env).DATABASE_PATH),
     );
     try {
       migrate(db);
@@ -127,41 +147,104 @@ interface Command<T> {
   run(db: Db, input: T, io: CliIo): void;
 }
 
-/** The actor and key lines on stdout, or with --key-only the key alone and the actor on stderr. */
+const projectsCell = (scope: KeyScopeView) =>
+  scope.projects?.join(",") ?? "all projects";
+const actionsCell = (scope: KeyScopeView) =>
+  scope.actions?.join(",") ?? "all actions";
+
+/** `scope  projects BGP; all actions`, or nothing for an unscoped key. */
+function scopeLine(scope: KeyScopeView): string {
+  if (scope.projects === null && scope.actions === null) return "";
+  const projects = scope.projects
+    ? `projects ${projectsCell(scope)}`
+    : projectsCell(scope);
+  const actions = scope.actions
+    ? `actions ${actionsCell(scope)}`
+    : actionsCell(scope);
+  return `scope  ${projects}; ${actions}\n`;
+}
+
+/**
+ * The actor and key lines on stdout, or with --key-only the key alone and the
+ * actor on stderr. A scoped key adds a scope line on the actor line's stream;
+ * an unscoped one prints nothing more.
+ */
 function printKey(
+  db: Db,
   io: CliIo,
   created: { actor: { id: string }; key: string },
   keyOnly: boolean,
 ): void {
+  const listed = listKeys(db).find(
+    (k) => k.prefix === created.key.slice(6, 14),
+  );
+  const scope = listed ? scopeLine(listed.scope) : "";
   if (keyOnly) {
     io.stdout.write(`${created.key}\n`);
-    io.stderr.write(`actor  ${created.actor.id}\n`);
+    io.stderr.write(`actor  ${created.actor.id}\n${scope}`);
   } else {
-    io.stdout.write(`actor  ${created.actor.id}\nkey    ${created.key}\n`);
+    io.stdout.write(
+      `actor  ${created.actor.id}\nkey    ${created.key}\n${scope}`,
+    );
   }
   io.stderr.write("store this key now: it can't be shown again\n");
 }
 
-const botCreate: Command<{ name: string; label?: string; keyOnly: boolean }> = {
-  flags: ["label", "key-only"],
+/** The comma-separated value of a list flag; a blank entry is refused here, before the database opens. */
+function listFlag(
+  flag: "projects" | "actions",
+  value: string | undefined,
+): string[] | undefined {
+  if (value === undefined) return undefined;
+  const items = value.split(",").map((item) => item.trim());
+  if (items.some((item) => item === "")) {
+    throw new UsageError(
+      `--${flag} takes a comma-separated list with no blank entries, like --${flag}=${flag === "projects" ? "BGP,ATL" : "read,issues"}; leave it out for no limit`,
+    );
+  }
+  return items;
+}
+
+function scopeFlags(flags: Flags): KeyScopeInput {
+  const projects = listFlag("projects", flags.projects);
+  const actions = listFlag("actions", flags.actions);
+  return {
+    ...(projects && { projects }),
+    ...(actions && { actions }),
+  };
+}
+
+const botCreate: Command<{
+  name: string;
+  label?: string;
+  scope: KeyScopeInput;
+  keyOnly: boolean;
+}> = {
+  flags: ["label", "projects", "actions", "key-only"],
   parse: (args, flags) => ({
     name: oneArg(args, "name"),
     label: flags.label,
+    scope: scopeFlags(flags),
     keyOnly: flags["key-only"] === true,
   }),
-  run(db, { name, label, keyOnly }, io) {
-    printKey(io, createBot(db, name, { label }), keyOnly);
+  run(db, { name, label, scope, keyOnly }, io) {
+    printKey(db, io, createBot(db, name, { label, scope }), keyOnly);
   },
 };
 
-const keyCreate: Command<{ bot: string; keyOnly: boolean }> = {
-  flags: ["key-only"],
+const keyCreate: Command<{
+  bot: string;
+  scope: KeyScopeInput;
+  keyOnly: boolean;
+}> = {
+  flags: ["projects", "actions", "key-only"],
   parse: (args, flags) => ({
     bot: oneArg(args, "bot-id-or-label"),
+    scope: scopeFlags(flags),
     keyOnly: flags["key-only"] === true,
   }),
-  run(db, { bot, keyOnly }, io) {
-    printKey(io, createKey(db, bot), keyOnly);
+  run(db, { bot, scope, keyOnly }, io) {
+    printKey(db, io, createKey(db, bot, scope), keyOnly);
   },
 };
 
@@ -173,7 +256,16 @@ const keyList: Command<null> = {
   },
   run(db, _, io) {
     const rows = [
-      ["prefix", "actor", "name", "label", "created", "revoked"],
+      [
+        "prefix",
+        "actor",
+        "name",
+        "label",
+        "created",
+        "revoked",
+        "projects",
+        "actions",
+      ],
       ...listKeys(db).map((k) => [
         k.prefix,
         k.actorId,
@@ -181,6 +273,8 @@ const keyList: Command<null> = {
         k.label ?? "-",
         k.createdAt.toISOString(),
         k.revokedAt?.toISOString() ?? "-",
+        projectsCell(k.scope),
+        actionsCell(k.scope),
       ]),
     ];
     const widths = rows[0]?.map((_, i) =>

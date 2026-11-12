@@ -2,6 +2,7 @@ import { z } from "@hono/zod-openapi";
 import {
   activitySubjectTypes,
   actorKinds,
+  apiKeyActions,
   issueStatuses,
   projectHealths,
 } from "../server/db/schema.js";
@@ -160,6 +161,31 @@ export const actorSchema = z
     label: actorLabel,
   })
   .openapi("Actor");
+
+export const whoamiSchema = actorSchema
+  .extend({
+    scope: z
+      .object({
+        projects: z
+          .array(z.string())
+          .nullable()
+          .meta({
+            description:
+              "The keys of the only projects this key reaches; null when it reaches every project.",
+            example: ["TRL"],
+          }),
+        actions: z
+          .array(z.enum(apiKeyActions))
+          .nullable()
+          .meta({
+            description:
+              "What this key may do: read, issues (create and update issues), comments, status_updates and admin (create, update and import projects, create labels, list bots). null when it may do all of them.",
+            example: ["read", "issues", "comments"],
+          }),
+      })
+      .meta({ description: "What the calling key reaches." }),
+  })
+  .openapi("Whoami");
 
 export const botSchema = z
   .object({ id, name: actorName, label: actorLabel })
@@ -506,7 +532,303 @@ export type CommentView = z.infer<typeof commentSchema>;
 export type StatusUpdateView = z.infer<typeof statusUpdateSchema>;
 export type LabelView = z.infer<typeof labelSchema>;
 export type ActorView = z.infer<typeof actorSchema>;
+export type WhoamiView = z.infer<typeof whoamiSchema>;
 export type BotView = z.infer<typeof botSchema>;
 export type ActivityEventView = z.infer<typeof activityEventSchema>;
 export type ImportResultView = z.infer<typeof importResultSchema>;
 export type PageView<T> = { items: T[]; nextCursor: string | null };
+
+// The human API under /api/web, which the SPA reads. Every row is shaped for display:
+// actors come with their name and kind, projects and issues by key.
+
+const webActorSchema = z.object({
+  id,
+  name: z.string(),
+  kind: z.enum(actorKinds),
+});
+const webProjectRefSchema = z.object({ key: z.string(), name: z.string() });
+const webIssueRefSchema = z.object({ key: z.string(), title: z.string() });
+
+export const viewerStates = [
+  "anonymous",
+  "not_invited",
+  "member",
+  "owner",
+] as const;
+
+export const meSchema = z.object({
+  state: z.enum(viewerStates),
+  login: z.string().nullable().meta({
+    description: "The lowercased GitHub login; null when anonymous.",
+  }),
+  actor: webActorSchema.nullable().meta({
+    description: "Null until let in: anonymous or not_invited.",
+  }),
+  projects: z.array(webProjectRefSchema),
+  ownerName: z.string().meta({
+    description:
+      "The owner actor's name, or TRAIL_OWNER_GITHUB before the owner has signed in.",
+  }),
+});
+
+const webStatusUpdateSchema = z.object({
+  id,
+  body: z.string(),
+  health: healthSchema,
+  author: webActorSchema,
+  sourceAuthor,
+  createdAt: timestamp,
+});
+
+export const webProjectSchema = z.object({
+  key: z.string(),
+  name: z.string(),
+  description: z.string(),
+  health: healthSchema.nullable().meta({
+    description: "The latest status update's; null with none.",
+  }),
+  latestStatusUpdate: webStatusUpdateSchema.nullable(),
+  openCount: z.int().meta({ description: "Issues with status open." }),
+  inProgressCount: z
+    .int()
+    .meta({ description: "Issues with status in_progress." }),
+  updatedAt: timestamp.meta({
+    description:
+      "The latest of the project's own edit, an issue's update and a status update.",
+  }),
+});
+
+export const webProjectListSchema = z.object({
+  items: z.array(webProjectSchema),
+});
+
+export const webIssueRowSchema = z.object({
+  key: z.string(),
+  title: z.string(),
+  status: issueStatusSchema,
+  priority: z.int(),
+  labels: z.array(z.string()),
+  assignee: webActorSchema.nullable(),
+  updatedAt: timestamp,
+});
+
+export const webIssueListSchema = pageSchema(webIssueRowSchema).extend({
+  counts: z
+    .object({
+      all: z.int(),
+      open: z.int(),
+      in_progress: z.int(),
+      done: z.int(),
+      canceled: z.int(),
+    })
+    .meta({
+      description:
+        "The project's issues per status and in all, whatever the status filter.",
+    }),
+});
+
+export const webStatusUpdatePageSchema = pageSchema(webStatusUpdateSchema);
+
+const entryBase = {
+  id: z.string(),
+  createdAt: timestamp,
+  actor: webActorSchema,
+  project: webProjectRefSchema,
+};
+const onIssue = { ...entryBase, issue: webIssueRefSchema };
+const onProject = { ...entryBase, issue: z.null() };
+
+// A feed row or issue timeline entry; switch on `kind`.
+export const entrySchema = z.discriminatedUnion("kind", [
+  z.object({
+    ...onIssue,
+    kind: z.literal("issue_created"),
+    sourceAuthor,
+  }),
+  z.object({
+    ...onIssue,
+    kind: z.literal("status_changed"),
+    from: issueStatusSchema,
+    to: issueStatusSchema,
+  }),
+  z.object({
+    ...onIssue,
+    kind: z.literal("priority_changed"),
+    from: z.int(),
+    to: z.int(),
+  }),
+  z.object({
+    ...onIssue,
+    kind: z.literal("labels_changed"),
+    added: z.array(z.string()),
+    removed: z.array(z.string()),
+  }),
+  z.object({ ...onIssue, kind: z.literal("link_added"), link: linkSchema }),
+  z.object({
+    ...onIssue,
+    kind: z.literal("assignee_changed"),
+    from: webActorSchema.nullable().meta({ description: "Null: unassigned." }),
+    to: webActorSchema.nullable().meta({ description: "Null: unassigned." }),
+  }),
+  z.object({
+    ...onIssue,
+    kind: z.literal("estimate_changed"),
+    from: estimate.nullable(),
+    to: estimate.nullable(),
+  }),
+  z.object({
+    ...onIssue,
+    kind: z.literal("comment"),
+    comment: z.object({ id, body: z.string(), sourceAuthor }),
+  }),
+  z.object({
+    ...onProject,
+    kind: z.literal("status_update"),
+    statusUpdate: z.object({
+      id,
+      body: z.string(),
+      health: healthSchema,
+      sourceAuthor,
+    }),
+  }),
+  z.object({ ...onProject, kind: z.literal("project_created") }),
+]);
+
+export const webIssueSchema = z.object({
+  key: z.string(),
+  sourceKey: z.string().nullable(),
+  project: webProjectRefSchema,
+  title: z.string(),
+  description: z.string(),
+  status: issueStatusSchema,
+  priority: z.int(),
+  estimate: z.number().nullable(),
+  labels: z.array(z.string()),
+  links: z.array(linkSchema),
+  assignee: webActorSchema.nullable(),
+  creator: webActorSchema,
+  sourceAuthor,
+  createdAt: timestamp,
+  updatedAt: timestamp,
+  completedAt: timestamp.nullable(),
+  timeline: z.array(entrySchema).meta({
+    description: "Oldest first: the filing, the comments and the changes.",
+  }),
+});
+
+export const feedSchema = pageSchema(entrySchema).extend({
+  filters: z
+    .object({
+      actors: z.array(webActorSchema),
+      projects: z.array(webProjectRefSchema),
+    })
+    .meta({
+      description:
+        "What the feed can be filtered by: the bots that have acted in a visible project, and the visible projects.",
+    }),
+});
+
+export const searchSchema = z.object({
+  issues: z.array(
+    z.object({
+      key: z.string(),
+      sourceKey: z.string().nullable(),
+      title: z.string(),
+      status: issueStatusSchema,
+      project: webProjectRefSchema,
+    }),
+  ),
+  projects: z.array(webProjectRefSchema),
+});
+
+export const personSchema = z.object({
+  username: z.string(),
+  owner: z.boolean().meta({
+    description: "The owner's row, which comes first and is not an invite.",
+  }),
+  pending: z.boolean().meta({
+    description: "Invited, and no one with this login has signed in yet.",
+  }),
+  name: z.string().nullable().meta({
+    description: "The person's display name once signed in.",
+  }),
+  projects: z.array(webProjectRefSchema),
+  invitedAt: timestamp
+    .nullable()
+    .meta({ description: "Null on the owner's row." }),
+});
+
+export const peopleSchema = z.object({ items: z.array(personSchema) });
+
+const projectKeys = z.array(z.string().min(1).max(10)).max(1000);
+
+// GitHub's username rule, checked after lowercasing: 1-39 of a-z, 0-9 and single inner hyphens
+const githubUsername = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .max(39)
+  .regex(
+    /^[a-z0-9](?:-?[a-z0-9]){0,38}$/,
+    "must be a GitHub username: up to 39 letters, digits and single inner hyphens",
+  );
+
+export const personCreateSchema = z.strictObject({
+  username: githubUsername,
+  projectKeys,
+});
+
+export const personUpdateSchema = z.strictObject({ projectKeys });
+
+export const webIssueCreateSchema = z.strictObject({
+  projectKey: z.string().min(1).max(10),
+  // trimmed before the length checks, which zod runs in order
+  title: z.string().trim().min(1).max(300),
+  description: text.optional(),
+});
+
+export const webCommentCreateSchema = z.strictObject({
+  // checked, not trimmed: a body's leading indentation can be Markdown
+  body: text.refine((body) => body.trim() !== "", "must not be blank"),
+});
+
+export const webIssueListQuerySchema = pageQuerySchema.extend({
+  status: issueStatusSchema.optional(),
+});
+
+const feedFilterQuery = {
+  actor: id.optional().meta({ description: "An actor's id." }),
+  project: z
+    .string()
+    .min(1)
+    .optional()
+    .meta({ description: "A project's key." }),
+};
+
+export const feedQuerySchema = pageQuerySchema.extend(feedFilterQuery);
+export const eventsQuerySchema = z.object(feedFilterQuery);
+export const searchQuerySchema = z.object({
+  q: z.string().trim().min(1).max(200),
+});
+
+export type ViewerState = (typeof viewerStates)[number];
+export type MeView = z.infer<typeof meSchema>;
+export type WebActorView = z.infer<typeof webActorSchema>;
+export type WebProjectRefView = z.infer<typeof webProjectRefSchema>;
+export type WebProjectView = z.infer<typeof webProjectSchema>;
+export type WebProjectListView = z.infer<typeof webProjectListSchema>;
+export type WebIssueRowView = z.infer<typeof webIssueRowSchema>;
+export type WebIssueListView = z.infer<typeof webIssueListSchema>;
+export type WebStatusUpdateView = z.infer<typeof webStatusUpdateSchema>;
+export type WebStatusUpdatePageView = z.infer<typeof webStatusUpdatePageSchema>;
+export type EntryView = z.infer<typeof entrySchema>;
+export type EntryKind = EntryView["kind"];
+export type WebIssueView = z.infer<typeof webIssueSchema>;
+export type FeedView = z.infer<typeof feedSchema>;
+export type SearchView = z.infer<typeof searchSchema>;
+export type PersonView = z.infer<typeof personSchema>;
+export type PeopleView = z.infer<typeof peopleSchema>;
+export type PersonCreate = z.input<typeof personCreateSchema>;
+export type PersonUpdate = z.input<typeof personUpdateSchema>;
+export type WebIssueCreate = z.input<typeof webIssueCreateSchema>;
+export type WebCommentCreate = z.input<typeof webCommentCreateSchema>;

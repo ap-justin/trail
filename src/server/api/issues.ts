@@ -34,6 +34,7 @@ const createIssue = createRoute({
   },
   responses: {
     201: jsonContent(issueSchema, "The created issue"),
+    ...forbiddenError("issues"),
     ...writeErrors,
     ...notFoundError,
     ...conflictError,
@@ -48,6 +49,7 @@ const listIssues = createRoute({
   request: { query: issueListQuerySchema },
   responses: {
     200: jsonContent(pageSchema(issueSchema), "A page of issues"),
+    ...forbiddenError("read"),
     ...readErrors,
     ...notFoundError,
   },
@@ -61,6 +63,7 @@ const getIssue = createRoute({
   request: { params: issueParam },
   responses: {
     200: jsonContent(issueSchema, "The issue"),
+    ...forbiddenError("read"),
     ...readErrors,
     ...notFoundError,
   },
@@ -75,8 +78,8 @@ const updateIssue = createRoute({
   request: { params: issueParam, body: jsonBody(issueUpdateSchema) },
   responses: {
     200: jsonContent(issueSchema, "The updated issue"),
+    ...forbiddenError("issues"),
     ...writeErrors,
-    ...forbiddenError,
     ...notFoundError,
   },
 });

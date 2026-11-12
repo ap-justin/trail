@@ -12,18 +12,24 @@ type SignalTarget = {
 const signals: Signal[] = ["SIGINT", "SIGTERM"];
 
 /**
- * On the first SIGINT or SIGTERM, stops accepting connections, cuts any still
- * open after `deadlineMs`, runs `onClosed` and dies by that signal. A second
- * signal during the drain dies by it at once.
+ * On the first SIGINT or SIGTERM, runs `onDraining`, stops accepting
+ * connections, cuts any still open after `deadlineMs`, runs `onClosed` and,
+ * once it settles, dies by that signal. A second signal during the drain dies by it at once.
  */
 export function onShutdownSignal({
   server,
+  onDraining = () => {},
   onClosed,
   deadlineMs,
   proc = process,
 }: {
-  server: Pick<Server, "close" | "closeAllConnections">;
-  onClosed: () => void;
+  server: Pick<
+    Server,
+    "close" | "closeAllConnections" | "closeIdleConnections"
+  >;
+  /** ends the responses that never end on their own, such as event streams */
+  onDraining?: () => void;
+  onClosed: () => void | Promise<void>;
   deadlineMs: number;
   proc?: SignalTarget;
 }) {
@@ -43,11 +49,19 @@ export function onShutdownSignal({
 
   function shutdown(signal: Signal) {
     listen(dieBy);
-    // a streaming response never ends on its own, so close() would wait forever
+    onDraining();
+    // a streaming response onDraining missed would hold close() forever
     setTimeout(() => server.closeAllConnections(), deadlineMs).unref();
-    server.close(() => {
-      onClosed();
-      dieBy(signal);
+    // close() shuts only the connections idle at the call; a keep-alive one whose stream
+    // onDraining is still ending goes idle later and would wait out keepAliveTimeout
+    const sweep = setInterval(() => server.closeIdleConnections(), 50).unref();
+    server.close(async () => {
+      clearInterval(sweep);
+      try {
+        await onClosed();
+      } finally {
+        dieBy(signal);
+      }
     });
   }
 

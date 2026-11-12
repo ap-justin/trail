@@ -4,18 +4,22 @@ import { join } from "node:path";
 import { and, asc, desc, eq, gt, lt, or } from "drizzle-orm";
 import { afterAll, expect, test } from "vitest";
 import { migrate, openDatabase } from "./client.js";
+import { newId } from "./id.js";
 import {
   activityEvent,
   actor,
   apiKey,
+  apiKeyProject,
   comment,
   idempotencyKey,
+  invite,
   issue,
   issueLabel,
   issueLink,
   label,
   project,
   projectHealths,
+  projectMember,
   projectStatusUpdate,
 } from "./schema.js";
 
@@ -657,4 +661,363 @@ test.each([
     expect(plan).toContain(index);
     expect(plan).not.toContain("TEMP B-TREE");
   }
+});
+
+test("a human carries a lowercased GitHub login, unique among actors; a bot carries none", () => {
+  const withLogin =
+    (githubLogin: string, kind: "human" | "bot" = "human") =>
+    () =>
+      db.insert(actor).values({ kind, displayName: "p", githubLogin }).run();
+  withLogin("octo-cat9")();
+  expect(errorCode(withLogin("octo-cat9"))).toBe("SQLITE_CONSTRAINT_UNIQUE");
+  expect(errorCode(withLogin("tara-bot", "bot"))).toBe(
+    "SQLITE_CONSTRAINT_CHECK",
+  );
+  expect(errorCode(withLogin("a".repeat(39)))).toBe("no error");
+});
+
+const malformedLogins = [
+  "",
+  "Octocat",
+  "-octocat",
+  "octocat-",
+  "octo--cat",
+  "octo_cat",
+  "octo.cat",
+  "a".repeat(40),
+];
+
+test.each(malformedLogins)("a GitHub login %j is rejected", (githubLogin) => {
+  expect(
+    errorCode(() =>
+      db
+        .insert(actor)
+        .values({ kind: "human", displayName: "p", githubLogin })
+        .run(),
+    ),
+  ).toBe("SQLITE_CONSTRAINT_CHECK");
+});
+
+test.each(malformedLogins)("an invite for %j is rejected", (username) => {
+  expect(
+    errorCode(() =>
+      db.insert(invite).values({ username, invitedBy: human.id }).run(),
+    ),
+  ).toBe("SQLITE_CONSTRAINT_CHECK");
+});
+
+test("a username is invited once, and its projects must exist", () => {
+  db.insert(invite).values({ username: "once", invitedBy: human.id }).run();
+  expect(
+    errorCode(() =>
+      db.insert(invite).values({ username: "once", invitedBy: human.id }).run(),
+    ),
+  ).toBe("SQLITE_CONSTRAINT_PRIMARYKEY");
+  const member = (username: string, projectId: string) => () =>
+    db.insert(projectMember).values({ username, projectId }).run();
+  member("once", proj.id)();
+  expect(errorCode(member("once", proj.id))).toBe(
+    "SQLITE_CONSTRAINT_PRIMARYKEY",
+  );
+  expect(errorCode(member("never-invited", proj.id))).toBe(
+    "SQLITE_CONSTRAINT_FOREIGNKEY",
+  );
+  expect(errorCode(member("once", "nope"))).toBe(
+    "SQLITE_CONSTRAINT_FOREIGNKEY",
+  );
+});
+
+test("an invite binds one GitHub id, never held by another invite", () => {
+  const pending = db
+    .insert(invite)
+    .values({ username: "binds", invitedBy: human.id })
+    .returning()
+    .get();
+  expect(pending.githubId).toBeNull();
+  const bind = (username: string, githubId: number) => () =>
+    db
+      .update(invite)
+      .set({ githubId })
+      .where(eq(invite.username, username))
+      .run();
+  bind("binds", 4001)();
+  db.insert(invite)
+    .values({ username: "binds-too", invitedBy: human.id })
+    .run();
+  expect(errorCode(bind("binds-too", 4001))).toBe("SQLITE_CONSTRAINT_UNIQUE");
+  expect(errorCode(bind("binds-too", 4002))).toBe("no error");
+});
+
+test("an invite's GitHub id, once bound, is never rewritten or cleared", () => {
+  db.insert(invite)
+    .values({ username: "pinned", invitedBy: human.id, githubId: 4101 })
+    .run();
+  const rebind = (githubId: number | null) => () =>
+    db
+      .update(invite)
+      .set({ githubId })
+      .where(eq(invite.username, "pinned"))
+      .run();
+  expect(errorCode(rebind(4102))).toBe("SQLITE_CONSTRAINT_TRIGGER");
+  expect(errorCode(rebind(null))).toBe("SQLITE_CONSTRAINT_TRIGGER");
+  expect(errorCode(rebind(4101))).toBe("no error");
+  expect(
+    db.select().from(invite).where(eq(invite.username, "pinned")).get()
+      ?.githubId,
+  ).toBe(4101);
+});
+
+test("one human at most is the owner, and a bot never is", () => {
+  const person = (isOwner: boolean, kind: "human" | "bot" = "human") =>
+    db
+      .insert(actor)
+      .values({ kind, displayName: `owner-${newId()}`, isOwner })
+      .returning();
+  expect(
+    db
+      .insert(actor)
+      .values({ kind: "human", displayName: "p" })
+      .returning()
+      .get().isOwner,
+  ).toBe(false);
+  expect(errorCode(() => person(true, "bot").get())).toBe(
+    "SQLITE_CONSTRAINT_CHECK",
+  );
+  expect(
+    errorCode(() =>
+      sqlite
+        .prepare(
+          "insert into actor (id, kind, display_name, is_owner, created_at) values ('o2', 'human', 'p', 2, 0)",
+        )
+        .run(),
+    ),
+  ).toBe("SQLITE_CONSTRAINT_CHECK");
+  const owner = person(true).get();
+  expect(owner.isOwner).toBe(true);
+  expect(errorCode(() => person(true).get())).toBe("SQLITE_CONSTRAINT_UNIQUE");
+  expect(errorCode(() => person(false).get())).toBe("no error");
+});
+
+test("removing an invite drops its projects and keeps the person's actor and writing", () => {
+  const other = db
+    .insert(project)
+    .values({ key: "MBR", name: "members", createdBy: bot.id })
+    .returning()
+    .get();
+  db.insert(invite).values({ username: "leaver", invitedBy: human.id }).run();
+  db.insert(projectMember)
+    .values([
+      { username: "leaver", projectId: proj.id },
+      { username: "leaver", projectId: other.id },
+    ])
+    .run();
+  const person = db
+    .insert(actor)
+    .values({ kind: "human", displayName: "Leaver", githubLogin: "leaver" })
+    .returning()
+    .get();
+  const filed = newIssue({ createdBy: person.id })();
+  db.insert(comment)
+    .values({ issueId: filed.id, authorId: person.id, body: "mine" })
+    .run();
+
+  db.delete(invite).where(eq(invite.username, "leaver")).run();
+
+  expect(
+    db
+      .select()
+      .from(projectMember)
+      .where(eq(projectMember.username, "leaver"))
+      .all(),
+  ).toEqual([]);
+  expect(
+    db.select().from(actor).where(eq(actor.id, person.id)).get(),
+  ).toMatchObject({ githubLogin: "leaver" });
+  expect(
+    db.select().from(issue).where(eq(issue.createdBy, person.id)).all(),
+  ).toHaveLength(1);
+  expect(
+    db.select().from(comment).where(eq(comment.authorId, person.id)).all(),
+  ).toHaveLength(1);
+});
+
+test("a project with issues cannot be deleted; one without drops its memberships", () => {
+  const empty = db
+    .insert(project)
+    .values({ key: "GONE", name: "gone", createdBy: bot.id })
+    .returning()
+    .get();
+  db.insert(invite).values({ username: "viewer", invitedBy: human.id }).run();
+  db.insert(projectMember)
+    .values([
+      { username: "viewer", projectId: proj.id },
+      { username: "viewer", projectId: empty.id },
+    ])
+    .run();
+
+  expect(
+    errorCode(() => db.delete(project).where(eq(project.id, proj.id)).run()),
+  ).toBe("SQLITE_CONSTRAINT_FOREIGNKEY");
+  db.delete(project).where(eq(project.id, empty.id)).run();
+
+  expect(
+    db
+      .select({ projectId: projectMember.projectId })
+      .from(projectMember)
+      .where(eq(projectMember.username, "viewer"))
+      .all(),
+  ).toEqual([{ projectId: proj.id }]);
+});
+
+test.each([
+  [
+    "a username's projects",
+    eq(projectMember.username, "viewer"),
+    "sqlite_autoindex_project_member_1",
+  ],
+  [
+    "a project's usernames",
+    eq(projectMember.projectId, proj.id),
+    "project_member_project_username_idx",
+  ],
+])("%s are read from an index alone", (_, where, index) => {
+  const plan = planOf(db.select().from(projectMember).where(where).toSQL());
+  expect(plan).toContain(index);
+  expect(plan).not.toContain("SCAN");
+});
+
+test("a key's actions are null or a set of known actions, and round-trip as an array", () => {
+  const unscoped = db
+    .insert(apiKey)
+    .values({ actorId: bot.id, prefix: "trl_act0", hash: "c".repeat(64) })
+    .returning()
+    .get();
+  const scoped = db
+    .insert(apiKey)
+    .values({
+      actorId: bot.id,
+      prefix: "trl_act1",
+      hash: "c".repeat(64),
+      actions: ["read", "issues", "comments", "status_updates", "admin"],
+    })
+    .returning()
+    .get();
+  expect(unscoped.actions).toBeNull();
+  expect(
+    db.select().from(apiKey).where(eq(apiKey.id, scoped.id)).get()?.actions,
+  ).toEqual(["read", "issues", "comments", "status_updates", "admin"]);
+});
+
+test.each([
+  ["malformed JSON", '["read"'],
+  ["a non-array", '{"read":true}'],
+  ["a bare string", '"read"'],
+  ["an empty array", "[]"],
+  ["a duplicate", '["read","issues","read"]'],
+  [
+    "a duplicate past the third slot",
+    '["read","issues","comments","admin","admin"]',
+  ],
+  ["an unknown action", '["read","write"]'],
+  ["a null member", '["read",null]'],
+  ["a nested array", '[["read"]]'],
+  [
+    "more members than actions",
+    '["read","issues","comments","status_updates","admin","read"]',
+  ],
+])("a key's actions as %s are rejected", (_, actions) => {
+  expect(
+    errorCode(() =>
+      sqlite
+        .prepare(
+          "insert into api_key (id, actor_id, prefix, hash, created_at, actions) values (?, ?, ?, ?, 0, ?)",
+        )
+        .run(newId(), bot.id, `trl_${newId()}`, "d".repeat(64), actions),
+    ),
+  ).toBe("SQLITE_CONSTRAINT_CHECK");
+});
+
+test("a key's allowlist names an existing key and project, each pair once", () => {
+  const key = db
+    .insert(apiKey)
+    .values({ actorId: bot.id, prefix: "trl_allow", hash: "e".repeat(64) })
+    .returning()
+    .get();
+  db.insert(apiKeyProject)
+    .values({ apiKeyId: key.id, projectId: proj.id })
+    .run();
+
+  expect(
+    errorCode(() =>
+      db
+        .insert(apiKeyProject)
+        .values({ apiKeyId: key.id, projectId: proj.id })
+        .run(),
+    ),
+  ).toBe("SQLITE_CONSTRAINT_PRIMARYKEY");
+  expect(
+    errorCode(() =>
+      db
+        .insert(apiKeyProject)
+        .values({ apiKeyId: "no-such-key", projectId: proj.id })
+        .run(),
+    ),
+  ).toBe("SQLITE_CONSTRAINT_FOREIGNKEY");
+  expect(
+    errorCode(() =>
+      db
+        .insert(apiKeyProject)
+        .values({ apiKeyId: key.id, projectId: "no-such-project" })
+        .run(),
+    ),
+  ).toBe("SQLITE_CONSTRAINT_FOREIGNKEY");
+});
+
+test("deleting a key drops its allowlist; a project on an allowlist cannot be deleted", () => {
+  const scopedTo = db
+    .insert(project)
+    .values({ key: "BGP", name: "better giving", createdBy: bot.id })
+    .returning()
+    .get();
+  const key = db
+    .insert(apiKey)
+    .values({ actorId: bot.id, prefix: "trl_gone", hash: "f".repeat(64) })
+    .returning()
+    .get();
+  db.insert(apiKeyProject)
+    .values({ apiKeyId: key.id, projectId: scopedTo.id })
+    .run();
+
+  expect(
+    errorCode(() =>
+      db.delete(project).where(eq(project.id, scopedTo.id)).run(),
+    ),
+  ).toBe("SQLITE_CONSTRAINT_FOREIGNKEY");
+
+  db.delete(apiKey).where(eq(apiKey.id, key.id)).run();
+  expect(
+    db
+      .select()
+      .from(apiKeyProject)
+      .where(eq(apiKeyProject.apiKeyId, key.id))
+      .all(),
+  ).toEqual([]);
+  db.delete(project).where(eq(project.id, scopedTo.id)).run();
+});
+
+test.each([
+  [
+    "a key's projects",
+    eq(apiKeyProject.apiKeyId, "k"),
+    "sqlite_autoindex_api_key_project_1",
+  ],
+  [
+    "a project's keys",
+    eq(apiKeyProject.projectId, proj.id),
+    "api_key_project_project_key_idx",
+  ],
+])("%s are read from an index alone", (_, where, index) => {
+  const plan = planOf(db.select().from(apiKeyProject).where(where).toSQL());
+  expect(plan).toContain(`USING COVERING INDEX ${index}`);
+  expect(plan).not.toContain("SCAN");
 });

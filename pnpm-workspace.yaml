@@ -3,3 +3,11 @@
 allowBuilds:
   better-sqlite3: true
   esbuild: true
+
+# One exact version for the three Tailwind packages: design-system.test.ts loads the design system
+# through @tailwindcss/node's unstable API, which must match the tailwindcss the build compiles with.
+# Bump all three here, together.
+catalog:
+  "@tailwindcss/node": 4.3.5
+  "@tailwindcss/vite": 4.3.5
+  tailwindcss: 4.3.5

@@ -7,10 +7,11 @@ Run from the repo root.
 
 1. `pnpm lint && pnpm typecheck`. A lint failure on formatting or import order: `pnpm format <paths>` fixes in place (name the files you touched; a bare `pnpm format` reflows the whole tree).
 2. `pnpm test` (each test file opens its own temp SQLite file; no service to start).
-3. `pnpm smoke`: builds `dist/`, boots `node dist/index.js` on a throwaway database and a free port, checks `/health`, mints a key with the built `dist/cli.js`, and calls `/api/v1/projects` and `/mcp` with and without it. It catches a bad bundle, externals list or migrations copy.
+3. `pnpm smoke`: builds `dist/`, boots `NODE_ENV=production node dist/index.js` on a throwaway database and a free port, and checks `/health`, the SPA's `index.html` and an immutable asset, a deep link falling back to `index.html` (and an unknown `/api` path staying a JSON 404), a CSP header on a page, and a key minted with the built `dist/cli.js` against `/api/v1/projects` and `/mcp` with and without it. It also checks `/api/web/me` answers a signed-out viewer, `/api/web/projects` answers 401, and `/api/auth` answers 503 with no GitHub app. It catches a bad bundle, externals list or migrations copy.
+   Then `git diff --exit-code src/web/routeTree.gen.ts`: the build regenerates the committed route tree and CI fails on a stale one.
 4. Live check of the dev server, against one database for both the CLI and the server:
    ```sh
-   export DATABASE_PATH=$(mktemp -d)/trail.db PORT=3000
+   export DATABASE_PATH=$(mktemp -d)/trail.db PORT=3000 TRAIL_OWNER_GITHUB=owner BETTER_AUTH_SECRET=verify-secret-verify-secret-verify-0
    pnpm -s db:migrate   # the CLI refuses a DATABASE_PATH with no file there
    export TRAIL_BOT_KEY=$(pnpm -s trail bot create verify | awk '$1 == "key" { print $2 }')
    # own session: pnpm, sh, tsx watch and the server child all share it. The inner sh execs pnpm, so the pid it
