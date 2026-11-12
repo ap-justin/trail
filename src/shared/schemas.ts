@@ -153,6 +153,11 @@ const actorLabel = z.string().nullable().meta({
   example: "agent-7",
 });
 
+const photoUrl = z.string().nullable().meta({
+  description:
+    "Where the actor's photo is served, a path under /api/photos that changes whenever the photo does; null without one. Fetch it with a bot key or a signed-in session.",
+});
+
 export const actorSchema = z
   .object({
     id,
@@ -184,12 +189,15 @@ export const whoamiSchema = actorSchema
           }),
       })
       .meta({ description: "What the calling key reaches." }),
+    photoUrl,
   })
   .openapi("Whoami");
 
 export const botSchema = z
-  .object({ id, name: actorName, label: actorLabel })
+  .object({ id, name: actorName, label: actorLabel, photoUrl })
   .openapi("Bot");
+
+export const myPhotoSchema = z.object({ photoUrl }).openapi("MyPhoto");
 
 export function pageSchema<T extends z.ZodType>(item: T) {
   return z.object({
@@ -534,6 +542,7 @@ export type LabelView = z.infer<typeof labelSchema>;
 export type ActorView = z.infer<typeof actorSchema>;
 export type WhoamiView = z.infer<typeof whoamiSchema>;
 export type BotView = z.infer<typeof botSchema>;
+export type MyPhotoView = z.infer<typeof myPhotoSchema>;
 export type ActivityEventView = z.infer<typeof activityEventSchema>;
 export type ImportResultView = z.infer<typeof importResultSchema>;
 export type PageView<T> = { items: T[]; nextCursor: string | null };
@@ -545,6 +554,7 @@ const webActorSchema = z.object({
   id,
   name: z.string(),
   kind: z.enum(actorKinds),
+  photoUrl,
 });
 const webProjectRefSchema = z.object({ key: z.string(), name: z.string() });
 const webIssueRefSchema = z.object({ key: z.string(), title: z.string() });
@@ -752,6 +762,7 @@ export const personSchema = z.object({
   name: z.string().nullable().meta({
     description: "The person's display name once signed in.",
   }),
+  photoUrl,
   projects: z.array(webProjectRefSchema),
   invitedAt: timestamp
     .nullable()

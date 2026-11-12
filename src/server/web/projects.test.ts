@@ -78,7 +78,12 @@ test("a project's health and latest status update are its newest update's, with 
     latestStatusUpdate: {
       body: "slipping",
       health: "at_risk",
-      author: { id: reporter.actor.id, name: "reporter", kind: "bot" },
+      author: {
+        id: reporter.actor.id,
+        name: "reporter",
+        kind: "bot",
+        photoUrl: null,
+      },
       sourceAuthor: null,
     },
   });
@@ -157,7 +162,12 @@ describe("GET /projects/:key/issues", () => {
       status: "open",
       priority: 2,
       labels: ["a", "b"],
-      assignee: { id: expect.any(String), name: "assignee", kind: "bot" },
+      assignee: {
+        id: expect.any(String),
+        name: "assignee",
+        kind: "bot",
+        photoUrl: null,
+      },
       updatedAt: expect.any(String),
     });
     expect(body.items[3]).toMatchObject({ key: `${p.key}-1`, assignee: null });

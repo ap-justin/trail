@@ -36,6 +36,26 @@ const row = (username: string) => {
 };
 
 describe("people list", () => {
+  test("a person with a photo shows it; one without shows initials", () => {
+    renderPeople({
+      people: people.map((p) =>
+        p.username === "mayachen"
+          ? { ...p, photoUrl: "/api/photos/a-maya/77b2" }
+          : p,
+      ),
+    });
+    const avatar = (username: string) =>
+      document.querySelector(
+        `[data-username="${username}"] [aria-hidden="true"]`,
+      );
+    expect(avatar("mayachen")?.querySelector("img")).toHaveAttribute(
+      "src",
+      "/api/photos/a-maya/77b2",
+    );
+    expect(avatar("justinsalas")).toHaveTextContent("JS");
+    expect(avatar("justinsalas")?.querySelector("img")).toBeNull();
+  });
+
   test("the owner row comes first and has no actions", () => {
     renderPeople();
     const items = screen.getAllByRole("listitem");

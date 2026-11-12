@@ -99,6 +99,8 @@ test("tools/list offers one tool per operation, none naming who writes", async (
       "list_projects",
       "list_status_updates",
       "post_status_update",
+      "clear_my_photo",
+      "set_my_photo",
       "update_issue",
       "update_project",
       "whoami",
@@ -459,7 +461,7 @@ test("create_issue after import_project numbers past the highest kept Linear num
   expect(created.key).toBe("MKN-188");
 });
 
-test("whoami answers the key's bot and list_bots pages every bot with id, name and label", async () => {
+test("whoami answers the key's bot and list_bots pages every bot with id, name, label and photoUrl", async () => {
   const [first, labelled] = atFakeTime([
     () => createBot(db, "mcp listed first"),
     () => createBot(db, "mcp whoami", { label: "agent-mcp" }),
@@ -471,6 +473,7 @@ test("whoami answers the key's bot and list_bots pages every bot with id, name a
     name: "mcp whoami",
     label: "agent-mcp",
     scope: { projects: null, actions: null },
+    photoUrl: null,
   });
 
   const items: Body[] = [];
@@ -489,10 +492,16 @@ test("whoami answers the key's bot and list_bots pages every bot with id, name a
     id: labelled.actor.id,
     name: "mcp whoami",
     label: "agent-mcp",
+    photoUrl: null,
   });
   expect(ids).toContain(bot.actor.id);
   for (const item of items) {
-    expect(Object.keys(item).sort()).toEqual(["id", "label", "name"]);
+    expect(Object.keys(item).sort()).toEqual([
+      "id",
+      "label",
+      "name",
+      "photoUrl",
+    ]);
   }
 });
 

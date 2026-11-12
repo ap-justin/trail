@@ -28,6 +28,7 @@ export function sessionOf(me: MeView): Session | null {
       name: me.actor.name,
       login: me.login,
       isOwner: me.state === "owner",
+      photoUrl: me.actor.photoUrl,
     },
     projects: me.projects,
     ownerName: me.ownerName,

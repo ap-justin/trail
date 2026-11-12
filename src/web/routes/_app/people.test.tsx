@@ -30,6 +30,7 @@ function servePeople() {
     owner: false,
     pending: true,
     name: null,
+    photoUrl: null,
     projects: projectKeys.map((key) => ({ key, name: key })),
     invitedAt: "2026-11-11T10:00:00.000Z",
   });

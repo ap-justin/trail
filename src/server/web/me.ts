@@ -5,6 +5,7 @@ import { jsonContent } from "../api/routes.js";
 import type { Viewer } from "../auth/viewer.js";
 import type { Db } from "../db/client.js";
 import { actor } from "../db/schema.js";
+import { photoUrlOf } from "../service/photos.js";
 import { createWebRouter } from "./env.js";
 
 const getMe = createRoute({
@@ -23,7 +24,7 @@ export function ownerName(db: Db, ownerLogin: string): string {
   return row?.name ?? ownerLogin;
 }
 
-function meOf(viewer: Viewer, owner: string): MeView {
+function meOf(db: Db, viewer: Viewer, owner: string): MeView {
   if (viewer.kind === "anonymous" || viewer.kind === "not_invited") {
     return {
       state: viewer.kind,
@@ -40,6 +41,7 @@ function meOf(viewer: Viewer, owner: string): MeView {
       id: viewer.actor.id,
       name: viewer.actor.displayName,
       kind: "human",
+      photoUrl: photoUrlOf(db, viewer.actor.id),
     },
     projects: viewer.projects.map(({ key, name }) => ({ key, name })),
     ownerName: owner,
@@ -49,6 +51,6 @@ function meOf(viewer: Viewer, owner: string): MeView {
 /** `GET /me`, which answers every viewer, signed in or not. */
 export function meRoutes(db: Db, ownerLogin: string) {
   return createWebRouter().openapi(getMe, (c) =>
-    c.json(meOf(c.var.viewer, ownerName(db, ownerLogin)), 200),
+    c.json(meOf(db, c.var.viewer, ownerName(db, ownerLogin)), 200),
   );
 }

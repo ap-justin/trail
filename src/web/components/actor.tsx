@@ -1,4 +1,5 @@
 import { BotIcon, UserIcon } from "lucide-react";
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import type { WebActorView } from "@/lib/api-types";
 import { cn } from "@/lib/utils";
@@ -50,7 +51,8 @@ function initials(actor: Pick<WebActorView, "name" | "kind">): string {
 }
 
 /**
- * Initials on a tinted ground: a rounded square for a bot, a circle for a person.
+ * The actor's photo, or initials when there is none or it fails to load, on a tinted
+ * ground: a rounded square for a bot, a circle for a person.
  * Decorative: the name always sits beside it.
  */
 export function ActorAvatar({
@@ -58,17 +60,23 @@ export function ActorAvatar({
   size = "sm",
   className,
 }: {
-  actor: Pick<WebActorView, "name" | "kind">;
+  actor: Pick<WebActorView, "name" | "kind"> & {
+    photoUrl?: WebActorView["photoUrl"];
+  };
   size?: keyof typeof avatarSizes;
   className?: string;
 }) {
   const bot = actor.kind === "bot";
+  // keyed by URL, so a new photo gets its own try after an old one failed
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const photoUrl =
+    actor.photoUrl && actor.photoUrl !== failedUrl ? actor.photoUrl : null;
   return (
     <span
       aria-hidden="true"
       data-actor-kind={actor.kind}
       className={cn(
-        "grid shrink-0 place-items-center font-semibold select-none",
+        "grid shrink-0 place-items-center overflow-hidden font-semibold select-none",
         avatarSizes[size],
         bot
           ? "rounded-md bg-bot-muted text-bot"
@@ -76,7 +84,18 @@ export function ActorAvatar({
         className,
       )}
     >
-      {initials(actor)}
+      {photoUrl ? (
+        <img
+          src={photoUrl}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          onError={() => setFailedUrl(photoUrl)}
+          className="size-full object-cover"
+        />
+      ) : (
+        initials(actor)
+      )}
     </span>
   );
 }

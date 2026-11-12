@@ -438,6 +438,7 @@ test("whoami reports the calling key's scope, null where it is unrestricted", as
     name: "bg-ivy",
     label: null,
     scope: { projects: [a.key], actions: ["read", "issues", "comments"] },
+    photoUrl: null,
   });
   const unscopedMe = await request("GET", "/api/v1/whoami", {
     key: (await unscopedKey()).key,
@@ -479,6 +480,8 @@ test("the spec documents each gated operation's 403 with the action it needs", a
     "GET /projects/{id}/labels": needs("read"),
     "GET /projects/{id}/status-updates": needs("read"),
     "GET /whoami": null,
+    "DELETE /me/photo": null,
+    "PUT /me/photo": null,
     "PATCH /issues/{id}": needs("issues"),
     "PATCH /projects/{id}": needs("admin"),
     "POST /import": orScope("admin"),

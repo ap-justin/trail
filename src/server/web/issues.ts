@@ -16,6 +16,7 @@ import type { Db } from "../db/client.js";
 import { issue, issueLabel, issueLink, label, project } from "../db/schema.js";
 import type { ActingActor, Service } from "../service/index.js";
 import { page } from "../service/paging.js";
+import { photoUrlOf } from "../service/photos.js";
 import { amongVisible, noIssue } from "../service/visible.js";
 import { timelineOf } from "./entries.js";
 import { createWebRouter, type Member } from "./env.js";
@@ -231,6 +232,7 @@ export function issueRoutes(db: Db, service: Service) {
             id: member.actor.id,
             name: member.actor.displayName,
             kind: "human" as const,
+            photoUrl: photoUrlOf(db, member.actor.id),
           },
           project: found.project,
           issue: { key: found.key, title: found.row.title },

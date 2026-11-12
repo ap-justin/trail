@@ -9,11 +9,22 @@ import type {
   WebStatusUpdateView,
 } from "@/lib/api-types";
 
-export const kai: WebActorView = { id: "a-kai", name: "Kai", kind: "bot" };
+export const kai: WebActorView = {
+  id: "a-kai",
+  name: "Kai",
+  kind: "bot",
+  photoUrl: null,
+};
+/** Kai with a photo on file. */
+export const kaiWithPhoto: WebActorView = {
+  ...kai,
+  photoUrl: "/api/photos/a-kai/3f9a1c",
+};
 export const maya: WebActorView = {
   id: "a-maya",
   name: "Maya Chen",
   kind: "human",
+  photoUrl: null,
 };
 
 export const trail = { key: "TRL", name: "trail" };
@@ -52,7 +63,12 @@ export function statusEntry(id: string, createdAt: string): EntryView {
   };
 }
 
-export const tara: WebActorView = { id: "a-tara", name: "Tara", kind: "bot" };
+export const tara: WebActorView = {
+  id: "a-tara",
+  name: "Tara",
+  kind: "bot",
+  photoUrl: null,
+};
 
 export function statusUpdate(
   overrides: Partial<WebStatusUpdateView> = {},
@@ -190,6 +206,7 @@ export const people: PersonView[] = [
     owner: true,
     pending: false,
     name: "Justin Salas",
+    photoUrl: null,
     projects: [],
     invitedAt: null,
   },
@@ -198,6 +215,7 @@ export const people: PersonView[] = [
     owner: false,
     pending: false,
     name: "Maya Chen",
+    photoUrl: null,
     projects: [trail, { key: "DOC", name: "Docs site" }],
     invitedAt: "2026-11-09T10:00:00.000Z",
   },
@@ -206,6 +224,7 @@ export const people: PersonView[] = [
     owner: false,
     pending: true,
     name: null,
+    photoUrl: null,
     projects: [{ key: "OPB", name: "OpenBot" }],
     invitedAt: "2026-11-10T10:00:00.000Z",
   },

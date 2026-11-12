@@ -71,6 +71,13 @@
       "when": 1794449542817,
       "tag": "0009_scoped_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1794460710918,
+      "tag": "0010_actor_photo",
+      "breakpoints": true
     }
   ]
 }

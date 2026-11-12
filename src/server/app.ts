@@ -6,6 +6,7 @@ import type { TrailAuth } from "./auth/auth.js";
 import type { Db } from "./db/client.js";
 import type { EventBus } from "./events/bus.js";
 import { mcpRoutes } from "./mcp/index.js";
+import { photoRoutes } from "./photos.js";
 import { createService } from "./service/index.js";
 import { spaHandlers } from "./spa.js";
 import type { LiveStreams } from "./web/events.js";
@@ -40,6 +41,7 @@ export function createApp({
   app.route("/api/v1", createApi({ db, service }));
   app.route("/mcp", mcpRoutes({ db, service }));
   app.route("/api/web", createWeb({ db, service, bus, auth, streams }));
+  app.route("/api/photos", photoRoutes({ db, auth }));
   const spa = webDir === undefined ? undefined : spaHandlers(webDir);
   if (spa) app.get("*", ...spa);
   // a sub-app's notFound never runs, so unknown /api/v1 routes land here too

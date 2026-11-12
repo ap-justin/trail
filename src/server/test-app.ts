@@ -98,6 +98,8 @@ function fakeGitHub() {
   };
 }
 
+const noAvatar: typeof fetch = async () => new Response(null, { status: 404 });
+
 /** The `name=value` of the session cookie a response sets, or "". */
 export const sessionCookie = (res: Response) =>
   res.headers
@@ -112,9 +114,12 @@ export const sessionCookie = (res: Response) =>
  */
 export function setupTestApp({
   auth: authOverrides = {},
+  avatarFetch = noAvatar,
   webDir,
 }: {
   auth?: Partial<AuthConfig>;
+  /** answers sign-in's GitHub photo fetch; by default with no photo */
+  avatarFetch?: typeof fetch;
   /** the built SPA directory `createApp` serves; none by default */
   webDir?: string;
 } = {}) {
@@ -132,6 +137,7 @@ export function setupTestApp({
   const auth = createAuth({
     db,
     config: { ...testAuthConfig, ...authOverrides },
+    avatarFetch,
   });
   const streams = new LiveStreams();
   const app = createApp({ db, bus, auth, streams, webDir });

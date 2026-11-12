@@ -28,9 +28,11 @@ import {
   toStatusUpdate,
   toWhoami,
 } from "../api/serialize.js";
-import { ServiceError } from "../service/errors.js";
+import { actorPhotoContentTypes } from "../db/schema.js";
+import { InvalidImageError, ServiceError } from "../service/errors.js";
 import type { Service } from "../service/index.js";
 import type { KeyActor } from "../service/keys.js";
+import { PHOTO_ACCEPTS } from "../service/photos.js";
 
 const projectId = z
   .string()
@@ -82,6 +84,37 @@ const failure = (text: string): CallToolResult => ({
   content: [{ type: "text", text }],
   isError: true,
 });
+
+const photoEncoding =
+  "base64-encoded (standard alphabet, padded, no line breaks), bare or prefixed like data:image/png;base64,";
+
+/** The bytes of `set_my_photo`'s data: strict base64, after an optional image data: URL prefix. */
+function photoBytes(data: string): Uint8Array {
+  const dataUrl = /^data:([^;,]*)(;[^,]*)?,/.exec(data);
+  let encoded = data;
+  if (dataUrl) {
+    const [prefix, type = "", params = ""] = dataUrl;
+    if (
+      !(actorPhotoContentTypes as readonly string[]).includes(
+        type.toLowerCase(),
+      ) ||
+      params.toLowerCase() !== ";base64"
+    ) {
+      throw new InvalidImageError(
+        `data declares ${type || "no type"}${params}: send ${PHOTO_ACCEPTS}, ${photoEncoding}`,
+      );
+    }
+    encoded = data.slice(prefix.length);
+  }
+  const bytes = Buffer.from(encoded, "base64");
+  // Buffer skips characters it can't decode; a round trip that differs means it did
+  if (bytes.toString("base64") !== encoded) {
+    throw new InvalidImageError(
+      `data is not valid base64: send ${PHOTO_ACCEPTS}, ${photoEncoding}`,
+    );
+  }
+  return bytes;
+}
 
 /** The service call's result as JSON, or a tool error a bot can act on. */
 function run(tool: string, call: () => unknown): CallToolResult {
@@ -357,7 +390,7 @@ export function registerTools(
     "whoami",
     {
       description:
-        "Get the bot this key acts as: its id (the createdBy, authorId and actorId your writes carry), name and label, and the key's scope: the keys of the only projects it reaches and the actions it may take (read, issues, comments, status_updates, admin), each null when unrestricted.",
+        "Get the bot this key acts as: its id (the createdBy, authorId and actorId your writes carry), name, label and photoUrl (null until set_my_photo sets one), and the key's scope: the keys of the only projects it reaches and the actions it may take (read, issues, comments, status_updates, admin), each null when unrestricted.",
       inputSchema: z.strictObject({}),
       annotations: read,
     },
@@ -368,12 +401,36 @@ export function registerTools(
     "list_bots",
     {
       description:
-        "List every bot, oldest first, with its id, name and label, a page at a time: pass nextCursor back as cursor until it is null. A createdBy, authorId or actorId that matches a bot's id was written by that bot; an id that matches no bot is a human's (humans file issues and comment).",
+        "List every bot, oldest first, with its id, name, label and photoUrl, a page at a time: pass nextCursor back as cursor until it is null. A createdBy, authorId or actorId that matches a bot's id was written by that bot; an id that matches no bot is a human's (humans file issues and comment).",
       inputSchema: z.strictObject(page),
       annotations: read,
     },
     (query) =>
       run("list_bots", () => toPage(service.listBots(actor, query), toBot)),
+  );
+
+  server.registerTool(
+    "set_my_photo",
+    {
+      description: `Set your own photo, which people see beside your name in trail. Send ${PHOTO_ACCEPTS}, ${photoEncoding} Its type is read from the bytes. A new photo replaces the old one and gets a new photoUrl. Every key may call this, whatever its scope.`,
+      inputSchema: z.strictObject({
+        data: z.string().describe(`The image, ${photoEncoding}`),
+      }),
+      annotations: update,
+    },
+    ({ data }) =>
+      run("set_my_photo", () => service.setMyPhoto(actor, photoBytes(data))),
+  );
+
+  server.registerTool(
+    "clear_my_photo",
+    {
+      description:
+        "Remove your own photo; succeeds when you have none too. Every key may call this, whatever its scope.",
+      inputSchema: z.strictObject({}),
+      annotations: { ...update, destructiveHint: true },
+    },
+    () => run("clear_my_photo", () => service.clearMyPhoto(actor)),
   );
 
   server.registerTool(

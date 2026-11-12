@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { ActorAvatar } from "@/components/actor";
 import { ErrorState, ListSkeleton } from "@/components/states";
 import { KeyText } from "@/components/text";
 import { Badge } from "@/components/ui/badge";
@@ -72,22 +73,25 @@ export function parseUsername(
 const displayName = (person: PersonView) =>
   person.name ?? `@${person.username}`;
 
-function initials(person: PersonView): string {
-  if (!person.name) return "?";
-  const words = person.name.trim().split(/\s+/);
-  return `${words[0]?.[0] ?? ""}${words.length > 1 ? (words.at(-1)?.[0] ?? "") : ""}`.toUpperCase();
-}
-
 function PersonAvatar({ person }: { person: PersonView }) {
+  if (!person.pending) {
+    return (
+      <ActorAvatar
+        actor={{
+          name: person.name ?? "",
+          kind: "human",
+          photoUrl: person.photoUrl,
+        }}
+        size="md"
+      />
+    );
+  }
   return (
     <span
       aria-hidden="true"
-      className={cn(
-        "grid size-7 shrink-0 place-items-center rounded-full text-2xs font-semibold text-muted-foreground",
-        person.pending ? "border border-dashed" : "bg-muted",
-      )}
+      className="grid size-7 shrink-0 place-items-center rounded-full border border-dashed text-2xs font-semibold text-muted-foreground"
     >
-      {person.pending ? "?" : initials(person)}
+      ?
     </span>
   );
 }

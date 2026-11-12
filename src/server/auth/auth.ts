@@ -5,6 +5,7 @@ import type { MiddlewareHandler } from "hono";
 import type { Config } from "../config.js";
 import type { Db } from "../db/client.js";
 import { account, session, user, verification } from "../db/schema.js";
+import { storeGitHubPhoto } from "./avatar.js";
 import { accessOf, syncActor, visibleProjects } from "./identity.js";
 import type { Viewer, ViewerEnv } from "./viewer.js";
 
@@ -41,9 +42,12 @@ const signInPath = /^\/api\/auth\/(sign-in\/social|callback\/github)\/?$/;
 export function createAuth({
   db,
   config,
+  avatarFetch = fetch,
 }: {
   db: Db;
   config: AuthConfig;
+  /** fetches a person's GitHub photo at sign-in */
+  avatarFetch?: typeof fetch;
 }): TrailAuth {
   const owner = config.TRAIL_OWNER_GITHUB;
   const github = "clientId" in config.github ? config.github : null;
@@ -117,7 +121,10 @@ export function createAuth({
               login: row.githubLogin,
               name: row.name,
             };
-            syncActor(db, identity, owner);
+            const access = syncActor(db, identity, owner);
+            if (access) {
+              await storeGitHubPhoto(db, access.actor, avatarFetch);
+            }
           },
         },
       },

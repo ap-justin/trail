@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, test, vi } from "vitest";
 import { FeedView, type FeedViewProps, LiveIndicator } from "@/components/feed";
-import { commentEntry, kai, statusEntry } from "@/test/fixtures";
+import { commentEntry, kai, kaiWithPhoto, statusEntry } from "@/test/fixtures";
 
 const now = new Date(2026, 10, 11, 12, 0);
 const minutesAgo = (m: number) =>
@@ -43,6 +43,22 @@ const rowFor = (id: string) => {
   if (!row) throw new Error(`no feed row ${id}`);
   return row;
 };
+
+describe("actor photos", () => {
+  test("an entry by an actor with a photo shows the photo; one without shows initials", () => {
+    renderFeed({
+      entries: [
+        commentEntry("e1", minutesAgo(1), { actor: kaiWithPhoto }),
+        statusEntry("e2", minutesAgo(30)),
+      ],
+    });
+    expect(rowFor("e1").querySelector("img")).toHaveAttribute(
+      "src",
+      kaiWithPhoto.photoUrl,
+    );
+    expect(rowFor("e2").querySelector("img")).toBeNull();
+  });
+});
 
 describe("feed highlight", () => {
   test("only rows whose ids are in freshIds carry the highlight", () => {

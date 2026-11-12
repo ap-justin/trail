@@ -29,7 +29,12 @@ const mainNavs = () => screen.getAllByRole("navigation", { name: "Main" });
 
 describe("People nav", () => {
   test("the owner sees People in the sidebar and the tab bar", () => {
-    renderShell({ name: "Justin Salas", login: "justin", isOwner: true });
+    renderShell({
+      name: "Justin Salas",
+      login: "justin",
+      isOwner: true,
+      photoUrl: null,
+    });
     for (const nav of mainNavs()) {
       expect(within(nav).getByRole("link", { name: "People" })).toHaveAttribute(
         "href",
@@ -39,7 +44,12 @@ describe("People nav", () => {
   });
 
   test("a member sees no People item anywhere", () => {
-    renderShell({ name: "Maya Chen", login: "mayachen", isOwner: false });
+    renderShell({
+      name: "Maya Chen",
+      login: "mayachen",
+      isOwner: false,
+      photoUrl: null,
+    });
     expect(mainNavs()).toHaveLength(2);
     expect(
       screen.queryByRole("link", { name: "People" }),
@@ -48,7 +58,12 @@ describe("People nav", () => {
 });
 
 test("the current section is marked for assistive tech", () => {
-  renderShell({ name: "Maya Chen", login: "mayachen", isOwner: false });
+  renderShell({
+    name: "Maya Chen",
+    login: "mayachen",
+    isOwner: false,
+    photoUrl: null,
+  });
   for (const nav of mainNavs()) {
     expect(within(nav).getByRole("link", { name: "Feed" })).toHaveAttribute(
       "aria-current",
@@ -61,6 +76,7 @@ const owner: ShellViewer = {
   name: "Justin Salas",
   login: "justin",
   isOwner: true,
+  photoUrl: null,
 };
 
 test("no heading draws no h1, so a page's own heading stands alone", () => {

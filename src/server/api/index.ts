@@ -9,6 +9,7 @@ import { handleError } from "./errors.js";
 import { importRoutes } from "./import.js";
 import { issueRoutes } from "./issues.js";
 import { labelRoutes } from "./labels.js";
+import { photoRoutes } from "./photos.js";
 import { projectRoutes } from "./projects.js";
 import { limitBody, MAX_BODY_BYTES } from "./routes.js";
 import { statusUpdateRoutes } from "./status-updates.js";
@@ -31,9 +32,10 @@ export function createApi({ db, service }: { db: Db; service: Service }) {
   });
   api.use(bearerKey(db));
   // Body limits sit behind the key check, so an unauthenticated caller can't make
-  // them buffer a body. The import sets its own and is registered above the
-  // general limit, which never runs for it.
+  // them buffer a body. The import and the photo set their own and are
+  // registered above the general limit, which never runs for them.
   api.route("/", importRoutes(service));
+  api.route("/", photoRoutes(service));
   api.use(limitBody(MAX_BODY_BYTES));
   api.route("/", projectRoutes(service));
   api.route("/", issueRoutes(service));
