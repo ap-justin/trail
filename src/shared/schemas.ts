@@ -2,6 +2,7 @@ import { z } from "@hono/zod-openapi";
 import {
   activitySubjectTypes,
   actorKinds,
+  apiKeyActions,
   issueStatuses,
   projectHealths,
 } from "../server/db/schema.js";
@@ -160,6 +161,31 @@ export const actorSchema = z
     label: actorLabel,
   })
   .openapi("Actor");
+
+export const whoamiSchema = actorSchema
+  .extend({
+    scope: z
+      .object({
+        projects: z
+          .array(z.string())
+          .nullable()
+          .meta({
+            description:
+              "The keys of the only projects this key reaches; null when it reaches every project.",
+            example: ["TRL"],
+          }),
+        actions: z
+          .array(z.enum(apiKeyActions))
+          .nullable()
+          .meta({
+            description:
+              "What this key may do: read, issues (create and update issues), comments, status_updates and admin (create, update and import projects, create labels, list bots). null when it may do all of them.",
+            example: ["read", "issues", "comments"],
+          }),
+      })
+      .meta({ description: "What the calling key reaches." }),
+  })
+  .openapi("Whoami");
 
 export const botSchema = z
   .object({ id, name: actorName, label: actorLabel })
@@ -506,6 +532,7 @@ export type CommentView = z.infer<typeof commentSchema>;
 export type StatusUpdateView = z.infer<typeof statusUpdateSchema>;
 export type LabelView = z.infer<typeof labelSchema>;
 export type ActorView = z.infer<typeof actorSchema>;
+export type WhoamiView = z.infer<typeof whoamiSchema>;
 export type BotView = z.infer<typeof botSchema>;
 export type ActivityEventView = z.infer<typeof activityEventSchema>;
 export type ImportResultView = z.infer<typeof importResultSchema>;

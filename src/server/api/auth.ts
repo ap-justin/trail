@@ -1,7 +1,7 @@
 import type { Context } from "hono";
 import { bearerAuth } from "hono/bearer-auth";
 import type { Db } from "../db/client.js";
-import { resolveKey } from "../service/keys.js";
+import { authenticateKey } from "../service/keys.js";
 import type { ApiEnv } from "./env.js";
 import { errorResponse } from "./errors.js";
 
@@ -14,11 +14,11 @@ const unauthorized = (c: Context) =>
     "send Authorization: Bearer <key> with a bot's unrevoked key",
   );
 
-/** Resolves the bearer key to its bot and sets it as `actor`; anything else is a 401. */
+/** Resolves the bearer key to its bot and the key's scope, set as `actor`; anything else is a 401. */
 export function bearerKey(db: Db) {
   return bearerAuth<ApiEnv>({
     verifyToken: (token, c) => {
-      const actor = resolveKey(db, token);
+      const actor = authenticateKey(db, token);
       if (actor) c.set("actor", actor);
       return actor !== null;
     },

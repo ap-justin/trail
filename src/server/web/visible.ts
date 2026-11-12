@@ -3,13 +3,8 @@ import type { WebActorView } from "../../shared/schemas.js";
 import type { VisibleProject } from "../auth/viewer.js";
 import type { Db } from "../db/client.js";
 import { actor } from "../db/schema.js";
-import { NotFoundError } from "../service/errors.js";
+import { noProject } from "../service/visible.js";
 import type { Member } from "./env.js";
-
-// One message for a key that is missing and one the viewer can't see, so a 404 never tells them apart.
-export const noProject = (key: string) =>
-  new NotFoundError(`no project ${key}`);
-export const noIssue = (key: string) => new NotFoundError(`no issue ${key}`);
 
 /** The visible project with this key, in any case. */
 export function visibleProject(member: Member, key: string): VisibleProject {

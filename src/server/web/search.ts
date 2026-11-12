@@ -1,18 +1,10 @@
 import { createRoute } from "@hono/zod-openapi";
-import {
-  and,
-  asc,
-  desc,
-  eq,
-  inArray,
-  or,
-  type SQLWrapper,
-  sql,
-} from "drizzle-orm";
+import { and, asc, desc, eq, or, type SQLWrapper, sql } from "drizzle-orm";
 import { searchQuerySchema, searchSchema } from "../../shared/schemas.js";
 import { jsonContent } from "../api/routes.js";
 import type { Db } from "../db/client.js";
 import { issue, project } from "../db/schema.js";
+import { amongVisible } from "../service/visible.js";
 import { createWebRouter } from "./env.js";
 import { visibleIds } from "./visible.js";
 
@@ -52,7 +44,7 @@ export function searchRoutes(db: Db) {
       .innerJoin(project, eq(project.id, issue.projectId))
       .where(
         and(
-          inArray(issue.projectId, ids),
+          amongVisible(issue.projectId, ids),
           or(
             contains(issue.title, q),
             contains(issueKey, q),
@@ -68,7 +60,7 @@ export function searchRoutes(db: Db) {
       .from(project)
       .where(
         and(
-          inArray(project.id, ids),
+          amongVisible(project.id, ids),
           or(contains(project.key, q), contains(project.name, q)),
         ),
       )

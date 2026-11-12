@@ -1,16 +1,5 @@
 import { createRoute } from "@hono/zod-openapi";
-import {
-  and,
-  asc,
-  desc,
-  eq,
-  exists,
-  gt,
-  inArray,
-  lt,
-  type SQL,
-  sql,
-} from "drizzle-orm";
+import { and, asc, desc, eq, exists, gt, lt, type SQL, sql } from "drizzle-orm";
 import {
   errorSchema,
   type FeedView,
@@ -26,6 +15,7 @@ import {
   type FeedFilters,
   pageLimit,
 } from "../service/paging.js";
+import { amongVisible } from "../service/visible.js";
 import { entriesOf, shownEvent } from "./entries.js";
 import { createWebRouter, type Member } from "./env.js";
 import { visibleIds, visibleProject } from "./visible.js";
@@ -61,7 +51,7 @@ export function feedFilters(
 /** The events these filters show among the projects with these ids, the ids checked inside the query. */
 export function feedWhere(projectIds: string[], filters: FeedFilters) {
   return [
-    inArray(activityEvent.projectId, projectIds),
+    amongVisible(activityEvent.projectId, projectIds),
     filters.projectId === null
       ? undefined
       : eq(activityEvent.projectId, filters.projectId),
@@ -141,7 +131,7 @@ function botsActingIn(db: Db, projectIds: string[]) {
             .where(
               and(
                 eq(activityEvent.actorId, actor.id),
-                inArray(activityEvent.projectId, projectIds),
+                amongVisible(activityEvent.projectId, projectIds),
               ),
             ),
         ),

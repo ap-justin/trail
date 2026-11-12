@@ -1,6 +1,7 @@
 import { z } from "@hono/zod-openapi";
 import { bodyLimit } from "hono/body-limit";
 import { errorSchema } from "../../shared/schemas.js";
+import type { ApiKeyAction } from "../db/schema.js";
 import { errorResponse } from "./errors.js";
 
 export const jsonContent = <T extends z.ZodType>(
@@ -39,10 +40,21 @@ export const notFoundError = {
   404: jsonContent(errorSchema, "No such resource"),
 };
 
-/** Spread only into operations whose service call runs `requireBot`. */
-export const forbiddenError = {
-  403: jsonContent(errorSchema, "Only a bot may make this write"),
-};
+/**
+ * The 403 of an operation a key's actions gate: spread into every operation but
+ * whoami. `scope` adds the refusal of a key limited to projects, for the
+ * operations that make one. (The service's bot-only 403 can't reach /api/v1,
+ * whose every caller is a bot.)
+ */
+export const forbiddenError = (
+  action: ApiKeyAction,
+  { scope = false }: { scope?: boolean } = {},
+) => ({
+  403: jsonContent(
+    errorSchema,
+    `The key lacks the ${action} action (code forbidden_action)${scope ? ", or reaches only some projects (code forbidden_scope)" : ""}`,
+  ),
+});
 
 /** Spread only into operations whose service call can throw `ConflictError`. */
 export const conflictError = {

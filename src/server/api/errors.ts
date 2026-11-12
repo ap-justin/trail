@@ -4,7 +4,9 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { ApiError } from "../../shared/schemas.js";
 import {
   ConflictError,
+  ForbiddenActionError,
   ForbiddenError,
+  ForbiddenScopeError,
   IdempotencyKeyReusedError,
   NotFoundError,
   ServiceError,
@@ -22,7 +24,13 @@ export function errorResponse(
 }
 
 function statusOf(error: ServiceError): ContentfulStatusCode {
-  if (error instanceof ForbiddenError) return 403;
+  if (
+    error instanceof ForbiddenError ||
+    error instanceof ForbiddenActionError ||
+    error instanceof ForbiddenScopeError
+  ) {
+    return 403;
+  }
   if (error instanceof NotFoundError) return 404;
   if (error instanceof ValidationError) return 422;
   if (error instanceof ConflictError) return 409;

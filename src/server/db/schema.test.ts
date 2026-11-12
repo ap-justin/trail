@@ -9,6 +9,7 @@ import {
   activityEvent,
   actor,
   apiKey,
+  apiKeyProject,
   comment,
   idempotencyKey,
   invite,
@@ -882,5 +883,141 @@ test.each([
 ])("%s are read from an index alone", (_, where, index) => {
   const plan = planOf(db.select().from(projectMember).where(where).toSQL());
   expect(plan).toContain(index);
+  expect(plan).not.toContain("SCAN");
+});
+
+test("a key's actions are null or a set of known actions, and round-trip as an array", () => {
+  const unscoped = db
+    .insert(apiKey)
+    .values({ actorId: bot.id, prefix: "trl_act0", hash: "c".repeat(64) })
+    .returning()
+    .get();
+  const scoped = db
+    .insert(apiKey)
+    .values({
+      actorId: bot.id,
+      prefix: "trl_act1",
+      hash: "c".repeat(64),
+      actions: ["read", "issues", "comments", "status_updates", "admin"],
+    })
+    .returning()
+    .get();
+  expect(unscoped.actions).toBeNull();
+  expect(
+    db.select().from(apiKey).where(eq(apiKey.id, scoped.id)).get()?.actions,
+  ).toEqual(["read", "issues", "comments", "status_updates", "admin"]);
+});
+
+test.each([
+  ["malformed JSON", '["read"'],
+  ["a non-array", '{"read":true}'],
+  ["a bare string", '"read"'],
+  ["an empty array", "[]"],
+  ["a duplicate", '["read","issues","read"]'],
+  [
+    "a duplicate past the third slot",
+    '["read","issues","comments","admin","admin"]',
+  ],
+  ["an unknown action", '["read","write"]'],
+  ["a null member", '["read",null]'],
+  ["a nested array", '[["read"]]'],
+  [
+    "more members than actions",
+    '["read","issues","comments","status_updates","admin","read"]',
+  ],
+])("a key's actions as %s are rejected", (_, actions) => {
+  expect(
+    errorCode(() =>
+      sqlite
+        .prepare(
+          "insert into api_key (id, actor_id, prefix, hash, created_at, actions) values (?, ?, ?, ?, 0, ?)",
+        )
+        .run(newId(), bot.id, `trl_${newId()}`, "d".repeat(64), actions),
+    ),
+  ).toBe("SQLITE_CONSTRAINT_CHECK");
+});
+
+test("a key's allowlist names an existing key and project, each pair once", () => {
+  const key = db
+    .insert(apiKey)
+    .values({ actorId: bot.id, prefix: "trl_allow", hash: "e".repeat(64) })
+    .returning()
+    .get();
+  db.insert(apiKeyProject)
+    .values({ apiKeyId: key.id, projectId: proj.id })
+    .run();
+
+  expect(
+    errorCode(() =>
+      db
+        .insert(apiKeyProject)
+        .values({ apiKeyId: key.id, projectId: proj.id })
+        .run(),
+    ),
+  ).toBe("SQLITE_CONSTRAINT_PRIMARYKEY");
+  expect(
+    errorCode(() =>
+      db
+        .insert(apiKeyProject)
+        .values({ apiKeyId: "no-such-key", projectId: proj.id })
+        .run(),
+    ),
+  ).toBe("SQLITE_CONSTRAINT_FOREIGNKEY");
+  expect(
+    errorCode(() =>
+      db
+        .insert(apiKeyProject)
+        .values({ apiKeyId: key.id, projectId: "no-such-project" })
+        .run(),
+    ),
+  ).toBe("SQLITE_CONSTRAINT_FOREIGNKEY");
+});
+
+test("deleting a key drops its allowlist; a project on an allowlist cannot be deleted", () => {
+  const scopedTo = db
+    .insert(project)
+    .values({ key: "BGP", name: "better giving", createdBy: bot.id })
+    .returning()
+    .get();
+  const key = db
+    .insert(apiKey)
+    .values({ actorId: bot.id, prefix: "trl_gone", hash: "f".repeat(64) })
+    .returning()
+    .get();
+  db.insert(apiKeyProject)
+    .values({ apiKeyId: key.id, projectId: scopedTo.id })
+    .run();
+
+  expect(
+    errorCode(() =>
+      db.delete(project).where(eq(project.id, scopedTo.id)).run(),
+    ),
+  ).toBe("SQLITE_CONSTRAINT_FOREIGNKEY");
+
+  db.delete(apiKey).where(eq(apiKey.id, key.id)).run();
+  expect(
+    db
+      .select()
+      .from(apiKeyProject)
+      .where(eq(apiKeyProject.apiKeyId, key.id))
+      .all(),
+  ).toEqual([]);
+  db.delete(project).where(eq(project.id, scopedTo.id)).run();
+});
+
+test.each([
+  [
+    "a key's projects",
+    eq(apiKeyProject.apiKeyId, "k"),
+    "sqlite_autoindex_api_key_project_1",
+  ],
+  [
+    "a project's keys",
+    eq(apiKeyProject.projectId, proj.id),
+    "api_key_project_project_key_idx",
+  ],
+])("%s are read from an index alone", (_, where, index) => {
+  const plan = planOf(db.select().from(apiKeyProject).where(where).toSQL());
+  expect(plan).toContain(`USING COVERING INDEX ${index}`);
   expect(plan).not.toContain("SCAN");
 });

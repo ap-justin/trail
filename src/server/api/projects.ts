@@ -34,8 +34,8 @@ const createProject = createRoute({
   },
   responses: {
     201: jsonContent(projectSchema, "The created project"),
+    ...forbiddenError("admin", { scope: true }),
     ...writeErrors,
-    ...forbiddenError,
     ...conflictError,
   },
 });
@@ -48,6 +48,7 @@ const listProjects = createRoute({
   request: { query: pageQuerySchema },
   responses: {
     200: jsonContent(pageSchema(projectSchema), "A page of projects"),
+    ...forbiddenError("read"),
     ...readErrors,
   },
 });
@@ -60,6 +61,7 @@ const getProject = createRoute({
   request: { params: projectParam },
   responses: {
     200: jsonContent(projectSchema, "The project"),
+    ...forbiddenError("read"),
     ...readErrors,
     ...notFoundError,
   },
@@ -73,8 +75,8 @@ const updateProject = createRoute({
   request: { params: projectParam, body: jsonBody(projectUpdateSchema) },
   responses: {
     200: jsonContent(projectSchema, "The updated project"),
+    ...forbiddenError("admin"),
     ...writeErrors,
-    ...forbiddenError,
     ...notFoundError,
   },
 });

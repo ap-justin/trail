@@ -37,6 +37,7 @@ test("migrate builds every table STRICT on an empty file", () => {
     { name: "activity_event", strict: 1 },
     { name: "actor", strict: 1 },
     { name: "api_key", strict: 1 },
+    { name: "api_key_project", strict: 1 },
     { name: "comment", strict: 1 },
     { name: "idempotency_key", strict: 1 },
     { name: "invite", strict: 1 },

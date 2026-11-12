@@ -18,7 +18,6 @@ import {
 } from "../../shared/schemas.js";
 import {
   toActivityEvent,
-  toActor,
   toBot,
   toComment,
   toImportResult,
@@ -27,9 +26,11 @@ import {
   toPage,
   toProject,
   toStatusUpdate,
+  toWhoami,
 } from "../api/serialize.js";
 import { ServiceError } from "../service/errors.js";
-import type { ActingActor, Service } from "../service/index.js";
+import type { Service } from "../service/index.js";
+import type { KeyActor } from "../service/keys.js";
 
 const projectId = z
   .string()
@@ -98,11 +99,11 @@ function run(tool: string, call: () => unknown): CallToolResult {
   }
 }
 
-/** Registers every trail tool on `server`, each acting as `actor`. */
+/** Registers every trail tool on `server`, each acting as `actor` within its key's scope. */
 export function registerTools(
   server: McpServer,
   service: Service,
-  actor: ActingActor,
+  actor: KeyActor,
 ): void {
   server.registerTool(
     "create_project",
@@ -356,11 +357,11 @@ export function registerTools(
     "whoami",
     {
       description:
-        "Get the bot this key acts as: its id (the createdBy, authorId and actorId your writes carry), name and label.",
+        "Get the bot this key acts as: its id (the createdBy, authorId and actorId your writes carry), name and label, and the key's scope: the keys of the only projects it reaches and the actions it may take (read, issues, comments, status_updates, admin), each null when unrestricted.",
       inputSchema: z.strictObject({}),
       annotations: read,
     },
-    () => run("whoami", () => toActor(service.whoami(actor))),
+    () => run("whoami", () => toWhoami(service.whoami(actor), actor.scope)),
   );
 
   server.registerTool(

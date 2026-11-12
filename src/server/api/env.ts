@@ -1,9 +1,9 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
 import type { Env } from "hono";
-import type { Actor } from "../service/keys.js";
+import type { KeyActor } from "../service/keys.js";
 import { errorResponse } from "./errors.js";
 
-export type ApiEnv = { Variables: { actor: Actor } };
+export type ApiEnv = { Variables: { actor: KeyActor } };
 
 /** A router whose request-validation failures are 422s in the shared error shape; `/api/v1`'s by default. */
 export function createRouter<E extends Env = ApiEnv>() {
