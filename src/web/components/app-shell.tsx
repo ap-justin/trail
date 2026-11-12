@@ -20,7 +20,8 @@ import {
 } from "react";
 import { ActorAvatar } from "@/components/actor";
 import { AppLink, type AppLinkProps } from "@/components/app-link";
-import { KeyText, Wordmark } from "@/components/text";
+import { Logo } from "@/components/logo";
+import { KeyText } from "@/components/text";
 import { useTheme } from "@/components/theme-provider";
 import { Button } from "@/components/ui/button";
 import {
@@ -162,7 +163,7 @@ function Sidebar({
   const projectsLabel = useId();
   return (
     <aside className="sticky top-0 hidden h-dvh w-58 shrink-0 flex-col gap-0.5 border-r px-2 py-3 lg:flex">
-      <Wordmark className="flex h-8 items-center px-2" />
+      <Logo className="h-8 px-2" />
       <nav aria-label="Main" className="flex flex-col gap-0.5">
         {navItems(viewer.isOwner, false).map((item) => (
           <AppLink
@@ -483,7 +484,7 @@ export function AppShell({
                 )}
               </div>
             ) : (
-              <Wordmark className="flex-1 lg:hidden" />
+              <Logo className="flex-1 lg:hidden" />
             )}
             <div className="hidden min-w-0 flex-1 items-center gap-2 lg:flex">
               {heading != null && (
