@@ -34,7 +34,7 @@ export function Mark({
   );
 }
 
-/** The mark beside the wordmark; the mark is `h-4.5` unless `markClassName` says otherwise. */
+/** The mark beside the wordmark. */
 export function Logo({
   className,
   markClassName = "h-4.5",
