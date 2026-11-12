@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { render } from "@testing-library/react";
 import { expect, test } from "vitest";
 import { Logo, Mark } from "@/components/logo";
@@ -29,4 +29,7 @@ test("index.html links the favicons", () => {
   expect(html).toContain(
     '<link rel="apple-touch-icon" href="/apple-touch-icon.png" />',
   );
+  for (const file of ["favicon.svg", "favicon.ico", "apple-touch-icon.png"]) {
+    expect(existsSync(`src/web/public/${file}`)).toBe(true);
+  }
 });
