@@ -39,14 +39,49 @@ export type ActorKind = (typeof actorKinds)[number];
 export type IssueStatus = (typeof issueStatuses)[number];
 export type ProjectHealth = (typeof projectHealths)[number];
 export type ActivitySubjectType = (typeof activitySubjectTypes)[number];
+export const apiKeyActions = [
+  "read",
+  "issues",
+  "comments",
+  "status_updates",
+  "admin",
+] as const;
+export type ApiKeyAction = (typeof apiKeyActions)[number];
 
 // Unqualified column name for CHECKs and index predicates: drizzle renders a column as
 // "table"."col", which fails in the `__new_<table>` copy drizzle-kit builds for a rebuild.
 const c = (column: AnySQLiteColumn) => sql.identifier(column.name);
 
 // the enum check is spelled from the same tuple the TS type comes from
+const literals = (values: readonly string[]) =>
+  sql.raw(values.map((v) => `'${v}'`).join(", "));
 const oneOf = (column: AnySQLiteColumn, values: readonly string[]) =>
-  sql`${c(column)} in (${sql.raw(values.map((v) => `'${v}'`).join(", "))})`;
+  sql`${c(column)} in (${literals(values)})`;
+
+// A non-empty JSON array of distinct members of `values`. CHECK allows no subquery, so no
+// json_each: distinct members of an n-value set number at most n, so the check reads
+// slots 0..n-1 by path. Each term stays non-null, since a CHECK passes on NULL.
+const jsonSetOf = (column: AnySQLiteColumn, values: readonly string[]) => {
+  const col = c(column);
+  const length = sql`json_array_length(${col})`;
+  const slot = (i: number) =>
+    sql`json_extract(${col}, ${sql.raw(`'$[${i}]'`)})`;
+  const slots = values.map((_, i) => i);
+  const members = slots.map(
+    (i) =>
+      sql`(${length} <= ${sql.raw(String(i))} or ifnull(${slot(i)}, '') in (${literals(values)}))`,
+  );
+  const distinct = slots.flatMap((i) =>
+    slots
+      .filter((j) => j > i)
+      .map(
+        (j) =>
+          sql`(${length} <= ${sql.raw(String(j))} or ${slot(i)} <> ${slot(j)})`,
+      ),
+  );
+  // CASE, not AND: json_type and json_array_length raise on malformed JSON, and only CASE fixes the order
+  return sql`${col} is null or case when not json_valid(${col}) then 0 when json_type(${col}) <> 'array' then 0 else ${length} between 1 and ${sql.raw(String(values.length))} and ${sql.join([...members, ...distinct], sql` and `)} end`;
+};
 
 // a GitHub username, lowercased: 1-39 of a-z, 0-9 and single hyphens, no hyphen at either end
 const githubLoginShape = (column: AnySQLiteColumn) =>
@@ -128,6 +163,9 @@ export const apiKey = sqliteTable(
     hash: text("hash").notNull(),
     createdAt: createdAt(),
     revokedAt: integer("revoked_at", { mode: "timestamp_ms" }),
+    // what the key may do; null is every action. Adding an action rewrites the check,
+    // a rebuild of this table
+    actions: text("actions", { mode: "json" }).$type<ApiKeyAction[]>(),
   },
   (t) => [
     foreignKey({
@@ -136,6 +174,7 @@ export const apiKey = sqliteTable(
     }),
     check("api_key_actor_kind_check", sql`${c(t.actorKind)} = 'bot'`),
     check("api_key_hash_check", sql`length(${c(t.hash)}) = 64`),
+    check("api_key_actions_check", jsonSetOf(t.actions, apiKeyActions)),
   ],
 );
 
@@ -166,6 +205,26 @@ export const project = sqliteTable(
     uniqueIndex("project_external_ref_unique")
       .on(t.externalRef)
       .where(sql`${c(t.externalRef)} is not null`),
+  ],
+);
+
+// the projects a key may touch; a key with no rows touches every project
+export const apiKeyProject = sqliteTable(
+  "api_key_project",
+  {
+    apiKeyId: text("api_key_id")
+      .notNull()
+      .references(() => apiKey.id, { onDelete: "cascade" }),
+    // no cascade: deleting a project must not quietly widen or empty a key's scope.
+    // no action, not restrict, which SQLite reports as SQLITE_CONSTRAINT_TRIGGER
+    projectId: text("project_id")
+      .notNull()
+      .references(() => project.id),
+  },
+  (t) => [
+    // the key serves "which projects may this key touch"
+    primaryKey({ columns: [t.apiKeyId, t.projectId] }),
+    index("api_key_project_project_key_idx").on(t.projectId, t.apiKeyId),
   ],
 );
 
