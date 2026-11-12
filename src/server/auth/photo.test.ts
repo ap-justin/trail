@@ -1,6 +1,15 @@
 import { createHash } from "node:crypto";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { eq } from "drizzle-orm";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import {
+  afterEach,
+  beforeEach,
+  expect,
+  type MockInstance,
+  test,
+  vi,
+} from "vitest";
 import { actor, actorPhoto } from "../db/schema.js";
 import { PHOTO_MAX_BYTES } from "../service/photos.js";
 import { setupTestApp, TEST_OWNER, TEST_OWNER_ID } from "../test-app.js";
@@ -44,7 +53,7 @@ const photoLands = (githubId: number, bytes: Uint8Array) =>
     .poll(() => photoOf(githubId)?.hash, { timeout: 5_000 })
     .toBe(sha256(bytes));
 
-let warn = vi.spyOn(console, "warn");
+let warn: MockInstance<typeof console.warn>;
 beforeEach(() => {
   warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 });
@@ -91,14 +100,18 @@ test("a later sign-in replaces the photo with GitHub's current one", async () =>
 });
 
 /** A PNG body of 1 MB past the cap that never says how long it is: bounded, so a missing cap can't exhaust memory. */
+const CHUNK = 65_536;
+let pulled = 0;
 const oversizedPng = () => {
+  pulled = 0;
   let left = PHOTO_MAX_BYTES + 1_048_576;
   let sent = false;
   return new ReadableStream<Uint8Array>({
     pull(controller) {
       if (left <= 0) return controller.close();
-      const chunk = sent ? new Uint8Array(65_536) : PNG;
+      const chunk = sent ? new Uint8Array(CHUNK) : PNG;
       sent = true;
+      pulled += chunk.length;
       left -= chunk.length;
       controller.enqueue(chunk);
     },
@@ -155,9 +168,48 @@ test.each(failures)(
   },
 );
 
+test("an oversized body with no content-length is read only up to the cap, not to its end", async () => {
+  answer = async () => new Response(oversizedPng());
+  await addMember("flooded", [], { githubId: 7900 });
+  await photoGivenUp("flooded");
+  // the stream holds 1 MB past the cap; slack covers chunks queued ahead of the reader
+  expect(pulled).toBeGreaterThan(PHOTO_MAX_BYTES);
+  expect(pulled).toBeLessThanOrEqual(PHOTO_MAX_BYTES + 3 * CHUNK);
+  expect(photoOf(7900)).toBeUndefined();
+});
+
+test("a redirect from GitHub's photo host is refused: sign-in goes on and the previous photo stays", async () => {
+  // Node's own fetch against local servers, so the redirect is followed or refused by the real thing
+  const elsewhere = createServer((_, res) => res.end(JPEG));
+  const avatars = createServer((_, res) => {
+    const { port } = elsewhere.address() as AddressInfo;
+    res.writeHead(302, { location: `http://127.0.0.1:${port}/photo.jpg` });
+    res.end();
+  });
+  for (const server of [elsewhere, avatars]) {
+    await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+  }
+  try {
+    await addMember("redirected", [], { githubId: 7800 });
+    await photoLands(7800, PNG);
+    const { port } = avatars.address() as AddressInfo;
+    answer = (init) => fetch(`http://127.0.0.1:${port}/u/7800`, init);
+    const { cookie } = await signInWithGitHub({
+      id: 7800,
+      login: "redirected",
+      name: null,
+    });
+    expect(await viewerOf(cookie)).toMatchObject({ kind: "member" });
+    await photoGivenUp("redirected");
+    expect(photoOf(7800)?.content).toEqual(PNG);
+  } finally {
+    for (const server of [elsewhere, avatars]) server.close();
+  }
+});
+
 test("sign-in asks GitHub for the account's photo by its numeric id, sending no cookie or credential", async () => {
   await addMember("curie", [], { githubId: 7400 });
-  expect(calls).toHaveLength(1);
+  await vi.waitFor(() => expect(calls).toHaveLength(1));
   const [{ url, init }] = calls as [(typeof calls)[number]];
   expect(url).toBe("https://avatars.githubusercontent.com/u/7400?s=128");
   expect([...new Request(url, init).headers]).toEqual([]);
@@ -170,7 +222,12 @@ test("a not-invited account's sign-in fetches and stores no photo", async () => 
     name: null,
   });
   expect(await viewerOf(cookie)).toMatchObject({ kind: "not_invited" });
-  expect(calls).toEqual([]);
+  // control: an invited sign-in after it does fetch, and by the time its photo lands the uninvited one's fetch would have started too
+  await addMember("invited-after", [], { githubId: 7501 });
+  await photoLands(7501, PNG);
+  expect(calls.map((c) => c.url)).toEqual([
+    "https://avatars.githubusercontent.com/u/7501?s=128",
+  ]);
   expect(photoOf(7500)).toBeUndefined();
 });
 
@@ -184,7 +241,7 @@ test("sign-in returns while GitHub's photo is still on its way, and the photo la
     });
   // were sign-in to await the fetch, this would hang until the test times out
   await addMember("hopper", [], { githubId: 7700 });
-  expect(calls).toHaveLength(1);
+  await vi.waitFor(() => expect(calls).toHaveLength(1));
   expect(photoOf(7700)).toBeUndefined();
   release();
   await photoLands(7700, PNG);

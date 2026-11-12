@@ -36,10 +36,10 @@ async function fetchAvatar(
   githubId: number,
   avatarFetch: typeof fetch,
 ): Promise<Uint8Array> {
-  // a fixed host and a numeric id: nothing from the profile shapes the URL
+  // a fixed host and a numeric id: nothing from the profile shapes the URL, and any redirect is refused
   const res = await avatarFetch(
     `https://avatars.githubusercontent.com/u/${githubId}?s=128`,
-    { signal: AbortSignal.timeout(AVATAR_TIMEOUT_MS) },
+    { redirect: "error", signal: AbortSignal.timeout(AVATAR_TIMEOUT_MS) },
   );
   if (res.status !== 200) {
     await res.body?.cancel();

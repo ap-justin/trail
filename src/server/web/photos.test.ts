@@ -19,7 +19,7 @@ let memberId = "";
 let bareCookie = "";
 let botUrl = "";
 let memberUrl = "";
-let issueKey = "";
+let plainIssueKey = "";
 let picturedIssueKey = "";
 
 const web = async (
@@ -44,14 +44,15 @@ beforeAll(async () => {
   memberId = (await web("GET", "/me", memberCookie)).actor.id;
   botUrl = setActorPhoto(db, pictured.actor.id, PNG).photoUrl;
   memberUrl = setActorPhoto(db, memberId, JPEG).photoUrl;
-  for (const key of [pictured.key, plain.key]) {
+  const fileIssue = async (key: string) => {
     const res = await request("POST", "/api/v1/issues", {
       key,
       json: { projectId: project.id, title: `by ${key}` },
     });
-    issueKey = ((await res.json()) as Body).key;
-    if (key === pictured.key) picturedIssueKey = issueKey;
-  }
+    return ((await res.json()) as Body).key as string;
+  };
+  picturedIssueKey = await fileIssue(pictured.key);
+  plainIssueKey = await fileIssue(plain.key);
 });
 
 test("photoUrl is the actor's id and the photo's hash", () => {
@@ -88,7 +89,7 @@ test("an issue's creator carries the photo URL, null without one", async () => {
     id: pictured.actor.id,
     photoUrl: botUrl,
   });
-  const without = await web("GET", `/issues/${issueKey}`, memberCookie);
+  const without = await web("GET", `/issues/${plainIssueKey}`, memberCookie);
   expect(without.creator).toMatchObject({ id: plain.actor.id, photoUrl: null });
 });
 
@@ -145,7 +146,7 @@ test("/me and a person's new comment carry their photo URL", async () => {
   expect((await web("GET", "/me", bareCookie)).actor.photoUrl).toBeNull();
   const comment = await web(
     "POST",
-    `/issues/${issueKey}/comments`,
+    `/issues/${plainIssueKey}/comments`,
     memberCookie,
     { body: "hello" },
   );
@@ -166,5 +167,8 @@ test("the people list carries each signed-in person's photo URL, null for the ow
 
   const ownerUrl = setActorPhoto(db, ownerId, PNG).photoUrl;
   const again = await web("GET", "/people", ownerCookie);
-  expect(again.items[0]).toMatchObject({ owner: true, photoUrl: ownerUrl });
+  expect(again.items.find((p: Body) => p.username === owner)).toMatchObject({
+    owner: true,
+    photoUrl: ownerUrl,
+  });
 });

@@ -162,6 +162,28 @@ test("a PUT streamed without a Content-Length over the limit is a 413", async ()
   expect(error.message).toMatch(/^the photo is over the limit/);
 });
 
+test("a PUT declaring a Content-Length over the limit is a 413 before its body is read", async () => {
+  const kept = addBot(`declared-${projectKey()}`);
+  const put = (declared: number, body: Uint8Array) =>
+    app.request("/api/v1/me/photo", {
+      method: "PUT",
+      headers: {
+        authorization: `Bearer ${kept.key}`,
+        "content-type": "image/png",
+        "content-length": String(declared),
+      },
+      body,
+    });
+  // control: a declared length at the limit gets through the same way
+  expect((await put(262144, pngOfSize(262144))).status).toBe(200);
+  // a small valid PNG would be stored if the body were looked at; only the declared length can refuse it
+  const res = await put(262145, PNG);
+  expect(res.status).toBe(413);
+  const { error } = (await res.json()) as Body;
+  expect(error.code).toBe("payload_too_large");
+  expect(error.message).toMatch(/^the photo is over the limit/);
+});
+
 test("a JPEG labelled image/png is stored as a JPEG", async () => {
   const res = await putPhoto(JPEG, "image/png");
   expect(res.status).toBe(200);

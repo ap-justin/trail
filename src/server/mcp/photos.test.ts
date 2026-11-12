@@ -128,6 +128,16 @@ test.each([
   expect(new Uint8Array(await served.arrayBuffer())).toEqual(image);
 });
 
+test("a 256 KB photo wrapped at 76 columns is accepted: line breaks are stripped before the length check", async () => {
+  const image = pngOfSize(262144);
+  const wrapped = `${(b64(image).match(/.{1,76}/g) ?? []).join("\n")}\n`;
+  // the wrapped text is over the base64 cap, so only stripping first lets it through
+  expect(wrapped.length).toBeGreaterThan(349528);
+  const { photoUrl } = await call(wide, "set_my_photo", { data: wrapped });
+  const served = await request("GET", photoUrl);
+  expect(new Uint8Array(await served.arrayBuffer())).toEqual(image);
+});
+
 test("set_my_photo points larger files to the REST route", async () => {
   const { tools } = await wide.listTools();
   const description =
