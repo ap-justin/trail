@@ -470,6 +470,7 @@ test("whoami answers the key's bot and list_bots pages every bot with id, name a
     kind: "bot",
     name: "mcp whoami",
     label: "agent-mcp",
+    scope: { projects: null, actions: null },
   });
 
   const items: Body[] = [];

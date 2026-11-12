@@ -16,10 +16,11 @@ import type { Db } from "../db/client.js";
 import { issue, issueLabel, issueLink, label, project } from "../db/schema.js";
 import type { ActingActor, Service } from "../service/index.js";
 import { page } from "../service/paging.js";
+import { amongVisible, noIssue } from "../service/visible.js";
 import { timelineOf } from "./entries.js";
 import { createWebRouter, type Member } from "./env.js";
 import { keyParam } from "./projects.js";
-import { actorsById, noIssue, visibleIds, visibleProject } from "./visible.js";
+import { actorsById, visibleIds, visibleProject } from "./visible.js";
 
 type IssueRow = typeof issue.$inferSelect;
 
@@ -75,7 +76,7 @@ export function visibleIssue(db: Db, member: Member, ref: string) {
   const ids = visibleIds(member);
   const columns = { issue, projectKey: project.key, projectName: project.name };
   const visible = and(
-    inArray(issue.projectId, ids),
+    amongVisible(issue.projectId, ids),
     eq(project.id, issue.projectId),
   );
   const match = issueKeyPattern.exec(ref);

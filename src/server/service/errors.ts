@@ -8,6 +8,18 @@ export class ForbiddenError extends ServiceError {
   override readonly name = "ForbiddenError";
 }
 
+/** The key lacks the action the call needs. */
+export class ForbiddenActionError extends ServiceError {
+  readonly code = "forbidden_action";
+  override readonly name = "ForbiddenActionError";
+}
+
+/** A key limited to some projects creating a project, or importing one outside them. */
+export class ForbiddenScopeError extends ServiceError {
+  readonly code = "forbidden_scope";
+  override readonly name = "ForbiddenScopeError";
+}
+
 export class NotFoundError extends ServiceError {
   readonly code = "not_found";
   override readonly name = "NotFoundError";

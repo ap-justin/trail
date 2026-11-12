@@ -11,6 +11,7 @@ import {
   sql,
 } from "drizzle-orm";
 import type { Db } from "../db/client.js";
+import type { ApiKeyAction } from "../db/schema.js";
 import {
   activityEvent,
   actor as actorTable,
@@ -27,8 +28,9 @@ import {
 import type { ActivityEvent, EventBus } from "../events/bus.js";
 import {
   ConflictError,
+  ForbiddenActionError,
   ForbiddenError,
-  NotFoundError,
+  ForbiddenScopeError,
   ValidationError,
 } from "./errors.js";
 import {
@@ -46,7 +48,7 @@ import {
   normalImport,
   zeroCounts,
 } from "./import.js";
-import type { Actor } from "./keys.js";
+import { type Actor, andList, type KeyScope } from "./keys.js";
 import {
   decodeFeedCursor,
   encodeFeedCursor,
@@ -73,6 +75,12 @@ import {
   validStatus,
   withinIssueCap,
 } from "./validate.js";
+import {
+  amongVisible,
+  noIssue,
+  noProject,
+  type VisibleIds,
+} from "./visible.js";
 
 export type {
   ImportComment,
@@ -85,7 +93,11 @@ export type { Actor } from "./keys.js";
 export type { Page, PageQuery } from "./paging.js";
 export type { Link, LinkInput } from "./validate.js";
 
-export type ActingActor = Pick<Actor, "id" | "kind">;
+/**
+ * Who a call acts as. A bot key's `scope` limits what it reaches; a person
+ * carries none, and /api/web applies their visibility before calling.
+ */
+export type ActingActor = Pick<Actor, "id" | "kind"> & { scope?: KeyScope };
 export type Project = typeof project.$inferSelect;
 type IssueRow = typeof issue.$inferSelect;
 /** An issue with its key (as in TRL-12), label names A–Z, and links in the order set. */
@@ -192,6 +204,29 @@ function requireBot(actor: ActingActor, write: string): void {
   }
 }
 
+/**
+ * Refuses a call the actor's key lacks `action` for, naming the call as
+ * `doing`. `reach` looks up the call's target first, so one the key can't see
+ * is the 404 a missing one is, whatever the key's actions.
+ */
+function requireAction(
+  actor: ActingActor,
+  action: ApiKeyAction,
+  doing: string,
+  reach?: () => unknown,
+): void {
+  const actions = actor.scope?.actions;
+  if (actions == null || actions.includes(action)) return;
+  reach?.();
+  throw new ForbiddenActionError(
+    `this key may not ${doing}: that needs the ${action} action, and the key has ${andList(actions)}. Ask whoever minted the key for one with the ${action} action.`,
+  );
+}
+
+/** "project A" or "projects A and B": the projects a key is limited to. */
+const reachOf = (projects: { key: string }[]) =>
+  `project${projects.length > 1 ? "s" : ""} ${andList(projects.map((p) => p.key))}`;
+
 /** Fields of `patch` whose value differs from `current`, as from/to pairs. */
 function changesOf<T extends object>(
   current: T,
@@ -226,6 +261,9 @@ function changedFields<T extends object>(
 }
 
 const isEmpty = (fields: object) => Object.keys(fields).length === 0;
+
+const visibleIdsOf = (actor: ActingActor): VisibleIds =>
+  actor.scope?.projects?.map((p) => p.id) ?? null;
 
 const sameJson = (a: unknown, b: unknown) =>
   JSON.stringify(a) === JSON.stringify(b);
@@ -282,26 +320,50 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
     });
   }
 
-  /** The project with this id, or else this key (in any case). */
-  function resolveProject(tx: Tx | Db, ref: string): Project {
+  /** The project the actor sees with this id, or else this key (in any case). */
+  function resolveProject(
+    tx: Tx | Db,
+    ref: string,
+    actor: ActingActor,
+  ): Project {
+    const visible = amongVisible(project.id, visibleIdsOf(actor));
     const found =
-      tx.select().from(project).where(eq(project.id, ref)).get() ??
-      tx.select().from(project).where(eq(project.key, ref.toUpperCase())).get();
+      tx
+        .select()
+        .from(project)
+        .where(and(eq(project.id, ref), visible))
+        .get() ??
+      tx
+        .select()
+        .from(project)
+        .where(and(eq(project.key, ref.toUpperCase()), visible))
+        .get();
     if (!found) {
-      throw new NotFoundError(
-        `no project ${ref}: pass the id or key (like TRL) of an existing project`,
+      throw noProject(
+        ref,
+        "pass the id or key (like TRL) of an existing project",
       );
     }
     return found;
   }
 
   /**
-   * The issue with this id, else this key (TRL-12, the project key in any
-   * case), else this source key (JUS-187, any case): a trail key wins over a
-   * source key that looks the same.
+   * The issue the actor sees with this id, else this key (TRL-12, the project
+   * key in any case), else this source key (JUS-187, any case): a trail key
+   * wins over a source key that looks the same. Only visible issues are
+   * searched, so a hidden one shadows nothing.
    */
-  function resolveIssueRow(tx: Tx | Db, ref: string): IssueRow {
-    const byId = tx.select().from(issue).where(eq(issue.id, ref)).get();
+  function resolveIssueRow(
+    tx: Tx | Db,
+    ref: string,
+    actor: ActingActor,
+  ): IssueRow {
+    const visible = amongVisible(issue.projectId, visibleIdsOf(actor));
+    const byId = tx
+      .select()
+      .from(issue)
+      .where(and(eq(issue.id, ref), visible))
+      .get();
     if (byId) return byId;
     const match = issueKeyPattern.exec(ref);
     const byKey =
@@ -314,6 +376,7 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
           and(
             eq(project.key, (match[1] as string).toUpperCase()),
             eq(issue.number, Number(match[2])),
+            visible,
           ),
         )
         .get()?.issue;
@@ -321,11 +384,12 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
     const bySourceKey = tx
       .select()
       .from(issue)
-      .where(eq(issue.sourceKey, ref.trim().toUpperCase()))
+      .where(and(eq(issue.sourceKey, ref.trim().toUpperCase()), visible))
       .get();
     if (!bySourceKey) {
-      throw new NotFoundError(
-        `no issue ${ref}: pass the id, the key (like TRL-12) or the source key (like JUS-187, kept from an import) of an existing issue`,
+      throw noIssue(
+        ref,
+        "pass the id, the key (like TRL-12) or the source key (like JUS-187, kept from an import) of an existing issue",
       );
     }
     return bySourceKey;
@@ -532,6 +596,13 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
       .from(project)
       .where(eq(project.externalRef, input.externalRef))
       .get();
+    // before any key is checked for a clash, so a hidden project and a new one are refused alike
+    const limited = actor.scope?.projects;
+    if (limited && !limited.some((p) => p.id === existing?.id)) {
+      throw new ForbiddenScopeError(
+        `this key may not import a project outside ${reachOf(limited)}. Ask whoever minted the key for one that lists the project, or no project list.`,
+      );
+    }
     if (!existing) {
       const taken = tx
         .select()
@@ -825,6 +896,14 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
       options: WriteOptions = {},
     ): Project {
       requireBot(actor, "create a project");
+      requireAction(actor, "admin", "create a project");
+      const limited = actor.scope?.projects;
+      // before the key is checked, so a taken key in a hidden project tells it nothing
+      if (limited) {
+        throw new ForbiddenScopeError(
+          `this key may not create a project: it reaches only ${reachOf(limited)}. Ask whoever minted the key for one with no project list.`,
+        );
+      }
       const fields = {
         name: nonBlank(input.name, "name"),
         key: validProjectKey(input.key),
@@ -888,13 +967,16 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
       patch: ProjectPatch,
     ): Project {
       requireBot(actor, "update a project");
+      requireAction(actor, "admin", "update a project", () =>
+        resolveProject(db, ref, actor),
+      );
       const next: ProjectPatch = {
         name:
           patch.name === undefined ? undefined : nonBlank(patch.name, "name"),
         description: patch.description,
       };
       return commit((tx) => {
-        const current = resolveProject(tx, ref);
+        const current = resolveProject(tx, ref, actor);
         const changes = changesOf(current, next);
         if (Object.keys(changes).length === 0) {
           return { result: current, event: null };
@@ -925,6 +1007,9 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
       input: IssueInput,
       options: WriteOptions = {},
     ): Issue {
+      requireAction(actor, "issues", "create an issue", () =>
+        resolveProject(db, input.projectId, actor),
+      );
       if (actor.kind === "human" && input.assigneeId != null) {
         throw new ForbiddenError(
           "a human files an issue unassigned: drop assigneeId, and a bot assigns it",
@@ -937,7 +1022,7 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
       const links = validLinks(input.links ?? []);
       const externalRef = optionalRef(input.externalRef);
       return create(actor, options, "issue.create", (tx) => {
-        const target = resolveProject(tx, input.projectId);
+        const target = resolveProject(tx, input.projectId, actor);
         requireAssignee(tx, input.assigneeId);
         const fields = {
           projectId: target.id,
@@ -1010,6 +1095,9 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
     /** A patch that changes nothing writes nothing and emits no event. */
     updateIssue(actor: ActingActor, ref: string, patch: IssuePatch): Issue {
       requireBot(actor, "update an issue");
+      requireAction(actor, "issues", "update an issue", () =>
+        resolveIssueRow(db, ref, actor),
+      );
       const next = {
         title:
           patch.title === undefined
@@ -1061,7 +1149,7 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
       const replacementLinks =
         patch.links === undefined ? undefined : validLinks(patch.links);
       return commit((tx) => {
-        const row = resolveIssueRow(tx, ref);
+        const row = resolveIssueRow(tx, ref, actor);
         const current = hydrateOne(tx, row);
         const changes = changesOf<IssueRow>(row, next);
         if ("assigneeId" in changes) requireAssignee(tx, next.assigneeId);
@@ -1142,12 +1230,15 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
       input: CommentInput,
       options: WriteOptions = {},
     ): Comment {
+      requireAction(actor, "comments", "comment on an issue", () =>
+        resolveIssueRow(db, input.issueId, actor),
+      );
       if (input.body.trim() === "") {
         throw new ValidationError("body must not be empty");
       }
       const externalRef = optionalRef(input.externalRef);
       return create(actor, options, "comment.create", (tx) => {
-        const target = resolveIssueRow(tx, input.issueId);
+        const target = resolveIssueRow(tx, input.issueId, actor);
         const fields = {
           issueId: target.id,
           body: input.body,
@@ -1204,6 +1295,9 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
       options: WriteOptions = {},
     ): StatusUpdate {
       requireBot(actor, "post a project status update");
+      requireAction(actor, "status_updates", "post a status update", () =>
+        resolveProject(db, input.projectId, actor),
+      );
       const body = input.body;
       if (body.trim() === "") {
         throw new ValidationError("body must not be empty");
@@ -1211,7 +1305,7 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
       const health = validHealth(input.health);
       const externalRef = optionalRef(input.externalRef);
       return create(actor, options, "status_update.create", (tx) => {
-        const target = resolveProject(tx, input.projectId);
+        const target = resolveProject(tx, input.projectId, actor);
         const fields = { projectId: target.id, body, health, externalRef };
         return {
           request: fields,
@@ -1260,9 +1354,12 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
       options: WriteOptions = {},
     ): Label {
       requireBot(actor, "create a label");
+      requireAction(actor, "admin", "create a label", () =>
+        resolveProject(db, input.projectId, actor),
+      );
       const name = nonBlank(input.name, "name");
       return create(actor, options, "label.create", (tx) => {
-        const target = resolveProject(tx, input.projectId);
+        const target = resolveProject(tx, input.projectId, actor);
         return {
           request: { projectId: target.id, name },
           write: () => {
@@ -1302,6 +1399,7 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
      */
     importProject(actor: ActingActor, payload: ImportPayload): ImportResult {
       requireBot(actor, "import a project");
+      requireAction(actor, "admin", "import a project");
       const input = normalImport(payload);
       return commit((tx) => {
         const tally: Tally = {
@@ -1375,13 +1473,18 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
       });
     },
 
-    getProject(_actor: ActingActor, ref: string): Project {
-      return resolveProject(db, ref);
+    getProject(actor: ActingActor, ref: string): Project {
+      requireAction(actor, "read", "read a project", () =>
+        resolveProject(db, ref, actor),
+      );
+      return resolveProject(db, ref, actor);
     },
 
     /** Newest first. */
-    listProjects(_actor: ActingActor, query: PageQuery = {}): Page<Project> {
-      return page(project, "desc", query, [], (where, orderBy, limit) =>
+    listProjects(actor: ActingActor, query: PageQuery = {}): Page<Project> {
+      requireAction(actor, "read", "list projects");
+      const visible = [amongVisible(project.id, visibleIdsOf(actor))];
+      return page(project, "desc", query, visible, (where, orderBy, limit) =>
         db
           .select()
           .from(project)
@@ -1392,16 +1495,25 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
       );
     },
 
-    getIssue(_actor: ActingActor, ref: string): Issue {
-      return hydrateOne(db, resolveIssueRow(db, ref));
+    getIssue(actor: ActingActor, ref: string): Issue {
+      requireAction(actor, "read", "read an issue", () =>
+        resolveIssueRow(db, ref, actor),
+      );
+      return hydrateOne(db, resolveIssueRow(db, ref, actor));
     },
 
     /** Newest first. */
-    listIssues(_actor: ActingActor, query: IssueQuery = {}): Page<Issue> {
-      const filters = [
+    listIssues(actor: ActingActor, query: IssueQuery = {}): Page<Issue> {
+      requireAction(actor, "read", "list issues", () =>
         query.projectId === undefined
           ? undefined
-          : eq(issue.projectId, resolveProject(db, query.projectId).id),
+          : resolveProject(db, query.projectId, actor),
+      );
+      const filters = [
+        amongVisible(issue.projectId, visibleIdsOf(actor)),
+        query.projectId === undefined
+          ? undefined
+          : eq(issue.projectId, resolveProject(db, query.projectId, actor).id),
         query.status === undefined
           ? undefined
           : eq(issue.status, validStatus(query.status)),
@@ -1428,11 +1540,14 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
 
     /** Oldest first, the order an issue's thread reads in. */
     listComments(
-      _actor: ActingActor,
+      actor: ActingActor,
       issueRef: string,
       query: PageQuery = {},
     ): Page<Comment> {
-      const target = resolveIssueRow(db, issueRef);
+      requireAction(actor, "read", "list comments", () =>
+        resolveIssueRow(db, issueRef, actor),
+      );
+      const target = resolveIssueRow(db, issueRef, actor);
       return page(
         comment,
         "asc",
@@ -1451,11 +1566,14 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
 
     /** Newest first. */
     listStatusUpdates(
-      _actor: ActingActor,
+      actor: ActingActor,
       projectRef: string,
       query: PageQuery = {},
     ): Page<StatusUpdate> {
-      const target = resolveProject(db, projectRef);
+      requireAction(actor, "read", "list status updates", () =>
+        resolveProject(db, projectRef, actor),
+      );
+      const target = resolveProject(db, projectRef, actor);
       return page(
         projectStatusUpdate,
         "desc",
@@ -1474,11 +1592,14 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
 
     /** Oldest first. */
     listLabels(
-      _actor: ActingActor,
+      actor: ActingActor,
       projectRef: string,
       query: PageQuery = {},
     ): Page<Label> {
-      const target = resolveProject(db, projectRef);
+      requireAction(actor, "read", "list labels", () =>
+        resolveProject(db, projectRef, actor),
+      );
+      const target = resolveProject(db, projectRef, actor);
       return page(
         label,
         "asc",
@@ -1505,7 +1626,8 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
     },
 
     /** Every bot, oldest first. */
-    listBots(_actor: ActingActor, query: PageQuery = {}): Page<Actor> {
+    listBots(actor: ActingActor, query: PageQuery = {}): Page<Actor> {
+      requireAction(actor, "admin", "list bots");
       return page(
         actorTable,
         "asc",
@@ -1528,9 +1650,14 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
      * issued under.
      */
     listActivity(
-      _actor: ActingActor,
+      actor: ActingActor,
       query: ActivityQuery = {},
     ): Page<ActivityEvent> {
+      requireAction(actor, "read", "read the activity feed", () =>
+        query.projectId === undefined
+          ? undefined
+          : resolveProject(db, query.projectId, actor),
+      );
       if (query.cursor !== undefined && query.after !== undefined) {
         throw new ValidationError(
           "send cursor (newest first) or after (oldest first), not both",
@@ -1541,10 +1668,11 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
         projectId:
           query.projectId === undefined
             ? null
-            : resolveProject(db, query.projectId).id,
+            : resolveProject(db, query.projectId, actor).id,
         actorId: query.actorId ?? null,
       };
       const where: (SQL | undefined)[] = [
+        amongVisible(activityEvent.projectId, visibleIdsOf(actor)),
         filters.projectId === null
           ? undefined
           : eq(activityEvent.projectId, filters.projectId),

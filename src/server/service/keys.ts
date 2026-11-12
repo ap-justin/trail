@@ -1,11 +1,43 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { and, asc, eq, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
 import type { Db } from "../db/client.js";
-import { actor, apiKey } from "../db/schema.js";
+import {
+  type ApiKeyAction,
+  actor,
+  apiKey,
+  apiKeyActions,
+  apiKeyProject,
+  project,
+} from "../db/schema.js";
 import { ConflictError, NotFoundError, ValidationError } from "./errors.js";
 import type { Tx } from "./tx.js";
 
 export type Actor = typeof actor.$inferSelect;
+
+/** What a key may reach; null on either side is unrestricted. */
+export type KeyScope = {
+  /** by id and key, A to Z by key */
+  projects: { id: string; key: string }[] | null;
+  /** in `apiKeyActions` order */
+  actions: ApiKeyAction[] | null;
+};
+
+/** A bot as one of its keys authenticates it: the bot, and that key's scope. */
+export type KeyActor = Actor & { scope: KeyScope };
+
+/** A key's scope as a person or bot reads it: projects by key. */
+export type KeyScopeView = {
+  projects: string[] | null;
+  actions: ApiKeyAction[] | null;
+};
+
+/** The scope to mint a key with: project keys in any case, and actions; a list left out is unrestricted. */
+export type KeyScopeInput = { projects?: string[]; actions?: string[] };
+
+export const scopeView = (scope: KeyScope): KeyScopeView => ({
+  projects: scope.projects?.map((p) => p.key) ?? null,
+  actions: scope.actions,
+});
 
 // trail_<8 hex prefix>_<43 base64url chars of 32 random bytes>; hex keeps `_` out of the prefix
 const keyPattern = /^trail_([0-9a-f]{8})_[A-Za-z0-9_-]{43}$/;
@@ -24,23 +56,80 @@ function displayNameOf(displayName: string): string {
   return name;
 }
 
-function mintKey(tx: Tx, actorId: string): string {
+/** "a", "a and b", "a, b and c" */
+export const andList = (items: readonly string[]) =>
+  items.length < 2
+    ? items.join("")
+    : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
+
+function validActions(raw: string[] | undefined): ApiKeyAction[] | null {
+  if (raw === undefined) return null;
+  if (raw.length === 0) {
+    throw new ValidationError(
+      "actions must name at least one action: leave it out for a key with every action",
+    );
+  }
+  const wanted = new Set(raw.map((a) => a.trim()));
+  for (const action of wanted) {
+    if (!(apiKeyActions as readonly string[]).includes(action)) {
+      throw new ValidationError(
+        `unknown action "${action}": a key's actions are ${andList(apiKeyActions)}`,
+      );
+    }
+  }
+  return apiKeyActions.filter((a) => wanted.has(a));
+}
+
+/** The ids of the projects with these keys; null for a list left out. */
+function projectIdsOf(tx: Tx, keys: string[] | undefined): string[] | null {
+  if (keys === undefined) return null;
+  if (keys.length === 0) {
+    throw new ValidationError(
+      "projects must name at least one project: leave it out for a key that reaches every project",
+    );
+  }
+  const wanted = [...new Set(keys.map((k) => k.trim().toUpperCase()))];
+  const found = tx
+    .select({ id: project.id, key: project.key })
+    .from(project)
+    .where(inArray(project.key, wanted))
+    .all();
+  const unknown = wanted.filter((k) => !found.some((p) => p.key === k));
+  if (unknown.length > 0) {
+    throw new ValidationError(
+      `no project with key ${unknown.join(", ")}: scope the key to the keys of existing projects, like TRL`,
+    );
+  }
+  return found.map((p) => p.id);
+}
+
+function mintKey(tx: Tx, actorId: string, scope: KeyScopeInput): string {
+  const actions = validActions(scope.actions);
+  const projectIds = projectIdsOf(tx, scope.projects);
   const prefix = randomBytes(4).toString("hex");
   const key = `trail_${prefix}_${randomBytes(32).toString("base64url")}`;
-  tx.insert(apiKey)
-    .values({ actorId, prefix, hash: sha256(key).toString("hex") })
-    .run();
+  const { id } = tx
+    .insert(apiKey)
+    .values({ actorId, prefix, hash: sha256(key).toString("hex"), actions })
+    .returning({ id: apiKey.id })
+    .get();
+  if (projectIds !== null) {
+    tx.insert(apiKeyProject)
+      .values(projectIds.map((projectId) => ({ apiKeyId: id, projectId })))
+      .run();
+  }
   return key;
 }
 
 /**
- * Creates a bot and its key. The key is returned once and never stored. A bot's
- * name (ignoring the case of A-Z), and its label when it has one, are unique among bots.
+ * Creates a bot and its key, scoped to `options.scope`. The key is returned
+ * once and never stored. A bot's name (ignoring the case of A-Z), and its
+ * label when it has one, are unique among bots.
  */
 export function createBot(
   db: Db,
   displayName: string,
-  options: { label?: string } = {},
+  options: { label?: string; scope?: KeyScopeInput } = {},
 ): { actor: Actor; key: string } {
   const name = displayNameOf(displayName);
   const label = options.label === undefined ? null : labelOf(options.label);
@@ -78,16 +167,20 @@ export function createBot(
         .values({ kind: "bot", displayName: name, label })
         .returning()
         .get();
-      return { actor: created, key: mintKey(tx, created.id) };
+      return {
+        actor: created,
+        key: mintKey(tx, created.id, options.scope ?? {}),
+      };
     },
     { behavior: "immediate" },
   );
 }
 
-/** Mints another key for the bot with this actor id or label. */
+/** Mints another key, scoped to `scope`, for the bot with this actor id or label. */
 export function createKey(
   db: Db,
   botRef: string,
+  scope: KeyScopeInput = {},
 ): { actor: Actor; key: string } {
   return db.transaction(
     (tx) => {
@@ -106,7 +199,7 @@ export function createKey(
           `no bot with id or label ${botRef}: \`trail key list\` shows each bot's id and label`,
         );
       }
-      return { actor: bot, key: mintKey(tx, bot.id) };
+      return { actor: bot, key: mintKey(tx, bot.id, scope) };
     },
     { behavior: "immediate" },
   );
@@ -119,12 +212,41 @@ export type KeyListing = {
   label: string | null;
   createdAt: Date;
   revokedAt: Date | null;
+  scope: KeyScopeView;
 };
 
-/** Every key, oldest first, without its hash. */
+/** The projects each of these keys is limited to, by key id; a key with none is absent. */
+function allowlists(
+  db: Db,
+  keyIds: string[],
+): Map<string, { id: string; key: string }[]> {
+  const rows =
+    keyIds.length === 0
+      ? []
+      : db
+          .select({
+            keyId: apiKeyProject.apiKeyId,
+            id: project.id,
+            key: project.key,
+          })
+          .from(apiKeyProject)
+          .innerJoin(project, eq(project.id, apiKeyProject.projectId))
+          .where(inArray(apiKeyProject.apiKeyId, keyIds))
+          .orderBy(asc(project.key))
+          .all();
+  const byKey = new Map<string, { id: string; key: string }[]>();
+  for (const { keyId, id, key } of rows) {
+    byKey.set(keyId, [...(byKey.get(keyId) ?? []), { id, key }]);
+  }
+  return byKey;
+}
+
+/** Every key, oldest first, with its scope and without its hash. */
 export function listKeys(db: Db): KeyListing[] {
-  return db
+  const rows = db
     .select({
+      id: apiKey.id,
+      actions: apiKey.actions,
       prefix: apiKey.prefix,
       actorId: apiKey.actorId,
       displayName: actor.displayName,
@@ -136,6 +258,14 @@ export function listKeys(db: Db): KeyListing[] {
     .innerJoin(actor, eq(actor.id, apiKey.actorId))
     .orderBy(asc(apiKey.createdAt), asc(apiKey.id))
     .all();
+  const lists = allowlists(
+    db,
+    rows.map((r) => r.id),
+  );
+  return rows.map(({ id, actions, ...listing }) => ({
+    ...listing,
+    scope: scopeView({ projects: lists.get(id) ?? null, actions }),
+  }));
 }
 
 export function createHuman(
@@ -176,18 +306,41 @@ export function revokeKey(
   );
 }
 
-/** The bot a bearer token belongs to, or null when it is malformed, unknown or revoked. */
-export function resolveKey(db: Db, token: string): Actor | null {
+function verifiedKey(db: Db, token: string) {
   const prefix = keyPattern.exec(token)?.[1];
   if (prefix === undefined) return null;
   const row = db
-    .select({ actor, hash: apiKey.hash, revokedAt: apiKey.revokedAt })
+    .select({
+      actor,
+      id: apiKey.id,
+      actions: apiKey.actions,
+      hash: apiKey.hash,
+      revokedAt: apiKey.revokedAt,
+    })
     .from(apiKey)
     .innerJoin(actor, eq(actor.id, apiKey.actorId))
     .where(eq(apiKey.prefix, prefix))
     .get();
   if (!row || row.revokedAt) return null;
   return timingSafeEqual(sha256(token), Buffer.from(row.hash, "hex"))
-    ? row.actor
+    ? row
     : null;
+}
+
+/** The bot a bearer token belongs to, or null when it is malformed, unknown or revoked. */
+export function resolveKey(db: Db, token: string): Actor | null {
+  return verifiedKey(db, token)?.actor ?? null;
+}
+
+/** `resolveKey` with the scope of the key the token is. */
+export function authenticateKey(db: Db, token: string): KeyActor | null {
+  const row = verifiedKey(db, token);
+  if (!row) return null;
+  return {
+    ...row.actor,
+    scope: {
+      projects: allowlists(db, [row.id]).get(row.id) ?? null,
+      actions: row.actions,
+    },
+  };
 }

@@ -16,6 +16,7 @@ test("GET /whoami answers the key's bot: id, kind, name and label", async () => 
     kind: "bot",
     name: "rest whoami",
     label: "agent-7",
+    scope: { projects: null, actions: null },
   });
 });
 

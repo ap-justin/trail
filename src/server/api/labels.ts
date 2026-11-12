@@ -35,8 +35,8 @@ const createLabel = createRoute({
   },
   responses: {
     201: jsonContent(labelSchema, "The created label"),
+    ...forbiddenError("admin"),
     ...writeErrors,
-    ...forbiddenError,
     ...notFoundError,
     ...conflictError,
   },
@@ -50,6 +50,7 @@ const listLabels = createRoute({
   request: { params: projectParam, query: pageQuerySchema },
   responses: {
     200: jsonContent(pageSchema(labelSchema), "A page of labels"),
+    ...forbiddenError("read"),
     ...readErrors,
     ...notFoundError,
   },

@@ -32,12 +32,12 @@ const importProject = createRoute({
       importResultSchema,
       "The project, per kind how many rows were created, updated and left unchanged, and the issues that were renumbered",
     ),
+    ...forbiddenError("admin", { scope: true }),
     ...writeErrors,
     413: jsonContent(
       errorSchema,
       `The body is over ${IMPORT_MAX_BODY_BYTES} bytes`,
     ),
-    ...forbiddenError,
     ...conflictError,
   },
 });

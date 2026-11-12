@@ -9,6 +9,7 @@ import type { Service } from "../service/index.js";
 import { createRouter } from "./env.js";
 import {
   conflictError,
+  forbiddenError,
   idempotencyHeaders,
   issueParam,
   jsonBody,
@@ -33,6 +34,7 @@ const addComment = createRoute({
   },
   responses: {
     201: jsonContent(commentSchema, "The created comment"),
+    ...forbiddenError("comments"),
     ...writeErrors,
     ...notFoundError,
     ...conflictError,
@@ -47,6 +49,7 @@ const listComments = createRoute({
   request: { params: issueParam, query: pageQuerySchema },
   responses: {
     200: jsonContent(pageSchema(commentSchema), "A page of comments"),
+    ...forbiddenError("read"),
     ...readErrors,
     ...notFoundError,
   },

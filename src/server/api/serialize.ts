@@ -9,6 +9,7 @@ import type {
   PageView,
   ProjectView,
   StatusUpdateView,
+  WhoamiView,
 } from "../../shared/schemas.js";
 import type { ActivityEvent } from "../events/bus.js";
 import type {
@@ -21,6 +22,7 @@ import type {
   Project,
   StatusUpdate,
 } from "../service/index.js";
+import { type KeyScope, scopeView } from "../service/keys.js";
 
 // One function per resource, each listing its wire keys, so a new column reaches the wire only on purpose.
 
@@ -116,6 +118,10 @@ export function toActor(row: Actor): ActorView {
     name: row.displayName,
     label: row.label,
   };
+}
+
+export function toWhoami(row: Actor, scope: KeyScope): WhoamiView {
+  return { ...toActor(row), scope: scopeView(scope) };
 }
 
 export function toBot(row: Actor): BotView {
