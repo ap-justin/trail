@@ -17,7 +17,9 @@ export const RECONNECT_MS = 5000;
 export type LiveConnection = "connecting" | "open" | "reconnecting";
 
 type Arrivals = {
-  /** Shown above the loaded page, newest first. */
+  /** The rows of the last `/feed` read that are on screen; null until the first read. */
+  page: EntryView[] | null;
+  /** Shown from the stream, newest first. */
   shown: EntryView[];
   /** Held while the viewer is scrolled away, newest first. */
   pending: EntryView[];
@@ -25,10 +27,19 @@ type Arrivals = {
 
 type ArrivalAction =
   | { type: "received"; entry: EntryView; hold: boolean }
-  | { type: "show_pending"; entries: EntryView[] }
+  | { type: "read"; items: EntryView[]; hold: boolean }
+  | { type: "show_pending" }
   | { type: "clear" };
 
-const noArrivals: Arrivals = { shown: [], pending: [] };
+const noArrivals: Arrivals = { page: null, shown: [], pending: [] };
+
+// a refetch after a gap brings rows newer than ones the stream already delivered;
+// stable, so equal timestamps keep the order they came in
+const newestFirst = (entries: EntryView[]) =>
+  entries.toSorted((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+
+const idsOf = (...lists: EntryView[][]) =>
+  new Set(lists.flat().map((e) => e.id));
 
 function arrivals(state: Arrivals, action: ArrivalAction): Arrivals {
   switch (action.type) {
@@ -36,8 +47,29 @@ function arrivals(state: Arrivals, action: ArrivalAction): Arrivals {
       return action.hold
         ? { ...state, pending: [action.entry, ...state.pending] }
         : { ...state, shown: [action.entry, ...state.shown] };
+    case "read": {
+      if (state.page === null || !action.hold) {
+        return { ...state, page: action.items };
+      }
+      // a read while scrolled away holds what it brings, as the stream's rows are held
+      const onScreen = idsOf(state.page, state.shown);
+      const heldIds = idsOf(state.pending);
+      const newcomers = action.items.filter(
+        (e) => !onScreen.has(e.id) && !heldIds.has(e.id),
+      );
+      for (const e of newcomers) heldIds.add(e.id);
+      return {
+        ...state,
+        page: action.items.filter((e) => !heldIds.has(e.id)),
+        pending: newestFirst([...state.pending, ...newcomers]),
+      };
+    }
     case "show_pending":
-      return { shown: [...action.entries, ...state.shown], pending: [] };
+      return {
+        ...state,
+        shown: [...state.pending, ...state.shown],
+        pending: [],
+      };
     case "clear":
       return noArrivals;
   }
@@ -67,19 +99,30 @@ export function useLiveFeed(
   const [freshIds, setFreshIds] = useState<ReadonlySet<string>>(new Set());
   const [connection, setConnection] = useState<LiveConnection>("connecting");
   const [attempt, setAttempt] = useState(0);
-  const atTop = useRef(true);
+  const [atTop, setAtTop] = useState(true);
   const received = useRef(new Set<string>());
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
+  // once anything is held, later entries wait behind it so the order holds
+  const hold = !atTop || state.pending.length > 0;
 
   const filterKey = `${actor}\u0000${project}`;
   const [shownFor, setShownFor] = useState(filterKey);
-  if (shownFor !== filterKey) {
+  const filterChanged = shownFor !== filterKey;
+  if (filterChanged) {
     setShownFor(filterKey);
     dispatch({ type: "clear" });
     setFreshIds(new Set());
     setConnection("connecting");
     setAttempt(0);
     received.current = new Set();
+  }
+
+  const loading = feed.isPending || feed.isPlaceholderData;
+  const read = loading ? null : (feed.data?.items ?? null);
+  const [readSeen, setReadSeen] = useState(read);
+  if (read && (filterChanged || read !== readSeen)) {
+    setReadSeen(read);
+    dispatch({ type: "read", items: read, hold });
   }
 
   const later = (ms: number, run: () => void) => {
@@ -90,21 +133,12 @@ export function useLiveFeed(
     timers.current.add(timer);
   };
 
-  const loading = feed.isPending || feed.isPlaceholderData;
-  const loaded = loading ? [] : (feed.data?.items ?? []);
-  const loadedIds = new Set(loaded.map((e) => e.id));
-  // a read since they arrived (a reopened stream, a reset) can already list them
-  const held = state.pending.filter((e) => !loadedIds.has(e.id));
+  const readIds = idsOf(read ?? []);
 
   const onEntry = useEffectEvent((entry: EntryView) => {
-    if (received.current.has(entry.id) || loadedIds.has(entry.id)) return;
+    if (received.current.has(entry.id) || readIds.has(entry.id)) return;
     received.current.add(entry.id);
-    // once anything is held, later entries wait behind it so the order holds
-    dispatch({
-      type: "received",
-      entry,
-      hold: !atTop.current || held.length > 0,
-    });
+    dispatch({ type: "received", entry, hold });
     setFreshIds((ids) => new Set(ids).add(entry.id));
     later(FRESH_MS, () =>
       setFreshIds((ids) => {
@@ -181,14 +215,15 @@ export function useLiveFeed(
 
   return {
     status: loading ? "loading" : statusOf(feed),
-    entries: [...state.shown, ...loaded.filter((e) => !shownIds.has(e.id))],
+    entries: newestFirst([
+      ...state.shown,
+      ...(state.page ?? []).filter((e) => !shownIds.has(e.id)),
+    ]),
     freshIds,
     connection,
-    pendingCount: held.length,
-    showPending: () => dispatch({ type: "show_pending", entries: held }),
-    setAtTop: (value: boolean) => {
-      atTop.current = value;
-    },
+    pendingCount: state.pending.length,
+    showPending: () => dispatch({ type: "show_pending" }),
+    setAtTop,
     filters: feed.data?.filters ?? { actors: [], projects: [] },
     retry: () => void feed.refetch(),
   };

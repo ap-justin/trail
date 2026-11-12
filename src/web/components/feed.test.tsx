@@ -70,6 +70,19 @@ describe("N new pill", () => {
     await userEvent.click(screen.getByRole("button", { name: "3 new" }));
     expect(props.onShowPending).toHaveBeenCalledOnce();
   });
+
+  // the shell's sticky top bar shares the pill's z-10; the feed's own stacking context keeps the
+  // pill above the rows but under the bar and its search (paint order itself is a browser check)
+  test("stacks inside the feed, so it never draws over the top bar", () => {
+    const { container } = render(
+      <FeedView {...feedProps({ pendingCount: 3 })} />,
+    );
+    const root = container.firstElementChild;
+    expect(root).toHaveClass("isolate");
+    expect(root).toContainElement(
+      screen.getByRole("button", { name: "3 new" }),
+    );
+  });
 });
 
 describe("announcing new activity", () => {

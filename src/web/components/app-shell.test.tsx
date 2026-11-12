@@ -100,6 +100,8 @@ function SearchingShell({ onSearch }: { onSearch: (q: string) => void }) {
         searchResults={
           query === "" ? null : (
             <SearchResults
+              query={query}
+              answeredQuery={query}
               status="ready"
               results={{
                 projects: [],
@@ -129,7 +131,43 @@ function SearchingShell({ onSearch }: { onSearch: (q: string) => void }) {
 const searchBox = () =>
   screen.getByRole("searchbox", { name: "Search issues" });
 
+/** The scroll container around the results, and the slot that bounds its height. */
+function resultsPanel(list: HTMLElement) {
+  const panel = list.parentElement as HTMLElement;
+  return { panel, slot: panel.parentElement as HTMLElement };
+}
+
 describe("search", () => {
+  // jsdom lays nothing out, so the bound is read off the classes that draw it
+  test("at 1440 the results scroll inside a panel bounded to the window under the top bar", async () => {
+    render(<SearchingShell onSearch={vi.fn()} />);
+    await userEvent.type(searchBox(), "team");
+    const { panel, slot } = resultsPanel(
+      screen.getByRole("list", { name: "Search results" }),
+    );
+    expect(slot).toHaveClass("absolute", "flex", "flex-col");
+    expect(slot.className).toMatch(/\bmax-h-\[calc\(100dvh-/);
+    expect(panel).toHaveClass("min-h-0", "overflow-y-auto");
+  });
+
+  test("at 375 the results scroll inside a panel bounded above the tab bar", async () => {
+    const user = userEvent.setup();
+    render(<SearchingShell onSearch={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    const phoneBox = screen.getAllByRole("searchbox", {
+      name: "Search issues",
+    })[1] as HTMLElement;
+    await user.type(phoneBox, "team");
+    // the 1440 box closed when focus moved to this one
+    const { panel, slot } = resultsPanel(
+      screen.getByRole("list", { name: "Search results" }),
+    );
+    expect(slot).not.toHaveClass("absolute");
+    expect(slot).toHaveClass("flex", "flex-col");
+    expect(slot.className).toMatch(/\bmax-h-\[calc\(100dvh-/);
+    expect(panel).toHaveClass("min-h-0", "overflow-y-auto");
+  });
+
   test("Escape from a result clears the box, closes the results and returns to the box", async () => {
     const onSearch = vi.fn();
     render(<SearchingShell onSearch={onSearch} />);

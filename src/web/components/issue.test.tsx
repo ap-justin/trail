@@ -68,6 +68,32 @@ describe("properties", () => {
   });
 });
 
+describe("links", () => {
+  test("a non-web URL is shown as text, never a live anchor", () => {
+    renderIssue({
+      issue: {
+        status: "ready",
+        data: issue({
+          links: [
+            { url: "javascript:alert(1)", title: "Totally a PR" },
+            { url: "https://github.com/ap-justin/trail/pull/31", title: "PR" },
+          ],
+        }),
+      },
+    });
+    const links = screen.getByRole("region", { name: "Links" });
+    expect(within(links).getByText("Totally a PR")).toBeInTheDocument();
+    expect(within(links).getByText("javascript:alert(1)")).toBeInTheDocument();
+    // the https row beside it is still an anchor, so the absence below is a live read
+    expect(
+      within(links)
+        .getAllByRole("link")
+        .map((a) => a.getAttribute("href")),
+    ).toEqual(["https://github.com/ap-justin/trail/pull/31"]);
+    expect(links.querySelector('[href^="javascript:"]')).toBeNull();
+  });
+});
+
 describe("timeline", () => {
   const entries = () => [
     ...document.querySelectorAll<HTMLElement>("[data-entry-id]"),

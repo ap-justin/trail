@@ -5,14 +5,17 @@ import { beforeAll, describe, expect, test } from "vitest";
 
 // The half of the conformance gate the build can't enforce. The build half is in
 // globals.css: `--color-*: initial` and friends leave an off-system class with no rule.
-// This sweeps trail's own components; components/ui is the shadcn CLI's.
+// This sweeps trail's own components and the app chrome; components/ui is the shadcn CLI's.
 
 const stylesDir = resolve("src/web/styles");
 const css = readFileSync(join(stylesDir, "globals.css"), "utf8");
-const componentsDir = resolve("src/web/components");
-const componentFiles = readdirSync(componentsDir)
-  .filter((f) => f.endsWith(".tsx") && !f.endsWith(".test.tsx"))
-  .map((f) => join(componentsDir, f));
+const webDir = resolve("src/web");
+const sweptDirs = [resolve("src/web/components"), resolve("src/web/app")];
+const componentFiles = sweptDirs.flatMap((dir) =>
+  readdirSync(dir)
+    .filter((f) => f.endsWith(".tsx") && !f.endsWith(".test.tsx"))
+    .map((f) => join(dir, f)),
+);
 
 /** Class-name tokens: every string literal, minus import paths and non-class JSX attributes. */
 function classTokens(source: string): string[] {
@@ -38,11 +41,11 @@ function sweep(check: (token: string) => boolean): Finding[] {
   return componentFiles.flatMap((file) =>
     [...new Set(classTokens(readFileSync(file, "utf8")))]
       .filter(check)
-      .map((token) => ({ file: file.slice(componentsDir.length + 1), token })),
+      .map((token) => ({ file: file.slice(webDir.length + 1), token })),
   );
 }
 
-describe("components stay inside the design system", () => {
+describe("components and app chrome stay inside the design system", () => {
   test("no literal values: every colour, length and duration is a token", () => {
     expect(sweep((token) => literalValue.test(token))).toEqual([]);
   });

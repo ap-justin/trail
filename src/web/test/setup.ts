@@ -26,8 +26,9 @@ window.matchMedia = (query: string) =>
 
 beforeAll(() => server.listen({ onUnhandledFrame: "error" }));
 afterEach(() => {
-  server.resetHandlers();
+  // unmount first: a request a mounted tree fires after the handlers are gone would trip the guard
   cleanup();
+  server.resetHandlers();
   expect(leaks.splice(0), "requests no handler answered").toEqual([]);
 });
 afterAll(() => server.close());

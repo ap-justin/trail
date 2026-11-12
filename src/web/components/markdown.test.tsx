@@ -40,6 +40,9 @@ describe("Markdown", () => {
       'Hello <b>bold</b>\n\n<script>alert(1)</script>\n\n<img src="x" onerror="alert(1)">',
     );
     expect(container.querySelector("script, b, img, [onerror]")).toBeNull();
+    // the markup shows as the literal text it is; it is not dropped
+    expect(container).toHaveTextContent("<b>bold</b>");
+    expect(container).toHaveTextContent("<script>alert(1)</script>");
   });
 
   test("links keep http, https and mailto, and open with noopener noreferrer", () => {
@@ -66,7 +69,11 @@ describe("Markdown", () => {
   });
 
   test("images are not rendered", () => {
-    const container = renderMarkdown("![logo](https://example.com/logo.png)");
+    const container = renderMarkdown(
+      "Before ![logo](https://example.com/logo.png) after",
+    );
     expect(container.querySelector("img")).toBeNull();
+    // the text around it survives, so the missing img is not a vanished paragraph
+    expect(container).toHaveTextContent("Before after");
   });
 });

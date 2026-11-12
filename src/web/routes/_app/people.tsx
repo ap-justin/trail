@@ -6,7 +6,11 @@ import { PeopleView } from "@/components/people";
 import { api } from "@/lib/api";
 import { statusOf } from "@/lib/loadable";
 import { keys } from "@/lib/queries";
-import { useAction } from "@/lib/use-action";
+import { useAction, useKeyedAction } from "@/lib/use-action";
+
+type RowWrite =
+  | { action: "save"; username: string; projectKeys: string[] }
+  | { action: "remove"; username: string };
 
 export const Route = createFileRoute("/_app/people")({
   component: PeopleRoute,
@@ -26,17 +30,15 @@ function PeoplePage() {
     queryClient.invalidateQueries({ queryKey: keys.people });
 
   const invite = useAction(api.invite, refresh);
-  const save = useAction(
-    ({ username, projectKeys }: { username: string; projectKeys: string[] }) =>
-      api.setProjects(username, projectKeys),
+  const rowWrites = useKeyedAction(
+    async (write: RowWrite) => {
+      if (write.action === "save")
+        await api.setProjects(write.username, write.projectKeys);
+      else await api.remove(write.username);
+    },
+    (write) => write.username,
     refresh,
   );
-  const remove = useAction(api.remove, refresh);
-  // one row control reports at a time: whichever write that row ran last
-  const rowWrite = [
-    save.vars && { ...save, username: save.vars.username },
-    remove.vars && { ...remove, username: remove.vars },
-  ].find((write) => write && (write.pending || write.error));
 
   return (
     <AppPage section="people" heading="People">
@@ -48,23 +50,16 @@ function PeoplePage() {
         onInvite={invite.run}
         invitePending={invite.pending}
         inviteError={invite.error?.message ?? null}
-        onSaveProjects={(username, projectKeys) => {
-          remove.reset();
-          save.run({ username, projectKeys });
-        }}
-        onRemove={(username) => {
-          save.reset();
-          remove.run(username);
-        }}
-        rowMutation={
-          rowWrite
-            ? {
-                username: rowWrite.username,
-                pending: rowWrite.pending,
-                error: rowWrite.error?.message ?? null,
-              }
-            : null
+        onSaveProjects={(username, projectKeys) =>
+          rowWrites.run({ action: "save", username, projectKeys })
         }
+        onRemove={(username) => rowWrites.run({ action: "remove", username })}
+        rowMutations={rowWrites.outcomes.map(({ vars, pending, error }) => ({
+          username: vars.username,
+          action: vars.action,
+          pending,
+          error: error?.message ?? null,
+        }))}
       />
     </AppPage>
   );

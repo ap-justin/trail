@@ -491,7 +491,8 @@ export function AppShell({
               query={query}
               onQueryChange={changeQuery}
               results={searchResults}
-              resultsClassName="absolute top-full right-0 mt-1 w-100"
+              // the window under the 48px bar, less a gap at its foot
+              resultsClassName="absolute top-full right-0 mt-1 flex max-h-[calc(100dvh-var(--spacing)*14)] w-100 flex-col"
               onEnd={endSearch}
               inputRef={desktopInput}
               className="hidden w-65 lg:block"
@@ -528,7 +529,8 @@ export function AppShell({
                 query={query}
                 onQueryChange={changeQuery}
                 results={searchResults}
-                resultsClassName="mt-1"
+                // clear of the 48px bar, the 40px box, this sheet's padding and the 56px tab bar
+                resultsClassName="mt-1 flex max-h-[calc(100dvh-var(--spacing)*40)] flex-col"
                 onEnd={endSearch}
                 autoFocus
               />

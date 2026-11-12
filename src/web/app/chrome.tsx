@@ -182,6 +182,8 @@ export function AppPage({
       searchResults={
         typed.trim() !== "" && (
           <SearchResults
+            query={typed}
+            answeredQuery={q}
             results={search.data ?? null}
             status={statusOf(search)}
           />

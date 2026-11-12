@@ -41,6 +41,27 @@ describe("session", () => {
     expect(router.state.location.pathname).toBe("/sign-in");
   });
 
+  test("Sign out from another page lands on plain sign-in, with no way back to it", async () => {
+    signedInAs("member");
+    const { router } = renderApp("/account");
+    server.use(
+      http.post("/api/auth/sign-out", () => {
+        signedInAs("anonymous");
+        return HttpResponse.json({ success: true });
+      }),
+    );
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Account: Maya Chen" }),
+    );
+    await userEvent.click(
+      await screen.findByRole("menuitem", { name: "Sign out" }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Sign in to trail" }),
+    ).toBeInTheDocument();
+    expect(router.state.location.href).toBe("/sign-in");
+  });
+
   test("a failed sign-out reads /me again and follows it", async () => {
     const { router } = await onFeed();
     server.use(
@@ -81,6 +102,25 @@ describe("session", () => {
       await screen.findByRole("heading", { name: "Sign in to trail" }),
     ).toBeInTheDocument();
     expect(router.state.location.search).toEqual({ redirect: "/projects" });
+  });
+
+  test("a 403 mid-session means the owner removed this person, and /me says so", async () => {
+    await onFeed();
+    signedInAs("not_invited");
+    server.use(
+      http.get("/api/web/projects", () =>
+        HttpResponse.json(
+          { error: { code: "forbidden", message: "Not invited" } },
+          { status: 403 },
+        ),
+      ),
+    );
+    const [projectsLink] = screen.getAllByRole("link", { name: "Projects" });
+    if (!projectsLink) throw new Error("no Projects link");
+    await userEvent.click(projectsLink);
+    expect(
+      await screen.findByRole("heading", { name: "You're not invited yet" }),
+    ).toBeInTheDocument();
   });
 
   test("a /me refetch on focus that says not invited switches to that view", async () => {

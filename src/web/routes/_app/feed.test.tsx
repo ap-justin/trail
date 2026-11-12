@@ -76,6 +76,21 @@ describe("live entries", () => {
   });
 });
 
+describe("live entries, replayed", () => {
+  test("the same entry delivered twice shows once and is not highlighted again", async () => {
+    const { stream } = await openFeed();
+    vi.useFakeTimers();
+    const e9 = commentEntry("e9", minutesAgo(0));
+    stream.send(e9);
+    act(() => vi.advanceTimersByTime(2000));
+    expect(rowFor("e9")).not.toHaveClass("row-fresh");
+    // the browser reconnects with Last-Event-ID and the server replays it
+    stream.send(e9);
+    expect(document.querySelectorAll('[data-entry-id="e9"]')).toHaveLength(1);
+    expect(rowFor("e9")).not.toHaveClass("row-fresh");
+  });
+});
+
 /** Reports the list's top as in or out of view, the way the feed's IntersectionObserver would. */
 function watchTop() {
   let report: IntersectionObserverCallback = () => {};
@@ -124,24 +139,43 @@ describe("scrolled away", () => {
 });
 
 describe("scrolled away, then read again", () => {
-  test("held entries the new read already lists are no longer counted as new", async () => {
+  test("held entries a new read also lists stay held and are counted once", async () => {
     const topInView = watchTop();
     const { stream } = await openFeed();
     topInView(false);
-    const e8 = commentEntry("e8", minutesAgo(1));
-    const e9 = commentEntry("e9", minutesAgo(0));
+    const e8 = commentEntry("e8", minutesAgo(2));
+    const e9 = commentEntry("e9", minutesAgo(1));
     stream.send(e8);
     stream.send(e9);
     expect(screen.getByRole("button", { name: "2 new" })).toBeInTheDocument();
-    serveFeed([e9, e8, statusEntry("e2", minutesAgo(30))]);
+    serveFeed([
+      commentEntry("g1", minutesAgo(0)),
+      e9,
+      e8,
+      statusEntry("e2", minutesAgo(30)),
+    ]);
     stream.reset();
-    await waitFor(() => expect(order()).toEqual(["e9", "e8", "e2"]));
     expect(
-      screen.queryByRole("button", { name: /new$/ }),
-    ).not.toBeInTheDocument();
+      await screen.findByRole("button", { name: "3 new" }),
+    ).toBeInTheDocument();
+    expect(order()).toEqual(["e2"]);
     stream.send(commentEntry("e10", minutesAgo(0)));
-    await userEvent.click(screen.getByRole("button", { name: "1 new" }));
-    expect(order()).toEqual(["e10", "e9", "e8", "e2"]);
+    await userEvent.click(screen.getByRole("button", { name: "4 new" }));
+    expect(order()).toEqual(["e10", "g1", "e9", "e8", "e2"]);
+  });
+});
+
+describe("the session behind a stream", () => {
+  test.each([
+    ["a stream error", (s: FakeEventSource) => s.fail()],
+    ["a reset event", (s: FakeEventSource) => s.reset()],
+  ])("%s reads /me, and a removed member leaves the feed", async (_, drop) => {
+    const { stream } = await openFeed();
+    signedInAs("not_invited");
+    drop(stream);
+    expect(
+      await screen.findByRole("heading", { name: "You're not invited yet" }),
+    ).toBeInTheDocument();
   });
 });
 
@@ -183,6 +217,53 @@ describe("connection", () => {
   });
 });
 
+/** Drops the stream for good and lets the retry open the next one, which then reads the feed. */
+async function reconnect(stream: FakeEventSource) {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  stream.fail({ closed: true });
+  act(() => vi.advanceTimersByTime(5000));
+  vi.useRealTimers();
+  FakeEventSource.current.open();
+}
+
+describe("after a reconnect", () => {
+  test("rows the gap missed sit above the older rows the stream delivered", async () => {
+    const { stream } = await openFeed();
+    const e8 = commentEntry("e8", minutesAgo(10));
+    stream.send(e8);
+    expect(order()).toEqual(["e8", "e2"]);
+    serveFeed([
+      commentEntry("g2", minutesAgo(1)),
+      commentEntry("g1", minutesAgo(5)),
+      e8,
+      statusEntry("e2", minutesAgo(30)),
+    ]);
+    await reconnect(stream);
+    await waitFor(() => expect(order()).toEqual(["g2", "g1", "e8", "e2"]));
+  });
+
+  test("scrolled away, the gap's rows are held behind N new", async () => {
+    const topInView = watchTop();
+    const { stream } = await openFeed();
+    const e8 = commentEntry("e8", minutesAgo(10));
+    stream.send(e8);
+    topInView(false);
+    serveFeed([
+      commentEntry("g2", minutesAgo(1)),
+      commentEntry("g1", minutesAgo(5)),
+      e8,
+      statusEntry("e2", minutesAgo(30)),
+    ]);
+    await reconnect(stream);
+    expect(
+      await screen.findByRole("button", { name: "2 new" }),
+    ).toBeInTheDocument();
+    expect(order()).toEqual(["e8", "e2"]);
+    await userEvent.click(screen.getByRole("button", { name: "2 new" }));
+    expect(order()).toEqual(["g2", "g1", "e8", "e2"]);
+  });
+});
+
 describe("a project taken away while filtered to it", () => {
   test("the closed stream reads the feed again, and its 404 clears the project filter", async () => {
     const { asked } = await openFeed();
@@ -211,6 +292,45 @@ describe("a project taken away while filtered to it", () => {
     expect(
       screen.getByRole("combobox", { name: "Filter by project" }),
     ).toHaveTextContent("All projects");
+  });
+});
+
+describe("a filter change with arrivals in flight", () => {
+  const chooseKai = async () => {
+    await userEvent.click(
+      screen.getByRole("combobox", { name: "Filter by bot" }),
+    );
+    await userEvent.click(screen.getByRole("option", { name: "Kai" }));
+    await waitFor(() =>
+      expect(FakeEventSource.current.url).toBe("/api/web/events?actor=a-kai"),
+    );
+  };
+
+  test("drops rows the old stream showed and forgets them, so the new stream can deliver them", async () => {
+    const { stream } = await openFeed();
+    stream.send(commentEntry("e9", minutesAgo(0)));
+    expect(order()).toEqual(["e9", "e2"]);
+    await chooseKai();
+    await waitFor(() => expect(order()).toEqual(["e2"]));
+    expect(document.querySelector(".row-fresh")).toBeNull();
+    FakeEventSource.current.open();
+    FakeEventSource.current.send(commentEntry("e9", minutesAgo(0)));
+    expect(order()).toEqual(["e9", "e2"]);
+  });
+
+  test("drops rows held behind N new", async () => {
+    const topInView = watchTop();
+    const { stream } = await openFeed();
+    topInView(false);
+    stream.send(commentEntry("e9", minutesAgo(0)));
+    expect(screen.getByRole("button", { name: "1 new" })).toBeInTheDocument();
+    await chooseKai();
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: /new$/ }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(order()).toEqual(["e2"]);
   });
 });
 

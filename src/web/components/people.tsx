@@ -1,6 +1,7 @@
 import { Trash2Icon, UserIcon } from "lucide-react";
 import {
   type FormEvent,
+  type KeyboardEvent,
   type ReactNode,
   type Ref,
   useEffect,
@@ -27,6 +28,7 @@ export type Invite = { username: string; projectKeys: string[] };
 /** A save or remove on one person's row, reported at that row's control. */
 export type RowMutation = {
   username: string;
+  action: "save" | "remove";
   pending: boolean;
   /** Why it failed, shown on the row; null when it didn't. */
   error: ReactNode;
@@ -46,8 +48,8 @@ export type PeopleViewProps = {
   inviteError: ReactNode;
   onSaveProjects: (username: string, projectKeys: string[]) => void;
   onRemove: (username: string) => void;
-  /** The row with a save or remove in flight or just failed; null otherwise. */
-  rowMutation: RowMutation | null;
+  /** One entry per row with a save or remove in flight or just failed, matched by username. */
+  rowMutations: RowMutation[];
 };
 
 // GitHub's rule, as `githubUsername` in src/shared/schemas.ts: 1-39 of a-z, 0-9 and single inner hyphens
@@ -202,6 +204,8 @@ function InviteForm({
   // null until the first submit; from then on each edit re-checks
   const [usernameError, setUsernameError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  // the failure answered the username as submitted, so editing it retires the message
+  const [editedSinceInvite, setEditedSinceInvite] = useState(false);
   const [wasPending, setWasPending] = useState(pending);
   if (pending !== wasPending) {
     setWasPending(pending);
@@ -238,6 +242,7 @@ function InviteForm({
       return;
     }
     setUsernameError(null);
+    setEditedSinceInvite(false);
     onInvite({ username: parsed.username, projectKeys });
   };
 
@@ -272,6 +277,7 @@ function InviteForm({
               onChange={(event) => {
                 const next = event.currentTarget.value;
                 setUsername(next);
+                setEditedSinceInvite(true);
                 if (submitted) setUsernameError(check(next));
               }}
               aria-invalid={usernameError ? true : undefined}
@@ -305,7 +311,7 @@ function InviteForm({
         They sign in with GitHub and see only the projects you pick.
       </p>
       <p id={ids.status} role="status" className="text-xs text-destructive">
-        {error}
+        {editedSinceInvite ? null : error}
       </p>
     </form>
   );
@@ -349,13 +355,35 @@ function PersonRow({
 }) {
   const [mode, setMode] = useState<Mode>("view");
   const [draft, setDraft] = useState<string[]>([]);
-  const pending = mutation?.pending ?? false;
-  const [wasPending, setWasPending] = useState(pending);
-  if (pending !== wasPending) {
-    setWasPending(pending);
+  // the write this row sent and still owes an outcome for
+  const [sent, setSent] = useState<RowMutation["action"] | null>(null);
+  const busy = mutation?.pending ?? false;
+  const saving = busy && mutation?.action === "save";
+  const removing = busy && mutation?.action === "remove";
+  const [wasSaving, setWasSaving] = useState(saving);
+  if (saving !== wasSaving) {
+    setWasSaving(saving);
     // a save landed: the row shows the saved projects again
-    if (!pending && !mutation?.error && mode === "edit") setMode("view");
+    if (!saving && !mutation?.error) {
+      setSent(null);
+      if (mode === "edit") setMode("view");
+    }
   }
+  const failure =
+    mutation && !mutation.pending && mutation.action === sent
+      ? mutation.error
+      : null;
+
+  // a settled outcome stays with the panel it answered; a write still running reports wherever the row goes
+  const changeMode = (next: Mode) => {
+    if (!busy) setSent(null);
+    setMode(next);
+  };
+  const cancelOnEscape = (event: KeyboardEvent) => {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    changeMode("view");
+  };
 
   const editRef = useRef<HTMLButtonElement>(null);
   const removeRef = useRef<HTMLButtonElement>(null);
@@ -423,9 +451,12 @@ function PersonRow({
       ) : editing ? (
         <form
           className="flex flex-col gap-2 lg:basis-full lg:pl-60"
+          onKeyDown={cancelOnEscape}
           onSubmit={(event) => {
             event.preventDefault();
-            if (!pending) onSaveProjects(person.username, draft);
+            if (busy) return;
+            setSent("save");
+            onSaveProjects(person.username, draft);
           }}
         >
           <fieldset className="flex flex-col gap-1">
@@ -439,23 +470,23 @@ function PersonRow({
               firstRef={firstCheckboxRef}
             />
           </fieldset>
-          <RowStatus error={mutation?.error} />
+          <RowStatus error={failure} />
           <div className="flex gap-2 pt-1">
             <Button
               type="submit"
               size="sm"
-              aria-disabled={pending || undefined}
-              aria-busy={pending || undefined}
+              aria-disabled={busy || undefined}
+              aria-busy={saving || undefined}
               className="max-lg:h-10 max-lg:flex-1"
             >
-              {pending ? "Saving…" : "Save projects"}
+              {saving ? "Saving…" : "Save projects"}
             </Button>
             <Button
               type="button"
               variant="outline"
               size="sm"
               className="max-lg:h-10 max-lg:flex-1"
-              onClick={() => setMode("view")}
+              onClick={() => changeMode("view")}
             >
               Cancel
             </Button>
@@ -472,6 +503,7 @@ function PersonRow({
             <fieldset
               aria-label={`Remove ${handle}`}
               className="flex min-w-0 flex-wrap items-center gap-2 lg:gap-3"
+              onKeyDown={cancelOnEscape}
             >
               <span className="text-muted-foreground max-lg:basis-full">
                 Remove {handle}?
@@ -481,23 +513,25 @@ function PersonRow({
                 variant="outline"
                 size="sm"
                 className="max-lg:h-10 max-lg:flex-1"
-                onClick={() => setMode("view")}
+                onClick={() => changeMode("view")}
               >
                 Keep
               </Button>
               <Button
                 variant="destructive"
                 size="sm"
-                aria-disabled={pending || undefined}
-                aria-busy={pending || undefined}
+                aria-disabled={busy || undefined}
+                aria-busy={removing || undefined}
                 className="max-lg:h-10 max-lg:flex-1"
                 onClick={() => {
-                  if (!pending) onRemove(person.username);
+                  if (busy) return;
+                  setSent("remove");
+                  onRemove(person.username);
                 }}
               >
-                {pending ? "Removing…" : "Remove"}
+                {removing ? "Removing…" : "Remove"}
               </Button>
-              <RowStatus error={mutation?.error} className="basis-full" />
+              <RowStatus error={failure} className="basis-full" />
             </fieldset>
           ) : (
             <div className="flex gap-2">
@@ -510,7 +544,7 @@ function PersonRow({
                 className="max-lg:h-10 max-lg:flex-1"
                 onClick={() => {
                   setDraft(person.projects.map((p) => p.key));
-                  setMode("edit");
+                  changeMode("edit");
                 }}
               >
                 Edit projects
@@ -521,12 +555,15 @@ function PersonRow({
                 size="sm"
                 aria-label={`Remove ${handle}`}
                 className="text-destructive max-lg:h-10 max-lg:flex-1"
-                onClick={() => setMode("confirm")}
+                onClick={() => changeMode("confirm")}
               >
                 <Trash2Icon data-icon="inline-start" aria-hidden="true" />
                 Remove
               </Button>
             </div>
+          )}
+          {mode === "view" && sent && (
+            <RowStatus error={failure} className="lg:basis-full lg:pl-60" />
           )}
         </>
       )}
@@ -603,9 +640,9 @@ export function PeopleView(props: PeopleViewProps) {
                 onSaveProjects={props.onSaveProjects}
                 onRemove={props.onRemove}
                 mutation={
-                  props.rowMutation?.username === person.username
-                    ? props.rowMutation
-                    : null
+                  props.rowMutations.find(
+                    (write) => write.username === person.username,
+                  ) ?? null
                 }
               />
             ))}

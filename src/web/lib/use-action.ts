@@ -46,3 +46,55 @@ export function useAction<TVars, TData>(
     reset: () => setOutcome({ pending: false, error: null, vars: null }),
   };
 }
+
+type KeyedOutcome<TVars> = {
+  pending: boolean;
+  error: Error | null;
+  vars: TVars;
+};
+
+/**
+ * `useAction` once per key: each key's write has its own pending, error and in-flight guard,
+ * so one row's write neither blocks nor resets another's. `outcomes` has one entry per key
+ * with a write in flight or just failed; a success drops its entry, in the same render as onSuccess's
+ * refresh landing.
+ */
+export function useKeyedAction<TKey, TVars, TData>(
+  mutationFn: MutationFunction<TData, TVars>,
+  keyOf: (vars: TVars) => TKey,
+  onSuccess?: (data: TData, vars: TVars) => unknown,
+) {
+  const [outcomes, setOutcomes] = useState<
+    ReadonlyMap<TKey, KeyedOutcome<TVars>>
+  >(new Map());
+  const inFlight = useRef(new Set<TKey>());
+  const settle = (key: TKey, outcome: KeyedOutcome<TVars> | null) =>
+    setOutcomes((current) => {
+      const next = new Map(current);
+      if (outcome) next.set(key, outcome);
+      else next.delete(key);
+      return next;
+    });
+  const mutation = useMutation({
+    mutationFn,
+    onSuccess: async (data, vars) => {
+      await onSuccess?.(data, vars);
+      settle(keyOf(vars), null);
+    },
+    onError: (error, vars) =>
+      settle(keyOf(vars), { pending: false, error, vars }),
+    onSettled: (_data, _error, vars) => {
+      inFlight.current.delete(keyOf(vars));
+    },
+  });
+  return {
+    outcomes: [...outcomes.values()],
+    run: (vars: TVars) => {
+      const key = keyOf(vars);
+      if (inFlight.current.has(key)) return;
+      inFlight.current.add(key);
+      settle(key, { pending: true, error: null, vars });
+      mutation.mutate(vars);
+    },
+  };
+}

@@ -114,8 +114,9 @@ export function FeedView(props: FeedViewProps) {
   };
 
   return (
-    // the 880px column sits inside the page padding, so the padding never narrows it
-    <div className="w-full lg:px-6 lg:py-4">
+    // the 880px column sits inside the page padding, so the padding never narrows it;
+    // isolate keeps the pill's z-10 inside the feed, under the shell's sticky z-10 top bar and its search
+    <div className="isolate w-full lg:px-6 lg:py-4">
       <div className="mx-auto flex max-w-220 flex-col">
         <div ref={topRef} />
         <FeedFilters {...props} />

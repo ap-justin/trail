@@ -5,6 +5,7 @@ import {
   PeopleView,
   type PeopleViewProps,
   parseUsername,
+  type RowMutation,
 } from "@/components/people";
 import { allProjects, people } from "@/test/fixtures";
 
@@ -19,7 +20,7 @@ function renderPeople(overrides: Partial<PeopleViewProps> = {}) {
     inviteError: null,
     onSaveProjects: vi.fn(),
     onRemove: vi.fn(),
-    rowMutation: null,
+    rowMutations: [],
     ...overrides,
   };
   const view = render(<PeopleView {...props} />);
@@ -131,6 +132,13 @@ describe("people list", () => {
   });
 });
 
+const failedSave = (username: string): RowMutation => ({
+  username,
+  action: "save",
+  pending: false,
+  error: "Couldn't save. Try again.",
+});
+
 describe("after a row changes", () => {
   async function confirmRemove(username: string) {
     const user = userEvent.setup();
@@ -180,11 +188,14 @@ describe("after a row changes", () => {
     rerender(
       <PeopleView
         {...props}
-        rowMutation={{
-          username: "kai-dev",
-          pending: false,
-          error: "Couldn't remove @kai-dev. Try again.",
-        }}
+        rowMutations={[
+          {
+            username: "kai-dev",
+            action: "remove",
+            pending: false,
+            error: "Couldn't remove @kai-dev. Try again.",
+          },
+        ]}
       />,
     );
     expect(row("kai-dev").getByRole("status")).toBe(status);
@@ -201,18 +212,151 @@ describe("after a row changes", () => {
     );
     const status = row("kai-dev").getByRole("status");
     expect(status).toHaveTextContent(/^$/);
+    await user.click(
+      row("kai-dev").getByRole("button", { name: "Save projects" }),
+    );
+    rerender(<PeopleView {...props} rowMutations={[failedSave("kai-dev")]} />);
+    expect(row("kai-dev").getByRole("status")).toBe(status);
+    expect(status).toHaveTextContent("Couldn't save. Try again.");
+  });
+
+  async function saveFor(username: string) {
+    const user = userEvent.setup();
+    await user.click(
+      row(username).getByRole("button", {
+        name: `Edit projects for @${username}`,
+      }),
+    );
+    await user.click(
+      row(username).getByRole("button", { name: "Save projects" }),
+    );
+    return user;
+  }
+
+  test("a row stays in edit mode until its own save settles, whatever other rows do", async () => {
+    const { props, rerender } = renderPeople();
+    await saveFor("mayachen");
+    const savingMaya: RowMutation = {
+      username: "mayachen",
+      action: "save",
+      pending: true,
+      error: null,
+    };
+    const removingKai: RowMutation = {
+      username: "kai-dev",
+      action: "remove",
+      pending: true,
+      error: null,
+    };
+    rerender(
+      <PeopleView {...props} rowMutations={[savingMaya, removingKai]} />,
+    );
+    rerender(<PeopleView {...props} rowMutations={[savingMaya]} />);
+    expect(
+      row("mayachen").getByRole("button", { name: "Saving…" }),
+    ).toBeInTheDocument();
+    rerender(<PeopleView {...props} rowMutations={[]} />);
+    expect(row("mayachen").queryByRole("checkbox")).not.toBeInTheDocument();
+  });
+
+  test("one row's write in flight leaves the other rows free to save", async () => {
+    const { props } = renderPeople({
+      rowMutations: [
+        { username: "kai-dev", action: "save", pending: true, error: null },
+      ],
+    });
+    await saveFor("mayachen");
+    expect(props.onSaveProjects).toHaveBeenCalledExactlyOnceWith("mayachen", [
+      "TRL",
+      "DOC",
+    ]);
+  });
+
+  test("a failed save doesn't show under Remove after Cancel", async () => {
+    const { props, rerender } = renderPeople();
+    const user = await saveFor("kai-dev");
+    rerender(<PeopleView {...props} rowMutations={[failedSave("kai-dev")]} />);
+    await user.click(row("kai-dev").getByRole("button", { name: "Cancel" }));
+    await user.click(
+      row("kai-dev").getByRole("button", { name: "Remove @kai-dev" }),
+    );
+    expect(row("kai-dev").getByText("Remove @kai-dev?")).toBeInTheDocument();
+    expect(row("kai-dev").getByRole("status")).toHaveTextContent(/^$/);
+  });
+
+  test("Edit projects opened again starts without the last failure", async () => {
+    const { props, rerender } = renderPeople();
+    const user = await saveFor("kai-dev");
+    rerender(<PeopleView {...props} rowMutations={[failedSave("kai-dev")]} />);
+    await user.click(row("kai-dev").getByRole("button", { name: "Cancel" }));
+    await user.click(
+      row("kai-dev").getByRole("button", {
+        name: "Edit projects for @kai-dev",
+      }),
+    );
+    expect(row("kai-dev").getByRole("status")).toHaveTextContent(/^$/);
+  });
+
+  test("a remove that fails after Keep reports on the row", async () => {
+    const user = userEvent.setup();
+    const { props, rerender } = renderPeople();
+    await confirmRemove("kai-dev");
+    const removing: RowMutation = {
+      username: "kai-dev",
+      action: "remove",
+      pending: true,
+      error: null,
+    };
+    rerender(<PeopleView {...props} rowMutations={[removing]} />);
+    await user.click(row("kai-dev").getByRole("button", { name: "Keep" }));
+    const status = row("kai-dev").getByRole("status");
+    expect(status).toHaveTextContent(/^$/);
     rerender(
       <PeopleView
         {...props}
-        rowMutation={{
-          username: "kai-dev",
-          pending: false,
-          error: "Couldn't save. Try again.",
-        }}
+        rowMutations={[
+          { ...removing, pending: false, error: "Couldn't remove @kai-dev." },
+        ]}
       />,
     );
-    expect(row("kai-dev").getByRole("status")).toBe(status);
-    expect(status).toHaveTextContent("Couldn't save. Try again.");
+    expect(status).toHaveTextContent("Couldn't remove @kai-dev.");
+    expect(
+      row("kai-dev").getByRole("button", { name: "Remove @kai-dev" }),
+    ).toBeInTheDocument();
+  });
+
+  test("Escape cancels Edit projects and focus returns to Edit projects", async () => {
+    const user = userEvent.setup();
+    const { props } = renderPeople();
+    await user.click(
+      row("mayachen").getByRole("button", {
+        name: "Edit projects for @mayachen",
+      }),
+    );
+    await user.keyboard("{Escape}");
+    expect(row("mayachen").queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(
+      row("mayachen").getByRole("button", {
+        name: "Edit projects for @mayachen",
+      }),
+    ).toHaveFocus();
+    expect(props.onSaveProjects).not.toHaveBeenCalled();
+  });
+
+  test("Escape backs out of Remove and focus returns to Remove", async () => {
+    const user = userEvent.setup();
+    const { props } = renderPeople();
+    await user.click(
+      row("kai-dev").getByRole("button", { name: "Remove @kai-dev" }),
+    );
+    await user.keyboard("{Escape}");
+    expect(
+      row("kai-dev").queryByText("Remove @kai-dev?"),
+    ).not.toBeInTheDocument();
+    expect(
+      row("kai-dev").getByRole("button", { name: "Remove @kai-dev" }),
+    ).toHaveFocus();
+    expect(props.onRemove).not.toHaveBeenCalled();
   });
 });
 
@@ -270,6 +414,27 @@ describe("invite", () => {
       username: "devon-r",
       projectKeys: ["TRL", "DOC"],
     });
+  });
+});
+
+describe("invite failure", () => {
+  test("clears once the username is edited", async () => {
+    const user = userEvent.setup();
+    const { props, rerender } = renderPeople();
+    const input = screen.getByRole("textbox", { name: "GitHub username" });
+    await user.type(input, "devon-r");
+    await user.click(screen.getByRole("button", { name: "Invite" }));
+    rerender(<PeopleView {...props} invitePending />);
+    rerender(
+      <PeopleView {...props} inviteError="@devon-r is already invited." />,
+    );
+    expect(
+      screen.getByText("@devon-r is already invited."),
+    ).toBeInTheDocument();
+    await user.type(input, "x");
+    expect(
+      screen.queryByText("@devon-r is already invited."),
+    ).not.toBeInTheDocument();
   });
 });
 

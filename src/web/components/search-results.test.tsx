@@ -17,7 +17,14 @@ const results = {
 
 describe("SearchResults", () => {
   test("projects and issues as links, each with its key and title", () => {
-    render(<SearchResults results={results} status="ready" />);
+    render(
+      <SearchResults
+        query="team"
+        answeredQuery="team"
+        results={results}
+        status="ready"
+      />,
+    );
     const [project, issue] = within(
       screen.getByRole("list", { name: "Search results" }),
     ).getAllByRole("link");
@@ -31,7 +38,12 @@ describe("SearchResults", () => {
 
   test("none: the empty state", () => {
     render(
-      <SearchResults results={{ projects: [], issues: [] }} status="ready" />,
+      <SearchResults
+        query="team"
+        answeredQuery="team"
+        results={{ projects: [], issues: [] }}
+        status="ready"
+      />,
     );
     expect(
       screen.getByRole("heading", { name: "No results" }),
@@ -41,13 +53,91 @@ describe("SearchResults", () => {
 
   test("loading and error draw no links", () => {
     const { rerender } = render(
-      <SearchResults results={null} status="loading" />,
+      <SearchResults
+        query="team"
+        answeredQuery="team"
+        results={null}
+        status="loading"
+      />,
     );
     expect(screen.getByRole("status")).toHaveTextContent("Loading");
-    rerender(<SearchResults results={results} status="error" />);
+    rerender(
+      <SearchResults
+        query="team"
+        answeredQuery="team"
+        results={results}
+        status="error"
+      />,
+    );
     expect(
       screen.getByRole("heading", { name: "Couldn't search" }),
     ).toBeInTheDocument();
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  });
+
+  test("results for an earlier query are never shown under a new one: loading instead", () => {
+    // "auth" answered, Escape, then "deploy" typed before the debounce lands
+    render(
+      <SearchResults
+        query="deploy"
+        answeredQuery="auth"
+        results={results}
+        status="ready"
+      />,
+    );
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Loading");
+  });
+
+  test("a failure for an earlier query reads as loading, not as this query failing", () => {
+    render(
+      <SearchResults
+        query="deploy"
+        answeredQuery="auth"
+        results={null}
+        status="error"
+      />,
+    );
+    expect(
+      screen.queryByRole("heading", { name: "Couldn't search" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Loading");
+  });
+
+  test("one live region announces each outcome as it replaces loading", () => {
+    const props = { query: "team", answeredQuery: "team" };
+    const { rerender } = render(
+      <SearchResults {...props} results={null} status="loading" />,
+    );
+    const region = screen.getByRole("status");
+    expect(region).toHaveTextContent("Loading");
+
+    rerender(<SearchResults {...props} results={results} status="ready" />);
+    expect(screen.getByRole("status")).toBe(region);
+    expect(region).toHaveTextContent("2 results");
+
+    rerender(
+      <SearchResults
+        {...props}
+        results={{ projects: [], issues: [] }}
+        status="ready"
+      />,
+    );
+    expect(region).toHaveTextContent("No results");
+
+    rerender(<SearchResults {...props} results={null} status="error" />);
+    expect(region).toHaveTextContent("Couldn't search");
+  });
+
+  test("a single hit is announced in the singular", () => {
+    render(
+      <SearchResults
+        query="team"
+        answeredQuery="team"
+        results={{ projects: [], issues: results.issues }}
+        status="ready"
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(/^1 result$/);
   });
 });

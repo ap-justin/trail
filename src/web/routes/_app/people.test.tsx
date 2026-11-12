@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, test } from "vitest";
@@ -54,6 +54,56 @@ function servePeople() {
     }),
   );
   return writes;
+}
+
+/**
+ * Holds each PUT or DELETE on a person until the test lets it go: `release` hands it on to
+ * servePeople's handler, `fail` answers it with a 500 carrying `message`.
+ */
+function holdWrites(method: "put" | "delete") {
+  const held = new Map<string, (answer?: Response) => void>();
+  server.use(
+    http[method](
+      "/api/web/people/:username",
+      ({ params }) =>
+        new Promise<Response | undefined>((resolve) => {
+          held.set(String(params.username), resolve);
+        }),
+    ),
+  );
+  const answer = async (username: string, response?: Response) => {
+    await waitFor(() => expect(held.has(username)).toBe(true));
+    held.get(username)?.(response);
+    held.delete(username);
+  };
+  return {
+    release: (username: string) => answer(username),
+    fail: (username: string, message: string) =>
+      answer(
+        username,
+        HttpResponse.json(
+          { error: { code: "internal", message } },
+          { status: 500 },
+        ),
+      ),
+  };
+}
+
+function row(username: string) {
+  const li = document.querySelector<HTMLElement>(
+    `li[data-username="${username}"]`,
+  );
+  if (!li) throw new Error(`no row for @${username}`);
+  return within(li);
+}
+
+async function startSave(username: string) {
+  await userEvent.click(
+    screen.getByRole("button", { name: `Edit projects for @${username}` }),
+  );
+  await userEvent.click(
+    row(username).getByRole("button", { name: "Save projects" }),
+  );
 }
 
 describe("owner only", () => {
@@ -124,6 +174,28 @@ describe("managing people", () => {
     );
   });
 
+  test("Save projects puts exactly the boxes left checked, after a change", async () => {
+    signedInAs("owner");
+    const writes = servePeople();
+    renderApp("/people");
+    await screen.findByText("@kai-dev");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Edit projects for @mayachen" }),
+    );
+    // she starts on TRL and DOC: drop TRL, add OPB
+    await userEvent.click(
+      row("mayachen").getByRole("checkbox", { name: /TRL/ }),
+    );
+    await userEvent.click(
+      row("mayachen").getByRole("checkbox", { name: /OPB/ }),
+    );
+    await userEvent.click(
+      row("mayachen").getByRole("button", { name: "Save projects" }),
+    );
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0]?.body).toEqual({ projectKeys: ["DOC", "OPB"] });
+  });
+
   test("Remove deletes the person and the row goes", async () => {
     signedInAs("owner");
     const writes = servePeople();
@@ -141,6 +213,108 @@ describe("managing people", () => {
     expect(writes).toEqual([
       { method: "DELETE", path: "/api/web/people/mayachen", body: null },
     ]);
+  });
+
+  test("a second row's Save runs while the first row's is still in flight", async () => {
+    signedInAs("owner");
+    const writes = servePeople();
+    const puts = holdWrites("put");
+    renderApp("/people");
+    await screen.findByText("@kai-dev");
+    await startSave("mayachen");
+    await startSave("kai-dev");
+    expect(
+      row("kai-dev").getByRole("button", { name: "Saving…" }),
+    ).toBeInTheDocument();
+
+    await puts.release("kai-dev");
+    expect(
+      await row("kai-dev").findByRole("button", {
+        name: "Edit projects for @kai-dev",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      row("mayachen").getByRole("button", { name: "Saving…" }),
+    ).toBeInTheDocument();
+
+    await puts.release("mayachen");
+    expect(
+      await row("mayachen").findByRole("button", {
+        name: "Edit projects for @mayachen",
+      }),
+    ).toBeInTheDocument();
+    expect(writes.map((write) => write.path)).toEqual([
+      "/api/web/people/kai-dev",
+      "/api/web/people/mayachen",
+    ]);
+  });
+
+  test("Remove on one row leaves another row's running save alone, and its failure lands there", async () => {
+    signedInAs("owner");
+    servePeople();
+    const puts = holdWrites("put");
+    renderApp("/people");
+    await screen.findByText("@kai-dev");
+    await startSave("mayachen");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Remove @kai-dev" }),
+    );
+    await userEvent.click(
+      row("kai-dev").getByRole("button", { name: "Remove" }),
+    );
+    await waitFor(() =>
+      expect(
+        document.querySelector('li[data-username="kai-dev"]'),
+      ).not.toBeInTheDocument(),
+    );
+    expect(
+      row("mayachen").getByRole("button", { name: "Saving…" }),
+    ).toBeInTheDocument();
+
+    await puts.fail("mayachen", "Couldn't save projects");
+    expect(
+      await row("mayachen").findByText("Couldn't save projects"),
+    ).toBeInTheDocument();
+    expect(
+      row("mayachen").getByRole("button", { name: "Save projects" }),
+    ).toBeInTheDocument();
+  });
+
+  test("a failed Remove reports on its own row while another row's Remove goes through", async () => {
+    signedInAs("owner");
+    servePeople();
+    const deletes = holdWrites("delete");
+    renderApp("/people");
+    await screen.findByText("@kai-dev");
+    for (const username of ["mayachen", "kai-dev"]) {
+      await userEvent.click(
+        screen.getByRole("button", { name: `Remove @${username}` }),
+      );
+      await userEvent.click(
+        row(username).getByRole("button", { name: "Remove" }),
+      );
+    }
+    expect(
+      row("kai-dev").getByRole("button", { name: "Removing…" }),
+    ).toBeInTheDocument();
+
+    await deletes.fail("kai-dev", "Couldn't remove @kai-dev");
+    expect(
+      await row("kai-dev").findByText("Couldn't remove @kai-dev"),
+    ).toBeInTheDocument();
+    expect(
+      row("mayachen").getByRole("button", { name: "Removing…" }),
+    ).toBeInTheDocument();
+
+    await deletes.release("mayachen");
+    await waitFor(() =>
+      expect(
+        document.querySelector('li[data-username="mayachen"]'),
+      ).not.toBeInTheDocument(),
+    );
+    expect(
+      row("kai-dev").getByText("Couldn't remove @kai-dev"),
+    ).toBeInTheDocument();
   });
 
   test("a failed invite shows the server's message", async () => {

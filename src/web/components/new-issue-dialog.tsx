@@ -55,10 +55,21 @@ export type NewIssueDialogProps = {
 
 type Errors = { project?: string; title?: string };
 
+/** `webIssueCreateSchema.title` in src/shared/schemas.ts, which src/web can only import as a type. */
+const TITLE_MAX = 300;
+
+function titleError(title: string) {
+  const trimmed = title.trim();
+  if (!trimmed) return "Add a title.";
+  if (trimmed.length > TITLE_MAX) return `Keep it to ${TITLE_MAX} characters.`;
+  return undefined;
+}
+
 function validate(projectKey: string | null, title: string): Errors {
+  const titleMessage = titleError(title);
   return {
     ...(projectKey ? {} : { project: "Pick a project." }),
-    ...(title.trim() ? {} : { title: "Add a title." }),
+    ...(titleMessage ? { title: titleMessage } : {}),
   };
 }
 
@@ -246,8 +257,9 @@ function NewIssueForm({
 
 /**
  * Filing an issue: a centred dialog at 1024px and up, a full-screen sheet below. Title
- * and project are required; an empty title is caught on submit, focus moves to it, and
- * `onSubmit` is not called.
+ * and project are required; an empty title, or one over 300 characters once trimmed, is
+ * caught on submit, focus moves to it, and `onSubmit` is not called. A click outside does
+ * not close it, so a draft is never lost to a stray click.
  */
 export function NewIssueDialog({
   open,
@@ -257,7 +269,11 @@ export function NewIssueDialog({
 }: NewIssueDialogProps) {
   const titleRef = useRef<HTMLInputElement>(null);
   return (
-    <Dialog open={open} onOpenChange={(next) => onOpenChange(next)}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => onOpenChange(next)}
+      disablePointerDismissal
+    >
       <DialogContent
         showCloseButton={false}
         initialFocus={titleRef}

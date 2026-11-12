@@ -99,6 +99,54 @@ describe("new issue dialog", () => {
     expect(props.onSubmit).not.toHaveBeenCalled();
   });
 
+  test("a click outside keeps the dialog and the draft", async () => {
+    const user = userEvent.setup();
+    const props = renderDialog();
+    await user.type(within(dialog()).getByLabelText("Title"), "Fix the logo");
+    const backdrop = document.querySelector('[data-slot="dialog-overlay"]');
+    if (!backdrop) throw new Error("no backdrop");
+    await user.click(backdrop);
+    expect(props.onOpenChange).not.toHaveBeenCalled();
+    expect(within(dialog()).getByLabelText("Title")).toHaveValue(
+      "Fix the logo",
+    );
+  });
+
+  test("Escape still closes", async () => {
+    const user = userEvent.setup();
+    const props = renderDialog();
+    await user.keyboard("{Escape}");
+    expect(props.onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  test("a title over 300 characters is refused at Title, which takes focus", async () => {
+    const user = userEvent.setup();
+    const props = renderDialog();
+    const title = within(dialog()).getByLabelText("Title");
+    await user.click(title);
+    await user.paste("x".repeat(301));
+    await user.click(
+      within(dialog()).getByRole("button", { name: "Create issue" }),
+    );
+    expect(title).toHaveFocus();
+    expect(title).toHaveAttribute("aria-invalid", "true");
+    expect(title).toHaveAccessibleDescription("Keep it to 300 characters.");
+    expect(props.onSubmit).not.toHaveBeenCalled();
+  });
+
+  test("a title of exactly 300 characters, padded with spaces, goes out", async () => {
+    const user = userEvent.setup();
+    const props = renderDialog();
+    await user.click(within(dialog()).getByLabelText("Title"));
+    await user.paste(`  ${"x".repeat(300)}  `);
+    await user.click(
+      within(dialog()).getByRole("button", { name: "Create issue" }),
+    );
+    expect(props.onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "x".repeat(300) }),
+    );
+  });
+
   test("while pending, Create issue holds and says so", async () => {
     const user = userEvent.setup();
     const props = renderDialog({ pending: true });
