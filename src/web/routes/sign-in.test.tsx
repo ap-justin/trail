@@ -229,5 +229,8 @@ describe("a member", () => {
     serveFeed();
     const { router } = renderApp("/sign-in");
     await waitFor(() => expect(router.state.location.pathname).toBe("/"));
+    // the feed read is still in flight at the pathname change: wait for it to land (the
+    // empty feed replaces the skeleton) so it cannot reach a later test's handlers
+    await screen.findByRole("heading", { name: "No activity yet" });
   });
 });
