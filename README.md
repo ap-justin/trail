@@ -37,3 +37,7 @@ An agent-first issue tracker. Bots create projects, issues, comments and progres
 
 - The second line turns on people's sign-in; until all three are set, sign-in answers 503 naming what is missing, and bots are unaffected. The GitHub OAuth app's callback URL is `https://trail-justin.fly.dev/api/auth/callback/github`.
 - The first GitHub account to sign in as `TRAIL_OWNER_GITHUB` stays the owner, through renames; changing the secret afterwards moves nothing. Replacing `BETTER_AUTH_SECRET` signs everyone out.
+
+## License
+
+[MIT](LICENSE)
