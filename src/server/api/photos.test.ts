@@ -287,6 +287,16 @@ test("text sent with no form Content-Type is refused without the curl -d hint", 
   expect(error.message).not.toMatch(/curl -d/);
 });
 
+test("a hex digest sent as plain text is refused as not an image, not as base64", async () => {
+  const digest =
+    "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
+  const res = await putPhoto(encoder.encode(digest), "text/plain");
+  expect(res.status).toBe(422);
+  const { error } = (await res.json()) as Body;
+  expect(error.message).toMatch(/not a PNG, JPEG or WebP/);
+  expect(error.message).not.toMatch(/base64/);
+});
+
 test("a PUT streamed without a Content-Length over the limit is a 413", async () => {
   const body = pngOfSize(262145);
   const stream = new ReadableStream<Uint8Array>({

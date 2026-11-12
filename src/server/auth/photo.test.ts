@@ -303,18 +303,51 @@ test.each([
   },
 );
 
-test("a photo one byte over the limit, declared or streamed, is refused", async () => {
+/** A body that records whether the consumer gave up on it. */
+const watchedBody = (chunks: Uint8Array[]) => {
+  const watch = { cancelled: false };
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(chunk);
+      controller.close();
+    },
+    cancel() {
+      watch.cancelled = true;
+    },
+  });
+  return { watch, body };
+};
+
+// the service refuses these bytes too, so only the body's fate shows which stage did the refusing
+test("a declared content-length one byte over the limit is refused without reading the body", async () => {
+  // the body itself is a small valid PNG: read, it would be stored
+  const { watch, body } = watchedBody([PNG]);
   answer = async () =>
-    new Response(pngOfSize(PHOTO_MAX_BYTES + 1), {
+    new Response(body, {
       headers: { "content-length": String(PHOTO_MAX_BYTES + 1) },
     });
   await addMember("over-declared", [], { githubId: 7951 });
   await photoGivenUp("over-declared");
+  expect(warn).toHaveBeenCalledWith(
+    expect.stringContaining(`is ${PHOTO_MAX_BYTES + 1} bytes`),
+  );
+  expect(watch.cancelled).toBe(true);
   expect(photoOf(7951)).toBeUndefined();
+});
 
-  answer = async () => new Response(pngOfSize(PHOTO_MAX_BYTES + 1));
+test("a streamed body one byte over the limit is abandoned when the cap trips", async () => {
+  const { watch, body } = watchedBody([
+    pngOfSize(PHOTO_MAX_BYTES),
+    new Uint8Array(1),
+    new Uint8Array(CHUNK),
+  ]);
+  answer = async () => new Response(body);
   await addMember("over-streamed", [], { githubId: 7952 });
   await photoGivenUp("over-streamed");
+  expect(warn).toHaveBeenCalledWith(
+    expect.stringContaining(`over ${PHOTO_MAX_BYTES} bytes`),
+  );
+  expect(watch.cancelled).toBe(true);
   expect(photoOf(7952)).toBeUndefined();
 });
 
