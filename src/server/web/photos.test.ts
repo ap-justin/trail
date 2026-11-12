@@ -1,9 +1,9 @@
 import { beforeAll, expect, test } from "vitest";
 import { photoUrl, setActorPhoto } from "../service/photos.js";
 import { setupTestApp } from "../test-app.js";
-import { JPEG, PNG } from "../test-images.js";
+import { JPEG, OTHER_PNG, PNG } from "../test-images.js";
 
-const { db, request, signIn, owner, addMember, addProject, addBot } =
+const { app, db, request, signIn, owner, addMember, addProject, addBot } =
   setupTestApp();
 
 // biome-ignore lint/suspicious/noExplicitAny: loose response bodies for field reads
@@ -171,4 +171,80 @@ test("the people list carries each signed-in person's photo URL, null for the ow
     owner: true,
     photoUrl: ownerUrl,
   });
+});
+
+test("replacing a bot's photo, then clearing it, shows on every author view at once", async () => {
+  const shifter = addBot("shifter");
+  const putPhoto = async (body: Uint8Array) => {
+    const res = await app.request("/api/v1/me/photo", {
+      method: "PUT",
+      headers: {
+        authorization: `Bearer ${shifter.key}`,
+        "content-type": "image/png",
+      },
+      body,
+    });
+    expect(res.status).toBe(200);
+    return ((await res.json()) as Body).photoUrl as string;
+  };
+  const first = await putPhoto(PNG);
+
+  const filed = await request("POST", "/api/v1/issues", {
+    key: shifter.key,
+    json: { projectId: project.id, title: "shifting face" },
+  });
+  const { key } = (await filed.json()) as Body;
+  await request("POST", `/api/v1/issues/${key}/comments`, {
+    key: shifter.key,
+    json: { body: "hi" },
+  });
+  await request("POST", `/api/v1/projects/${project.id}/status-updates`, {
+    key: shifter.key,
+    json: { body: "status", health: "on_track" },
+  });
+
+  const photoOnEveryView = async () => {
+    const feed = await web("GET", "/feed", memberCookie);
+    const issue = await web("GET", `/issues/${key}`, memberCookie);
+    const proj = await web("GET", `/projects/${project.key}`, memberCookie);
+    const urls = {
+      feedActors: feed.items
+        .filter((e: Body) => e.actor.id === shifter.actor.id)
+        .map((e: Body) => e.actor.photoUrl),
+      feedFilter: feed.filters.actors.find(
+        (a: Body) => a.id === shifter.actor.id,
+      ).photoUrl,
+      creator: issue.creator.photoUrl,
+      timeline: issue.timeline
+        .filter((e: Body) => e.actor.id === shifter.actor.id)
+        .map((e: Body) => e.actor.photoUrl),
+      statusUpdate: proj.latestStatusUpdate.author.photoUrl,
+    };
+    return urls;
+  };
+  const everyViewShows = (url: string | null) => {
+    const expected = (n: number) => Array(n).fill(url);
+    return async () => {
+      const seen = await photoOnEveryView();
+      expect(seen.feedActors.length).toBeGreaterThan(0);
+      expect(seen.feedActors).toEqual(expected(seen.feedActors.length));
+      expect(seen.timeline.length).toBeGreaterThan(0);
+      expect(seen.timeline).toEqual(expected(seen.timeline.length));
+      expect(seen.feedFilter).toBe(url);
+      expect(seen.creator).toBe(url);
+      expect(seen.statusUpdate).toBe(url);
+    };
+  };
+
+  await everyViewShows(first)();
+
+  const second = await putPhoto(OTHER_PNG);
+  expect(second).not.toBe(first);
+  await everyViewShows(second)();
+
+  const cleared = await request("DELETE", "/api/v1/me/photo", {
+    key: shifter.key,
+  });
+  expect(cleared.status).toBe(200);
+  await everyViewShows(null)();
 });

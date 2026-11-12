@@ -94,7 +94,7 @@ const failure = (text: string): CallToolResult => ({
 });
 
 const photoEncoding =
-  "base64-encoded (standard alphabet, padded; line breaks are fine), bare or prefixed like data:image/png;base64,";
+  "base64-encoded (standard or URL-safe alphabet, padded or not; line breaks are fine), bare or prefixed like data:image/png;base64,";
 
 /** The media types a data: URL prefix may declare; image/jpg is the common misspelling of image/jpeg. */
 const dataUrlImageTypes: readonly string[] = [
@@ -108,7 +108,7 @@ const MAX_PHOTO_BASE64_LENGTH = Math.ceil(PHOTO_MAX_BYTES / 3) * 4;
 /** The longest raw `data` read at all: room for CRLF wrapping, a data: URL prefix and stray whitespace around the largest photo. */
 const MAX_PHOTO_DATA_LENGTH = MAX_PHOTO_BASE64_LENGTH * 2;
 
-/** The bytes of `set_my_photo`'s data: strict base64 once whitespace is dropped, after an optional image data: URL prefix. */
+/** The bytes of `set_my_photo`'s data: strict base64 once whitespace is dropped and URL-safe or unpadded input is made standard, after an optional image data: URL prefix. */
 function photoBytes(data: string): Uint8Array {
   // /mcp takes bodies far larger than any photo; refuse those before trimming or stripping copies them
   if (data.length > MAX_PHOTO_DATA_LENGTH) {
@@ -131,6 +131,9 @@ function photoBytes(data: string): Uint8Array {
   }
   // `base64 file` wraps its output at 76 columns
   encoded = encoded.replace(/[\t\n\f\r ]/g, "");
+  encoded = encoded.replaceAll("-", "+").replaceAll("_", "/");
+  // a length of 1 past a group of 4 can't be padded; the round trip below refuses it
+  if (encoded.length % 4 > 1) encoded += "=".repeat(4 - (encoded.length % 4));
   // refused before decoding, so an oversized string never allocates its bytes
   if (encoded.length > MAX_PHOTO_BASE64_LENGTH) {
     throw new PayloadTooLargeError(photoTooLarge(null));
@@ -445,7 +448,8 @@ export function registerTools(
       inputSchema: z.strictObject({
         data: z.string().describe(`The image, ${photoEncoding}`),
       }),
-      annotations: update,
+      // the photo it replaces is gone for good
+      annotations: { ...update, destructiveHint: true },
     },
     ({ data }) =>
       run("set_my_photo", () => service.setMyPhoto(actor, photoBytes(data))),

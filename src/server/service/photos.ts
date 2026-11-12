@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import type { Db } from "../db/client.js";
 import { type ActorPhotoContentType, actorPhoto } from "../db/schema.js";
 import { InvalidImageError, PayloadTooLargeError } from "./errors.js";
@@ -21,7 +21,9 @@ const RIFF = ascii("RIFF");
 const WEBP = ascii("WEBP");
 
 /** The image type the leading bytes declare, or null for anything but PNG, JPEG and WebP. */
-function sniffImageType(bytes: Uint8Array): ActorPhotoContentType | null {
+export function sniffImageType(
+  bytes: Uint8Array,
+): ActorPhotoContentType | null {
   const startsWith = (signature: number[], at = 0) =>
     signature.every((b, i) => bytes[at + i] === b);
   if (startsWith(PNG)) return "image/png";
@@ -62,12 +64,17 @@ export function setActorPhoto(
   }
   const content = Buffer.from(bytes);
   const hash = createHash("sha256").update(content).digest("hex");
-  const set = { content, contentType, hash, updatedAt: new Date() };
   db.insert(actorPhoto)
-    .values({ actorId, ...set })
+    .values({ actorId, content, contentType, hash, updatedAt: new Date() })
     .onConflictDoUpdate({
       target: actorPhoto.actorId,
-      set,
+      // excluded.* reuses the inserted row's values, so the blob is bound once
+      set: {
+        content: sql`excluded.content`,
+        contentType: sql`excluded.content_type`,
+        hash: sql`excluded.hash`,
+        updatedAt: sql`excluded.updated_at`,
+      },
       // the same bytes again (a GitHub avatar on every sign-in) write nothing
       setWhere: ne(actorPhoto.hash, hash),
     })

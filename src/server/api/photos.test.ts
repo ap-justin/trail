@@ -160,6 +160,33 @@ test("a PNG uploaded as a multipart form is a 422 asking for the raw bytes, and 
   expect((await whoami(kept.key)).photoUrl).toBe(photoUrl);
 });
 
+test("a PNG stripped of its line breaks, as curl -d sends it, is a 422 naming --data-binary, and nothing is stored", async () => {
+  const kept = addBot(`dash-d-${projectKey()}`);
+  const { photoUrl } = (await (
+    await putPhoto(PNG, "image/png", kept.key)
+  ).json()) as Body;
+  const stripped = OTHER_PNG.filter((b) => b !== 0x0a && b !== 0x0d);
+  const res = await putPhoto(
+    stripped,
+    "application/x-www-form-urlencoded",
+    kept.key,
+  );
+  expect(res.status).toBe(422);
+  const { error } = (await res.json()) as Body;
+  expect(error.code).toBe("invalid_image");
+  expect(error.message).toMatch(/curl -d strips line breaks/);
+  expect(error.message).toMatch(/--data-binary @/);
+  expect((await whoami(kept.key)).photoUrl).toBe(photoUrl);
+});
+
+test("text sent with no form Content-Type is refused without the curl -d hint", async () => {
+  const res = await putPhoto(TEXT, "application/octet-stream");
+  expect(res.status).toBe(422);
+  const { error } = (await res.json()) as Body;
+  expect(error.message).toMatch(/not a PNG, JPEG or WebP/);
+  expect(error.message).not.toMatch(/curl -d/);
+});
+
 test("a PUT streamed without a Content-Length over the limit is a 413", async () => {
   const body = pngOfSize(262145);
   const stream = new ReadableStream<Uint8Array>({

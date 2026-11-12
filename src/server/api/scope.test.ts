@@ -480,6 +480,7 @@ test("the spec documents each gated operation's 403 with the action it needs", a
     "GET /projects/{id}/labels": needs("read"),
     "GET /projects/{id}/status-updates": needs("read"),
     "GET /whoami": null,
+    "GET /photos/{actorId}/{hash}": null,
     "DELETE /me/photo": null,
     "PUT /me/photo": null,
     "PATCH /issues/{id}": needs("issues"),

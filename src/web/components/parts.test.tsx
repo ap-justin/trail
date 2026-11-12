@@ -3,6 +3,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { ActorAvatar, ActorBadge } from "@/components/actor";
 import { NotFoundPanel } from "@/components/states";
 import { PriorityLabel } from "@/components/status";
+import { photoUrlFor } from "@/test/fixtures";
 
 describe("ActorBadge", () => {
   test.each([
@@ -42,7 +43,7 @@ describe("ActorAvatar", () => {
     ["md", "size-7"],
     ["lg", "size-9"],
   ] as const;
-  const photo = "/api/photos/a-kai/3f9a1c";
+  const photo = photoUrlFor("a-kai", "3f");
 
   test.each(sizes)(
     "%s: a photo sits over the initials in its kind's shape at its size",
@@ -57,7 +58,7 @@ describe("ActorAvatar", () => {
             actor={{
               name: "Maya Chen",
               kind: "human",
-              photoUrl: "/api/photos/a-maya/77b2",
+              photoUrl: photoUrlFor("a-maya", "77"),
             }}
             size={size}
           />
@@ -70,7 +71,7 @@ describe("ActorAvatar", () => {
       expect(human).toHaveClass(sizeClass, "rounded-full");
       expect(human?.querySelector("img")).toHaveAttribute(
         "src",
-        "/api/photos/a-maya/77b2",
+        photoUrlFor("a-maya", "77"),
       );
       expect(human).toHaveTextContent("MC");
     },
@@ -135,17 +136,46 @@ describe("ActorAvatar", () => {
 
     rerender(
       <ActorAvatar
-        actor={{ name: "Kai", kind: "bot", photoUrl: "/api/photos/a-new/9c0d" }}
+        actor={{
+          name: "Kai",
+          kind: "bot",
+          photoUrl: photoUrlFor("a-new", "9c"),
+        }}
       />,
     );
     expect(avatar).not.toHaveClass("border");
     expect(avatar).not.toHaveClass("border-bot");
-    fireEvent.load(img);
+    const next = container.querySelector("img");
+    if (!next) throw new Error("no img");
+    fireEvent.load(next);
     expect(avatar).toHaveClass("border", "border-bot");
 
-    fireEvent.error(img);
+    fireEvent.error(next);
     expect(avatar).not.toHaveClass("border");
     expect(avatar).not.toHaveClass("border-bot");
+  });
+
+  test("a new photo URL gets a fresh img, so the old photo never paints unframed under the initials", () => {
+    const { container, rerender } = render(
+      <ActorAvatar actor={{ name: "Kai", kind: "bot", photoUrl: photo }} />,
+    );
+    const avatar = container.firstElementChild;
+    const old = container.querySelector("img");
+    if (!old) throw new Error("no img");
+    fireEvent.load(old);
+    expect(avatar).toHaveClass("border", "border-bot");
+
+    rerender(
+      <ActorAvatar
+        actor={{ name: "Kai", kind: "bot", photoUrl: "/api/photos/a-new/9c0d" }}
+      />,
+    );
+    const next = container.querySelector("img");
+    expect(old).not.toBeInTheDocument();
+    expect(next).not.toBe(old);
+    expect(next).toHaveAttribute("src", "/api/photos/a-new/9c0d");
+    expect(avatar).toHaveTextContent("K");
+    expect(avatar).not.toHaveClass("border");
   });
 
   test("the photo is decorative and loads lazily", () => {
@@ -156,7 +186,8 @@ describe("ActorAvatar", () => {
     expect(container.firstElementChild).toHaveAttribute("aria-hidden", "true");
     expect(img).toHaveAttribute("alt", "");
     expect(img).toHaveAttribute("loading", "lazy");
-    expect(img).toHaveAttribute("decoding", "async");
+    // async decoding can fire load before the pixels are ready, leaving a blank frame
+    expect(img).not.toHaveAttribute("decoding");
   });
 
   test("loading is lazy by default and eager on request", () => {
@@ -209,7 +240,7 @@ describe("ActorAvatar", () => {
 
       rerender(
         <ActorAvatar
-          actor={{ name, kind, photoUrl: "/api/photos/a-new/9c0d" }}
+          actor={{ name, kind, photoUrl: photoUrlFor("a-new", "9c") }}
         />,
       );
       expect(avatar).toHaveTextContent(letters);
@@ -227,13 +258,6 @@ describe("ActorAvatar", () => {
         "naturalWidth",
         "get",
       ).mockReturnValue(64);
-      vi.spyOn(
-        HTMLImageElement.prototype,
-        "currentSrc",
-        "get",
-      ).mockImplementation(function (this: HTMLImageElement) {
-        return this.src;
-      });
     }
     afterEach(() => vi.restoreAllMocks());
 
@@ -266,54 +290,46 @@ describe("ActorAvatar", () => {
           actor={{
             name: "Kai",
             kind: "bot",
-            photoUrl: "/api/photos/a-new/9c0d",
+            photoUrl: photoUrlFor("a-new", "9c"),
           }}
         />,
       );
       expect(container.firstElementChild).not.toHaveTextContent("K");
     });
 
-    test("a new URL still fetching keeps the initials, though the old photo still reads complete", () => {
+    test("a new URL still fetching keeps the initials until it loads", () => {
       stubCompleteImages();
       const { container, rerender } = render(
         <ActorAvatar actor={{ name: "Kai", kind: "bot", photoUrl: photo }} />,
       );
       const avatar = container.firstElementChild;
-      const img = container.querySelector("img");
-      if (!img) throw new Error("no img");
+      const old = container.querySelector("img");
       expect(avatar).not.toHaveTextContent("K");
-      // until the new request lands, complete and naturalWidth describe the old photo
-      const oldSrc = img.src;
-      vi.spyOn(HTMLImageElement.prototype, "currentSrc", "get").mockReturnValue(
-        oldSrc,
-      );
+      // the new URL's fresh img isn't complete yet
+      vi.restoreAllMocks();
       rerender(
         <ActorAvatar
           actor={{
             name: "Kai",
             kind: "bot",
-            photoUrl: "/api/photos/a-new/9c0d",
+            photoUrl: photoUrlFor("a-new", "9c"),
           }}
         />,
       );
-      expect(container.querySelector("img")).toBe(img);
+      const img = container.querySelector("img");
+      if (!img) throw new Error("no img");
+      expect(img).not.toBe(old);
       expect(avatar).toHaveTextContent("K");
+      expect(avatar).not.toHaveClass("border");
       fireEvent.load(img);
       expect(avatar).not.toHaveTextContent("K");
     });
 
     test("a complete image that decoded to nothing (broken) keeps the initials", () => {
-      // currentSrc matches and naturalWidth stays jsdom's 0: only the naturalWidth guard rejects it
+      // complete, but naturalWidth stays jsdom's 0: only the naturalWidth guard rejects it
       vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(
         true,
       );
-      vi.spyOn(
-        HTMLImageElement.prototype,
-        "currentSrc",
-        "get",
-      ).mockImplementation(function (this: HTMLImageElement) {
-        return this.src;
-      });
       const { container } = render(
         <ActorAvatar actor={{ name: "Kai", kind: "bot", photoUrl: photo }} />,
       );
@@ -339,13 +355,13 @@ describe("ActorAvatar", () => {
         actor={{
           name: "Maya Chen",
           kind: "human",
-          photoUrl: "/api/photos/a-maya/77b2",
+          photoUrl: photoUrlFor("a-maya", "77"),
         }}
       />,
     );
     expect(container.querySelector("img")).toHaveAttribute(
       "src",
-      "/api/photos/a-maya/77b2",
+      photoUrlFor("a-maya", "77"),
     );
   });
 });

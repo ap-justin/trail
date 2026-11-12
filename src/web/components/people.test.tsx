@@ -7,7 +7,7 @@ import {
   parseUsername,
   type RowMutation,
 } from "@/components/people";
-import { allProjects, people } from "@/test/fixtures";
+import { allProjects, people, photoUrlFor } from "@/test/fixtures";
 
 function renderPeople(overrides: Partial<PeopleViewProps> = {}) {
   const props: PeopleViewProps = {
@@ -40,7 +40,7 @@ describe("people list", () => {
     renderPeople({
       people: people.map((p) =>
         p.username === "mayachen"
-          ? { ...p, photoUrl: "/api/photos/a-maya/77b2" }
+          ? { ...p, photoUrl: photoUrlFor("a-maya", "77") }
           : p,
       ),
     });
@@ -48,7 +48,7 @@ describe("people list", () => {
       document.querySelector(`[data-username="${username}"] [data-actor-kind]`);
     expect(avatar("mayachen")?.querySelector("img")).toHaveAttribute(
       "src",
-      "/api/photos/a-maya/77b2",
+      photoUrlFor("a-maya", "77"),
     );
     expect(avatar("justinsalas")).toHaveTextContent("JS");
     expect(avatar("justinsalas")?.querySelector("img")).toBeNull();

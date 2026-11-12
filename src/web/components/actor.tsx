@@ -83,13 +83,10 @@ export function ActorAvatar({
   const photoShown = photoUrl !== null && photoUrl === loadedUrl;
   // a photo this page already loaded is complete at attach, before its load event; taking it
   // then skips a frame of initials. After a hard reload it isn't, so initials may show for a
-  // frame. Rerun per URL: relies on React setting the new src before it attaches refs.
-  // complete/naturalWidth can still describe the old photo right after src changes, so the
-  // check holds only once currentSrc has caught up with the src just set.
+  // frame.
   const takeIfComplete = useCallback(
     (img: HTMLImageElement | null) => {
-      if (img?.complete && img.naturalWidth > 0 && img.currentSrc === img.src)
-        setLoadedUrl(photoUrl);
+      if (img?.complete && img.naturalWidth > 0) setLoadedUrl(photoUrl);
     },
     [photoUrl],
   );
@@ -112,12 +109,14 @@ export function ActorAvatar({
         <span className="col-start-1 row-start-1">{initials(actor)}</span>
       )}
       {photoUrl && (
+        // keyed: a reused img keeps painting the old photo while the new one loads,
+        // unframed and over the initials
         <img
+          key={photoUrl}
           ref={takeIfComplete}
           src={photoUrl}
           alt=""
           loading={loading}
-          decoding="async"
           onLoad={() => setLoadedUrl(photoUrl)}
           onError={() => setFailedUrl(photoUrl)}
           className="col-start-1 row-start-1 size-full object-cover"

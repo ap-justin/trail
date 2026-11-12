@@ -158,6 +158,20 @@ test("set_my_photo points larger files to the REST route", async () => {
   expect(description).toContain("PUT /api/v1/me/photo");
 });
 
+test("both photo tools are annotated destructive: each discards the photo the bot had", async () => {
+  const { tools } = await wide.listTools();
+  for (const name of ["set_my_photo", "clear_my_photo"]) {
+    expect(tools.find((t) => t.name === name)?.annotations, name).toMatchObject(
+      {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    );
+  }
+});
+
 test("list_bots carries each bot's photo URL", async () => {
   const { photoUrl } = await call(wide, "set_my_photo", { data: b64(PNG) });
   const { items } = await call(wide, "list_bots", { limit: 200 });
@@ -187,8 +201,9 @@ test.each([
     /^invalid_image: data is not valid base64/,
   ],
   [
-    "base64 missing its padding",
-    b64(JPEG).replace(/=+$/, ""),
+    // 13 characters: one past a whole group of 4, which no padding completes
+    "base64 cut one character into a group",
+    b64(JPEG).slice(0, 13),
     /^invalid_image: data is not valid base64/,
   ],
   [
@@ -205,6 +220,25 @@ test.each([
   const { photoUrl } = await call(wide, "set_my_photo", { data: b64(PNG) });
   expect(await refusal(wide, "set_my_photo", { data })).toMatch(message);
   expect((await call(wide, "whoami")).photoUrl).toBe(photoUrl);
+});
+
+test("unpadded and URL-safe base64 store the same photo as the standard encoding", async () => {
+  // 0xfb 0xff 0xbf encodes to +/+/, and the lone last byte to AQ==
+  const image = Uint8Array.from([...JPEG, 0, 0, 0xfb, 0xff, 0xbf, 0x01]);
+  const standard = b64(image);
+  expect(standard).toMatch(/\+\/\+\/AQ==$/);
+  const { photoUrl } = await call(wide, "set_my_photo", { data: standard });
+
+  for (const data of [
+    standard.replace(/=+$/, ""),
+    standard.replaceAll("+", "-").replaceAll("/", "_"),
+    standard.replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, ""),
+  ]) {
+    await call(wide, "set_my_photo", { data: b64(PNG) });
+    expect((await call(wide, "set_my_photo", { data })).photoUrl, data).toBe(
+      photoUrl,
+    );
+  }
 });
 
 test("exactly 256 KB fits through /mcp as base64", async () => {

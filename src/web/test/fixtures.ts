@@ -9,6 +9,10 @@ import type {
   WebStatusUpdateView,
 } from "@/lib/api-types";
 
+/** A photo URL in the server's real shape: `/api/photos/<actorId>/<64 lowercase hex>`. */
+export const photoUrlFor = (actorId: string, hexByte: string) =>
+  `/api/photos/${actorId}/${hexByte.repeat(32)}`;
+
 export const kai: WebActorView = {
   id: "a-kai",
   name: "Kai",
@@ -18,7 +22,7 @@ export const kai: WebActorView = {
 /** Kai with a photo on file. */
 export const kaiWithPhoto: WebActorView = {
   ...kai,
-  photoUrl: "/api/photos/a-kai/3f9a1c",
+  photoUrl: photoUrlFor("a-kai", "3f"),
 };
 export const maya: WebActorView = {
   id: "a-maya",

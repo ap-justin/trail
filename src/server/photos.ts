@@ -1,11 +1,15 @@
+import { createRoute, z } from "@hono/zod-openapi";
 import { Hono } from "hono";
 import { some } from "hono/combine";
 import { createMiddleware } from "hono/factory";
 import { HTTPException } from "hono/http-exception";
+import { errorSchema } from "../shared/schemas.js";
 import { bearerKey } from "./api/auth.js";
 import { errorResponse, handleError } from "./api/errors.js";
+import { jsonContent } from "./api/routes.js";
 import type { TrailAuth } from "./auth/auth.js";
 import type { Db } from "./db/client.js";
+import { actorPhotoContentTypes } from "./db/schema.js";
 import { readActorPhoto } from "./service/photos.js";
 
 /**
@@ -27,6 +31,42 @@ const memberSession = (auth: TrailAuth) =>
     }
     await next();
   });
+
+/**
+ * The serving route as the /api/v1 document lists it. It is served outside
+ * /api/v1, so the operation names its own server; `photoRoutes` below serves it.
+ */
+export const servePhotoRoute = createRoute({
+  method: "get",
+  path: "/photos/{actorId}/{hash}",
+  servers: [{ url: "/api" }],
+  summary: "Fetch an actor's photo",
+  description:
+    "The path an actor's photoUrl holds, under /api rather than /api/v1. Answers the image's raw bytes with its type; a URL never changes meaning, so a client may cache it for good. A bot key works, and so does a signed-in person's session.",
+  tags: ["actors"],
+  request: {
+    params: z.object({
+      actorId: z.string().describe("The actor's id, as photoUrl holds it"),
+      hash: z.string().describe("The photo's hash, as photoUrl holds it"),
+    }),
+  },
+  responses: {
+    200: {
+      description: "The photo's bytes",
+      content: Object.fromEntries(
+        actorPhotoContentTypes.map((type) => [type, {}]),
+      ),
+    },
+    401: jsonContent(
+      errorSchema,
+      "No unrevoked bot key and no signed-in invited person",
+    ),
+    404: jsonContent(
+      errorSchema,
+      "The actor has no photo, or it has changed since this URL was read: read photoUrl again",
+    ),
+  },
+});
 
 /**
  * `GET /api/photos/:actorId/:hash`, to any bot key or person let in. The hash

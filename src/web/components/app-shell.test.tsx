@@ -8,6 +8,7 @@ import { AppShell, type ShellViewer } from "@/components/app-shell";
 import { SearchResults } from "@/components/search-results";
 import { ThemeProvider } from "@/components/theme-provider";
 import type { MeView } from "@/lib/api-types";
+import { photoUrlFor } from "@/test/fixtures";
 
 function renderShell(viewer: ShellViewer) {
   render(
@@ -80,7 +81,7 @@ test("the viewer's photo shows in the sidebar's account menu (hidden below lg) a
     name: "Maya Chen",
     login: "mayachen",
     isOwner: false,
-    photoUrl: "/api/photos/a-maya/77b2",
+    photoUrl: photoUrlFor("a-maya", "77"),
   };
   renderShell(viewer);
   const trigger = screen.getByRole("button", { name: "Account: Maya Chen" });
@@ -89,7 +90,7 @@ test("the viewer's photo shows in the sidebar's account menu (hidden below lg) a
   expect(sidebar).toHaveClass("hidden", "lg:flex");
   expect(trigger.querySelector("img")).toHaveAttribute(
     "src",
-    "/api/photos/a-maya/77b2",
+    photoUrlFor("a-maya", "77"),
   );
   expect(trigger.querySelector("img")).toHaveAttribute("loading", "lazy");
 
@@ -101,7 +102,7 @@ test("the viewer's photo shows in the sidebar's account menu (hidden below lg) a
   expect(container.querySelector("img")).toHaveAttribute("loading", "eager");
   expect(container.querySelector("img")).toHaveAttribute(
     "src",
-    "/api/photos/a-maya/77b2",
+    photoUrlFor("a-maya", "77"),
   );
 });
 
@@ -113,7 +114,7 @@ test("the shell's viewer carries the photo URL `/me` gives the signed-in actor",
       id: "a-maya",
       name: "Maya Chen",
       kind: "human",
-      photoUrl: "/api/photos/a-maya/77b2",
+      photoUrl: photoUrlFor("a-maya", "77"),
     },
     projects: [],
     ownerName: "Justin Salas",
@@ -122,7 +123,7 @@ test("the shell's viewer carries the photo URL `/me` gives the signed-in actor",
     name: "Maya Chen",
     login: "mayachen",
     isOwner: false,
-    photoUrl: "/api/photos/a-maya/77b2",
+    photoUrl: photoUrlFor("a-maya", "77"),
   });
 });
 

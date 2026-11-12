@@ -8,7 +8,7 @@ import { actorPhoto } from "../db/schema.js";
 import { JPEG, OTHER_PNG, PNG, pngOfSize, WEBP } from "../test-images.js";
 import { InvalidImageError } from "./errors.js";
 import { createBot } from "./keys.js";
-import { setActorPhoto } from "./photos.js";
+import { readActorPhoto, setActorPhoto } from "./photos.js";
 
 const dir = mkdtempSync(join(tmpdir(), "trail-photos-"));
 const db = openDatabase(join(dir, "trail.db"));
@@ -51,6 +51,21 @@ test("setting different bytes moves updatedAt", () => {
   vi.setSystemTime(later);
   setActorPhoto(db, actor.id, OTHER_PNG);
   expect(storedAt(actor.id)).toEqual(later);
+});
+
+test("a replacing photo stores its own bytes and type under its own hash", () => {
+  const { actor } = createBot(db, "replaced");
+  const first = setActorPhoto(db, actor.id, PNG);
+  const { photoUrl } = setActorPhoto(db, actor.id, JPEG);
+  const hash = photoUrl.split("/").at(-1) ?? "";
+
+  expect(readActorPhoto(db, actor.id, hash)).toEqual({
+    content: Buffer.from(JPEG),
+    contentType: "image/jpeg",
+  });
+  expect(
+    readActorPhoto(db, actor.id, first.photoUrl.split("/").at(-1) ?? ""),
+  ).toBeNull();
 });
 
 // the literal 262144 is the schema's CHECK bound; a service limit drifting from it surfaces here
