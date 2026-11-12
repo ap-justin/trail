@@ -45,15 +45,37 @@ describe("people list", () => {
       ),
     });
     const avatar = (username: string) =>
-      document.querySelector(
-        `[data-username="${username}"] [aria-hidden="true"]`,
-      );
+      document.querySelector(`[data-username="${username}"] [data-actor-kind]`);
     expect(avatar("mayachen")?.querySelector("img")).toHaveAttribute(
       "src",
       "/api/photos/a-maya/77b2",
     );
     expect(avatar("justinsalas")).toHaveTextContent("JS");
     expect(avatar("justinsalas")?.querySelector("img")).toBeNull();
+  });
+
+  test("a pending invite shows a dashed ? circle; a signed-in person with no name still shows ?", () => {
+    renderPeople({
+      people: people.map((p) =>
+        p.username === "mayachen" ? { ...p, name: null } : p,
+      ),
+    });
+    const pending = document.querySelector(
+      '[data-username="kai-dev"] .border-dashed',
+    );
+    expect(pending).toHaveTextContent("?");
+    expect(pending).toHaveClass("rounded-full");
+    expect(
+      document.querySelector('[data-username="kai-dev"] [data-actor-kind]'),
+    ).toBeNull();
+
+    const unnamed = document.querySelector(
+      '[data-username="mayachen"] [data-actor-kind]',
+    );
+    expect(unnamed).toHaveTextContent("?");
+    expect(
+      document.querySelector('[data-username="mayachen"] .border-dashed'),
+    ).toBeNull();
   });
 
   test("the owner row comes first and has no actions", () => {

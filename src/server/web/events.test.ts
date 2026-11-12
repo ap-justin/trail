@@ -2,6 +2,7 @@ import { desc, eq, max } from "drizzle-orm";
 import { afterEach, expect, test, vi } from "vitest";
 import { activityEvent, session, user } from "../db/schema.js";
 import { readEventStream, setupTestApp } from "../test-app.js";
+import { PNG } from "../test-images.js";
 
 const {
   app,
@@ -58,6 +59,27 @@ test("a member's stream delivers its projects' entries with the event's seq as i
     actor: { name: "tester", kind: "bot" },
   });
   expect(entry?.seq).toBeGreaterThan(0);
+  await stream.cancel();
+});
+
+test("a pictured bot's streamed entry carries its photoUrl", async () => {
+  const p = addProject("Pictured");
+  const pictured = addBot("pictured");
+  const put = await app.request("/api/v1/me/photo", {
+    method: "PUT",
+    headers: {
+      authorization: `Bearer ${pictured.key}`,
+      "content-type": "image/png",
+    },
+    body: PNG,
+  });
+  expect(put.status).toBe(200);
+  const { photoUrl } = (await put.json()) as { photoUrl: string };
+  const stream = await openStream(ownerCookie);
+  await file(p.id, "with a face", pictured.key);
+  const entry = await stream.nextEntry();
+  expect(entry?.actor).toMatchObject({ name: "pictured", photoUrl });
+  expect(photoUrl).toMatch(/^\/api\/photos\//);
   await stream.cancel();
 });
 

@@ -10,8 +10,8 @@ import { readActorPhoto } from "./service/photos.js";
 
 /**
  * Throws a 401 unless the session is a person let in; a bot key is tried before it.
- * The session is read without refreshing it, so a page of avatars never rewrites
- * the session row or sets a cookie.
+ * The session is read without refreshing it, so a page of avatars never extends
+ * the session or sets a cookie (an expired session's row is still cleaned up).
  */
 const memberSession = (auth: TrailAuth) =>
   createMiddleware(async (c, next) => {

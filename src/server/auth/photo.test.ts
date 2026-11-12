@@ -272,7 +272,7 @@ test("a GitHub that never answers is given up on once the fetch's timeout fires"
     await vi.waitFor(() => expect(calls).toHaveLength(1));
     const timeout = timeouts.get(calls[0]?.init?.signal as AbortSignal);
     // the fetch carries a short timeout (AVATAR_TIMEOUT_MS in avatar.ts, 3s), and nothing has given up before it fires
-    expect(timeout?.ms).toBeGreaterThan(0);
+    expect(timeout?.ms).toBeGreaterThanOrEqual(1_000);
     expect(timeout?.ms).toBeLessThanOrEqual(3_000);
     expect(warn).not.toHaveBeenCalled();
 

@@ -9,6 +9,7 @@ const { app, bot, db, request, signIn, owner, addMember } = setupTestApp();
 
 let photoUrl = "";
 let memberCookie = "";
+let ownerCookie = "";
 let outsiderCookie = "";
 
 const putPhoto = (body: Uint8Array, contentType: string) =>
@@ -31,7 +32,7 @@ beforeEach(async () => {
 });
 
 beforeAll(async () => {
-  await signIn(owner);
+  ownerCookie = await signIn(owner);
   memberCookie = await addMember("member-none", []);
   outsiderCookie = await signIn("outsider");
 });
@@ -61,6 +62,15 @@ test("a signed-in member gets the photo, even one seeing no projects", async () 
     cookie: memberCookie,
   });
   expectServedWebp(res);
+});
+
+test("the signed-in owner, who has no invite row, gets the photo's bytes", async () => {
+  const res = await request("GET", photoUrl, {
+    key: null,
+    cookie: ownerCookie,
+  });
+  expectServedWebp(res);
+  expect(new Uint8Array(await res.arrayBuffer())).toEqual(WEBP);
 });
 
 test("HEAD answers with the same headers", async () => {

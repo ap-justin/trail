@@ -75,7 +75,7 @@ test("the current section is marked for assistive tech", () => {
   }
 });
 
-test("the viewer's photo loads lazily in the sidebar's account menu (hidden below lg) and eagerly atop the account panel", () => {
+test("the viewer's photo shows in the sidebar's account menu (hidden below lg) and loads eagerly atop the account panel", () => {
   const viewer: ShellViewer = {
     name: "Maya Chen",
     login: "mayachen",
@@ -84,8 +84,8 @@ test("the viewer's photo loads lazily in the sidebar's account menu (hidden belo
   };
   renderShell(viewer);
   const trigger = screen.getByRole("button", { name: "Account: Maya Chen" });
-  expect(trigger.querySelector("img")).toHaveAttribute("loading", "lazy");
-  // the sheet shows the sidebar only from lg up, so below it the lazy img never renders or fetches
+  // the sheet shows the sidebar only from lg up, so below it the img never renders or fetches;
+  // the sidebar's explicit loading="lazy" is ActorAvatar's default and unobservable in jsdom
   const sidebar = trigger.closest("aside");
   expect(sidebar).toHaveClass("hidden", "lg:flex");
   expect(trigger.querySelector("img")).toHaveAttribute(

@@ -32,8 +32,9 @@ export function createApi({ db, service }: { db: Db; service: Service }) {
   });
   api.use(bearerKey(db));
   // Body limits sit behind the key check, so an unauthenticated caller can't make
-  // them buffer a body. The import and the photo set their own and are
-  // registered above the general limit, which never runs for them.
+  // them buffer a body. The import and the photo upload set their own and are
+  // registered above the general limit, which never runs for them (the photo
+  // delete reads no body).
   api.route("/", importRoutes(service));
   api.route("/", photoRoutes(service));
   api.use(limitBody(MAX_BODY_BYTES));
