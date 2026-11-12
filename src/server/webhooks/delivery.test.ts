@@ -5,12 +5,12 @@ import {
   type IncomingHttpHeaders,
   type Server,
 } from "node:http";
-import type { AddressInfo } from "node:net";
+import { type AddressInfo, createServer as createTcpServer } from "node:net";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { webhookDelivery, webhookSubscription } from "../db/schema.js";
 import { projectKey, setupTestApp, testWebhookSettings } from "../test-app.js";
-import type { Transport } from "./send.js";
-import { createWebhookWorker } from "./worker.js";
+import { sendWebhook, type Transport } from "./send.js";
+import { BACKOFF_MS, createWebhookWorker } from "./worker.js";
 
 // A receiver on the loopback. trail refuses loopback addresses, so the transport
 // under test stands where the TLS connection would be: it posts the signed
@@ -40,26 +40,54 @@ afterAll(() => {
   receiver.close();
 });
 
-const toReceiver: Transport = ({ headers, body }) =>
-  new Promise((resolve, reject) => {
-    const req = httpRequest(
-      { host: "127.0.0.1", port, method: "POST", path: "/hook", headers },
-      (res) => {
-        res.resume();
-        resolve({ status: res.statusCode ?? 0 });
-      },
-    );
-    req.on("error", reject);
-    req.end(body);
-  });
+const postTo =
+  (to: () => number): Transport =>
+  ({ headers, body, signal }) =>
+    new Promise((resolve, reject) => {
+      const req = httpRequest(
+        {
+          host: "127.0.0.1",
+          port: to(),
+          method: "POST",
+          path: "/hook",
+          headers,
+          signal,
+        },
+        (res) => {
+          res.resume();
+          resolve({ status: res.statusCode ?? 0 });
+        },
+      );
+      req.on("error", reject);
+      req.end(body);
+    });
+const toReceiver = postTo(() => port);
 
-const { db, bus, request } = setupTestApp();
+// the app and the worker share one clock that stands still until a test moves it: a backoff
+// or a retry window is crossed by advancing it, never by waiting
+let clock = Date.now();
+const now = () => clock;
+const advance = (ms: number) => {
+  clock += ms;
+};
+const SECOND = 1_000;
+const MINUTE = 60 * SECOND;
+const HOUR = 60 * MINUTE;
+const { db, bus, request } = setupTestApp({ webhooks: { now } });
 let resolveTo = ["93.184.216.34"];
 let sends = 0;
+// the path of every send, and a path whose receiver answers 503 without being reached
+const sentTo: string[] = [];
+let failPath: string | null = null;
+const PUBLIC_URL = "https://trail.example/";
 const settings = testWebhookSettings({
+  publicUrl: PUBLIC_URL,
+  now,
   resolve: async () => resolveTo,
   transport: (call) => {
     sends++;
+    sentTo.push(call.url.pathname);
+    if (call.url.pathname === failPath) return Promise.resolve({ status: 503 });
     return toReceiver(call);
   },
 });
@@ -79,8 +107,8 @@ async function newProject() {
   await api("POST", "/projects", { key, name: `Project ${key}` });
   return key;
 }
-async function subscribe(projects: string[], url = HOOK) {
-  return api("POST", "/webhooks", { url, secret: SECRET, projects });
+async function subscribe(projects: string[], url = HOOK, secret = SECRET) {
+  return api("POST", "/webhooks", { url, secret, projects });
 }
 const worker = (
   options: Partial<Parameters<typeof createWebhookWorker>[0]> = {},
@@ -100,13 +128,16 @@ const reset = () => {
   received.length = 0;
   statuses.length = 0;
   sends = 0;
+  sentTo.length = 0;
+  failPath = null;
   resolveTo = ["93.184.216.34"];
+  clock = Date.now();
 };
-/** Runs the worker's passes until `done`, or fails after a second. */
+/** Runs the worker's passes until `done`, a second of the shared clock apart, or fails after 100. */
 async function until(w: { tick(): Promise<void> }, done: () => boolean) {
   for (let i = 0; i < 100 && !done(); i++) {
     await w.tick();
-    if (!done()) await sleep(10);
+    if (!done()) advance(SECOND);
   }
   expect(done()).toBe(true);
 }
@@ -160,7 +191,7 @@ test("an issue, a comment and a status change each arrive once, signed, in order
     project: { key, name: `Project ${key}` },
     subject: { type: "issue", key: issue.key, title: "First" },
     actor: { name: "tester", kind: "bot" },
-    url: `https://trail-justin.fly.dev/issues/${issue.key}`,
+    url: `https://trail.example/issues/${issue.key}`,
     payload: expect.objectContaining({ title: "First" }),
   });
   expect(created.data.eventId).toEqual(expect.any(String));
@@ -189,18 +220,23 @@ test("an issue, a comment and a status change each arrive once, signed, in order
   ).toBe(true);
 });
 
-test("nothing arrives for a project the webhook doesn't follow", async () => {
+test("nothing arrives for a project the webhook doesn't follow, while its own project's events do", async () => {
   reset();
   const followed = await newProject();
   const other = await newProject();
-  await subscribe([followed], "https://bot.example.com/only-followed");
+  const hook = await subscribe(
+    [followed],
+    "https://bot.example.com/only-followed",
+  );
   await api("POST", "/issues", { projectId: other, title: "elsewhere" });
+  await api("POST", "/issues", { projectId: followed, title: "mine" });
   const w = worker();
   await w.tick();
-  await sleep(30);
-  await w.tick();
-  const types = received.map((r) => JSON.parse(r.body).data.project.key);
-  expect(types).not.toContain(other);
+  expect(received.map((r) => JSON.parse(r.body).data.project.key)).toEqual([
+    followed,
+  ]);
+  // nothing was even queued for the other project's event
+  expect(rows().filter((r) => r.subscriptionId === hook.id)).toHaveLength(1);
 });
 
 test("a 500 then a 200 retries under the same delivery id, and holds later deliveries behind it", async () => {
@@ -213,9 +249,12 @@ test("a 500 then a 200 retries under the same delivery id, and holds later deliv
 
   const w = worker();
   await w.tick();
-  // the first attempt failed; "two" waits behind it
+  // the first attempt failed; "two" waits behind it, and nothing is due until the backoff passes
   expect(received).toHaveLength(1);
-  await until(w, () => received.length >= 3);
+  await w.tick();
+  expect(received).toHaveLength(1);
+  advance(20);
+  await w.tick();
   expect(received.map((r) => JSON.parse(r.body).data.subject.title)).toEqual([
     "one",
     "one",
@@ -231,6 +270,7 @@ test("a 500 then a 200 retries under the same delivery id, and holds later deliv
   expect(received[1]?.body).toBe(received[0]?.body);
   for (const r of received)
     expect(r.headers["x-openbot-signature"]).toBe(signatureOf(r));
+  expect(received).toHaveLength(3);
   const first = rows().find(
     (r) => r.id === received[0]?.headers["x-openbot-delivery-id"],
   );
@@ -238,19 +278,36 @@ test("a 500 then a 200 retries under the same delivery id, and holds later deliv
   void one;
 });
 
-test("a status the receiver won't change on a retry fails that delivery and moves on", async () => {
+test("a 401, 403 or 404 from a receiver mid-deploy is retried, and the delivery goes out", async () => {
   reset();
   const key = await newProject();
-  const hook = await subscribe([key], "https://bot.example.com/bad-request");
-  statuses.push(400, 200);
+  const hook = await subscribe([key], "https://bot.example.com/redeploying");
+  statuses.push(401, 403, 404, 200);
+  await api("POST", "/issues", { projectId: key, title: "during deploy" });
+  const w = worker({ pauseAfter: 1000 });
+  await until(w, () => received.length >= 4);
+  expect(
+    new Set(received.map((r) => r.headers["x-openbot-delivery-id"])).size,
+  ).toBe(1);
+  const mine = rows().filter((r) => r.subscriptionId === hook.id);
+  expect(mine.map((r) => [r.status, r.attempts, r.lastStatus])).toEqual([
+    ["delivered", 4, 200],
+  ]);
+});
+
+test("a 410 Gone fails that delivery at once and moves on", async () => {
+  reset();
+  const key = await newProject();
+  const hook = await subscribe([key], "https://bot.example.com/gone-410");
+  statuses.push(410, 200);
   await api("POST", "/issues", { projectId: key, title: "rejected" });
   await api("POST", "/issues", { projectId: key, title: "accepted" });
   const w = worker();
   await until(w, () => received.length >= 2);
   const mine = rows().filter((r) => r.subscriptionId === hook.id);
-  expect(mine.map((r) => [r.status, r.lastStatus])).toEqual([
-    ["failed", 400],
-    ["delivered", 200],
+  expect(mine.map((r) => [r.status, r.attempts, r.lastStatus])).toEqual([
+    ["failed", 1, 410],
+    ["delivered", 1, 200],
   ]);
 });
 
@@ -299,10 +356,9 @@ test("repeated failures pause the subscription, shown in its listing, and an upd
   await api("POST", "/issues", { projectId: key, title: "stuck" });
   await api("POST", "/issues", { projectId: key, title: "behind" });
   const w = worker({ pauseAfter: 3, backoffMs: [5] });
-  const paused = async () => (await api("GET", `/webhooks/${hook.id}`)).paused;
-  for (let i = 0; i < 100 && !(await paused()); i++) {
+  for (let i = 0; i < 3; i++) {
     await w.tick();
-    await sleep(10);
+    advance(10);
   }
   const listed = (await api("GET", "/webhooks")).items.find(
     (x: Body) => x.id === hook.id,
@@ -317,7 +373,8 @@ test("repeated failures pause the subscription, shown in its listing, and an upd
   expect(listed.lastErrorAt).not.toBeNull();
 
   const count = received.length;
-  await sleep(30);
+  expect(count).toBe(3);
+  advance(HOUR);
   await w.tick();
   expect(received).toHaveLength(count);
 
@@ -339,14 +396,48 @@ test("a delivery still failing after the retry window is marked failed", async (
   const hook = await subscribe([key], "https://bot.example.com/giveup");
   statuses.push(...Array(50).fill(502));
   await api("POST", "/issues", { projectId: key, title: "doomed" });
-  const w = worker({ giveUpMs: 60, backoffMs: [15], pauseAfter: 1000 });
-  await until(w, () =>
-    rows().some((r) => r.subscriptionId === hook.id && r.status === "failed"),
-  );
-  const row = rows().find((r) => r.subscriptionId === hook.id);
-  expect(row?.lastError).toBe("HTTP 502");
-  expect(row?.attempts).toBeGreaterThan(1);
+  const w = worker({ giveUpMs: 50_000, backoffMs: [15_000], pauseAfter: 1000 });
+  const mine = () => rows().filter((r) => r.subscriptionId === hook.id);
+  // attempts at 0s, 15s, 30s and 45s: the fourth would retry at 60s, past the 50s window
+  for (let i = 0; i < 4; i++) {
+    await w.tick();
+    expect(mine()[0]?.status, `after attempt ${i + 1}`).toBe(
+      i < 3 ? "pending" : "failed",
+    );
+    advance(15_000);
+  }
+  expect(mine()[0]).toMatchObject({
+    status: "failed",
+    attempts: 4,
+    lastError: "HTTP 502",
+  });
   statuses.length = 0;
+});
+
+test("a paused webhook's deliveries wait past the retry window and go out on resume", async () => {
+  reset();
+  const key = await newProject();
+  const hook = await subscribe(
+    [key],
+    "https://bot.example.com/paused-overnight",
+  );
+  statuses.push(503);
+  await api("POST", "/issues", { projectId: key, title: "overnight" });
+  const w = worker({ pauseAfter: 1 });
+  await w.tick();
+  expect((await api("GET", `/webhooks/${hook.id}`)).paused).toBe(true);
+
+  advance(25 * HOUR);
+  await w.tick();
+  const waiting = rows().find((r) => r.subscriptionId === hook.id);
+  expect(waiting).toMatchObject({ status: "pending", attempts: 1 });
+
+  await api("PATCH", `/webhooks/${hook.id}`, {});
+  await until(w, () => received.length >= 2);
+  expect(rows().find((r) => r.subscriptionId === hook.id)).toMatchObject({
+    status: "delivered",
+    attempts: 2,
+  });
 });
 
 test("DNS that now points inside is refused at delivery, with no request sent", async () => {
@@ -361,6 +452,18 @@ test("DNS that now points inside is refused at delivery, with no request sent", 
   const row = rows().find((r) => r.subscriptionId === hook.id);
   expect(row).toMatchObject({ status: "pending", attempts: 1 });
   expect(row?.lastError).toMatch(/internal address/);
+});
+
+test("with no public URL configured a delivery carries no link", async () => {
+  reset();
+  const key = await newProject();
+  await subscribe([key], "https://bot.example.com/nolink");
+  await api("POST", "/issues", { projectId: key, title: "unlinked" });
+  const w = worker({ settings: { ...settings, publicUrl: undefined } });
+  await until(w, () => received.length === 1);
+  const { data } = JSON.parse(received[0]?.body ?? "");
+  expect(data.subject.title).toBe("unlinked");
+  expect(data).not.toHaveProperty("url");
 });
 
 test("a payload over 2000 characters is cut", async () => {
@@ -387,4 +490,380 @@ test("deleting a webhook drops its queued deliveries", async () => {
   expect(rows().filter((r) => r.subscriptionId === hook.id)).toHaveLength(1);
   await api("DELETE", `/webhooks/${hook.id}`);
   expect(rows().filter((r) => r.subscriptionId === hook.id)).toHaveLength(0);
+});
+
+/** A receiver that takes the request, then drips its response head a line every few ms: never idle, never done. */
+async function dripReceiver() {
+  let dripping = () => {};
+  const started = new Promise<void>((done) => {
+    dripping = done;
+  });
+  const drips = new Set<NodeJS.Timeout>();
+  const server = createTcpServer((socket) => {
+    // an abort resets the connection
+    socket.on("error", () => {});
+    socket.once("data", () => {
+      socket.write("HTTP/1.1 200 OK\r\n");
+      const drip = setInterval(() => socket.write("x-drip: 1\r\n"), 5);
+      drips.add(drip);
+      socket.on("close", () => clearInterval(drip));
+      dripping();
+    });
+  });
+  await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+  return {
+    transport: postTo(() => (server.address() as AddressInfo).port),
+    started,
+    close() {
+      for (const drip of drips) clearInterval(drip);
+      server.close();
+    },
+  };
+}
+
+test("a receiver that drips its response head is cut off at the deadline", async () => {
+  const slow = await dripReceiver();
+  const deadline = new AbortController();
+  try {
+    const sent = sendWebhook(
+      {
+        ...settings,
+        transport: slow.transport,
+        deadline: () => deadline.signal,
+      },
+      { url: HOOK, secret: SECRET, deliveryId: "drip", body: "{}" },
+    );
+    await slow.started;
+    deadline.abort();
+    expect(await sent).toEqual({
+      ok: false,
+      status: null,
+      error: "no answer within 10s",
+      retryable: true,
+    });
+  } finally {
+    slow.close();
+  }
+});
+
+test("stopping the worker cuts a send in flight, and its delivery stays pending", async () => {
+  reset();
+  const key = await newProject();
+  const hook = await subscribe([key], "https://bot.example.com/shutdown");
+  await api("POST", "/issues", { projectId: key, title: "in flight" });
+  const slow = await dripReceiver();
+  try {
+    const w = worker({ settings: { ...settings, transport: slow.transport } });
+    w.start();
+    await slow.started;
+    await w.stop();
+    expect(rows().find((r) => r.subscriptionId === hook.id)).toMatchObject({
+      status: "pending",
+      attempts: 0,
+    });
+  } finally {
+    slow.close();
+  }
+});
+
+// the shipped schedule and threshold, not the shortened ones the tests above pass
+const shipped = () => createWebhookWorker({ db, bus, settings });
+/** Moves the clock to when the earliest retry is due, no further. */
+const advanceToDue = () => {
+  const due = rows()
+    .filter((r) => r.status === "pending")
+    .map((r) => r.nextAttemptAt.getTime());
+  if (due.length > 0) clock = Math.max(clock, Math.min(...due));
+};
+const sub = (id: string) =>
+  db
+    .select()
+    .from(webhookSubscription)
+    .all()
+    .find((x) => x.id === id);
+
+test("the shipped backoff waits 10s, 30s, 2m, 10m, 30m, 1h, 2h, then 4h, and nothing is sent before it is up", async () => {
+  reset();
+  const key = await newProject();
+  const hook = await subscribe([key], "https://bot.example.com/schedule");
+  statuses.push(...Array(9).fill(503));
+  await api("POST", "/issues", { projectId: key, title: "slow receiver" });
+  // pause is out of the way: this is the schedule alone
+  const w = createWebhookWorker({ db, bus, settings, pauseAfter: 1000 });
+  const mine = () => rows().filter((r) => r.subscriptionId === hook.id)[0];
+  const waits = [
+    10 * SECOND,
+    30 * SECOND,
+    2 * MINUTE,
+    10 * MINUTE,
+    30 * MINUTE,
+    HOUR,
+    2 * HOUR,
+    4 * HOUR,
+    4 * HOUR,
+  ];
+  expect(BACKOFF_MS).toEqual(waits.slice(0, 8));
+  for (const [i, wait] of waits.entries()) {
+    await w.tick();
+    expect(sends, `attempt ${i + 1}`).toBe(i + 1);
+    expect(
+      (mine()?.nextAttemptAt.getTime() ?? 0) - clock,
+      `wait ${i + 1}`,
+    ).toBe(wait);
+    advance(wait - 1);
+    await w.tick();
+    expect(sends, `one ms early, after attempt ${i + 1}`).toBe(i + 1);
+    advance(1);
+  }
+});
+
+test("a delivery that keeps failing is given up on once the next try would fall past 24 hours", async () => {
+  reset();
+  const key = await newProject();
+  const hook = await subscribe([key], "https://bot.example.com/day");
+  statuses.push(...Array(30).fill(503));
+  await api("POST", "/issues", { projectId: key, title: "never answered" });
+  const w = createWebhookWorker({ db, bus, settings, pauseAfter: 1000 });
+  const mine = () => rows().filter((r) => r.subscriptionId === hook.id)[0];
+  const created = mine()?.createdAt.getTime() ?? 0;
+  let lastAttempt = clock;
+  for (let i = 0; i < 30 && mine()?.status === "pending"; i++) {
+    lastAttempt = clock;
+    await w.tick();
+    if (mine()?.status === "pending") advanceToDue();
+  }
+  // attempts at 0s, 10s, 40s, 2m40s, 12m40s, 42m40s, 1h42m40s, 3h42m40s, then every 4h: the 13th, at 23h42m40s,
+  // would wait to 27h42m40s
+  expect(mine()).toMatchObject({ status: "failed", attempts: 13 });
+  expect(lastAttempt - created).toBeGreaterThan(23 * HOUR);
+  expect(lastAttempt - created).toBeLessThan(24 * HOUR);
+  statuses.length = 0;
+});
+
+test("a delivery 24 hours old is failed, however late the receiver is tried again", async () => {
+  reset();
+  const key = await newProject();
+  const hook = await subscribe([key], "https://bot.example.com/late");
+  statuses.push(...Array(5).fill(503));
+  await api("POST", "/issues", { projectId: key, title: "stale" });
+  const w = createWebhookWorker({ db, bus, settings, pauseAfter: 1000 });
+  const mine = () => rows().filter((r) => r.subscriptionId === hook.id)[0];
+  const created = mine()?.createdAt.getTime() ?? 0;
+  await w.tick();
+  // 10 minutes inside the window the retry still goes out and is still pending
+  clock = created + 24 * HOUR - 10 * MINUTE;
+  await w.tick();
+  expect(mine()).toMatchObject({ status: "pending", attempts: 2 });
+  // 10 minutes past it nothing is sent: the delivery is failed with the last answer kept
+  clock = created + 24 * HOUR + 10 * MINUTE;
+  await w.tick();
+  expect(sends).toBe(2);
+  expect(mine()).toMatchObject({
+    status: "failed",
+    attempts: 2,
+    lastError: "HTTP 503",
+  });
+  statuses.length = 0;
+});
+
+test("seven failures in a row don't pause, the eighth does", async () => {
+  reset();
+  const key = await newProject();
+  const hook = await subscribe([key], "https://bot.example.com/eight");
+  statuses.push(...Array(8).fill(503));
+  await api("POST", "/issues", { projectId: key, title: "flapping" });
+  const w = shipped();
+  for (let i = 1; i <= 7; i++) {
+    await w.tick();
+    advanceToDue();
+    expect(sub(hook.id), `after ${i} failures`).toMatchObject({
+      consecutiveFailures: i,
+      pausedAt: null,
+    });
+  }
+  await w.tick();
+  expect(sub(hook.id)).toMatchObject({ consecutiveFailures: 8 });
+  expect(sub(hook.id)?.pausedAt).not.toBeNull();
+});
+
+test("a success resets the count, so only failures in a row pause", async () => {
+  reset();
+  const key = await newProject();
+  const hook = await subscribe([key], "https://bot.example.com/streak");
+  const w = shipped();
+  // three failures, then it answers
+  statuses.push(503, 503, 503, 200);
+  await api("POST", "/issues", { projectId: key, title: "first" });
+  for (let i = 0; i < 4; i++) {
+    await w.tick();
+    advanceToDue();
+  }
+  expect(sub(hook.id)).toMatchObject({
+    consecutiveFailures: 0,
+    pausedAt: null,
+  });
+  // seven more would reach eight only if the three before them still counted
+  statuses.push(...Array(7).fill(503));
+  await api("POST", "/issues", { projectId: key, title: "second" });
+  for (let i = 0; i < 7; i++) {
+    await w.tick();
+    advanceToDue();
+  }
+  expect(sub(hook.id)).toMatchObject({
+    consecutiveFailures: 7,
+    pausedAt: null,
+  });
+});
+
+test("a delivery a receiver refuses for good still counts toward the pause", async () => {
+  reset();
+  const key = await newProject();
+  const hook = await subscribe([key], "https://bot.example.com/refuser");
+  statuses.push(...Array(8).fill(410));
+  const w = shipped();
+  for (let i = 1; i <= 8; i++) {
+    await api("POST", "/issues", { projectId: key, title: `refused ${i}` });
+    await w.tick();
+    expect(sub(hook.id)?.consecutiveFailures).toBe(i);
+    expect(sub(hook.id)?.pausedAt === null, `after ${i}`).toBe(i < 8);
+  }
+  expect(
+    rows().filter((r) => r.subscriptionId === hook.id && r.status === "failed"),
+  ).toHaveLength(8);
+});
+
+test("one event reaches every webhook that follows its project, each signed with its own secret", async () => {
+  reset();
+  const key = await newProject();
+  const other = await newProject();
+  const first = await subscribe(
+    [key],
+    "https://bot.example.com/one",
+    "whsec_first_0123456789abcdef",
+  );
+  const second = await subscribe(
+    [key, other],
+    "https://bot.example.com/two",
+    "whsec_second_0123456789abcdef",
+  );
+  await api("POST", "/issues", { projectId: key, title: "for both" });
+  await worker().tick();
+  expect(sentTo.sort()).toEqual(["/one", "/two"]);
+  const [x, y] = received;
+  expect(x?.headers["x-openbot-delivery-id"]).not.toBe(
+    y?.headers["x-openbot-delivery-id"],
+  );
+  expect(x?.body).toBe(y?.body);
+  const secrets = [
+    "whsec_first_0123456789abcdef",
+    "whsec_second_0123456789abcdef",
+  ];
+  // arrival order isn't fixed: each message verifies under exactly one of the two secrets
+  for (const r of received) {
+    expect(
+      secrets.filter(
+        (s) => r.headers["x-openbot-signature"] === signatureOf(r, s),
+      ),
+    ).toHaveLength(1);
+  }
+  expect(
+    rows()
+      .filter((r) => [first.id, second.id].includes(r.subscriptionId))
+      .map((r) => r.status),
+  ).toEqual(["delivered", "delivered"]);
+});
+
+test("a webhook that keeps failing doesn't hold back another one on the same project", async () => {
+  reset();
+  const key = await newProject();
+  const down = await subscribe([key], "https://bot.example.com/down");
+  await subscribe([key], "https://bot.example.com/up");
+  failPath = "/down";
+  for (const title of ["one", "two", "three"]) {
+    await api("POST", "/issues", { projectId: key, title });
+  }
+  const w = worker({ pauseAfter: 1000 });
+  await until(w, () => received.length === 3);
+  expect(received.map((r) => JSON.parse(r.body).data.subject.title)).toEqual([
+    "one",
+    "two",
+    "three",
+  ]);
+  // the failing one is still on its first delivery, retrying; the others wait behind it
+  const stuck = rows().filter((r) => r.subscriptionId === down.id);
+  expect(stuck.map((r) => r.status)).toEqual(["pending", "pending", "pending"]);
+  expect(stuck.map((r) => r.attempts > 0)).toEqual([true, false, false]);
+});
+
+test("events created while a webhook is paused queue behind it and go out in order on resume", async () => {
+  reset();
+  const key = await newProject();
+  const hook = await subscribe([key], "https://bot.example.com/paused-queue");
+  failPath = "/paused-queue";
+  await api("POST", "/issues", { projectId: key, title: "before" });
+  const w = worker({ pauseAfter: 1 });
+  await w.tick();
+  expect(sub(hook.id)?.pausedAt).not.toBeNull();
+
+  await api("POST", "/issues", { projectId: key, title: "during one" });
+  await api("POST", "/issues", { projectId: key, title: "during two" });
+  const queued = rows().filter((r) => r.subscriptionId === hook.id);
+  expect(queued.map((r) => r.status)).toEqual([
+    "pending",
+    "pending",
+    "pending",
+  ]);
+  advance(HOUR);
+  await w.tick();
+  expect(sentTo).toEqual(["/paused-queue"]);
+
+  failPath = null;
+  await api("PATCH", `/webhooks/${hook.id}`, {});
+  await until(w, () => received.length === 3);
+  expect(received.map((r) => JSON.parse(r.body).data.subject.title)).toEqual([
+    "before",
+    "during one",
+    "during two",
+  ]);
+});
+
+test("a delivery queued before a rotation is signed with the new secret", async () => {
+  reset();
+  const key = await newProject();
+  const hook = await subscribe([key], "https://bot.example.com/rotate");
+  await api("POST", "/issues", { projectId: key, title: "queued" });
+  const next = "whsec_rotated_0123456789abcdef";
+  await api("PUT", `/webhooks/${hook.id}/secret`, { secret: next });
+  await worker().tick();
+  const [only] = received;
+  expect(received).toHaveLength(1);
+  expect(only?.headers["x-openbot-signature"]).toBe(
+    signatureOf(only as Received, next),
+  );
+  expect(only?.headers["x-openbot-signature"]).not.toBe(
+    signatureOf(only as Received, SECRET),
+  );
+});
+
+test("rotating the secret of a paused webhook resumes it, and what waited goes out under the new secret", async () => {
+  reset();
+  const key = await newProject();
+  const hook = await subscribe([key], "https://bot.example.com/rotate-resume");
+  failPath = "/rotate-resume";
+  await api("POST", "/issues", { projectId: key, title: "held" });
+  const w = worker({ pauseAfter: 1 });
+  await w.tick();
+  expect(sub(hook.id)?.pausedAt).not.toBeNull();
+
+  failPath = null;
+  const next = "whsec_resumed_0123456789abcdef";
+  const rotated = await api("PUT", `/webhooks/${hook.id}/secret`, {
+    secret: next,
+  });
+  expect(rotated).toMatchObject({ paused: false, consecutiveFailures: 0 });
+  advance(HOUR);
+  await until(w, () => received.length === 1);
+  expect(received[0]?.headers["x-openbot-signature"]).toBe(
+    signatureOf(received[0] as Received, next),
+  );
 });

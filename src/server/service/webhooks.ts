@@ -9,7 +9,6 @@ import {
   webhookSubscriptionProject,
 } from "../db/schema.js";
 import type { Resolve } from "../webhooks/address.js";
-import { DEFAULT_PUBLIC_URL } from "../webhooks/payload.js";
 import { type SecretKey, sealSecret } from "../webhooks/secret.js";
 import {
   defaultSendDeps,
@@ -22,8 +21,8 @@ import type { Tx } from "./tx.js";
 /** What the service needs to store secrets and to send a test call. */
 export type WebhookSettings = SendDeps & {
   key: SecretKey;
-  /** the origin links in a webhook point at */
-  publicUrl: string;
+  /** the origin links in a webhook point at; with none, a webhook carries no links */
+  publicUrl: string | undefined;
 };
 
 export function webhookSettings(
@@ -38,7 +37,7 @@ export function webhookSettings(
   return {
     ...defaultSendDeps,
     ...overrides,
-    publicUrl: overrides.publicUrl ?? DEFAULT_PUBLIC_URL,
+    publicUrl: overrides.publicUrl,
     key,
   };
 }
@@ -145,14 +144,27 @@ export function setProjects(
     .run();
 }
 
-/** Clears a pause and lets the deliveries that waited go out at once. */
+/**
+ * Clears a pause and lets the deliveries that waited go out at once. The time
+ * paused doesn't count toward their retry window: the worker measures it from
+ * `created_at`, so that moves forward by the pause.
+ */
 export function resume(tx: Tx, subscriptionId: string, now: number) {
+  const pausedAt = tx
+    .select({ at: webhookSubscription.pausedAt })
+    .from(webhookSubscription)
+    .where(eq(webhookSubscription.id, subscriptionId))
+    .get()?.at;
   tx.update(webhookSubscription)
     .set({ pausedAt: null, consecutiveFailures: 0 })
     .where(eq(webhookSubscription.id, subscriptionId))
     .run();
+  const pausedFor = pausedAt ? Math.max(0, now - pausedAt.getTime()) : 0;
   tx.update(webhookDelivery)
-    .set({ nextAttemptAt: new Date(now) })
+    .set({
+      nextAttemptAt: new Date(now),
+      createdAt: sql`${webhookDelivery.createdAt} + ${pausedFor}`,
+    })
     .where(
       and(
         eq(webhookDelivery.subscriptionId, subscriptionId),

@@ -19,7 +19,7 @@ export const TEST_OWNER_ID = 1;
 /** Webhook settings for a test: every name resolves to a public address but internal.example.test, and nothing is sent. */
 export const testWebhookSettings = (
   overrides: Partial<
-    Pick<WebhookSettings, "resolve" | "transport" | "now">
+    Pick<WebhookSettings, "resolve" | "transport" | "now" | "publicUrl">
   > = {},
 ) =>
   webhookSettings(

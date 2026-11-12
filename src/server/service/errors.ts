@@ -30,7 +30,7 @@ export class ValidationError extends ServiceError {
   override readonly name = "ValidationError";
 }
 
-/** The write collides with a row that already holds a unique value. */
+/** The write collides with what already exists: a row holding a unique value, or a count at its limit. */
 export class ConflictError extends ServiceError {
   readonly code = "conflict";
   override readonly name = "ConflictError";

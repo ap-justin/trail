@@ -13,9 +13,6 @@ import type { ActivityEvent } from "../events/bus.js";
 /** How much of an event's payload a webhook carries, in characters of its JSON. */
 export const PAYLOAD_MAX_CHARS = 2000;
 
-/** The public origin links point at when none is configured. */
-export const DEFAULT_PUBLIC_URL = "https://trail-justin.fly.dev";
-
 export type Envelope = {
   type: string;
   occurredAt: string;
@@ -128,7 +125,7 @@ function subjectOf(
 export function buildEnvelope(
   db: Db,
   event: ActivityEvent,
-  publicUrl: string,
+  publicUrl: string | undefined,
 ): Envelope {
   const proj =
     event.projectId === null
@@ -158,7 +155,9 @@ export function buildEnvelope(
       project: proj ? { key: proj.key, name: proj.name } : null,
       subject,
       actor: by ? { name: by.name, kind: by.kind } : null,
-      url: `${publicUrl.replace(/\/+$/, "")}${path}`,
+      ...(publicUrl !== undefined && {
+        url: `${publicUrl.replace(/\/+$/, "")}${path}`,
+      }),
       payload: cutPayload(event.payload),
     },
   };

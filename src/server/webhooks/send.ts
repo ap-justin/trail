@@ -12,6 +12,7 @@ export type Transport = (call: {
   signal?: AbortSignal;
 }) => Promise<{ status: number }>;
 
+/** The whole attempt, connect to response head, not an idle gap: a receiver that drips bytes still runs out. */
 export const SEND_TIMEOUT_MS = 10_000;
 
 /**
@@ -42,16 +43,12 @@ export const httpsTransport: Transport = ({
           "user-agent": "trail-webhooks/1",
         },
         servername: isIP(hostname) === 0 ? hostname : undefined,
-        timeout: SEND_TIMEOUT_MS,
         signal,
       },
       (res) => {
         res.destroy();
         resolve({ status: res.statusCode ?? 0 });
       },
-    );
-    req.on("timeout", () =>
-      req.destroy(new Error(`no answer within ${SEND_TIMEOUT_MS / 1000}s`)),
     );
     req.on("error", reject);
     req.end(body);
@@ -61,21 +58,24 @@ export type SendDeps = {
   resolve: Resolve;
   transport: Transport;
   now: () => number;
+  /** aborts when an attempt's time is up */
+  deadline: () => AbortSignal;
 };
 
 export const defaultSendDeps: SendDeps = {
   resolve: resolveHost,
   transport: httpsTransport,
   now: Date.now,
+  deadline: () => AbortSignal.timeout(SEND_TIMEOUT_MS),
 };
 
 export type SendResult =
   | { ok: true; status: number }
   | { ok: false; status: number | null; error: string; retryable: boolean };
 
-// the statuses a receiver uses to say "try again"
-const retryableStatus = (status: number) =>
-  status === 408 || status === 429 || status >= 500;
+// a 401/403/404 is often a receiver mid-deploy or mid-rotation, so every 4xx
+// retries; 410 Gone is the one 4xx that says stop
+const retryableStatus = (status: number) => status >= 400 && status !== 410;
 
 /** A short, safe description of a failure: a code or message, never a URL or a secret. */
 function describe(error: unknown): string {
@@ -89,14 +89,15 @@ function describe(error: unknown): string {
 
 /**
  * Signs and sends one webhook, checking the URL's address first. Never throws:
- * a refused address and a network error are retryable failures, as are 408,
- * 429 and 5xx; any other non-2xx status is not.
+ * a refused address and a network error are retryable failures, as are every
+ * 4xx but 410 and every 5xx; 410, a 3xx and any other non-2xx status are not.
  */
 export async function sendWebhook(
   deps: SendDeps,
   call: { url: string; secret: string; deliveryId: string; body: string },
   signal?: AbortSignal,
 ): Promise<SendResult> {
+  let deadline: AbortSignal | undefined;
   try {
     const { url, address } = await checkWebhookUrl(call.url, deps.resolve);
     const headers = signedHeaders({
@@ -105,12 +106,13 @@ export async function sendWebhook(
       body: call.body,
       now: deps.now(),
     });
+    deadline = deps.deadline();
     const { status } = await deps.transport({
       url,
       address,
       headers,
       body: call.body,
-      signal,
+      signal: signal ? AbortSignal.any([signal, deadline]) : deadline,
     });
     if (status >= 200 && status < 300) return { ok: true, status };
     return {
@@ -126,7 +128,10 @@ export async function sendWebhook(
     return {
       ok: false,
       status: null,
-      error: describe(error),
+      error:
+        deadline?.aborted && !signal?.aborted
+          ? `no answer within ${SEND_TIMEOUT_MS / 1000}s`
+          : describe(error),
       retryable: true,
     };
   }

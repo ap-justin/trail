@@ -1,5 +1,6 @@
 import { createRoute, z } from "@hono/zod-openapi";
 import {
+  errorSchema,
   pageSchema,
   webhookCreateSchema,
   webhookDeletedSchema,
@@ -9,10 +10,10 @@ import {
   webhookUpdateSchema,
 } from "../../shared/schemas.js";
 import type { Service } from "../service/index.js";
+import { WEBHOOKS_PER_BOT_MAX } from "../service/webhooks.js";
 import { WEBHOOK_DELIVERY, WEBHOOK_SETUP } from "../webhooks/docs.js";
 import { createRouter } from "./env.js";
 import {
-  conflictError,
   forbiddenError,
   jsonBody,
   jsonContent,
@@ -25,6 +26,9 @@ import { toPage, toWebhook } from "./serialize.js";
 const tags = ["webhooks"];
 const own =
   "Acts on the calling bot's own webhooks only; a webhook of another bot, or one that follows a project outside the key's scope, is a 404.";
+
+const URL_TAKEN = "This bot already has a webhook to that URL";
+const urlTaken = { 409: jsonContent(errorSchema, URL_TAKEN) };
 
 const webhookParam = z.object({
   id: z
@@ -48,7 +52,10 @@ const createWebhook = createRoute({
     ...forbiddenError("read"),
     ...writeErrors,
     ...notFoundError,
-    ...conflictError,
+    409: jsonContent(
+      errorSchema,
+      `${URL_TAKEN}, or already has ${WEBHOOKS_PER_BOT_MAX} webhooks, the most allowed`,
+    ),
   },
 });
 
@@ -92,7 +99,7 @@ const updateWebhook = createRoute({
     ...forbiddenError("read"),
     ...writeErrors,
     ...notFoundError,
-    ...conflictError,
+    ...urlTaken,
   },
 });
 

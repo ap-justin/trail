@@ -217,6 +217,9 @@ export const myPhotoRemovedSchema = z
   })
   .openapi("MyPhotoRemoved");
 
+/** Consecutive failed attempts, across a webhook's deliveries, that pause it. */
+export const WEBHOOK_PAUSE_AFTER = 8;
+
 export const webhookSchema = z
   .object({
     id,
@@ -230,7 +233,7 @@ export const webhookSchema = z
     }),
     pausedAt: timestamp.nullable(),
     consecutiveFailures: z.int().meta({
-      description: "Failed attempts since the last success; 8 pauses it.",
+      description: `Failed attempts since the last success; ${WEBHOOK_PAUSE_AFTER} pauses it.`,
     }),
     lastSuccessAt: timestamp.nullable(),
     lastError: z.string().nullable().meta({

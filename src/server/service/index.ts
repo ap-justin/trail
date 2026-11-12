@@ -1870,7 +1870,7 @@ export function createService({
         .where(eq(webhookSubscription.actorId, actor.id))
         .all().length;
       if (count >= WEBHOOKS_PER_BOT_MAX) {
-        throw new ValidationError(
+        throw new ConflictError(
           `this bot already has ${count} webhooks, the most allowed: delete one you no longer use, or add the project to one you have with update_webhook`,
         );
       }
@@ -2053,7 +2053,7 @@ export function createService({
         data: {
           webhookId: id,
           projects: view.projects,
-          url: webhooks.publicUrl,
+          ...(webhooks.publicUrl !== undefined && { url: webhooks.publicUrl }),
           message: "A test call from trail: your webhook is set up.",
         },
       });

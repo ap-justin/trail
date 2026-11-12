@@ -1,5 +1,6 @@
 import { createHmac } from "node:crypto";
-import { expect, test } from "vitest";
+import { eq } from "drizzle-orm";
+import { beforeEach, expect, test } from "vitest";
 import { webhookSubscription } from "../db/schema.js";
 import { createBot, createKey } from "../service/keys.js";
 import { setupTestApp } from "../test-app.js";
@@ -7,14 +8,18 @@ import { setupTestApp } from "../test-app.js";
 const sent: { url: string; headers: Record<string, string>; body: string }[] =
   [];
 let answer = 200;
-const { db, request, addProject, addBot } = setupTestApp({
-  webhooks: {
-    transport: async ({ url, headers, body }) => {
-      sent.push({ url: url.href, headers, body });
-      return { status: answer };
+let resolveTo = ["93.184.216.34"];
+const { db, request, addProject, addBot, addMember, signIn, owner } =
+  setupTestApp({
+    webhooks: {
+      resolve: async (host) =>
+        host === "internal.example.test" ? ["10.0.0.5"] : resolveTo,
+      transport: async ({ url, headers, body }) => {
+        sent.push({ url: url.href, headers, body });
+        return { status: answer };
+      },
     },
-  },
-});
+  });
 
 // biome-ignore lint/suspicious/noExplicitAny: loose response bodies for field reads
 type Body = Record<string, any>;
@@ -25,6 +30,14 @@ const HOOK = "https://bot.example.com/hooks/trail";
 
 const a = addProject("A");
 const b = addProject("B");
+
+// every test starts with no webhooks, so none depends on the ones before it or counts toward the bot's limit
+beforeEach(() => {
+  db.delete(webhookSubscription).run();
+  sent.length = 0;
+  answer = 200;
+  resolveTo = ["93.184.216.34"];
+});
 
 // every body this file reads, to prove no secret ever shows in one
 const seen: string[] = [];
@@ -244,6 +257,24 @@ test("the same URL twice is a 409 naming the first", async () => {
   expect(again.body.error.message).toContain(first.body.id);
 });
 
+test("a bot at its webhook limit gets a 409 conflict, not a validation failure", async () => {
+  const busy = createBot(db, "busy");
+  for (let i = 0; i < 20; i++) {
+    const made = await create(
+      { url: `https://bot.example.com/busy/${i}` },
+      busy.key,
+    );
+    expect(made.status).toBe(201);
+  }
+  const over = await create(
+    { url: "https://bot.example.com/busy/x" },
+    busy.key,
+  );
+  expect(over.status).toBe(409);
+  expect(over.body.error.code).toBe("conflict");
+  expect(over.body.error.message).toContain("20 webhooks");
+});
+
 test("an empty projects list and an unknown field are 422s", async () => {
   expect((await create({ projects: [] })).status).toBe(422);
   expect((await create({ extra: 1 })).status).toBe(422);
@@ -304,4 +335,167 @@ test("the spec explains the set-up and carries no secret in any response schema"
   expect(
     Object.keys(spec.components.schemas.Webhook?.properties ?? {}),
   ).not.toContain("secret");
+});
+
+test("the spec's 409s say what conflicts on a webhook", async () => {
+  const res = await request("GET", "/api/v1/openapi.json", { key: null });
+  const spec = (await res.json()) as {
+    paths: Record<
+      string,
+      Record<string, { responses: Record<string, { description: string }> }>
+    >;
+  };
+  const onCreate = spec.paths["/webhooks"]?.post?.responses["409"];
+  expect(onCreate?.description).toContain("already has a webhook to that URL");
+  expect(onCreate?.description).toContain("20 webhooks");
+  expect(
+    spec.paths["/webhooks/{id}"]?.patch?.responses["409"]?.description,
+  ).toContain("already has a webhook to that URL");
+});
+
+test("a signed-in person is refused on every webhook route, owner or member, and changes nothing", async () => {
+  const made = await create({ url: "https://bot.example.com/human" });
+  const id = made.body.id as string;
+  const person = await addMember("pat", [a.id]);
+  const admin = await signIn(owner);
+  for (const cookie of [person, admin]) {
+    for (const [method, path, json] of [
+      [
+        "POST",
+        "/webhooks",
+        {
+          url: "https://bot.example.com/h2",
+          secret: SECRET,
+          projects: [a.key],
+        },
+      ],
+      ["GET", "/webhooks", undefined],
+      ["GET", `/webhooks/${id}`, undefined],
+      ["PATCH", `/webhooks/${id}`, { url: "https://bot.example.com/h3" }],
+      ["PUT", `/webhooks/${id}/secret`, { secret: NEW_SECRET }],
+      ["POST", `/webhooks/${id}/ping`, undefined],
+      ["DELETE", `/webhooks/${id}`, undefined],
+    ] as const) {
+      const res = await request(method, `/api/v1${path}`, {
+        json,
+        key: null,
+        cookie,
+      });
+      expect(res.status, `${method} ${path}`).toBe(401);
+    }
+  }
+  // the bot's own read shows nothing was made, moved, rotated, pinged or deleted
+  expect(sent).toEqual([]);
+  const after = await call("GET", "/webhooks");
+  expect(after.body.items.map((w: Body) => [w.id, w.url])).toEqual([
+    [id, "https://bot.example.com/human"],
+  ]);
+});
+
+test("limits: 50 projects, a 16 to 256 character secret and a 2048 character URL are the edges", async () => {
+  const many = Array.from({ length: 51 }, () => addProject("m").key);
+  const atLimit = await create({
+    url: "https://bot.example.com/fifty",
+    projects: many.slice(0, 50),
+  });
+  expect(atLimit.status).toBe(201);
+  expect(atLimit.body.projects).toHaveLength(50);
+  const overLimit = await create({
+    url: "https://bot.example.com/fifty-one",
+    projects: many,
+  });
+  expect(overLimit.status).toBe(422);
+
+  const id = atLimit.body.id as string;
+  const secretAt = (length: number) => "s".repeat(length);
+  for (const length of [16, 256]) {
+    const res = await call("PUT", `/webhooks/${id}/secret`, {
+      json: { secret: secretAt(length) },
+    });
+    expect(res.status, `${length} characters`).toBe(200);
+  }
+  for (const length of [15, 257]) {
+    const res = await call("PUT", `/webhooks/${id}/secret`, {
+      json: { secret: secretAt(length) },
+    });
+    expect(res.status, `${length} characters`).toBe(422);
+  }
+  expect(
+    (await create({ url: "https://bot.example.com/s", secret: secretAt(257) }))
+      .status,
+  ).toBe(422);
+
+  const prefix = "https://bot.example.com/";
+  const longest = await create({
+    url: prefix + "p".repeat(2048 - prefix.length),
+  });
+  expect(longest.status).toBe(201);
+  const tooLong = await create({
+    url: prefix + "p".repeat(2049 - prefix.length),
+  });
+  expect(tooLong.status).toBe(422);
+});
+
+test("rotating the secret ends a pause and clears the failure count", async () => {
+  const id = (await create({ url: "https://bot.example.com/rotpause" })).body
+    .id;
+  db.update(webhookSubscription)
+    .set({
+      pausedAt: new Date(),
+      consecutiveFailures: 8,
+      lastError: "HTTP 503",
+    })
+    .where(eq(webhookSubscription.id, id))
+    .run();
+  expect((await call("GET", `/webhooks/${id}`)).body).toMatchObject({
+    paused: true,
+    consecutiveFailures: 8,
+  });
+  const rotated = await call("PUT", `/webhooks/${id}/secret`, {
+    json: { secret: NEW_SECRET },
+  });
+  expect(rotated.body).toMatchObject({
+    paused: false,
+    pausedAt: null,
+    consecutiveFailures: 0,
+  });
+});
+
+test("a ping that fails leaves the failure count and the pause alone", async () => {
+  const id = (await create({ url: "https://bot.example.com/pingfail" })).body
+    .id;
+  db.update(webhookSubscription)
+    .set({ consecutiveFailures: 5 })
+    .where(eq(webhookSubscription.id, id))
+    .run();
+
+  answer = 503;
+  const refused = await call("POST", `/webhooks/${id}/ping`);
+  expect(refused.body).toEqual({
+    delivered: false,
+    status: 503,
+    error: "HTTP 503",
+  });
+  expect(sent).toHaveLength(1);
+
+  // the name now points inside: refused before any request, and still no count
+  resolveTo = ["10.0.0.7"];
+  const rebound = await call("POST", `/webhooks/${id}/ping`);
+  expect(rebound.body).toMatchObject({ delivered: false, status: null });
+  expect(rebound.body.error).toMatch(/internal address/);
+  expect(sent).toHaveLength(1);
+
+  // and a ping that gets through does not reset it either
+  resolveTo = ["93.184.216.34"];
+  answer = 200;
+  expect((await call("POST", `/webhooks/${id}/ping`)).body.delivered).toBe(
+    true,
+  );
+  const after = (await call("GET", `/webhooks/${id}`)).body;
+  expect(after).toMatchObject({
+    consecutiveFailures: 5,
+    paused: false,
+    lastError: null,
+    lastSuccessAt: null,
+  });
 });

@@ -1,11 +1,12 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { afterAll, expect, test } from "vitest";
+import { afterAll, beforeEach, expect, test } from "vitest";
+import { webhookSubscription } from "../db/schema.js";
 import { createBot } from "../service/keys.js";
 import { setupTestApp } from "../test-app.js";
 
 const sent: string[] = [];
-const { app, db, bot, addProject } = setupTestApp({
+const { app, db, bot, addProject, signIn, owner } = setupTestApp({
   webhooks: {
     transport: async ({ url }) => {
       sent.push(url.href);
@@ -47,6 +48,11 @@ async function call(client: Client, name: string, args: Body = {}) {
   expect(isError, text).toBe(false);
   return JSON.parse(text) as Body;
 }
+
+// each test starts with no webhooks
+beforeEach(() => {
+  db.delete(webhookSubscription).run();
+});
 
 const SECRET = "whsec_mcp_0123456789abcdef";
 const NEXT_SECRET = "whsec_mcp_fedcba9876543210";
@@ -153,4 +159,51 @@ test("the tool descriptions walk a bot through hooking up an OpenBot routine", a
     const tool = tools.find((t) => t.name === name);
     expect(JSON.stringify(tool?.inputSchema)).toContain("never");
   }
+});
+
+test("a signed-in person gets no MCP tools: every webhook call is a 401 and changes nothing", async () => {
+  const client = await connect(bot.key);
+  const mine = await call(client, "create_webhook", {
+    url: "https://bot.example.com/person",
+    secret: SECRET,
+    projects: [a.key],
+  });
+  const cookie = await signIn(owner);
+  sent.length = 0;
+  for (const [name, args] of [
+    [
+      "create_webhook",
+      { url: "https://bot.example.com/p2", secret: SECRET, projects: [a.key] },
+    ],
+    ["list_webhooks", {}],
+    ["update_webhook", { webhookId: mine.id, projects: [b.key] }],
+    ["rotate_webhook_secret", { webhookId: mine.id, secret: NEXT_SECRET }],
+    ["test_webhook", { webhookId: mine.id }],
+    ["delete_webhook", { webhookId: mine.id }],
+  ] as const) {
+    const res = await app.request("/mcp", {
+      method: "POST",
+      headers: {
+        cookie,
+        origin: "http://localhost",
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name, arguments: args },
+      }),
+    });
+    expect(res.status, name).toBe(401);
+  }
+  expect(sent).toEqual([]);
+  const after = await call(client, "list_webhooks");
+  expect(after.items).toHaveLength(1);
+  expect(after.items[0]).toMatchObject({
+    id: mine.id,
+    url: "https://bot.example.com/person",
+    projects: [a.key],
+  });
 });

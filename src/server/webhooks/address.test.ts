@@ -96,3 +96,54 @@ test("isInternalAddress refuses what is not an address", () => {
   expect(isInternalAddress("example.com")).toBe(true);
   expect(isInternalAddress("93.184.216.34")).toBe(false);
 });
+
+// the blocked ranges end exactly where the table says: a neighbour outside is a public host
+test.each([
+  "172.15.255.255",
+  "172.32.0.1",
+  "100.63.255.255",
+  "100.128.0.1",
+  "11.0.0.1",
+  "9.255.255.255",
+  "126.255.255.255",
+  "128.0.0.1",
+  "169.253.255.255",
+  "169.255.0.1",
+  "192.167.255.255",
+  "192.169.0.1",
+  "198.17.255.255",
+  "198.20.0.1",
+  "223.255.255.255",
+  "::ffff:93.184.216.34",
+  "64:ff9b::5db8:d822",
+  "2002:5db8:d822::",
+  "2606:4700:4700::1111",
+  "2001:200::1",
+])("%s is public", (address) => {
+  expect(isInternalAddress(address)).toBe(false);
+});
+
+test.each([
+  "198.18.0.1",
+  "198.19.255.255",
+  "198.51.100.1",
+  "203.0.113.1",
+  "192.0.0.1",
+  "192.0.2.1",
+  "192.88.99.1",
+  "240.0.0.1",
+  "100.127.255.255",
+  "172.16.0.0",
+  "10.255.255.255",
+  "::127.0.0.1",
+  "::10.0.0.1",
+  "fec0::1",
+  "100::1",
+  "64:ff9b:1::1",
+  "64:ff9b::7f00:1",
+  "2001::1",
+  "fe80::1",
+  "ff00::1",
+])("%s is internal", (address) => {
+  expect(isInternalAddress(address)).toBe(true);
+});

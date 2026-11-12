@@ -1,4 +1,5 @@
 import { and, asc, eq, lt, sql } from "drizzle-orm";
+import { WEBHOOK_PAUSE_AFTER } from "../../shared/schemas.js";
 import type { Db } from "../db/client.js";
 import {
   activityEvent,
@@ -25,10 +26,8 @@ export const BACKOFF_MS = [
   2 * HOUR,
   4 * HOUR,
 ];
-/** A delivery still failing this long after its event is marked failed. */
+/** A delivery still failing this long after it was queued, time paused not counted, is marked failed. */
 export const GIVE_UP_MS = 24 * HOUR;
-/** Consecutive failed attempts, across a subscription's deliveries, that pause it. */
-export const PAUSE_AFTER = 8;
 export const POLL_MS = 5_000;
 
 export type WebhookWorkerOptions = {
@@ -55,7 +54,7 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
   const { db, bus, settings } = options;
   const backoff = options.backoffMs ?? BACKOFF_MS;
   const giveUpMs = options.giveUpMs ?? GIVE_UP_MS;
-  const pauseAfter = options.pauseAfter ?? PAUSE_AFTER;
+  const pauseAfter = options.pauseAfter ?? WEBHOOK_PAUSE_AFTER;
   const pollMs = options.pollMs ?? POLL_MS;
 
   let running: Promise<void> | null = null;
@@ -65,6 +64,7 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
   let timer: NodeJS.Timeout | null = null;
   const abort = new AbortController();
 
+  /** Fails what an unpaused subscription couldn't deliver in the window; a paused one's deliveries wait. */
   function expire(now: number) {
     db.update(webhookDelivery)
       .set({
@@ -75,6 +75,7 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
         and(
           eq(webhookDelivery.status, "pending"),
           lt(webhookDelivery.createdAt, new Date(now - giveUpMs)),
+          sql`${webhookDelivery.subscriptionId} in (select id from webhook_subscription where paused_at is null)`,
         ),
       )
       .run();
@@ -121,54 +122,52 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
 
   function record(delivery: Delivery, result: SendResult, now: number) {
     const attempts = delivery.attempts + 1;
-    db.transaction((tx) => {
-      if (result.ok) {
+    db.transaction(
+      (tx) => {
+        if (result.ok) {
+          tx.update(webhookDelivery)
+            .set({
+              status: "delivered",
+              attempts,
+              lastStatus: result.status,
+              lastError: null,
+              deliveredAt: new Date(now),
+            })
+            .where(eq(webhookDelivery.id, delivery.id))
+            .run();
+          tx.update(webhookSubscription)
+            .set({ lastSuccessAt: new Date(now), consecutiveFailures: 0 })
+            .where(eq(webhookSubscription.id, delivery.subscriptionId))
+            .run();
+          return;
+        }
+        const wait = backoff[Math.min(attempts - 1, backoff.length - 1)] ?? 0;
+        const giveUp =
+          !result.retryable ||
+          now + wait > delivery.createdAt.getTime() + giveUpMs;
         tx.update(webhookDelivery)
           .set({
-            status: "delivered",
+            status: giveUp ? "failed" : "pending",
             attempts,
             lastStatus: result.status,
-            lastError: null,
-            deliveredAt: new Date(now),
+            lastError: result.error,
+            nextAttemptAt: new Date(now + wait),
           })
           .where(eq(webhookDelivery.id, delivery.id))
           .run();
+        // SET expressions all read the row as it was, so both see the count before this failure
         tx.update(webhookSubscription)
-          .set({ lastSuccessAt: new Date(now), consecutiveFailures: 0 })
+          .set({
+            consecutiveFailures: sql`${webhookSubscription.consecutiveFailures} + 1`,
+            lastError: result.error,
+            lastErrorAt: new Date(now),
+            pausedAt: sql`case when ${webhookSubscription.pausedAt} is null and ${webhookSubscription.consecutiveFailures} + 1 >= ${pauseAfter} then ${now} else ${webhookSubscription.pausedAt} end`,
+          })
           .where(eq(webhookSubscription.id, delivery.subscriptionId))
           .run();
-        return;
-      }
-      const wait = backoff[Math.min(attempts - 1, backoff.length - 1)] ?? 0;
-      const giveUp =
-        !result.retryable ||
-        now + wait > delivery.createdAt.getTime() + giveUpMs;
-      tx.update(webhookDelivery)
-        .set({
-          status: giveUp ? "failed" : "pending",
-          attempts,
-          lastStatus: result.status,
-          lastError: result.error,
-          nextAttemptAt: new Date(now + wait),
-        })
-        .where(eq(webhookDelivery.id, delivery.id))
-        .run();
-      const failures =
-        tx
-          .select({ n: webhookSubscription.consecutiveFailures })
-          .from(webhookSubscription)
-          .where(eq(webhookSubscription.id, delivery.subscriptionId))
-          .get()?.n ?? 0;
-      tx.update(webhookSubscription)
-        .set({
-          consecutiveFailures: failures + 1,
-          lastError: result.error,
-          lastErrorAt: new Date(now),
-          ...(failures + 1 >= pauseAfter ? { pausedAt: new Date(now) } : {}),
-        })
-        .where(eq(webhookSubscription.id, delivery.subscriptionId))
-        .run();
-    });
+      },
+      { behavior: "immediate" },
+    );
   }
 
   async function attempt(delivery: Delivery) {

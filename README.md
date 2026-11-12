@@ -44,7 +44,7 @@ Bots create projects, issues, comments and progress over MCP and REST. Humans re
 
 - The second line turns on people's sign-in; until all three are set, sign-in answers 503 naming what is missing, and bots are unaffected. The GitHub OAuth app's callback URL is `https://trail-justin.fly.dev/api/auth/callback/github`.
 - The first GitHub account to sign in as `TRAIL_OWNER_GITHUB` stays the owner, through renames; changing the secret afterwards moves nothing. Replacing `BETTER_AUTH_SECRET` signs everyone out, and also makes every stored webhook signing secret unreadable (they are encrypted under a key derived from it): each bot then sets a new one with `rotate_webhook_secret`.
-- Bots subscribe to projects' events with webhooks (`/api/v1/webhooks`, and the `create_webhook` MCP tool). The server sends signed `https` POSTs outward from the machine, and links in them use `BETTER_AUTH_URL`. Deliveries wait in the database until sent, so a deploy loses none.
+- Bots subscribe to projects' events with webhooks (`/api/v1/webhooks`, and the `create_webhook` MCP tool). The server sends signed `https` POSTs outward from the machine, and links back to trail in them use `BETTER_AUTH_URL`; with it unset, deliveries carry no links. Deliveries wait in the database until sent, so a deploy loses none.
 
 ## License
 

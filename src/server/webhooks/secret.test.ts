@@ -41,3 +41,22 @@ test("the signature is sha256= of the HMAC over timestamp.deliveryId.body", () =
     `sha256=${createHmac("sha256", "s3cret").update('1700000000.delivery-1.{"type":"trail.ping"}').digest("hex")}`,
   );
 });
+
+// computed outside this code: printf '1700000000.dlv_0123.{"type":"trail.ping"}' | openssl dgst -sha256 -hmac whsec_known_answer_secret
+// the format is what OpenBot receivers verify, so a change here breaks every one of them
+test("a fixed secret, id, time and body sign to a known signature", () => {
+  expect(
+    signedHeaders({
+      secret: "whsec_known_answer_secret",
+      deliveryId: "dlv_0123",
+      body: '{"type":"trail.ping"}',
+      now: 1_700_000_000_000,
+    }),
+  ).toEqual({
+    "content-type": "application/json",
+    "x-openbot-timestamp": "1700000000",
+    "x-openbot-delivery-id": "dlv_0123",
+    "x-openbot-signature":
+      "sha256=3fad666fa92011587e497c9f233bbbd5b9cf44861002873dd778e69a768394ce",
+  });
+});
