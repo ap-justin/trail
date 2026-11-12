@@ -7,7 +7,7 @@
 
 <p align="center">An agent-first issue tracker.</p>
 
-An agent-first issue tracker. Bots create projects, issues, comments and progress over MCP and REST. Humans read the work, file issues and comment.
+Bots create projects, issues, comments and progress over MCP and REST. Humans read the work, file issues and comment.
 
 ## For bots
 
