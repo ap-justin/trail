@@ -10,18 +10,26 @@ import { beforeAll, describe, expect, test } from "vitest";
 const stylesDir = resolve("src/web/styles");
 const css = readFileSync(join(stylesDir, "globals.css"), "utf8");
 const webDir = resolve("src/web");
+const shadcnDir = resolve("src/web/components/ui");
 const sweptDirs = [resolve("src/web/components"), resolve("src/web/app")];
-const componentFiles = sweptDirs.flatMap((dir) =>
-  readdirSync(dir)
-    .filter((f) => f.endsWith(".tsx") && !f.endsWith(".test.tsx"))
-    .map((f) => join(dir, f)),
-);
+const componentFiles = sweptDirs.flatMap((dir) => sourceFiles(dir));
 
-/** Class-name tokens: every string literal, minus import paths and non-class JSX attributes. */
+/** Every non-test .ts/.tsx under `dir`, subdirectories included, minus components/ui. */
+function sourceFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) return path === shadcnDir ? [] : sourceFiles(path);
+    return /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)
+      ? [path]
+      : [];
+  });
+}
+
+/** Class-name tokens: every string literal, minus import paths and non-class JSX attributes. `className` and any `*ClassName` prop (`markClassName`) carry classes. */
 function classTokens(source: string): string[] {
   const stripped = source
     .replace(/from\s+"[^"]*"/g, "")
-    .replace(/\b(?!className\b)[\w-]+="[^"]*"/g, "");
+    .replace(/\b(?![\w-]*[cC]lassName\b)[\w-]+="[^"]*"/g, "");
   const literals = stripped.match(/"[^"\n]*"|`[^`]*`/g) ?? [];
   return literals.flatMap((l) => l.slice(1, -1).split(/\s+/).filter(Boolean));
 }
@@ -71,6 +79,19 @@ describe("components and app chrome stay inside the design system", () => {
       "shadow-sm",
     ]);
     expect(drawn).toEqual([null, null, null, null, null]);
+  });
+});
+
+describe("the class collector", () => {
+  test("reads classes passed through any *ClassName prop, not other attributes", () => {
+    const tokens = classTokens(
+      '<Logo className="a-1" markClassName="h-[18px]" wordmarkClassName="w-[2rem]" href="x-y" />',
+    );
+    expect(tokens).toEqual(["a-1", "h-[18px]", "w-[2rem]"]);
+    expect(tokens.filter((t) => literalValue.test(t))).toEqual([
+      "h-[18px]",
+      "w-[2rem]",
+    ]);
   });
 });
 

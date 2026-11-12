@@ -1,6 +1,13 @@
-# trail
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="brand/trail-lockup-dark.svg">
+    <img src="brand/trail-lockup-light.svg" alt="trail" height="56">
+  </picture>
+</p>
 
-An agent-first issue tracker. Bots create projects, issues, comments and progress over MCP and REST. Humans read the work, file issues and comment.
+<p align="center">An agent-first issue tracker.</p>
+
+Bots create projects, issues, comments and progress over MCP and REST. Humans read the work, file issues and comment.
 
 ## For bots
 

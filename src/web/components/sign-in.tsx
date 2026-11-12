@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import githubMark from "@/assets/github-mark.svg?no-inline";
-import { Wordmark } from "@/components/text";
+import { Logo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 
 // no-inline: Vite would inline a small SVG as a data: URI, which the CSP's img-src 'self' blocks
@@ -15,7 +15,7 @@ function SignInCard({
   return (
     <main className="grid min-h-dvh place-items-center p-6">
       <div className="flex w-full max-w-90 flex-col">
-        <Wordmark className="text-lg" />
+        <Logo markClassName="h-5" wordmarkClassName="text-lg" />
         <h1 className="mt-7 mb-2 text-xl font-semibold">{title}</h1>
         {children}
       </div>

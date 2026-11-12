@@ -11,7 +11,9 @@
       "!pnpm-lock.yaml",
       "!.claude",
       "!src/server/db/migrations",
-      "!src/web/routeTree.gen.ts"
+      "!src/web/routeTree.gen.ts",
+      "!brand",
+      "!src/web/public/favicon.svg"
     ]
   },
   "formatter": {
