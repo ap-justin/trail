@@ -6,12 +6,13 @@ import {
   type Server,
 } from "node:http";
 import { type AddressInfo, createServer as createTcpServer } from "node:net";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import { webhookDelivery, webhookSubscription } from "../db/schema.js";
 import { projectKey, setupTestApp, testWebhookSettings } from "../test-app.js";
 import { deriveSecretKey, sealSecret } from "./secret.js";
 import { sendWebhook, type Transport } from "./send.js";
-import { BACKOFF_MS, createWebhookWorker } from "./worker.js";
+import { BACKOFF_MS, createWebhookWorker, headsQuery } from "./worker.js";
 
 // A receiver on the loopback. trail refuses loopback addresses, so the transport
 // under test stands where the TLS connection would be: it posts the signed
@@ -1136,4 +1137,64 @@ test("a stored secret that can't be read sends nothing and says to rotate, until
   expect(received[0]?.headers["x-openbot-signature"]).toBe(
     signatureOf(received[0] as Received, next),
   );
+});
+
+test("a poll reads one head per unpaused webhook, never a paused webhook's backlog", async () => {
+  reset();
+  const key = await newProject();
+  const paused = await subscribe(
+    [key],
+    "https://bot.example.com/paused-backlog",
+  );
+  db.update(webhookSubscription)
+    .set({ pausedAt: new Date(now()) })
+    .where(eq(webhookSubscription.id, paused.id))
+    .run();
+  for (let i = 0; i < 20; i++) {
+    await api("POST", "/issues", { projectId: key, title: `backlog ${i}` });
+  }
+  expect(rows().filter((r) => r.status === "pending")).toHaveLength(20);
+
+  // the plan, not the timing: a scan of webhook_delivery reads every pending row, the paused backlog included
+  const { sql, params } = headsQuery(db).toSQL();
+  const plan = db.$client
+    .prepare(`explain query plan ${sql}`)
+    .all(...params)
+    .map((step) => (step as { detail: string }).detail);
+  expect(plan.filter((step) => step.startsWith("SCAN"))).toEqual([
+    "SCAN webhook_subscription",
+  ]);
+  expect(headsQuery(db).all()).toEqual([]);
+});
+
+test("the heads are each unpaused webhook's oldest pending delivery, in event order", async () => {
+  reset();
+  const key = await newProject();
+  const ahead = await subscribe([key], "https://bot.example.com/ahead");
+  const behind = await subscribe([key], "https://bot.example.com/behind");
+  const paused = await subscribe([key], "https://bot.example.com/paused");
+  for (const title of ["one", "two", "three"]) {
+    await api("POST", "/issues", { projectId: key, title });
+  }
+  const queue = (id: string) =>
+    rows()
+      .filter((r) => r.subscriptionId === id)
+      .sort((a, b) => a.seq - b.seq);
+  const [first] = queue(ahead.id);
+  db.update(webhookDelivery)
+    .set({ status: "delivered", deliveredAt: new Date(now()) })
+    .where(eq(webhookDelivery.id, first?.id ?? ""))
+    .run();
+  db.update(webhookSubscription)
+    .set({ pausedAt: new Date(now()) })
+    .where(eq(webhookSubscription.id, paused.id))
+    .run();
+
+  const heads = (id?: string) =>
+    headsQuery(db, id)
+      .all()
+      .map((h) => h.delivery.id);
+  expect(heads()).toEqual([queue(behind.id)[0]?.id, queue(ahead.id)[1]?.id]);
+  expect(heads(ahead.id)).toEqual([queue(ahead.id)[1]?.id]);
+  expect(heads(paused.id)).toEqual([]);
 });

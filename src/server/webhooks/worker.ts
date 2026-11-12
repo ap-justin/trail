@@ -1,4 +1,4 @@
-import { and, asc, eq, lt, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, lt, sql } from "drizzle-orm";
 import { WEBHOOK_PAUSE_AFTER } from "../../shared/schemas.js";
 import type { Db } from "../db/client.js";
 import {
@@ -41,6 +41,34 @@ export type WebhookWorkerOptions = {
 };
 
 type Delivery = typeof webhookDelivery.$inferSelect;
+
+/**
+ * Each unpaused subscription's oldest pending delivery, due or not, in seq order.
+ * Driven from the subscriptions, one index probe each: a paused subscription's
+ * backlog only grows, and a query driven from the deliveries reads all of it.
+ */
+export function headsQuery(db: Db, subscriptionId?: string) {
+  return db
+    .select({ delivery: webhookDelivery })
+    .from(webhookSubscription)
+    .innerJoin(
+      webhookDelivery,
+      // 'pending' as a literal, so the planner can match the partial index
+      eq(
+        webhookDelivery.id,
+        sql`(select x.id from webhook_delivery x where x.subscription_id = ${webhookSubscription.id} and x.status = 'pending' order by x.seq limit 1)`,
+      ),
+    )
+    .where(
+      and(
+        isNull(webhookSubscription.pausedAt),
+        subscriptionId === undefined
+          ? undefined
+          : eq(webhookSubscription.id, subscriptionId),
+      ),
+    )
+    .orderBy(asc(webhookDelivery.seq));
+}
 
 /**
  * Sends the outbox. The outbox rows are written with the events, so this only
@@ -89,26 +117,8 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
 
   /** Each unpaused subscription's oldest pending delivery, when it is due. */
   function dueHeads(now: number, subscriptionId?: string): Delivery[] {
-    const heads = db
-      .select({ delivery: webhookDelivery })
-      .from(webhookDelivery)
-      .innerJoin(
-        webhookSubscription,
-        eq(webhookSubscription.id, webhookDelivery.subscriptionId),
-      )
-      .where(
-        and(
-          eq(webhookDelivery.status, "pending"),
-          subscriptionId === undefined
-            ? undefined
-            : eq(webhookDelivery.subscriptionId, subscriptionId),
-          sql`${webhookSubscription.pausedAt} is null`,
-          sql`${webhookDelivery.seq} = (select min(d.seq) from webhook_delivery d where d.subscription_id = ${webhookDelivery.subscriptionId} and d.status = 'pending')`,
-        ),
-      )
-      .orderBy(asc(webhookDelivery.seq))
-      .all();
-    return heads
+    return headsQuery(db, subscriptionId)
+      .all()
       .map((h) => h.delivery)
       .filter((d) => d.nextAttemptAt.getTime() <= now);
   }

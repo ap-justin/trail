@@ -1,8 +1,8 @@
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, notInArray, sql } from "drizzle-orm";
 import type { Db } from "../db/client.js";
 import { newId } from "../db/id.js";
 import {
-  type activityEvent,
+  activityEvent,
   project,
   webhookDelivery,
   webhookSubscription,
@@ -131,6 +131,12 @@ export function insertSubscription(
   return row;
 }
 
+/**
+ * Replaces the projects a subscription follows. Its pending deliveries for a
+ * project it no longer follows go with them, since the worker never re-checks
+ * following; sent and failed ones stay as history. A project followed again
+ * later gets only the events committed after.
+ */
 export function setProjects(
   tx: Tx,
   subscriptionId: string,
@@ -141,6 +147,20 @@ export function setProjects(
     .run();
   tx.insert(webhookSubscriptionProject)
     .values(projectIds.map((projectId) => ({ subscriptionId, projectId })))
+    .run();
+  const unfollowed = tx
+    .select({ id: webhookDelivery.id })
+    .from(webhookDelivery)
+    .innerJoin(activityEvent, eq(activityEvent.id, webhookDelivery.eventId))
+    .where(
+      and(
+        eq(webhookDelivery.subscriptionId, subscriptionId),
+        eq(webhookDelivery.status, "pending"),
+        notInArray(activityEvent.projectId, projectIds),
+      ),
+    );
+  tx.delete(webhookDelivery)
+    .where(inArray(webhookDelivery.id, unfollowed))
     .run();
 }
 

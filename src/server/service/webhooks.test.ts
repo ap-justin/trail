@@ -1,6 +1,11 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, expect, test } from "vitest";
-import { webhookDelivery, webhookSubscription } from "../db/schema.js";
+import {
+  activityEvent,
+  project,
+  webhookDelivery,
+  webhookSubscription,
+} from "../db/schema.js";
 import { projectKey, setupTestApp, testWebhookSettings } from "../test-app.js";
 import { buildEnvelope } from "../webhooks/payload.js";
 import { createWebhookWorker } from "../webhooks/worker.js";
@@ -240,4 +245,58 @@ test("a ping to a webhook whose stored secret can't be read says to rotate it, a
   expect(result).toMatchObject({ delivered: false, status: null });
   expect(result.error).toContain("rotate_webhook_secret");
   expect(sent).toEqual([]);
+});
+
+/** Each delivery's project key and status, in event order. */
+const deliveriesByProject = () =>
+  db
+    .select({ key: project.key, status: webhookDelivery.status })
+    .from(webhookDelivery)
+    .innerJoin(activityEvent, eq(activityEvent.id, webhookDelivery.eventId))
+    .innerJoin(project, eq(project.id, activityEvent.projectId))
+    .orderBy(webhookDelivery.seq)
+    .all()
+    .map((d) => `${d.key}:${d.status}`);
+
+test("dropping a project from a paused webhook drops its backlog for that project, and the resume sends only the rest", async () => {
+  const a = await newProject();
+  const b = await newProject();
+  const hook = await subscribe([a, b], "https://bot.example.com/narrowed");
+  await fileIssue(a, "kept");
+  await fileIssue(b, "dropped");
+  pause(hook.id);
+
+  await api("PATCH", `/webhooks/${hook.id}`, { projects: [a] });
+  expect(deliveriesByProject()).toEqual([`${a}:pending`]);
+
+  answer = 200;
+  const w = worker();
+  await w.tick();
+  await w.tick();
+  expect(
+    sent.map((body) => JSON.parse(body).data.subject.title as string),
+  ).toEqual(["kept"]);
+});
+
+test("widening a webhook's projects keeps its queued deliveries", async () => {
+  const a = await newProject();
+  const b = await newProject();
+  const hook = await subscribe([a], "https://bot.example.com/widened");
+  await fileIssue(a, "queued");
+
+  await api("PATCH", `/webhooks/${hook.id}`, { projects: [a, b] });
+  expect(deliveriesByProject()).toEqual([`${a}:pending`]);
+});
+
+test("dropping a project keeps the deliveries already made to it", async () => {
+  answer = 200;
+  const a = await newProject();
+  const b = await newProject();
+  const hook = await subscribe([a, b], "https://bot.example.com/history");
+  await fileIssue(b, "sent before");
+  await worker().tick();
+  expect(deliveriesByProject()).toEqual([`${b}:delivered`]);
+
+  await api("PATCH", `/webhooks/${hook.id}`, { projects: [a] });
+  expect(deliveriesByProject()).toEqual([`${b}:delivered`]);
 });
