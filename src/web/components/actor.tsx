@@ -52,8 +52,9 @@ function initials(actor: Pick<WebActorView, "name" | "kind">): string {
 
 /**
  * The actor's initials on a tinted ground, with their photo stacked on top when there
- * is one: a rounded square for a bot, a circle for a person. A bot's photo gets a thin
- * indigo frame, so it still reads as a bot at 18px. The initials show while the photo
+ * is one: a rounded square for a bot, a circle for a person. A bot's photo, once shown,
+ * gets a thin indigo frame, so it still reads as a bot at 18px; while it loads or after it
+ * fails, the avatar is the plain one with initials. The initials show while the photo
  * loads and stay when it fails; once it loads they go, so a transparent photo never
  * shows them through.
  * Decorative: the name always sits beside it.
@@ -103,7 +104,7 @@ export function ActorAvatar({
           ? "rounded-md bg-bot-muted text-bot"
           : "rounded-full bg-muted text-muted-foreground",
         // a border, not a ring: an outer ring grows past the box, an inset one paints under the img
-        bot && photoUrl && "border border-bot",
+        bot && photoShown && "border border-bot",
         className,
       )}
     >

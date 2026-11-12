@@ -92,6 +92,7 @@ describe("ActorAvatar", () => {
         </>,
       );
       const [bot, human] = container.children;
+      for (const img of container.querySelectorAll("img")) fireEvent.load(img);
       expect(bot).toHaveClass(sizeClass, "rounded-md", "border", "border-bot");
       expect(human).toHaveClass(sizeClass, "rounded-full");
       expect(human).not.toHaveClass("border");
@@ -115,6 +116,36 @@ describe("ActorAvatar", () => {
     expect(failing).not.toHaveClass("border");
     expect(failing).not.toHaveClass("border-bot");
     expect(failing).toHaveClass("bg-bot-muted", "text-bot");
+  });
+
+  test("a bot's frame shows only while its photo is shown: not while loading, not after a failure", () => {
+    const { container, rerender } = render(
+      <ActorAvatar actor={{ name: "Kai", kind: "bot", photoUrl: photo }} />,
+    );
+    const avatar = container.firstElementChild;
+    const img = container.querySelector("img");
+    if (!img) throw new Error("no img");
+    expect(avatar).not.toHaveClass("border");
+    expect(avatar).not.toHaveClass("border-bot");
+    expect(avatar).toHaveClass("bg-bot-muted", "text-bot");
+    expect(avatar).toHaveTextContent("K");
+
+    fireEvent.load(img);
+    expect(avatar).toHaveClass("border", "border-bot");
+
+    rerender(
+      <ActorAvatar
+        actor={{ name: "Kai", kind: "bot", photoUrl: "/api/photos/a-new/9c0d" }}
+      />,
+    );
+    expect(avatar).not.toHaveClass("border");
+    expect(avatar).not.toHaveClass("border-bot");
+    fireEvent.load(img);
+    expect(avatar).toHaveClass("border", "border-bot");
+
+    fireEvent.error(img);
+    expect(avatar).not.toHaveClass("border");
+    expect(avatar).not.toHaveClass("border-bot");
   });
 
   test("the photo is decorative and loads lazily", () => {
@@ -216,8 +247,11 @@ describe("ActorAvatar", () => {
         const { container } = render(
           <ActorAvatar actor={{ name, kind, photoUrl: photo }} />,
         );
-        expect(container.firstElementChild).not.toHaveTextContent(letters);
+        const avatar = container.firstElementChild;
+        expect(avatar).not.toHaveTextContent(letters);
         expect(container.querySelector("img")).toHaveAttribute("src", photo);
+        if (kind === "bot") expect(avatar).toHaveClass("border", "border-bot");
+        else expect(avatar).not.toHaveClass("border");
       },
     );
 
