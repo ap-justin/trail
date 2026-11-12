@@ -1,4 +1,4 @@
-/** A read the route owns, as a screen sees it: in flight, failed, or here. */
+/** A read as the screen it's handed to sees it: in flight, failed, or here. */
 export type Loadable<T> =
   | { status: "loading" }
   | { status: "error" }
