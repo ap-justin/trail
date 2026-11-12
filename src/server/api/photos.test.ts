@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { createBot } from "../service/keys.js";
+import { createBot, revokeKey } from "../service/keys.js";
 import { projectKey, setupTestApp } from "../test-app.js";
 import {
   JPEG,
@@ -87,6 +87,22 @@ test("a key limited to reading one project still sets and clears its own photo",
     key: scoped.key,
   });
   expect(cleared.status).toBe(200);
+  expect((await whoami(scoped.key)).photoUrl).toBeNull();
+});
+
+test("a key without the read action still sets and clears its own photo", async () => {
+  const writer = createBot(db, "writer", {
+    scope: { actions: ["comments"] },
+  });
+  const set = await putPhoto(PNG, "image/png", writer.key);
+  expect(set.status).toBe(200);
+  const { photoUrl } = (await set.json()) as Body;
+  expect((await whoami(writer.key)).photoUrl).toBe(photoUrl);
+  const cleared = await request("DELETE", "/api/v1/me/photo", {
+    key: writer.key,
+  });
+  expect(cleared.status).toBe(200);
+  expect((await whoami(writer.key)).photoUrl).toBeNull();
 });
 
 test("the bots list carries each bot's photo URL, null without one", async () => {
@@ -356,6 +372,21 @@ test("without a key the photo routes are a 401", async () => {
   expect(
     (await request("DELETE", "/api/v1/me/photo", { key: null })).status,
   ).toBe(401);
+});
+
+test("an over-limit upload from a missing or revoked key is a 401, not a 413", async () => {
+  const revoked = createBot(db, "revoked");
+  revokeKey(db, revoked.key.split("_")[1] as string);
+  const big = pngOfSize(262145);
+  const anonymous = await app.request("/api/v1/me/photo", {
+    method: "PUT",
+    headers: { "content-type": "image/png" },
+    body: big,
+  });
+  expect(anonymous.status).toBe(401);
+  expect((await putPhoto(big, "image/png", revoked.key)).status).toBe(401);
+  // the same body from a live key reaches the limit, so the 401s above are the key check's
+  expect((await putPhoto(big, "image/png")).status).toBe(413);
 });
 
 test("a signed-in person cannot set or clear a photo", async () => {

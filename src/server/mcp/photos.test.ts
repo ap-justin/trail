@@ -85,7 +85,18 @@ test("a key limited to reading one project still sets and clears its own photo",
   const served = await request("GET", photoUrl, { key: scoped.key });
   expect(served.status).toBe(200);
   expect(new Uint8Array(await served.arrayBuffer())).toEqual(PNG);
-  await call(reader, "clear_my_photo");
+  expect(await call(reader, "clear_my_photo")).toEqual({ photoUrl: null });
+  expect((await call(reader, "whoami")).photoUrl).toBeNull();
+});
+
+test("a key without the read action still sets and clears its own photo", async () => {
+  const writer = await connect(
+    createBot(db, "writer", { scope: { actions: ["comments"] } }).key,
+  );
+  const { photoUrl } = await call(writer, "set_my_photo", { data: b64(PNG) });
+  expect((await call(writer, "whoami")).photoUrl).toBe(photoUrl);
+  await call(writer, "clear_my_photo");
+  expect((await call(writer, "whoami")).photoUrl).toBeNull();
 });
 
 test("a data: URL prefix is accepted and the bytes decide the type", async () => {
