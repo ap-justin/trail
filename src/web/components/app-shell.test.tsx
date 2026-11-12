@@ -2,10 +2,12 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, test, vi } from "vitest";
+import { sessionOf } from "@/app/chrome";
 import { AccountPanel } from "@/components/account-panel";
 import { AppShell, type ShellViewer } from "@/components/app-shell";
 import { SearchResults } from "@/components/search-results";
 import { ThemeProvider } from "@/components/theme-provider";
+import type { MeView } from "@/lib/api-types";
 
 function renderShell(viewer: ShellViewer) {
   render(
@@ -98,6 +100,27 @@ test("the viewer's photo loads lazily in the sidebar's account menu (hidden belo
     "src",
     "/api/photos/a-maya/77b2",
   );
+});
+
+test("the shell's viewer carries the photo URL `/me` gives the signed-in actor", () => {
+  const me: MeView = {
+    state: "member",
+    login: "mayachen",
+    actor: {
+      id: "a-maya",
+      name: "Maya Chen",
+      kind: "human",
+      photoUrl: "/api/photos/a-maya/77b2",
+    },
+    projects: [],
+    ownerName: "Justin Salas",
+  };
+  expect(sessionOf(me)?.viewer).toEqual({
+    name: "Maya Chen",
+    login: "mayachen",
+    isOwner: false,
+    photoUrl: "/api/photos/a-maya/77b2",
+  });
 });
 
 const owner: ShellViewer = {

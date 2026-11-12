@@ -85,6 +85,25 @@ test.each([
   );
 });
 
+test.each([
+  [
+    "an unknown actor",
+    (_actor: string, hash: string) => `/api/photos/nobody/${hash}`,
+  ],
+  [
+    "a known actor with a wrong hash",
+    (actor: string) => `/api/photos/${actor}/stale`,
+  ],
+])(
+  "%s is a 401 with no key or session, not the 404 a signed-in caller gets",
+  async (_, urlOf) => {
+    const [, , actor = "", hash = ""] = photoUrl.split("/");
+    const url = urlOf(actor, hash);
+    expect((await request("GET", url, { key: null })).status).toBe(401);
+    expect((await request("GET", url)).status).toBe(404);
+  },
+);
+
 test("a stale hash, an actor without a photo and an unknown actor are 404s", async () => {
   const stale = photoUrl;
   const replaced = (await (await putPhoto(OTHER_PNG, "image/png")).json()) as {
