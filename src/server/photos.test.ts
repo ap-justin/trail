@@ -73,7 +73,13 @@ test("a member's photo request reads only the session, its user, the access and 
     const tables = prepare.mock.calls.map(
       ([sql]) => /\bfrom "(\w+)"/.exec(sql)?.[1],
     );
-    expect(tables).toEqual(["session", "user", "actor", "invite", "actor_photo"]);
+    expect(tables).toEqual([
+      "session",
+      "user",
+      "actor",
+      "invite",
+      "actor_photo",
+    ]);
   } finally {
     prepare.mockRestore();
   }
