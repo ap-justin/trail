@@ -52,8 +52,9 @@ function initials(actor: Pick<WebActorView, "name" | "kind">): string {
 
 /**
  * The actor's initials on a tinted ground, with their photo stacked on top when there
- * is one: a rounded square for a bot, a circle for a person. The initials show while
- * the photo loads and stay when it fails.
+ * is one: a rounded square for a bot, a circle for a person. A bot's photo gets a thin
+ * indigo frame, so it still reads as a bot at 18px. The initials show while the photo
+ * loads and stay when it fails.
  * Decorative: the name always sits beside it.
  * `loading="eager"` for avatars that are always on screen (the shell's account menu
  * and panel); lists keep the lazy default.
@@ -86,6 +87,8 @@ export function ActorAvatar({
         bot
           ? "rounded-md bg-bot-muted text-bot"
           : "rounded-full bg-muted text-muted-foreground",
+        // a border, not a ring: an outer ring grows past the box, an inset one paints under the img
+        bot && photoUrl && "border border-bot",
         className,
       )}
     >

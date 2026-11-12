@@ -74,6 +74,47 @@ describe("ActorAvatar", () => {
     },
   );
 
+  test.each(sizes)(
+    "%s: a bot's photo is framed in indigo inside its box; a person's is a bare circle",
+    (size, sizeClass) => {
+      const { container } = render(
+        <>
+          <ActorAvatar
+            actor={{ name: "Kai", kind: "bot", photoUrl: photo }}
+            size={size}
+          />
+          <ActorAvatar
+            actor={{ name: "Maya Chen", kind: "human", photoUrl: photo }}
+            size={size}
+          />
+        </>,
+      );
+      const [bot, human] = container.children;
+      expect(bot).toHaveClass(sizeClass, "rounded-md", "border", "border-bot");
+      expect(human).toHaveClass(sizeClass, "rounded-full");
+      expect(human).not.toHaveClass("border");
+      expect(human?.className).not.toMatch(/\bborder-/);
+    },
+  );
+
+  test("a bot without a photo, or whose photo failed, has no frame", () => {
+    const { container } = render(
+      <>
+        <ActorAvatar actor={{ name: "Kai", kind: "bot", photoUrl: null }} />
+        <ActorAvatar actor={{ name: "Kai", kind: "bot", photoUrl: photo }} />
+      </>,
+    );
+    const [bare, failing] = container.children;
+    expect(bare).not.toHaveClass("border");
+    expect(bare).not.toHaveClass("border-bot");
+    const img = failing?.querySelector("img");
+    if (!img) throw new Error("no img");
+    fireEvent.error(img);
+    expect(failing).not.toHaveClass("border");
+    expect(failing).not.toHaveClass("border-bot");
+    expect(failing).toHaveClass("bg-bot-muted", "text-bot");
+  });
+
   test("the photo is decorative and loads lazily", () => {
     const { container } = render(
       <ActorAvatar actor={{ name: "Kai", kind: "bot", photoUrl: photo }} />,
