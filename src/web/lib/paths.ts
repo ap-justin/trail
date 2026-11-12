@@ -1,4 +1,4 @@
-// The routes in the build spec; the routes seat mounts a screen at each.
+// The app's routes; each mounts one screen.
 export const paths = {
   feed: "/",
   projects: "/projects",

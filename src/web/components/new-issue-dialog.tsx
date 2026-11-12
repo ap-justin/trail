@@ -46,7 +46,7 @@ export type NewIssueDialogProps = {
   viewer: { name: string; isOwner: boolean };
   /** Who to ask for access when `projects` is empty. */
   ownerName: string;
-  /** Title and description arrive trimmed; the routes seat navigates to the new issue. */
+  /** Title and description arrive trimmed; the route navigates to the new issue. */
   onSubmit: (issue: NewIssue) => void;
   pending: boolean;
   /** Why the last create failed, above the buttons; null when it didn't. */

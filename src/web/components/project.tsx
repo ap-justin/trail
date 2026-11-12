@@ -49,7 +49,7 @@ export type ProjectViewProps = {
   issues: Loadable<WebIssueListView>;
   /** Newest first. */
   statusUpdates: Loadable<WebStatusUpdatePageView>;
-  /** The status filter; null is All. The URL (`?status=`) is the routes seat's. */
+  /** The status filter; null is All. The URL (`?status=`) is the route's. */
   status: IssueStatus | null;
   onStatusChange: (status: IssueStatus | null) => void;
   onNewIssue: () => void;

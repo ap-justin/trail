@@ -10,7 +10,7 @@
  * The design system's closed set: values from the "trail-tokens" guideline and the
  * approved frames on the doop canvas ltdlIxhvr2. Each `initial` drops Tailwind's
  * stock scale, so a class outside the set (`text-gray-500`, `text-2xl`, `rounded-3xl`,
- * `shadow-sm`) compiles to nothing; theme.test.ts sweeps the rest.
+ * `shadow-sm`) compiles to nothing; design-system.test.ts sweeps the rest.
  */
 @theme {
   --color-*: initial;
