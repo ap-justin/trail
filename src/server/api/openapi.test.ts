@@ -215,3 +215,55 @@ test("an import issue's statusType advertises Linear's seven state types", async
     }),
   );
 });
+
+test("PUT /me/photo takes a body of any media type as raw bytes, in 3.1 form", async () => {
+  const res = await request("GET", "/api/v1/openapi.json", { key: null });
+  const spec = (await res.json()) as {
+    paths: Record<string, Record<string, { requestBody: { content: object } }>>;
+  };
+  const content = spec.paths["/me/photo"]?.put?.requestBody.content as Record<
+    string,
+    unknown
+  >;
+  expect(content).toEqual({
+    "image/png": {},
+    "image/jpeg": {},
+    "image/webp": {},
+    "*/*": {},
+  });
+});
+
+test("setting a photo answers a URL that is never null; removing one answers null", async () => {
+  const res = await request("GET", "/api/v1/openapi.json", { key: null });
+  type Schema = {
+    $ref?: string;
+    type?: string | string[];
+    properties?: Record<string, Schema>;
+    required?: string[];
+  };
+  type Operation = {
+    responses: Record<
+      string,
+      { content: { "application/json": { schema: Schema } } }
+    >;
+  };
+  const spec = (await res.json()) as {
+    paths: Record<string, Record<string, Operation>>;
+    components: { schemas: Record<string, Schema> };
+  };
+  const okBody = (method: string) => {
+    const schema =
+      spec.paths["/me/photo"]?.[method]?.responses["200"]?.content[
+        "application/json"
+      ].schema;
+    const name = schema?.$ref?.split("/").at(-1) ?? "";
+    return spec.components.schemas[name] ?? schema;
+  };
+
+  const set = okBody("put");
+  expect(set?.properties?.photoUrl?.type).toBe("string");
+  expect(set?.required).toEqual(["photoUrl"]);
+  const cleared = okBody("delete");
+  expect(cleared?.properties?.photoUrl?.type).toBe("null");
+  expect(cleared?.required).toEqual(["photoUrl"]);
+});

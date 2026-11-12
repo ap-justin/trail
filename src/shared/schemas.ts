@@ -153,6 +153,11 @@ const actorLabel = z.string().nullable().meta({
   example: "agent-7",
 });
 
+const servedPhotoUrl = z.string().meta({
+  description:
+    "Where the photo is served, a path under /api/photos that changes whenever the photo does. Fetch it with a bot key or a signed-in session.",
+});
+
 const photoUrl = z.string().nullable().meta({
   description:
     "Where the actor's photo is served, a path under /api/photos that changes whenever the photo does; null without one. Fetch it with a bot key or a signed-in session.",
@@ -197,7 +202,15 @@ export const botSchema = z
   .object({ id, name: actorName, label: actorLabel, photoUrl })
   .openapi("Bot");
 
-export const myPhotoSchema = z.object({ photoUrl }).openapi("MyPhoto");
+export const myPhotoSchema = z
+  .object({ photoUrl: servedPhotoUrl })
+  .openapi("MyPhoto");
+
+export const myPhotoRemovedSchema = z
+  .object({
+    photoUrl: z.null().meta({ description: "The bot has no photo now." }),
+  })
+  .openapi("MyPhotoRemoved");
 
 export function pageSchema<T extends z.ZodType>(item: T) {
   return z.object({

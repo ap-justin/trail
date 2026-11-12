@@ -5,7 +5,8 @@ import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, expect, test, vi } from "vitest";
 import { migrate, openDatabase } from "../db/client.js";
 import { actorPhoto } from "../db/schema.js";
-import { OTHER_PNG, PNG, pngOfSize } from "../test-images.js";
+import { JPEG, OTHER_PNG, PNG, pngOfSize, WEBP } from "../test-images.js";
+import { InvalidImageError } from "./errors.js";
 import { createBot } from "./keys.js";
 import { setActorPhoto } from "./photos.js";
 
@@ -66,4 +67,30 @@ test("a photo of exactly 262144 bytes is stored whole, and one byte more is refu
   expect(() => setActorPhoto(db, actor.id, pngOfSize(262145))).toThrow(
     /262145 bytes/,
   );
+});
+
+const riff = (form: string) =>
+  new Uint8Array([...Buffer.from(`RIFF\x0c\0\0\0${form}data`, "latin1")]);
+
+test.each([
+  ["a RIFF container that is not WebP (WAVE)", riff("WAVE")],
+  ["a RIFF container that is not WebP (AVI)", riff("AVI ")],
+  ["RIFF with no form type", new Uint8Array(Buffer.from("RIFF"))],
+  ["a PNG signature cut short", PNG.slice(0, 7)],
+  ["a JPEG signature cut short", JPEG.slice(0, 2)],
+])("%s is refused as not an image", (_, bytes) => {
+  const { actor } = createBot(db, `sniff-${bytes.length}-${bytes[8]}`);
+  expect(() => setActorPhoto(db, actor.id, bytes)).toThrow(InvalidImageError);
+  expect(storedAt(actor.id)).toBeUndefined();
+});
+
+test("a WebP is typed by its form type, not just its RIFF header", () => {
+  const { actor } = createBot(db, "webp-ok");
+  setActorPhoto(db, actor.id, WEBP);
+  const stored = db
+    .select({ contentType: actorPhoto.contentType })
+    .from(actorPhoto)
+    .where(eq(actorPhoto.actorId, actor.id))
+    .get();
+  expect(stored?.contentType).toBe("image/webp");
 });

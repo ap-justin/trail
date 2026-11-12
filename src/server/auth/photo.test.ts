@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { actor, actorPhoto } from "../db/schema.js";
 import { PHOTO_MAX_BYTES } from "../service/photos.js";
 import { setupTestApp, TEST_OWNER, TEST_OWNER_ID } from "../test-app.js";
@@ -42,7 +42,14 @@ const photoOf = (githubId: number) => {
 const photoLands = (githubId: number, bytes: Uint8Array) =>
   expect.poll(() => photoOf(githubId)?.hash).toBe(sha256(bytes));
 
-const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+let warn = vi.spyOn(console, "warn");
+beforeEach(() => {
+  warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+});
+afterEach(() => {
+  warn.mockRestore();
+});
+
 /** Resolves once the photo fetch for `login` has failed and been given up on. */
 const photoGivenUp = (login: string) =>
   vi.waitFor(
@@ -173,26 +180,46 @@ test("sign-in returns while GitHub's photo is still on its way, and the photo la
       const signal = init?.signal;
       signal?.addEventListener("abort", () => reject(signal.reason));
     });
-  const started = Date.now();
+  // were sign-in to await the fetch, this would hang until the test times out
   await addMember("hopper", [], { githubId: 7700 });
-  expect(Date.now() - started).toBeLessThan(1_000);
   expect(calls).toHaveLength(1);
   expect(photoOf(7700)).toBeUndefined();
   release();
   await photoLands(7700, PNG);
 });
 
-test("a GitHub that never answers is given up on at the timeout", async () => {
-  // as fetch does, the stub gives up when the signal it was handed aborts
-  answer = (init) =>
-    new Promise((_, reject) => {
-      const signal = init?.signal;
-      signal?.addEventListener("abort", () => reject(signal.reason));
+test("a GitHub that never answers is given up on once the fetch's timeout fires", async () => {
+  // AbortSignal.timeout runs on Node's own timer, out of fake timers' reach: hand out signals the test fires itself
+  const timeouts = new Map<AbortSignal, { ms: number; fire: () => void }>();
+  const timeoutSpy = vi
+    .spyOn(AbortSignal, "timeout")
+    .mockImplementation((ms) => {
+      const controller = new AbortController();
+      timeouts.set(controller.signal, {
+        ms,
+        fire: () =>
+          controller.abort(new DOMException("timed out", "TimeoutError")),
+      });
+      return controller.signal;
     });
-  const started = Date.now();
-  await addMember("patient", [], { githubId: 7600 });
-  await photoGivenUp("patient");
-  expect(Date.now() - started).toBeGreaterThanOrEqual(3_000);
-  expect(Date.now() - started).toBeLessThan(4_000);
-  expect(photoOf(7600)).toBeUndefined();
-}, 10_000);
+  try {
+    // as fetch does, the stub gives up when the signal it was handed aborts
+    answer = (init) =>
+      new Promise((_, reject) => {
+        const signal = init?.signal;
+        signal?.addEventListener("abort", () => reject(signal.reason));
+      });
+    await addMember("patient", [], { githubId: 7600 });
+    const timeout = timeouts.get(calls[0]?.init?.signal as AbortSignal);
+    // the fetch carries a finite timeout, and nothing has given up before it fires
+    expect(timeout?.ms).toBeGreaterThan(0);
+    expect(timeout?.ms).toBeLessThanOrEqual(10_000);
+    expect(warn).not.toHaveBeenCalled();
+
+    timeout?.fire();
+    await photoGivenUp("patient");
+    expect(photoOf(7600)).toBeUndefined();
+  } finally {
+    timeoutSpy.mockRestore();
+  }
+});

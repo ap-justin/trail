@@ -54,7 +54,8 @@ function initials(actor: Pick<WebActorView, "name" | "kind">): string {
  * The actor's initials on a tinted ground, with their photo stacked on top when there
  * is one: a rounded square for a bot, a circle for a person. A bot's photo gets a thin
  * indigo frame, so it still reads as a bot at 18px. The initials show while the photo
- * loads and stay when it fails.
+ * loads and stay when it fails; once it loads they go, so a transparent photo never
+ * shows them through.
  * Decorative: the name always sits beside it.
  * `loading="eager"` for avatars that are always on screen (the shell's account menu
  * and panel); lists keep the lazy default.
@@ -65,9 +66,7 @@ export function ActorAvatar({
   loading = "lazy",
   className,
 }: {
-  actor: Pick<WebActorView, "name" | "kind"> & {
-    photoUrl?: WebActorView["photoUrl"];
-  };
+  actor: Pick<WebActorView, "name" | "kind" | "photoUrl">;
   size?: keyof typeof avatarSizes;
   loading?: "eager" | "lazy";
   className?: string;
@@ -75,8 +74,12 @@ export function ActorAvatar({
   const bot = actor.kind === "bot";
   // keyed by URL, so a new photo gets its own try after an old one failed
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  // hidden on load rather than a ground on the img: a sized img paints its
+  // background before the photo arrives, which would cover the initials while loading
+  const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
   const photoUrl =
     actor.photoUrl && actor.photoUrl !== failedUrl ? actor.photoUrl : null;
+  const photoShown = photoUrl !== null && photoUrl === loadedUrl;
   return (
     <span
       aria-hidden="true"
@@ -92,13 +95,16 @@ export function ActorAvatar({
         className,
       )}
     >
-      <span className="col-start-1 row-start-1">{initials(actor)}</span>
+      {!photoShown && (
+        <span className="col-start-1 row-start-1">{initials(actor)}</span>
+      )}
       {photoUrl && (
         <img
           src={photoUrl}
           alt=""
           loading={loading}
           decoding="async"
+          onLoad={() => setLoadedUrl(photoUrl)}
           onError={() => setFailedUrl(photoUrl)}
           className="col-start-1 row-start-1 size-full object-cover"
         />

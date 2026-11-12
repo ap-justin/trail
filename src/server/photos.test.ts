@@ -1,8 +1,10 @@
+import { eq } from "drizzle-orm";
 import { beforeAll, beforeEach, expect, test } from "vitest";
+import { session } from "./db/schema.js";
 import { setupTestApp } from "./test-app.js";
 import { OTHER_PNG, WEBP } from "./test-images.js";
 
-const { app, bot, request, signIn, owner, addMember } = setupTestApp();
+const { app, bot, db, request, signIn, owner, addMember } = setupTestApp();
 
 let photoUrl = "";
 let memberCookie = "";
@@ -96,4 +98,26 @@ test("a stale hash, an actor without a photo and an unknown actor are 404s", asy
   expect(((await gone.json()) as { error: { code: string } }).error.code).toBe(
     "not_found",
   );
+});
+
+test("serving a photo leaves a session due for refresh as it was, and sets no cookie", async () => {
+  const cookie = await addMember("member-due", []);
+  const token = decodeURIComponent(cookie.split("=")[1] ?? "").split(".")[0];
+  // an hour from expiry is past better-auth's updateAge, so a session read that may refresh does
+  const dueAt = new Date(Date.now() + 3_600_000);
+  dueAt.setMilliseconds(0);
+  db.update(session)
+    .set({ expiresAt: dueAt })
+    .where(eq(session.token, token ?? ""))
+    .run();
+
+  const res = await request("GET", photoUrl, { key: null, cookie });
+  expectServedWebp(res);
+  expect(res.headers.getSetCookie()).toEqual([]);
+  const [row] = db
+    .select({ expiresAt: session.expiresAt })
+    .from(session)
+    .where(eq(session.token, token ?? ""))
+    .all();
+  expect(row?.expiresAt).toEqual(dueAt);
 });

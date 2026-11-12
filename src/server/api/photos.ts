@@ -1,5 +1,9 @@
-import { createRoute, z } from "@hono/zod-openapi";
-import { errorSchema, myPhotoSchema } from "../../shared/schemas.js";
+import { createRoute } from "@hono/zod-openapi";
+import {
+  errorSchema,
+  myPhotoRemovedSchema,
+  myPhotoSchema,
+} from "../../shared/schemas.js";
 import { actorPhotoContentTypes } from "../db/schema.js";
 import type { Service } from "../service/index.js";
 import {
@@ -14,12 +18,11 @@ const tags = ["actors"];
 const anyKey =
   "Acts only on the calling bot. Every key may call it, whatever projects and actions it is limited to.";
 
+// no schema: in OpenAPI 3.1 raw bytes are the media type alone. */* because
+// the route takes any Content-Type and reads the type from the bytes
 const imageBody = {
   content: Object.fromEntries(
-    actorPhotoContentTypes.map((type) => [
-      type,
-      { schema: z.string().openapi({ format: "binary" }) },
-    ]),
+    [...actorPhotoContentTypes, "*/*"].map((type) => [type, {}]),
   ),
   required: true,
 };
@@ -50,7 +53,7 @@ const clearPhoto = createRoute({
   description: `${anyKey} Removing a photo the bot doesn't have succeeds too.`,
   tags,
   responses: {
-    200: jsonContent(myPhotoSchema, "photoUrl null"),
+    200: jsonContent(myPhotoRemovedSchema, "The photo is gone"),
     401: readErrors[401],
   },
 });

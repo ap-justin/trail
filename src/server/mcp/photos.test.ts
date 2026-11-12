@@ -104,6 +104,18 @@ test.each(["image/jpg", "IMAGE/JPG"])(
   },
 );
 
+test.each([
+  ["wrapped at 76 columns, as GNU base64 writes it", "\n"],
+  ["wrapped with CRLF line ends", "\r\n"],
+])("base64 %s stores the same bytes", async (_, eol) => {
+  const image = pngOfSize(1000);
+  const lines = b64(image).match(/.{1,76}/g) ?? [];
+  const wrapped = lines.map((line) => `${line}${eol}`).join("");
+  const { photoUrl } = await call(wide, "set_my_photo", { data: wrapped });
+  const served = await request("GET", photoUrl);
+  expect(new Uint8Array(await served.arrayBuffer())).toEqual(image);
+});
+
 test("set_my_photo recommends a small avatar and points larger files to the REST route", async () => {
   const { tools } = await wide.listTools();
   const description =

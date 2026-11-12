@@ -86,7 +86,7 @@ const failure = (text: string): CallToolResult => ({
 });
 
 const photoEncoding =
-  "base64-encoded (standard alphabet, padded, no line breaks), bare or prefixed like data:image/png;base64,";
+  "base64-encoded (standard alphabet, padded; line breaks are fine), bare or prefixed like data:image/png;base64,";
 
 /** The media types a data: URL prefix may declare; image/jpg is the common misspelling of image/jpeg. */
 const dataUrlImageTypes: readonly string[] = [
@@ -94,7 +94,7 @@ const dataUrlImageTypes: readonly string[] = [
   "image/jpg",
 ];
 
-/** The bytes of `set_my_photo`'s data: strict base64, after an optional image data: URL prefix. */
+/** The bytes of `set_my_photo`'s data: strict base64 once whitespace is dropped, after an optional image data: URL prefix. */
 function photoBytes(data: string): Uint8Array {
   const dataUrl = /^data:([^;,]*)(;[^,]*)?,/.exec(data);
   let encoded = data;
@@ -110,6 +110,8 @@ function photoBytes(data: string): Uint8Array {
     }
     encoded = data.slice(prefix.length);
   }
+  // `base64 file` wraps its output at 76 columns
+  encoded = encoded.replace(/[\t\n\f\r ]/g, "");
   const bytes = Buffer.from(encoded, "base64");
   // Buffer skips characters it can't decode; a round trip that differs means it did
   if (bytes.toString("base64") !== encoded) {

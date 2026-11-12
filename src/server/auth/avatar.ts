@@ -2,7 +2,7 @@ import type { Db } from "../db/client.js";
 import { PHOTO_MAX_BYTES, setActorPhoto } from "../service/photos.js";
 import type { HumanActor } from "./identity.js";
 
-// sign-in doesn't wait on the fetch; this bounds how long a slow GitHub keeps it open
+// sign-in doesn't wait on the fetch; this bounds how long the background fetch can run
 const AVATAR_TIMEOUT_MS = 3_000;
 
 /**

@@ -16,6 +16,7 @@ let ownerCookie = "";
 let memberCookie = "";
 let ownerId = "";
 let memberId = "";
+let bareCookie = "";
 let botUrl = "";
 let memberUrl = "";
 let issueKey = "";
@@ -38,6 +39,7 @@ const web = async (
 beforeAll(async () => {
   ownerCookie = await signIn(owner);
   memberCookie = await addMember("pictured-person", [project.id]);
+  bareCookie = await addMember("bare-person", [project.id]);
   ownerId = (await web("GET", "/me", ownerCookie)).actor.id;
   memberId = (await web("GET", "/me", memberCookie)).actor.id;
   botUrl = setActorPhoto(db, pictured.actor.id, PNG).photoUrl;
@@ -90,11 +92,57 @@ test("an issue's creator carries the photo URL, null without one", async () => {
   expect(without.creator).toMatchObject({ id: plain.actor.id, photoUrl: null });
 });
 
+test("an issue's assignee, its timeline comments, and a project's status update author carry the photo URL", async () => {
+  const filed = await request("POST", "/api/v1/issues", {
+    key: plain.key,
+    json: {
+      projectId: project.id,
+      title: "assigned",
+      assigneeId: pictured.actor.id,
+    },
+  });
+  const { key } = (await filed.json()) as Body;
+  await request("POST", `/api/v1/issues/${key}/comments`, {
+    key: pictured.key,
+    json: { body: "on it" },
+  });
+  await request("POST", `/api/v1/projects/${project.id}/status-updates`, {
+    key: pictured.key,
+    json: { body: "going well", health: "on_track" },
+  });
+
+  const issue = await web("GET", `/issues/${key}`, memberCookie);
+  expect(issue.assignee).toMatchObject({
+    id: pictured.actor.id,
+    photoUrl: botUrl,
+  });
+  const comment = issue.timeline.find((e: Body) => e.kind === "comment");
+  expect(comment.actor).toMatchObject({
+    id: pictured.actor.id,
+    photoUrl: botUrl,
+  });
+  const created = issue.timeline.find((e: Body) => e.kind === "issue_created");
+  expect(created.actor.photoUrl).toBeNull();
+
+  const proj = await web("GET", `/projects/${project.key}`, memberCookie);
+  expect(proj.latestStatusUpdate.author).toMatchObject({
+    id: pictured.actor.id,
+    photoUrl: botUrl,
+  });
+  const rows = await web(
+    "GET",
+    `/projects/${project.key}/issues`,
+    memberCookie,
+  );
+  const row = rows.items.find((i: Body) => i.key === key);
+  expect(row.assignee).toMatchObject({ photoUrl: botUrl });
+});
+
 test("/me and a person's new comment carry their photo URL", async () => {
   expect((await web("GET", "/me", memberCookie)).actor.photoUrl).toBe(
     memberUrl,
   );
-  expect((await web("GET", "/me", ownerCookie)).actor.photoUrl).toBeNull();
+  expect((await web("GET", "/me", bareCookie)).actor.photoUrl).toBeNull();
   const comment = await web(
     "POST",
     `/issues/${issueKey}/comments`,

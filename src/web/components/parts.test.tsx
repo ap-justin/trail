@@ -21,8 +21,10 @@ describe("ActorBadge", () => {
   test("bot avatars are rounded squares, human avatars circles", () => {
     const { container } = render(
       <>
-        <ActorAvatar actor={{ name: "Kai", kind: "bot" }} />
-        <ActorAvatar actor={{ name: "Maya Chen", kind: "human" }} />
+        <ActorAvatar actor={{ name: "Kai", kind: "bot", photoUrl: null }} />
+        <ActorAvatar
+          actor={{ name: "Maya Chen", kind: "human", photoUrl: null }}
+        />
       </>,
     );
     const [bot, human] = container.children;
@@ -141,19 +143,45 @@ describe("ActorAvatar", () => {
     expect(eager).toHaveAttribute("loading", "eager");
   });
 
-  test.each([null, undefined])(
-    "photoUrl %s: initials and no img",
-    (photoUrl) => {
-      const { container } = render(
-        <>
-          <ActorAvatar actor={{ name: "Kai", kind: "bot", photoUrl }} />
-          <ActorAvatar actor={{ name: "Maya Chen", kind: "human", photoUrl }} />
-        </>,
+  test("photoUrl null: initials and no img", () => {
+    const { container } = render(
+      <>
+        <ActorAvatar actor={{ name: "Kai", kind: "bot", photoUrl: null }} />
+        <ActorAvatar
+          actor={{ name: "Maya Chen", kind: "human", photoUrl: null }}
+        />
+      </>,
+    );
+    const [bot, human] = container.children;
+    expect(bot).toHaveTextContent("K");
+    expect(human).toHaveTextContent("MC");
+    expect(container.querySelector("img")).toBeNull();
+  });
+
+  test.each([
+    ["bot", "Kai", "K"],
+    ["human", "Maya Chen", "MC"],
+  ] as const)(
+    "%s: initials show until the photo loads, then stop painting so a transparent photo never shows them through",
+    (kind, name, letters) => {
+      const { container, rerender } = render(
+        <ActorAvatar actor={{ name, kind, photoUrl: photo }} />,
       );
-      const [bot, human] = container.children;
-      expect(bot).toHaveTextContent("K");
-      expect(human).toHaveTextContent("MC");
-      expect(container.querySelector("img")).toBeNull();
+      const avatar = container.firstElementChild;
+      expect(avatar).toHaveTextContent(letters);
+      const img = container.querySelector("img");
+      if (!img) throw new Error("no img");
+      fireEvent.load(img);
+      expect(avatar).not.toHaveTextContent(letters);
+      expect(img).toBeInTheDocument();
+      if (kind === "bot") expect(avatar).toHaveClass("border", "border-bot");
+
+      rerender(
+        <ActorAvatar
+          actor={{ name, kind, photoUrl: "/api/photos/a-new/9c0d" }}
+        />,
+      );
+      expect(avatar).toHaveTextContent(letters);
     },
   );
 

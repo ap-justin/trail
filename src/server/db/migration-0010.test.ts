@@ -166,15 +166,19 @@ test("an actor has one photo at most, of an actor that exists", () => {
 });
 
 test("a photo can be deleted, and goes with its actor", () => {
+  // its own actor, so deleting it leaves h1 and h2 for the tests that use them
+  db.$client.exec(
+    "insert into actor (id, kind, display_name, created_at) values ('h3', 'human', 'Edsger', 0)",
+  );
   insertPhoto(db, { actorId: "h1" });
-  insertPhoto(db, { actorId: "h2" });
+  insertPhoto(db, { actorId: "h3" });
 
   db.$client.exec("delete from actor_photo where actor_id = 'h1'");
   expect(rows(db, "select actor_id from actor_photo")).toEqual([
-    { actor_id: "h2" },
+    { actor_id: "h3" },
   ]);
 
-  db.$client.exec("delete from actor where id = 'h2'");
+  db.$client.exec("delete from actor where id = 'h3'");
   expect(rows(db, "select * from actor_photo")).toEqual([]);
   expect(rows(db, "pragma foreign_key_check")).toEqual([]);
 });

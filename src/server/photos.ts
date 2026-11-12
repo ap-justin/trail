@@ -1,29 +1,33 @@
 import { Hono } from "hono";
-import { every, some } from "hono/combine";
+import { some } from "hono/combine";
 import { createMiddleware } from "hono/factory";
 import { HTTPException } from "hono/http-exception";
 import { bearerKey } from "./api/auth.js";
 import { errorResponse, handleError } from "./api/errors.js";
 import type { TrailAuth } from "./auth/auth.js";
-import type { ViewerEnv } from "./auth/viewer.js";
 import type { Db } from "./db/client.js";
 import { readActorPhoto } from "./service/photos.js";
 
-/** Throws a 401 unless the session is a person let in; a bot key is tried before it. */
-const memberSession = createMiddleware<ViewerEnv>(async (c, next) => {
-  const { kind } = c.var.viewer;
-  if (kind !== "member" && kind !== "owner") {
-    throw new HTTPException(401, {
-      res: errorResponse(
-        c,
-        401,
-        "unauthorized",
-        "send Authorization: Bearer <key> with a bot's unrevoked key, or sign in to trail as an invited person",
-      ),
-    });
-  }
-  await next();
-});
+/**
+ * Throws a 401 unless the session is a person let in; a bot key is tried before it.
+ * The session is read without refreshing it, so a page of avatars never rewrites
+ * the session row or sets a cookie.
+ */
+const memberSession = (auth: TrailAuth) =>
+  createMiddleware(async (c, next) => {
+    const { kind } = await auth.resolveViewer(c.req.raw.headers);
+    if (kind !== "member" && kind !== "owner") {
+      throw new HTTPException(401, {
+        res: errorResponse(
+          c,
+          401,
+          "unauthorized",
+          "send Authorization: Bearer <key> with a bot's unrevoked key, or sign in to trail as an invited person",
+        ),
+      });
+    }
+    await next();
+  });
 
 /**
  * `GET /api/photos/:actorId/:hash`, to any bot key or person let in. The hash
@@ -32,7 +36,7 @@ const memberSession = createMiddleware<ViewerEnv>(async (c, next) => {
 export function photoRoutes({ db, auth }: { db: Db; auth: TrailAuth }) {
   const photos = new Hono();
   photos.onError(handleError);
-  photos.use(some(bearerKey(db), every(auth.viewer, memberSession)));
+  photos.use(some(bearerKey(db), memberSession(auth)));
   photos.get("/:actorId/:hash", (c) => {
     const found = readActorPhoto(
       db,
