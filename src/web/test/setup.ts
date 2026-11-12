@@ -3,8 +3,8 @@ import { cleanup, configure } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, expect } from "vitest";
 import { leaks, server } from "./server";
 
-// The first render of a route loads its chunk. On a busy machine that takes longer than
-// the 1s default, so a findBy or waitFor gives up on a page that is about to appear.
+// the first render of a route loads its chunk; on a busy machine that outlasts the 1s default,
+// so a findBy or waitFor gives up on a page that is about to appear
 configure({ asyncUtilTimeout: 5000 });
 // jsdom does not implement scrolling; the router calls it on navigation and jsdom logs "Not implemented" without it
 window.scrollTo = () => {};
