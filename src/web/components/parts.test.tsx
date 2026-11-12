@@ -77,7 +77,7 @@ describe("ActorAvatar", () => {
   );
 
   test.each(sizes)(
-    "%s: a bot's photo is framed in indigo inside its box; a person's is a bare circle",
+    "%s: a bot's photo wears the indigo border and rounded-md classes; a person's has the round class and no border",
     (size, sizeClass) => {
       const { container } = render(
         <>
@@ -303,9 +303,17 @@ describe("ActorAvatar", () => {
     });
 
     test("a complete image that decoded to nothing (broken) keeps the initials", () => {
+      // currentSrc matches and naturalWidth stays jsdom's 0: only the naturalWidth guard rejects it
       vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(
         true,
       );
+      vi.spyOn(
+        HTMLImageElement.prototype,
+        "currentSrc",
+        "get",
+      ).mockImplementation(function (this: HTMLImageElement) {
+        return this.src;
+      });
       const { container } = render(
         <ActorAvatar actor={{ name: "Kai", kind: "bot", photoUrl: photo }} />,
       );

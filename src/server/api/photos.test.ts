@@ -140,6 +140,26 @@ test.each([
   },
 );
 
+test("a PNG uploaded as a multipart form is a 422 asking for the raw bytes, and nothing is stored", async () => {
+  const kept = addBot(`form-${projectKey()}`);
+  const { photoUrl } = (await (
+    await putPhoto(PNG, "image/png", kept.key)
+  ).json()) as Body;
+  const form = new FormData();
+  form.append("photo", new Blob([OTHER_PNG], { type: "image/png" }), "me.png");
+  const res = await app.request("/api/v1/me/photo", {
+    method: "PUT",
+    headers: { authorization: `Bearer ${kept.key}` },
+    body: form,
+  });
+  expect(res.status).toBe(422);
+  const { error } = (await res.json()) as Body;
+  expect(error.code).toBe("invalid_image");
+  expect(error.message).toMatch(/raw bytes/);
+  expect(error.message).not.toMatch(/convert/);
+  expect((await whoami(kept.key)).photoUrl).toBe(photoUrl);
+});
+
 test("a PUT streamed without a Content-Length over the limit is a 413", async () => {
   const body = pngOfSize(262145);
   const stream = new ReadableStream<Uint8Array>({

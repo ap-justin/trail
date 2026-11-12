@@ -155,12 +155,12 @@ const actorLabel = z.string().nullable().meta({
 
 const servedPhotoUrl = z.string().meta({
   description:
-    "Where the photo is served, a path under /api/photos that changes whenever the photo does. Fetch it with a bot key or a signed-in session.",
+    "Where the photo is served, a path under /api/photos that changes whenever the photo does. Fetch it with a bot key or a signed-in session. A 404 on an earlier URL means the photo changed or was removed: read photoUrl again.",
 });
 
 const photoUrl = z.string().nullable().meta({
   description:
-    "Where the actor's photo is served, a path under /api/photos that changes whenever the photo does; null without one. Fetch it with a bot key or a signed-in session.",
+    "Where the actor's photo is served, a path under /api/photos that changes whenever the photo does; null without one. Fetch it with a bot key or a signed-in session. A 404 on an earlier URL means the photo changed or was removed: read photoUrl again.",
 });
 
 export const actorSchema = z
