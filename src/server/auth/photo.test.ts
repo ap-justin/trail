@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { beforeEach, expect, test } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
 import { actor, actorPhoto } from "../db/schema.js";
 import { PHOTO_MAX_BYTES } from "../service/photos.js";
 import { setupTestApp, TEST_OWNER, TEST_OWNER_ID } from "../test-app.js";
@@ -38,8 +38,24 @@ const photoOf = (githubId: number) => {
   return row && { ...row, content: new Uint8Array(row.content) };
 };
 
+// sign-in doesn't wait on the photo, so each test waits for the write it checks
+const photoLands = (githubId: number, bytes: Uint8Array) =>
+  expect.poll(() => photoOf(githubId)?.hash).toBe(sha256(bytes));
+
+const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+/** Resolves once the photo fetch for `login` has failed and been given up on. */
+const photoGivenUp = (login: string) =>
+  vi.waitFor(
+    () =>
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining(`GitHub photo for ${login} not stored`),
+      ),
+    { timeout: 5_000 },
+  );
+
 test("the owner's first sign-in stores their GitHub photo", async () => {
   await signIn(TEST_OWNER);
+  await photoLands(TEST_OWNER_ID, PNG);
   expect(photoOf(TEST_OWNER_ID)).toEqual({
     content: PNG,
     contentType: "image/png",
@@ -49,13 +65,15 @@ test("the owner's first sign-in stores their GitHub photo", async () => {
 
 test("an invited member's first sign-in stores their GitHub photo", async () => {
   await addMember("lovelace", [], { githubId: 7001 });
-  expect(photoOf(7001)?.hash).toBe(sha256(PNG));
+  await photoLands(7001, PNG);
 });
 
 test("a later sign-in replaces the photo with GitHub's current one", async () => {
   await addMember("babbage", [], { githubId: 7002 });
+  await photoLands(7002, PNG);
   answer = async () => new Response(JPEG, { status: 200 });
   await signIn("babbage", { githubId: 7002 });
+  await photoLands(7002, JPEG);
   expect(photoOf(7002)).toEqual({
     content: JPEG,
     contentType: "image/jpeg",
@@ -104,6 +122,7 @@ test.each(failures)(
   async (_, n, failure) => {
     const githubId = 7100 + n;
     await addMember(`kept-${n}`, [], { githubId });
+    await photoLands(githubId, PNG);
     answer = failure;
     const { cookie } = await signInWithGitHub({
       id: githubId,
@@ -111,6 +130,7 @@ test.each(failures)(
       name: null,
     });
     expect(await viewerOf(cookie)).toMatchObject({ kind: "member" });
+    await photoGivenUp(`kept-${n}`);
     expect(photoOf(githubId)?.content).toEqual(PNG);
   },
 );
@@ -121,6 +141,7 @@ test.each(failures)(
     const githubId = 7200 + n;
     answer = failure;
     await addMember(`bare-${n}`, [], { githubId });
+    await photoGivenUp(`bare-${n}`);
     expect(photoOf(githubId)).toBeUndefined();
   },
 );
@@ -144,7 +165,24 @@ test("a not-invited account's sign-in fetches and stores no photo", async () => 
   expect(photoOf(7500)).toBeUndefined();
 });
 
-test("a GitHub that never answers holds sign-in only until the timeout", async () => {
+test("sign-in returns while GitHub's photo is still on its way, and the photo lands after", async () => {
+  let release = () => {};
+  answer = (init) =>
+    new Promise((resolve, reject) => {
+      release = () => resolve(new Response(PNG, { status: 200 }));
+      const signal = init?.signal;
+      signal?.addEventListener("abort", () => reject(signal.reason));
+    });
+  const started = Date.now();
+  await addMember("hopper", [], { githubId: 7700 });
+  expect(Date.now() - started).toBeLessThan(1_000);
+  expect(calls).toHaveLength(1);
+  expect(photoOf(7700)).toBeUndefined();
+  release();
+  await photoLands(7700, PNG);
+});
+
+test("a GitHub that never answers is given up on at the timeout", async () => {
   // as fetch does, the stub gives up when the signal it was handed aborts
   answer = (init) =>
     new Promise((_, reject) => {
@@ -153,6 +191,8 @@ test("a GitHub that never answers holds sign-in only until the timeout", async (
     });
   const started = Date.now();
   await addMember("patient", [], { githubId: 7600 });
+  await photoGivenUp("patient");
+  expect(Date.now() - started).toBeGreaterThanOrEqual(3_000);
   expect(Date.now() - started).toBeLessThan(4_000);
   expect(photoOf(7600)).toBeUndefined();
 }, 10_000);

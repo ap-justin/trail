@@ -28,6 +28,7 @@ export function AccountPanel({
             photoUrl: viewer.photoUrl,
           }}
           size="lg"
+          loading="eager"
         />
         <div className="flex min-w-0 flex-1 flex-col">
           <span className="truncate font-medium">{viewer.name}</span>

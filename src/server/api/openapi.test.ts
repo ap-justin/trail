@@ -78,7 +78,7 @@ test("the spec lists the error statuses each operation can return", async () => 
     "GET /projects/{id}/status-updates": withForbidden(withNotFound(list)),
     "GET /whoami": ["200", "401"],
     "DELETE /me/photo": ["200", "401"],
-    "PUT /me/photo": ["200", "401", "413", "415", "422"],
+    "PUT /me/photo": ["200", "401", "413", "422"],
     "PATCH /issues/{id}": withForbidden(withNotFound(write("200"))),
     "PATCH /projects/{id}": withForbidden(withNotFound(write("200"))),
     "POST /import": withConflict(withForbidden(write("200"))),

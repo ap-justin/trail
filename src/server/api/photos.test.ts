@@ -105,7 +105,8 @@ test("bytes of exactly 256 KB are stored and one byte more is a 413", async () =
   expect(res.status).toBe(413);
   const { error } = (await res.json()) as Body;
   expect(error.code).toBe("payload_too_large");
-  expect(error.message).toContain("262144 bytes");
+  // the limitBody middleware's message, which never saw the body's length; the service's own would say "262145 bytes,"
+  expect(error.message).toMatch(/^the photo is over the limit/);
 });
 
 test.each([
@@ -137,20 +138,35 @@ test("a JPEG labelled image/png is stored as a JPEG", async () => {
 });
 
 test.each([
-  ["image/svg+xml", "image/svg+xml"],
-  ["image/gif", "image/gif"],
+  [
+    "application/x-www-form-urlencoded, as curl --data-binary sends it",
+    "application/x-www-form-urlencoded",
+  ],
   ["application/octet-stream", "application/octet-stream"],
+  ["image/jpg", "image/jpg"],
+  ["image/gif", "image/gif"],
   ["no Content-Type", null],
-])("a photo sent as %s is a 415", async (_, type) => {
+])("a PNG sent as %s is stored as a PNG", async (_, type) => {
   const res = await putPhoto(PNG, type);
-  expect(res.status).toBe(415);
-  const { error } = (await res.json()) as Body;
-  expect(error.code).toBe("unsupported_media_type");
-  expect(error.message).toContain("image/png, image/jpeg, image/webp");
+  expect(res.status).toBe(200);
+  const { photoUrl } = (await res.json()) as Body;
+  const served = await request("GET", photoUrl);
+  expect(served.headers.get("content-type")).toBe("image/png");
+  expect(new Uint8Array(await served.arrayBuffer())).toEqual(PNG);
 });
 
-test("a Content-Type with parameters and any case is accepted", async () => {
-  expect((await putPhoto(PNG, "Image/PNG; charset=binary")).status).toBe(200);
+test.each([
+  ["an SVG sent as image/svg+xml", SVG, "image/svg+xml"],
+  [
+    "a text file sent as application/x-www-form-urlencoded",
+    TEXT,
+    "application/x-www-form-urlencoded",
+  ],
+  ["an empty body sent without a Content-Type", new Uint8Array(), null],
+])("%s is a 422 invalid_image", async (_, body, type) => {
+  const res = await putPhoto(body, type);
+  expect(res.status).toBe(422);
+  expect(((await res.json()) as Body).error.code).toBe("invalid_image");
 });
 
 test("without a key the photo routes are a 401", async () => {

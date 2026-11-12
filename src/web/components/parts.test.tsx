@@ -34,12 +34,17 @@ describe("ActorBadge", () => {
 });
 
 describe("ActorAvatar", () => {
-  const sizes = ["xs", "sm", "md", "lg"] as const;
+  const sizes = [
+    ["xs", "size-4.5"],
+    ["sm", "size-6"],
+    ["md", "size-7"],
+    ["lg", "size-9"],
+  ] as const;
   const photo = "/api/photos/a-kai/3f9a1c";
 
   test.each(sizes)(
-    "%s: a photo fills the avatar in its kind's shape",
-    (size) => {
+    "%s: a photo sits over the initials in its kind's shape at its size",
+    (size, sizeClass) => {
       const { container } = render(
         <>
           <ActorAvatar
@@ -57,15 +62,15 @@ describe("ActorAvatar", () => {
         </>,
       );
       const [bot, human] = container.children;
-      expect(bot).toHaveClass("rounded-md", "bg-bot-muted");
+      expect(bot).toHaveClass(sizeClass, "rounded-md", "bg-bot-muted");
       expect(bot?.querySelector("img")).toHaveAttribute("src", photo);
-      expect(bot).not.toHaveTextContent("K");
-      expect(human).toHaveClass("rounded-full");
+      expect(bot).toHaveTextContent("K");
+      expect(human).toHaveClass(sizeClass, "rounded-full");
       expect(human?.querySelector("img")).toHaveAttribute(
         "src",
         "/api/photos/a-maya/77b2",
       );
-      expect(human).not.toHaveTextContent("MC");
+      expect(human).toHaveTextContent("MC");
     },
   );
 
@@ -78,6 +83,21 @@ describe("ActorAvatar", () => {
     expect(img).toHaveAttribute("alt", "");
     expect(img).toHaveAttribute("loading", "lazy");
     expect(img).toHaveAttribute("decoding", "async");
+  });
+
+  test("loading is lazy by default and eager on request", () => {
+    const { container } = render(
+      <>
+        <ActorAvatar actor={{ name: "Kai", kind: "bot", photoUrl: photo }} />
+        <ActorAvatar
+          actor={{ name: "Kai", kind: "bot", photoUrl: photo }}
+          loading="eager"
+        />
+      </>,
+    );
+    const [lazy, eager] = container.querySelectorAll("img");
+    expect(lazy).toHaveAttribute("loading", "lazy");
+    expect(eager).toHaveAttribute("loading", "eager");
   });
 
   test.each([null, undefined])(
@@ -102,6 +122,7 @@ describe("ActorAvatar", () => {
         actor={{ name: "Maya Chen", kind: "human", photoUrl: photo }}
       />,
     );
+    expect(container.firstElementChild).toHaveTextContent("MC");
     const img = container.querySelector("img");
     if (!img) throw new Error("no img");
     fireEvent.error(img);

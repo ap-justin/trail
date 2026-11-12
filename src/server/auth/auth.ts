@@ -122,9 +122,8 @@ export function createAuth({
               name: row.name,
             };
             const access = syncActor(db, identity, owner);
-            if (access) {
-              await storeGitHubPhoto(db, access.actor, avatarFetch);
-            }
+            // not awaited: sign-in never waits on GitHub, and storeGitHubPhoto never rejects
+            if (access) void storeGitHubPhoto(db, access.actor, avatarFetch);
           },
         },
       },

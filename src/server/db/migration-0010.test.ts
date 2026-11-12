@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, expect, test } from "vitest";
+import { afterAll, afterEach, beforeAll, expect, test } from "vitest";
 import { type Db, migrate, openDatabase } from "./client.js";
 import { actorPhoto } from "./schema.js";
 
@@ -72,6 +72,11 @@ beforeAll(() => {
   return () => db.$client.close();
 });
 
+// runs even when an assertion threw, so a red test can't leave rows behind for the next
+afterEach(() => {
+  db.$client.exec("delete from actor_photo");
+});
+
 test("an actor from before 0010 has no photo, and keeps its row", () => {
   expect(rows(db, "select * from actor_photo")).toEqual([]);
   expect(rows(db, "select id from actor order by id")).toEqual([
@@ -99,7 +104,6 @@ test("a photo round-trips through the drizzle table as bytes, stamped updated_at
   expect(photo?.content).toEqual(content);
   expect(photo?.contentType).toBe("image/jpeg");
   expect(photo?.updatedAt).toBeInstanceOf(Date);
-  db.delete(actorPhoto).where(eq(actorPhoto.actorId, "h2")).run();
 });
 
 test("a content type outside png, jpeg and webp is rejected", () => {
@@ -126,7 +130,6 @@ test("content is 1 to 262144 bytes", () => {
   expect(rows(db, "select length(content) as n from actor_photo")).toEqual([
     { n: 262144 },
   ]);
-  db.$client.exec("delete from actor_photo");
 });
 
 test("content is bytes, not text", () => {
@@ -160,7 +163,6 @@ test("an actor has one photo at most, of an actor that exists", () => {
   expect(() => insertPhoto(db, { actorId: "nobody" })).toThrow(
     /FOREIGN KEY constraint failed/,
   );
-  db.$client.exec("delete from actor_photo");
 });
 
 test("a photo can be deleted, and goes with its actor", () => {

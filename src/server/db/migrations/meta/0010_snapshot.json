@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "8d2239e5-398f-44f1-a3c3-2360ac2cfcc2",
+  "id": "99fc8e24-3608-48cd-a252-49d3ba458766",
   "prevId": "6816a88e-5368-4fbf-8ba0-11810b3cfab3",
   "tables": {
     "account": {
@@ -432,13 +432,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "content": {
-          "name": "content",
-          "type": "blob",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
         "content_type": {
           "name": "content_type",
           "type": "text",
@@ -456,6 +449,13 @@
         "updated_at": {
           "name": "updated_at",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "content": {
+          "name": "content",
+          "type": "blob",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false

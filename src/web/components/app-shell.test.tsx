@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, test, vi } from "vitest";
+import { AccountPanel } from "@/components/account-panel";
 import { AppShell, type ShellViewer } from "@/components/app-shell";
 import { SearchResults } from "@/components/search-results";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -70,6 +71,33 @@ test("the current section is marked for assistive tech", () => {
       "page",
     );
   }
+});
+
+test("the viewer's photo, always on screen, loads eagerly in the account menu and panel", () => {
+  const viewer: ShellViewer = {
+    name: "Maya Chen",
+    login: "mayachen",
+    isOwner: false,
+    photoUrl: "/api/photos/a-maya/77b2",
+  };
+  renderShell(viewer);
+  const trigger = screen.getByRole("button", { name: "Account: Maya Chen" });
+  expect(trigger.querySelector("img")).toHaveAttribute("loading", "eager");
+  expect(trigger.querySelector("img")).toHaveAttribute(
+    "src",
+    "/api/photos/a-maya/77b2",
+  );
+
+  const { container } = render(
+    <ThemeProvider>
+      <AccountPanel viewer={viewer} onSignOut={vi.fn()} />
+    </ThemeProvider>,
+  );
+  expect(container.querySelector("img")).toHaveAttribute("loading", "eager");
+  expect(container.querySelector("img")).toHaveAttribute(
+    "src",
+    "/api/photos/a-maya/77b2",
+  );
 });
 
 const owner: ShellViewer = {

@@ -164,13 +164,15 @@ export const actorPhoto = sqliteTable(
     actorId: text("actor_id")
       .primaryKey()
       .references(() => actor.id, { onDelete: "cascade" }),
-    content: blob("content", { mode: "buffer" }).notNull(),
     contentType: text("content_type", {
       enum: actorPhotoContentTypes,
     }).notNull(),
     // lowercase hex sha256 of content
     hash: text("hash").notNull(),
     updatedAt: updatedAt(),
+    // last: a row stores columns in this order, and reading any column after
+    // the blob walks its whole overflow-page chain
+    content: blob("content", { mode: "buffer" }).notNull(),
   },
   (t) => [
     check(

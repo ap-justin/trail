@@ -88,6 +88,12 @@ const failure = (text: string): CallToolResult => ({
 const photoEncoding =
   "base64-encoded (standard alphabet, padded, no line breaks), bare or prefixed like data:image/png;base64,";
 
+/** The media types a data: URL prefix may declare; image/jpg is the common misspelling of image/jpeg. */
+const dataUrlImageTypes: readonly string[] = [
+  ...actorPhotoContentTypes,
+  "image/jpg",
+];
+
 /** The bytes of `set_my_photo`'s data: strict base64, after an optional image data: URL prefix. */
 function photoBytes(data: string): Uint8Array {
   const dataUrl = /^data:([^;,]*)(;[^,]*)?,/.exec(data);
@@ -95,9 +101,7 @@ function photoBytes(data: string): Uint8Array {
   if (dataUrl) {
     const [prefix, type = "", params = ""] = dataUrl;
     if (
-      !(actorPhotoContentTypes as readonly string[]).includes(
-        type.toLowerCase(),
-      ) ||
+      !dataUrlImageTypes.includes(type.toLowerCase()) ||
       params.toLowerCase() !== ";base64"
     ) {
       throw new InvalidImageError(
@@ -412,7 +416,7 @@ export function registerTools(
   server.registerTool(
     "set_my_photo",
     {
-      description: `Set your own photo, which people see beside your name in trail. Send ${PHOTO_ACCEPTS}, ${photoEncoding} Its type is read from the bytes. A new photo replaces the old one and gets a new photoUrl. Every key may call this, whatever its scope.`,
+      description: `Set your own photo, which people see beside your name in trail. Send ${PHOTO_ACCEPTS}, ${photoEncoding} Its type is read from the bytes. The whole image goes in this one argument, so send a small avatar: about 128x128px, under about 16 KB. For a larger file, send its raw bytes to PUT /api/v1/me/photo with this same key instead. A new photo replaces the old one and gets a new photoUrl. Every key may call this, whatever its scope.`,
       inputSchema: z.strictObject({
         data: z.string().describe(`The image, ${photoEncoding}`),
       }),

@@ -19,6 +19,7 @@ let memberId = "";
 let botUrl = "";
 let memberUrl = "";
 let issueKey = "";
+let picturedIssueKey = "";
 
 const web = async (
   method: string,
@@ -47,6 +48,7 @@ beforeAll(async () => {
       json: { projectId: project.id, title: `by ${key}` },
     });
     issueKey = ((await res.json()) as Body).key;
+    if (key === pictured.key) picturedIssueKey = issueKey;
   }
 });
 
@@ -74,9 +76,18 @@ test("feed actors and the feed's bot filter carry the photo URL, null without on
   expect(filter(plain.actor.id).photoUrl).toBeNull();
 });
 
-test("an issue's creator carries the photo URL", async () => {
-  const issue = await web("GET", `/issues/${issueKey}`, memberCookie);
-  expect(issue.creator).toMatchObject({ id: plain.actor.id, photoUrl: null });
+test("an issue's creator carries the photo URL, null without one", async () => {
+  const withPhoto = await web(
+    "GET",
+    `/issues/${picturedIssueKey}`,
+    memberCookie,
+  );
+  expect(withPhoto.creator).toMatchObject({
+    id: pictured.actor.id,
+    photoUrl: botUrl,
+  });
+  const without = await web("GET", `/issues/${issueKey}`, memberCookie);
+  expect(without.creator).toMatchObject({ id: plain.actor.id, photoUrl: null });
 });
 
 test("/me and a person's new comment carry their photo URL", async () => {

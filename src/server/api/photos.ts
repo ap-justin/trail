@@ -1,5 +1,4 @@
 import { createRoute, z } from "@hono/zod-openapi";
-import { createMiddleware } from "hono/factory";
 import { errorSchema, myPhotoSchema } from "../../shared/schemas.js";
 import { actorPhotoContentTypes } from "../db/schema.js";
 import type { Service } from "../service/index.js";
@@ -9,7 +8,6 @@ import {
   photoTooLarge,
 } from "../service/photos.js";
 import { createRouter } from "./env.js";
-import { errorResponse } from "./errors.js";
 import { jsonContent, limitBody, readErrors } from "./routes.js";
 
 const tags = ["actors"];
@@ -26,40 +24,18 @@ const imageBody = {
   required: true,
 };
 
-/** 415 unless the declared Content-Type is one a photo may be; parameters are ignored. */
-const requireImageType = createMiddleware(async (c, next) => {
-  const declared = c.req.header("content-type");
-  const essence = declared?.split(";")[0]?.trim().toLowerCase() ?? "";
-  if (!(actorPhotoContentTypes as readonly string[]).includes(essence)) {
-    return errorResponse(
-      c,
-      415,
-      "unsupported_media_type",
-      `the photo was sent as ${declared ? `Content-Type ${declared}` : "no Content-Type"}: send its raw bytes with Content-Type ${actorPhotoContentTypes.join(", ")}`,
-    );
-  }
-  await next();
-});
-
 const setPhoto = createRoute({
   method: "put",
   path: "/me/photo",
   summary: "Set the calling bot's photo",
-  description: `${anyKey} The body is the image's raw bytes, ${PHOTO_ACCEPTS}. Its type is read from the bytes, which win over the declared Content-Type. A new photo replaces the old one, and its URL changes.`,
+  description: `${anyKey} The body is the image's raw bytes, ${PHOTO_ACCEPTS}. Its type is read from the bytes; the Content-Type is ignored, so curl's --data-binary default and application/octet-stream are fine. A new photo replaces the old one, and its URL changes.`,
   tags,
-  middleware: [
-    requireImageType,
-    limitBody(PHOTO_MAX_BYTES, photoTooLarge(null)),
-  ] as const,
+  middleware: [limitBody(PHOTO_MAX_BYTES, photoTooLarge(null))] as const,
   request: { body: imageBody },
   responses: {
     200: jsonContent(myPhotoSchema, "The new photo's URL"),
     401: readErrors[401],
     413: jsonContent(errorSchema, `The body is over ${PHOTO_MAX_BYTES} bytes`),
-    415: jsonContent(
-      errorSchema,
-      "The Content-Type is not image/png, image/jpeg or image/webp",
-    ),
     422: jsonContent(
       errorSchema,
       "The bytes are empty or not a PNG, JPEG or WebP image (code invalid_image)",

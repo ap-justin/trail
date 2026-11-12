@@ -35,7 +35,7 @@ export function ActorBadge({
   );
 }
 
-const avatarSizes = {
+export const avatarSizes = {
   xs: "size-4.5 text-2xs",
   sm: "size-6 text-2xs",
   md: "size-7 text-2xs",
@@ -51,19 +51,24 @@ function initials(actor: Pick<WebActorView, "name" | "kind">): string {
 }
 
 /**
- * The actor's photo, or initials when there is none or it fails to load, on a tinted
- * ground: a rounded square for a bot, a circle for a person.
+ * The actor's initials on a tinted ground, with their photo stacked on top when there
+ * is one: a rounded square for a bot, a circle for a person. The initials show while
+ * the photo loads and stay when it fails.
  * Decorative: the name always sits beside it.
+ * `loading="eager"` for avatars that are always on screen (the shell's account menu
+ * and panel); lists keep the lazy default.
  */
 export function ActorAvatar({
   actor,
   size = "sm",
+  loading = "lazy",
   className,
 }: {
   actor: Pick<WebActorView, "name" | "kind"> & {
     photoUrl?: WebActorView["photoUrl"];
   };
   size?: keyof typeof avatarSizes;
+  loading?: "eager" | "lazy";
   className?: string;
 }) {
   const bot = actor.kind === "bot";
@@ -84,17 +89,16 @@ export function ActorAvatar({
         className,
       )}
     >
-      {photoUrl ? (
+      <span className="col-start-1 row-start-1">{initials(actor)}</span>
+      {photoUrl && (
         <img
           src={photoUrl}
           alt=""
-          loading="lazy"
+          loading={loading}
           decoding="async"
           onError={() => setFailedUrl(photoUrl)}
-          className="size-full object-cover"
+          className="col-start-1 row-start-1 size-full object-cover"
         />
-      ) : (
-        initials(actor)
       )}
     </span>
   );

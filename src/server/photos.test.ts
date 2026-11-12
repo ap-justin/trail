@@ -1,4 +1,4 @@
-import { beforeAll, expect, test } from "vitest";
+import { beforeAll, beforeEach, expect, test } from "vitest";
 import { setupTestApp } from "./test-app.js";
 import { OTHER_PNG, WEBP } from "./test-images.js";
 
@@ -18,12 +18,16 @@ const putPhoto = (body: Uint8Array, contentType: string) =>
     body,
   });
 
-beforeAll(async () => {
+// each test starts from the bot's WEBP photo, whatever the one before did to it
+beforeEach(async () => {
   photoUrl = (
     (await (await putPhoto(WEBP, "image/webp")).json()) as {
       photoUrl: string;
     }
   ).photoUrl;
+});
+
+beforeAll(async () => {
   await signIn(owner);
   memberCookie = await addMember("member-none", []);
   outsiderCookie = await signIn("outsider");

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import type { Db } from "../db/client.js";
 import { type ActorPhotoContentType, actorPhoto } from "../db/schema.js";
 import { InvalidImageError, PayloadTooLargeError } from "./errors.js";
@@ -39,8 +39,9 @@ export function photoUrl(actorId: string, hash: string | null) {
 
 /**
  * Stores `bytes` as the actor's photo, replacing any it had, typed by its
- * leading bytes. Throws `PayloadTooLargeError` over `PHOTO_MAX_BYTES` and
- * `InvalidImageError` for an empty body or anything but PNG, JPEG and WebP.
+ * leading bytes; bytes equal to the stored photo's leave its row untouched.
+ * Throws `PayloadTooLargeError` over `PHOTO_MAX_BYTES` and `InvalidImageError`
+ * for an empty body or anything but PNG, JPEG and WebP.
  */
 export function setActorPhoto(
   db: Db | Tx,
@@ -64,7 +65,12 @@ export function setActorPhoto(
   const set = { content, contentType, hash, updatedAt: new Date() };
   db.insert(actorPhoto)
     .values({ actorId, ...set })
-    .onConflictDoUpdate({ target: actorPhoto.actorId, set })
+    .onConflictDoUpdate({
+      target: actorPhoto.actorId,
+      set,
+      // the same bytes again (a GitHub avatar on every sign-in) write nothing
+      setWhere: ne(actorPhoto.hash, hash),
+    })
     .run();
   return { photoUrl: photoUrl(actorId, hash) };
 }

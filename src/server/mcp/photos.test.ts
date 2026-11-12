@@ -93,6 +93,25 @@ test("a data: URL prefix is accepted and the bytes decide the type", async () =>
   expect(served.headers.get("content-type")).toBe("image/jpeg");
 });
 
+test.each(["image/jpg", "IMAGE/JPG"])(
+  "a data:%s;base64, prefix is accepted as JPEG",
+  async (type) => {
+    const { photoUrl } = await call(wide, "set_my_photo", {
+      data: `data:${type};base64,${b64(JPEG)}`,
+    });
+    const served = await request("GET", photoUrl);
+    expect(served.headers.get("content-type")).toBe("image/jpeg");
+  },
+);
+
+test("set_my_photo recommends a small avatar and points larger files to the REST route", async () => {
+  const { tools } = await wide.listTools();
+  const description =
+    tools.find((t) => t.name === "set_my_photo")?.description ?? "";
+  expect(description).toMatch(/128.*px/);
+  expect(description).toContain("PUT /api/v1/me/photo");
+});
+
 test("list_bots carries each bot's photo URL", async () => {
   const { photoUrl } = await call(wide, "set_my_photo", { data: b64(PNG) });
   const { items } = await call(wide, "list_bots", { limit: 200 });

@@ -9,7 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { ActorAvatar } from "@/components/actor";
+import { ActorAvatar, avatarSizes } from "@/components/actor";
 import { ErrorState, ListSkeleton } from "@/components/states";
 import { KeyText } from "@/components/text";
 import { Badge } from "@/components/ui/badge";
@@ -89,7 +89,10 @@ function PersonAvatar({ person }: { person: PersonView }) {
   return (
     <span
       aria-hidden="true"
-      className="grid size-7 shrink-0 place-items-center rounded-full border border-dashed text-2xs font-semibold text-muted-foreground"
+      className={cn(
+        "grid shrink-0 place-items-center rounded-full border border-dashed font-semibold text-muted-foreground",
+        avatarSizes.md,
+      )}
     >
       ?
     </span>
