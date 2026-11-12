@@ -18,7 +18,7 @@ export default defineConfig({
           name: "web",
           include: ["src/web/**/*.test.{ts,tsx}"],
           environment: "jsdom",
-          // a findBy may now wait 5s (src/web/test/setup.ts), so a test needs more than the 5s default
+          // a findBy may wait 5s (src/web/test/setup.ts), so a test needs more than the 5s default
           testTimeout: 15000,
           setupFiles: ["src/web/test/setup.ts"],
         },
