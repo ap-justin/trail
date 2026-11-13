@@ -12,6 +12,7 @@ import {
   sql,
 } from "drizzle-orm";
 import type { Db } from "../db/client.js";
+import { newId } from "../db/id.js";
 import type { ApiKeyAction } from "../db/schema.js";
 import {
   activityEvent,
@@ -26,13 +27,18 @@ import {
   type ProjectHealth,
   project,
   projectStatusUpdate,
+  webhookSubscription,
 } from "../db/schema.js";
 import type { ActivityEvent, EventBus } from "../events/bus.js";
+import { checkWebhookUrl, UnsafeUrlError } from "../webhooks/address.js";
+import { openSecret, sealSecret } from "../webhooks/secret.js";
+import { sendWebhook } from "../webhooks/send.js";
 import {
   ConflictError,
   ForbiddenActionError,
   ForbiddenError,
   ForbiddenScopeError,
+  NotFoundError,
   ValidationError,
 } from "./errors.js";
 import {
@@ -84,6 +90,19 @@ import {
   noProject,
   type VisibleIds,
 } from "./visible.js";
+import {
+  countOwn,
+  enqueueDeliveries,
+  insertSubscription,
+  resume,
+  setProjects,
+  validSecret,
+  WEBHOOK_PROJECTS_MAX,
+  WEBHOOKS_PER_BOT_MAX,
+  type Webhook,
+  type WebhookSettings,
+  webhooksOf,
+} from "./webhooks.js";
 
 export type {
   ImportComment,
@@ -283,13 +302,104 @@ const withPhotoUrl = ({
   photoUrl: photoUrl(row.id, photoHash),
 });
 
-export function createService({ db, bus }: { db: Db; bus: EventBus }) {
+export type { Webhook, WebhookSettings } from "./webhooks.js";
+/** What a test call to a webhook found. */
+export type WebhookTestResult = {
+  delivered: boolean;
+  status: number | null;
+  error: string | null;
+};
+
+export function createService({
+  db,
+  bus,
+  webhooks,
+}: {
+  db: Db;
+  bus: EventBus;
+  webhooks: WebhookSettings;
+}) {
   /** Actors with their photo's hash; the bytes stay in actor_photo. */
   const selectWithPhotoHash = () =>
     db
       .select({ ...getTableColumns(actorTable), photoHash: actorPhoto.hash })
       .from(actorTable)
       .leftJoin(actorPhoto, eq(actorPhoto.actorId, actorTable.id));
+
+  /** Project keys or ids as the project ids a webhook follows; one the key can't see is a 404, as everywhere. */
+  function webhookProjectIds(actor: ActingActor, refs: string[]): string[] {
+    if (refs.length === 0) {
+      throw new ValidationError(
+        "projects must name at least one project: send the keys (like TRL) of the projects whose events you want",
+      );
+    }
+    if (refs.length > WEBHOOK_PROJECTS_MAX) {
+      throw new ValidationError(
+        `projects names ${refs.length} projects, over the limit of ${WEBHOOK_PROJECTS_MAX}`,
+      );
+    }
+    return [...new Set(refs.map((ref) => resolveProject(db, ref, actor).id))];
+  }
+
+  /** The URL vetted and its address resolved; a refusal is a 422 saying why. */
+  async function checkedUrl(raw: string) {
+    try {
+      return await checkWebhookUrl(raw, webhooks.resolve);
+    } catch (error) {
+      if (error instanceof UnsafeUrlError) {
+        throw new ValidationError(error.message);
+      }
+      throw error;
+    }
+  }
+
+  /** True when every project the webhook follows is within the key's scope. */
+  function withinScope(actor: ActingActor, hook: Webhook): boolean {
+    const scoped = actor.scope?.projects;
+    if (scoped == null) return true;
+    return hook.projects.every((key) => scoped.some((p) => p.key === key));
+  }
+
+  /** The 409 for a URL the bot already uses: names the webhook only when this key can manage it. */
+  function twinConflict(
+    actor: ActingActor,
+    twinId: string,
+    from: Db | Tx,
+    advice: string,
+  ) {
+    try {
+      ownWebhook(actor, twinId, from);
+    } catch (error) {
+      if (!(error instanceof NotFoundError)) throw error;
+      return new ConflictError(
+        "this bot already has a webhook to that URL that this key can't manage: use a different URL, or ask for a key that reaches that webhook's projects",
+      );
+    }
+    return new ConflictError(
+      `webhook ${twinId} already sends to this URL: ${advice}`,
+    );
+  }
+
+  /** The calling bot's webhook, or a 404: another bot's and one the key's scope doesn't cover read as missing. */
+  function ownWebhook(actor: ActingActor, id: string, from: Db | Tx = db) {
+    const row = from
+      .select()
+      .from(webhookSubscription)
+      .where(
+        and(
+          eq(webhookSubscription.id, id),
+          eq(webhookSubscription.actorId, actor.id),
+        ),
+      )
+      .get();
+    const view = row && (webhooksOf(from, [row])[0] as Webhook);
+    if (!row || !view || !withinScope(actor, view)) {
+      throw new NotFoundError(
+        `no webhook ${id}: list yours with list_webhooks (GET /webhooks)`,
+      );
+    }
+    return { view, cipher: row.secretCipher };
+  }
 
   /**
    * Runs `write` and the activity event it returns in one immediate
@@ -306,6 +416,7 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
           .values(event)
           .returning()
           .get();
+        enqueueDeliveries(tx, committed, webhooks.now());
         return { result, event: committed };
       },
       { behavior: "immediate" },
@@ -1760,6 +1871,242 @@ export function createService({ db, bus }: { db: Db; bus: EventBus }) {
             ? encodeFeedCursor({ ...filters, seq: last.seq, param: "cursor" })
             : null,
       };
+    },
+
+    // Webhooks. A subscription belongs to the bot, so every call below names only the
+    // calling bot's own; one that follows a project outside the key's scope is as
+    // missing to that key as a project it can't see.
+
+    async createWebhook(
+      actor: ActingActor,
+      input: { url: string; secret: string; projects: string[] },
+    ): Promise<Webhook> {
+      requireBot(actor, "subscribe to a project");
+      requireAction(actor, "read", "create a webhook");
+      validSecret(input.secret);
+      const projectIds = webhookProjectIds(actor, input.projects);
+      const refuseAtLimit = (from: Db | Tx) => {
+        const count = countOwn(from, actor.id);
+        if (count >= WEBHOOKS_PER_BOT_MAX) {
+          // a count or advice about webhooks this key can't see would describe them
+          const own = from
+            .select()
+            .from(webhookSubscription)
+            .where(eq(webhookSubscription.actorId, actor.id))
+            .all();
+          if (!webhooksOf(from, own).every((w) => withinScope(actor, w))) {
+            throw new ConflictError(
+              `this bot has reached its limit of ${WEBHOOKS_PER_BOT_MAX} webhooks, and this key can't manage all of them: a key that reaches every project the bot follows can delete one to make room`,
+            );
+          }
+          throw new ConflictError(
+            `this bot already has ${count} webhooks, the most allowed: delete one you no longer use, or add the project to one you have with update_webhook`,
+          );
+        }
+      };
+      refuseAtLimit(db);
+      const { url } = await checkedUrl(input.url);
+      return db.transaction(
+        (tx) => {
+          // again under the write lock: creates sent together all passed the check above
+          refuseAtLimit(tx);
+          const twin = tx
+            .select({ id: webhookSubscription.id })
+            .from(webhookSubscription)
+            .where(
+              and(
+                eq(webhookSubscription.actorId, actor.id),
+                eq(webhookSubscription.url, url.href),
+              ),
+            )
+            .get();
+          if (twin) {
+            throw twinConflict(
+              actor,
+              twin.id,
+              tx,
+              "change it with update_webhook, or use a different URL",
+            );
+          }
+          const row = insertSubscription(tx, webhooks, {
+            actorId: actor.id,
+            url: url.href,
+            secret: input.secret,
+            projectIds,
+          });
+          return webhooksOf(tx, [row])[0] as Webhook;
+        },
+        { behavior: "immediate" },
+      );
+    },
+
+    listWebhooks(actor: ActingActor): Page<Webhook> {
+      requireBot(actor, "list webhooks");
+      requireAction(actor, "read", "list webhooks");
+      const rows = db
+        .select()
+        .from(webhookSubscription)
+        .where(eq(webhookSubscription.actorId, actor.id))
+        .orderBy(
+          asc(webhookSubscription.createdAt),
+          asc(webhookSubscription.id),
+        )
+        .all();
+      return {
+        items: webhooksOf(db, rows).filter((w) => withinScope(actor, w)),
+        nextCursor: null,
+      };
+    },
+
+    getWebhook(actor: ActingActor, id: string): Webhook {
+      requireBot(actor, "read a webhook");
+      requireAction(actor, "read", "read a webhook", () =>
+        ownWebhook(actor, id),
+      );
+      return ownWebhook(actor, id).view;
+    },
+
+    /** Changes the URL or the followed projects; any update, an empty one too, ends a pause. */
+    async updateWebhook(
+      actor: ActingActor,
+      id: string,
+      patch: { url?: string; projects?: string[] },
+    ): Promise<Webhook> {
+      requireBot(actor, "update a webhook");
+      requireAction(actor, "read", "update a webhook", () =>
+        ownWebhook(actor, id),
+      );
+      ownWebhook(actor, id);
+      const projectIds =
+        patch.projects === undefined
+          ? undefined
+          : webhookProjectIds(actor, patch.projects);
+      const url =
+        patch.url === undefined
+          ? undefined
+          : (await checkedUrl(patch.url)).url.href;
+      return db.transaction(
+        (tx) => {
+          // again under the write lock: a delete during the DNS lookup is a 404, not an FK failure
+          const current = ownWebhook(actor, id, tx).view;
+          if (url !== undefined && url !== current.url) {
+            const twin = tx
+              .select({ id: webhookSubscription.id })
+              .from(webhookSubscription)
+              .where(
+                and(
+                  eq(webhookSubscription.actorId, actor.id),
+                  eq(webhookSubscription.url, url),
+                ),
+              )
+              .get();
+            if (twin) {
+              throw twinConflict(
+                actor,
+                twin.id,
+                tx,
+                "use a different URL, or delete that webhook",
+              );
+            }
+          }
+          if (url !== undefined) {
+            tx.update(webhookSubscription)
+              .set({ url })
+              .where(eq(webhookSubscription.id, id))
+              .run();
+          }
+          if (projectIds !== undefined) setProjects(tx, id, projectIds);
+          resume(tx, id, webhooks.now());
+          tx.update(webhookSubscription)
+            .set({ updatedAt: new Date() })
+            .where(eq(webhookSubscription.id, id))
+            .run();
+          return ownWebhook(actor, id, tx).view;
+        },
+        { behavior: "immediate" },
+      );
+    },
+
+    /** Replaces the signing secret; the old one stops signing at once. Ends a pause. */
+    rotateWebhookSecret(
+      actor: ActingActor,
+      id: string,
+      secret: string,
+    ): Webhook {
+      requireBot(actor, "rotate a webhook's secret");
+      requireAction(actor, "read", "rotate a webhook's secret", () =>
+        ownWebhook(actor, id),
+      );
+      ownWebhook(actor, id);
+      validSecret(secret);
+      return db.transaction(
+        (tx) => {
+          tx.update(webhookSubscription)
+            .set({
+              secretCipher: sealSecret(webhooks.key, id, secret),
+              updatedAt: new Date(),
+            })
+            .where(eq(webhookSubscription.id, id))
+            .run();
+          resume(tx, id, webhooks.now());
+          return ownWebhook(actor, id, tx).view;
+        },
+        { behavior: "immediate" },
+      );
+    },
+
+    /** Deletes the subscription with its queued deliveries. */
+    deleteWebhook(actor: ActingActor, id: string): { deleted: true } {
+      requireBot(actor, "delete a webhook");
+      requireAction(actor, "read", "delete a webhook", () =>
+        ownWebhook(actor, id),
+      );
+      ownWebhook(actor, id);
+      db.delete(webhookSubscription)
+        .where(eq(webhookSubscription.id, id))
+        .run();
+      return { deleted: true };
+    },
+
+    /** Sends a signed trail.ping to the subscription now and reports what the receiver answered. */
+    async testWebhook(
+      actor: ActingActor,
+      id: string,
+    ): Promise<WebhookTestResult> {
+      requireBot(actor, "test a webhook");
+      requireAction(actor, "read", "test a webhook", () =>
+        ownWebhook(actor, id),
+      );
+      const { view, cipher } = ownWebhook(actor, id);
+      const secret = openSecret(webhooks.key, id, cipher);
+      if (secret === null) {
+        return {
+          delivered: false,
+          status: null,
+          error:
+            "trail can no longer read this webhook's secret: set a new one with rotate_webhook_secret",
+        };
+      }
+      const now = webhooks.now();
+      const body = JSON.stringify({
+        type: "trail.ping",
+        occurredAt: new Date(now).toISOString(),
+        data: {
+          webhookId: id,
+          projects: view.projects,
+          ...(webhooks.publicUrl !== undefined && { url: webhooks.publicUrl }),
+          message: "A test call from trail: your webhook is set up.",
+        },
+      });
+      const result = await sendWebhook(webhooks, {
+        url: view.url,
+        secret,
+        deliveryId: newId(),
+        body,
+      });
+      return result.ok
+        ? { delivered: true, status: result.status, error: null }
+        : { delivered: false, status: result.status, error: result.error };
     },
   };
 }

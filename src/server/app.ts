@@ -7,7 +7,7 @@ import type { Db } from "./db/client.js";
 import type { EventBus } from "./events/bus.js";
 import { mcpRoutes } from "./mcp/index.js";
 import { photoRoutes } from "./photos.js";
-import { createService } from "./service/index.js";
+import { createService, type WebhookSettings } from "./service/index.js";
 import { spaHandlers } from "./spa.js";
 import type { LiveStreams } from "./web/events.js";
 import { createWeb } from "./web/index.js";
@@ -18,16 +18,19 @@ export function createApp({
   auth,
   streams,
   webDir,
+  webhooks,
 }: {
   db: Db;
   bus: EventBus;
   auth: TrailAuth;
   /** the open event streams, which a drain ends */
   streams: LiveStreams;
+  /** how webhooks are sealed, vetted and sent */
+  webhooks: WebhookSettings;
   /** the built SPA (dist/web); without it only the API answers */
   webDir?: string;
 }) {
-  const service = createService({ db, bus });
+  const service = createService({ db, bus, webhooks });
   const app = new Hono({
     // a bot configured with `.../mcp/` reaches the endpoint, not a 404 behind
     // the key check; trimTrailingSlash only redirects GET and HEAD

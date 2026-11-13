@@ -9,6 +9,7 @@ import type {
   PageView,
   ProjectView,
   StatusUpdateView,
+  WebhookView,
   WhoamiView,
 } from "../../shared/schemas.js";
 import type { ActivityEvent } from "../events/bus.js";
@@ -22,6 +23,7 @@ import type {
   Page,
   Project,
   StatusUpdate,
+  Webhook,
 } from "../service/index.js";
 import { type KeyScope, scopeView } from "../service/keys.js";
 
@@ -145,5 +147,21 @@ export function toImportResult(result: ImportResult): ImportResultView {
     created: result.created,
     updated: result.updated,
     unchanged: result.unchanged,
+  };
+}
+
+export function toWebhook(row: Webhook): WebhookView {
+  return {
+    id: row.id,
+    url: row.url,
+    projects: row.projects,
+    paused: row.pausedAt !== null,
+    pausedAt: row.pausedAt?.toISOString() ?? null,
+    consecutiveFailures: row.consecutiveFailures,
+    lastSuccessAt: row.lastSuccessAt?.toISOString() ?? null,
+    lastError: row.lastError,
+    lastErrorAt: row.lastErrorAt?.toISOString() ?? null,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
   };
 }

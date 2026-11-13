@@ -11,7 +11,7 @@ import {
 } from "vitest";
 import { migrate, openDatabase } from "../db/client.js";
 import { type ActivityEvent, createEventBus } from "../events/bus.js";
-import { atFakeTime, projectKey } from "../test-app.js";
+import { atFakeTime, projectKey, testWebhooks } from "../test-app.js";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors.js";
 import { createService, type Issue, type Project } from "./index.js";
 import { createBot, createHuman } from "./keys.js";
@@ -25,7 +25,7 @@ afterAll(() => {
 });
 
 const bus = createEventBus();
-const service = createService({ db, bus });
+const service = createService({ db, bus, webhooks: testWebhooks });
 let published: ActivityEvent[] = [];
 bus.subscribe((e) => published.push(e));
 beforeEach(() => {

@@ -8,11 +8,30 @@ import { migrate, openDatabase } from "./db/client.js";
 import { invite, project, projectMember } from "./db/schema.js";
 import { type ActivityEvent, createEventBus } from "./events/bus.js";
 import { createBot } from "./service/keys.js";
+import { type WebhookSettings, webhookSettings } from "./service/webhooks.js";
 import { LiveStreams } from "./web/events.js";
+import { deriveSecretKey } from "./webhooks/secret.js";
 
 /** The owner's login in every test app, and the GitHub id `signIn` gives it. */
 export const TEST_OWNER = "trail-owner";
 export const TEST_OWNER_ID = 1;
+
+/** Webhook settings for a test: every name resolves to a public address but internal.example.test, and nothing is sent. */
+export const testWebhookSettings = (
+  overrides: Partial<
+    Pick<WebhookSettings, "resolve" | "transport" | "now" | "publicUrl">
+  > = {},
+) =>
+  webhookSettings(
+    deriveSecretKey("test-secret-that-is-at-least-32-characters"),
+    {
+      resolve: async (host) =>
+        host === "internal.example.test" ? ["10.0.0.5"] : ["93.184.216.34"],
+      transport: async () => ({ status: 200 }),
+      ...overrides,
+    },
+  );
+export const testWebhooks = testWebhookSettings();
 
 /** The origin `app.request` gives a path-only request. */
 export const TEST_ORIGIN = "http://localhost";
@@ -117,8 +136,11 @@ export function setupTestApp({
   auth: authOverrides = {},
   avatarFetch = noAvatar,
   webDir,
+  webhooks: webhookOverrides = {},
 }: {
   auth?: Partial<AuthConfig>;
+  /** replaces how webhooks resolve hosts and send; by default every name resolves to a public address and nothing is sent */
+  webhooks?: Partial<Pick<WebhookSettings, "resolve" | "transport" | "now">>;
   /** answers sign-in's GitHub photo fetch; by default never, so no photo and no warning */
   avatarFetch?: typeof fetch;
   /** the built SPA directory `createApp` serves; none by default */
@@ -141,7 +163,8 @@ export function setupTestApp({
     avatarFetch,
   });
   const streams = new LiveStreams();
-  const app = createApp({ db, bus, auth, streams, webDir });
+  const webhooks = testWebhookSettings(webhookOverrides);
+  const app = createApp({ db, bus, auth, streams, webDir, webhooks });
   const bot = createBot(db, "tester");
   const github = fakeGitHub();
 
@@ -283,6 +306,7 @@ export function setupTestApp({
     addBot,
     addProject,
     addMember,
+    webhooks,
     published,
     request,
     owner: TEST_OWNER,

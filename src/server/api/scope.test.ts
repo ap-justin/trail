@@ -491,6 +491,13 @@ test("the spec documents each gated operation's 403 with the action it needs", a
     "POST /projects": orScope("admin"),
     "POST /projects/{id}/labels": needs("admin"),
     "POST /projects/{id}/status-updates": needs("status_updates"),
+    "GET /webhooks": needs("read"),
+    "POST /webhooks": needs("read"),
+    "GET /webhooks/{id}": needs("read"),
+    "PATCH /webhooks/{id}": needs("read"),
+    "DELETE /webhooks/{id}": needs("read"),
+    "PUT /webhooks/{id}/secret": needs("read"),
+    "POST /webhooks/{id}/ping": needs("read"),
   });
 });
 
