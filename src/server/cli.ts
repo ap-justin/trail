@@ -12,6 +12,7 @@ import {
   type KeyScopeInput,
   type KeyScopeView,
   listKeys,
+  renameBot,
   revokeKey,
 } from "./service/keys.js";
 
@@ -28,6 +29,8 @@ export interface CliIo {
 const usage = `Usage:
   trail bot create <name> [--label <agent-id>] [<scope>] [--key-only]
                                    create a bot and print its key once
+  trail bot rename <bot-id-label-or-name> <new name>
+                                   change a bot's display name; its keys stay
   trail key create <bot-id-or-label> [<scope>] [--key-only]
                                    mint another key for an existing bot
   trail key list                   list every key's prefix, bot, times and scope
@@ -311,9 +314,27 @@ const keyRevoke: Command<string> = {
   },
 };
 
+const botRename: Command<{ bot: string; name: string }> = {
+  flags: [],
+  parse(args) {
+    if (args.length === 0)
+      throw new UsageError("missing <bot-id-label-or-name>");
+    if (args.length === 1) throw new UsageError("missing <new name>");
+    // an unquoted multi-word name arrives as several arguments
+    return { bot: args[0] as string, name: args.slice(1).join(" ") };
+  },
+  run(db, { bot, name }, io) {
+    const renamed = renameBot(db, bot, name);
+    io.stdout.write(
+      `actor  ${renamed.id}\nfrom   ${renamed.oldName}\nto     ${renamed.newName}\n`,
+    );
+  },
+};
+
 // method syntax in Command keeps run() bivariant, so each command keeps its own input type
 const commands: Record<string, Command<unknown> | undefined> = {
   "bot create": botCreate,
+  "bot rename": botRename,
   "key create": keyCreate,
   "key list": keyList,
   "key revoke": keyRevoke,
