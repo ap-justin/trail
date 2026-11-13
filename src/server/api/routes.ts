@@ -1,6 +1,7 @@
 import { z } from "@hono/zod-openapi";
 import { bodyLimit } from "hono/body-limit";
 import { createMiddleware } from "hono/factory";
+import { matchedRoutes } from "hono/route";
 import { errorSchema } from "../../shared/schemas.js";
 import type { ApiKeyAction } from "../db/schema.js";
 import { errorResponse } from "./errors.js";
@@ -31,12 +32,16 @@ const jsonType = /^\s*application\/json\s*(;|$)/i;
  * form or text body would otherwise read as an empty one and a write could
  * succeed having changed nothing. A write with no body (a ping, a delete)
  * passes whatever its Content-Type says, since nothing is read. The photo upload takes raw bytes and is exempt.
+ * A request no route takes passes on to the 404, so an unknown path or method isn't
+ * answered as a body problem.
  */
 export const jsonBodiesOnly = createMiddleware(async (c, next) => {
   const method = c.req.method;
   if (
     (method !== "POST" && method !== "PUT" && method !== "PATCH") ||
-    (method === "PUT" && /\/me\/photo\/?$/.test(c.req.path))
+    (method === "PUT" && /\/me\/photo\/?$/.test(c.req.path)) ||
+    // middleware (this one included) is registered under ALL; a route under its own method
+    !matchedRoutes(c).some((route) => route.method === method)
   ) {
     return next();
   }

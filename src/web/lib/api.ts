@@ -151,6 +151,8 @@ export const api = {
     ),
   signOut: () => request<unknown>("/api/auth/sign-out", json("POST", {})),
   eventsUrl: (filter: FeedFilter) => web(`/events${query(filter)}`),
+  /** Only `actor` events and heartbeats: no feed entries, no replay, its own per-person cap. */
+  actorEventsUrl: () => web(`/events${query({ only: "actors" })}`),
 };
 
 /** trail answers a missing and a hidden project or issue alike, with 404. */

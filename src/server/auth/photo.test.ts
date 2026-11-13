@@ -11,23 +11,46 @@ import {
   vi,
 } from "vitest";
 import { actor, actorPhoto } from "../db/schema.js";
+import type { ActorUpdate } from "../events/bus.js";
 import { PHOTO_MAX_BYTES } from "../service/photos.js";
 import { setupTestApp, TEST_OWNER, TEST_OWNER_ID } from "../test-app.js";
 import { JPEG, PNG, pngOfSize, TEXT } from "../test-images.js";
+
+/** How far the auth clock runs ahead of real time; each test starts it level and only moves it forward. */
+let ahead = 0;
+const HOUR = 3_600_000;
 
 /** What the stubbed avatar fetch answers next; each test sets its own. */
 let answer: (init: RequestInit | undefined) => Promise<Response>;
 const calls: { url: string; init: RequestInit | undefined }[] = [];
 beforeEach(() => {
+  ahead = 0;
   calls.length = 0;
   answer = async () => new Response(PNG, { status: 200 });
 });
 
-const { db, signIn, signInWithGitHub, addMember, viewerOf } = setupTestApp({
+const {
+  db,
+  bus,
+  request,
+  signIn,
+  signInWithGitHub,
+  addMember,
+  viewerOf,
+  inviteEmail,
+  signInWithEmail,
+} = setupTestApp({
   avatarFetch: async (input, init) => {
     calls.push({ url: String(input), init });
     return answer(init);
   },
+  authNow: () => Date.now() + ahead,
+});
+
+const updates: ActorUpdate[] = [];
+bus.subscribeActors((update) => updates.push(update));
+beforeEach(() => {
+  updates.length = 0;
 });
 
 const sha256 = (bytes: Uint8Array) =>
@@ -386,4 +409,237 @@ test("a body that stalls after the headers is abandoned when the timeout fires, 
   } finally {
     timeoutSpy.mockRestore();
   }
+});
+
+/** The actor of the GitHub account, by its numeric id. */
+const actorIdOf = (githubId: number) =>
+  db
+    .select({ id: actor.id })
+    .from(actor)
+    .where(eq(actor.githubId, githubId))
+    .get()?.id ?? "";
+
+const photoCheckedAt = (githubId: number) =>
+  db
+    .select({ updatedAt: actorPhoto.updatedAt })
+    .from(actorPhoto)
+    .where(eq(actorPhoto.actorId, actorIdOf(githubId)))
+    .get()?.updatedAt;
+
+/** Backdates the photo's last check by `hours`, as if that long had passed since. */
+const ageThePhoto = (githubId: number, hours: number) =>
+  db
+    .update(actorPhoto)
+    .set({ updatedAt: new Date(Date.now() - hours * HOUR) })
+    .where(eq(actorPhoto.actorId, actorIdOf(githubId)))
+    .run();
+
+/** A page of the app loading for this session: the SPA's first call. */
+const loadApp = (cookie: string) =>
+  request("GET", "/api/web/me", { cookie, key: null });
+
+/**
+ * A member signed in with GitHub's PNG stored, more than an hour ago by the
+ * auth clock, whose photo was last checked `hours` ago; the fetch log cleared.
+ */
+async function memberWithPhoto(login: string, githubId: number, hours = 25) {
+  const cookie = await addMember(login, [], { githubId });
+  await photoLands(githubId, PNG);
+  ageThePhoto(githubId, hours);
+  ahead += 2 * HOUR;
+  calls.length = 0;
+  updates.length = 0;
+  return cookie;
+}
+
+const photoPath = (githubId: number, bytes: Uint8Array) =>
+  `/api/photos/${actorIdOf(githubId)}/${sha256(bytes)}`;
+
+test("a photo last checked over a day ago is fetched again when the app loads, published once and served at its new URL", async () => {
+  const cookie = await memberWithPhoto("stale", 8001);
+  answer = async () => new Response(JPEG, { status: 200 });
+  expect((await loadApp(cookie)).status).toBe(200);
+  await photoLands(8001, JPEG);
+  expect(calls.map((c) => c.url)).toEqual([
+    "https://avatars.githubusercontent.com/u/8001?s=128",
+  ]);
+  expect(updates).toEqual([
+    { actorId: actorIdOf(8001), photoUrl: photoPath(8001, JPEG) },
+  ]);
+  const me = (await (await loadApp(cookie)).json()) as {
+    actor: { photoUrl: string };
+  };
+  expect(me.actor.photoUrl).toBe(photoPath(8001, JPEG));
+  const served = await request("GET", photoPath(8001, JPEG), {
+    cookie,
+    key: null,
+  });
+  expect(new Uint8Array(await served.arrayBuffer())).toEqual(JPEG);
+});
+
+test("the same bytes again publish nothing but mark the photo checked", async () => {
+  const cookie = await memberWithPhoto("unchanged", 8002);
+  const before = photoCheckedAt(8002)?.getTime() ?? 0;
+  await loadApp(cookie);
+  await vi.waitFor(() =>
+    expect(photoCheckedAt(8002)?.getTime()).toBeGreaterThan(before + HOUR),
+  );
+  expect(calls).toHaveLength(1);
+  expect(updates).toEqual([]);
+  expect(photoOf(8002)?.content).toEqual(PNG);
+});
+
+test("a photo checked within the day is not fetched when the app loads", async () => {
+  const cookie = await memberWithPhoto("fresh", 8003, 20);
+  expect((await loadApp(cookie)).status).toBe(200);
+  expect(calls).toEqual([]);
+});
+
+test("the app loading again within the hour fetches nothing more, even after a failed fetch, and after the hour fetches again", async () => {
+  const cookie = await memberWithPhoto("retried", 8004);
+  answer = async () => new Response(null, { status: 500 });
+  await loadApp(cookie);
+  await photoGivenUp("retried");
+  ahead += HOUR - 60_000;
+  await loadApp(cookie);
+  expect(calls).toHaveLength(1);
+  ahead += 2 * 60_000;
+  answer = async () => new Response(JPEG, { status: 200 });
+  await loadApp(cookie);
+  await photoLands(8004, JPEG);
+  expect(calls).toHaveLength(2);
+});
+
+test("a person without a photo is fetched for at most hourly", async () => {
+  answer = async () => new Response(TEXT);
+  const cookie = await addMember("photoless", [], { githubId: 8005 });
+  await photoGivenUp("photoless");
+  // sign-in's own fetch counts: the load right after it fetches nothing
+  await loadApp(cookie);
+  expect(calls).toHaveLength(1);
+  ahead += 2 * HOUR;
+  await loadApp(cookie);
+  await loadApp(cookie);
+  expect(calls).toHaveLength(2);
+});
+
+test.each(failures)(
+  "%s on a refresh keeps the photo and publishes nothing",
+  async (_, n, failure) => {
+    const githubId = 8100 + n;
+    const cookie = await memberWithPhoto(`refresh-kept-${n}`, githubId);
+    answer = failure;
+    expect((await loadApp(cookie)).status).toBe(200);
+    await photoGivenUp(`refresh-kept-${n}`);
+    expect(photoOf(githubId)?.content).toEqual(PNG);
+    expect(updates).toEqual([]);
+  },
+);
+
+test("a redirect on a refresh is refused and the photo stays", async () => {
+  const elsewhere = createServer((_, res) => res.end(JPEG));
+  const avatars = createServer((_, res) => {
+    const { port } = elsewhere.address() as AddressInfo;
+    res.writeHead(302, { location: `http://127.0.0.1:${port}/photo.jpg` });
+    res.end();
+  });
+  for (const server of [elsewhere, avatars]) {
+    await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+  }
+  try {
+    const cookie = await memberWithPhoto("refresh-redirected", 8200);
+    const { port } = avatars.address() as AddressInfo;
+    answer = (init) => fetch(`http://127.0.0.1:${port}/u/8200`, init);
+    await loadApp(cookie);
+    await photoGivenUp("refresh-redirected");
+    expect(photoOf(8200)?.content).toEqual(PNG);
+    expect(updates).toEqual([]);
+  } finally {
+    for (const server of [elsewhere, avatars]) server.close();
+  }
+});
+
+test("a refresh asks with redirects refused and a short timeout, is answered without waiting on it, and gives up when the timeout fires", async () => {
+  const timeouts = new Map<AbortSignal, { ms: number; fire: () => void }>();
+  const timeoutSpy = vi
+    .spyOn(AbortSignal, "timeout")
+    .mockImplementation((ms) => {
+      const controller = new AbortController();
+      timeouts.set(controller.signal, {
+        ms,
+        fire: () =>
+          controller.abort(new DOMException("timed out", "TimeoutError")),
+      });
+      return controller.signal;
+    });
+  try {
+    const cookie = await memberWithPhoto("refresh-slow", 8201);
+    answer = (init) =>
+      new Promise((_, reject) => {
+        const signal = init?.signal;
+        signal?.addEventListener("abort", () => reject(signal.reason));
+      });
+    // were the load to await the fetch, this would hang until the test times out
+    expect((await loadApp(cookie)).status).toBe(200);
+    const [{ init }] = calls as [(typeof calls)[number]];
+    expect(init?.redirect).toBe("error");
+    const timeout = timeouts.get(init?.signal as AbortSignal);
+    expect(timeout?.ms).toBeGreaterThanOrEqual(1_000);
+    expect(timeout?.ms).toBeLessThanOrEqual(3_000);
+    timeout?.fire();
+    await photoGivenUp("refresh-slow");
+    expect(photoOf(8201)?.content).toEqual(PNG);
+    expect(updates).toEqual([]);
+  } finally {
+    timeoutSpy.mockRestore();
+  }
+});
+
+test("a slow refresh lands after the load was answered", async () => {
+  const cookie = await memberWithPhoto("refresh-later", 8202);
+  let release = () => {};
+  answer = () =>
+    new Promise((resolve) => {
+      release = () => resolve(new Response(JPEG, { status: 200 }));
+    });
+  expect((await loadApp(cookie)).status).toBe(200);
+  expect(photoOf(8202)?.content).toEqual(PNG);
+  release();
+  await photoLands(8202, JPEG);
+});
+
+test("a person signed in by email, and an anonymous viewer, never fetch a photo", async () => {
+  inviteEmail("ada@example.test");
+  const cookie = await signInWithEmail("ada@example.test");
+  ahead += 2 * HOUR;
+  const me = (await (await loadApp(cookie)).json()) as { state: string };
+  expect(me.state).toBe("member");
+  expect((await request("GET", "/api/web/me", { key: null })).status).toBe(200);
+  expect(calls).toEqual([]);
+});
+
+test("reading the viewer for a stream or a photo fetches nothing", async () => {
+  const cookie = await memberWithPhoto("heartbeat", 8203);
+  expect(await viewerOf(cookie)).toMatchObject({ kind: "member" });
+  await request("GET", photoPath(8203, PNG), { cookie, key: null });
+  expect(calls).toEqual([]);
+});
+
+test("a sign-in that changes the photo publishes it; one with the same bytes does not", async () => {
+  await addMember("signing", [], { githubId: 8204 });
+  await photoLands(8204, PNG);
+  await vi.waitFor(() =>
+    expect(updates).toEqual([
+      { actorId: actorIdOf(8204), photoUrl: photoPath(8204, PNG) },
+    ]),
+  );
+  await signIn("signing", { githubId: 8204 });
+  await vi.waitFor(() => expect(calls).toHaveLength(2));
+  answer = async () => new Response(JPEG, { status: 200 });
+  await signIn("signing", { githubId: 8204 });
+  await photoLands(8204, JPEG);
+  expect(updates).toEqual([
+    { actorId: actorIdOf(8204), photoUrl: photoPath(8204, PNG) },
+    { actorId: actorIdOf(8204), photoUrl: photoPath(8204, JPEG) },
+  ]);
 });

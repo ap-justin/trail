@@ -4,11 +4,9 @@ import { HttpResponse, http } from "msw";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { SearchView } from "@/lib/api-types";
 import { renderApp, serveFeed, signedInAs } from "@/test/app";
-import { installFakeEventSource } from "@/test/event-source";
 import { issueList, project, trail } from "@/test/fixtures";
 import { server } from "@/test/server";
 
-installFakeEventSource();
 afterEach(() => {
   vi.restoreAllMocks();
 });

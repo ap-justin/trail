@@ -8,7 +8,8 @@ import { parseInvitee } from "../../shared/schemas.js";
 import type { Config } from "../config.js";
 import type { Db } from "../db/client.js";
 import { account, session, user, verification } from "../db/schema.js";
-import { storeGitHubPhoto } from "./avatar.js";
+import type { EventBus } from "../events/bus.js";
+import { githubPhotos } from "./avatar.js";
 import {
   type Access,
   accessOf,
@@ -126,12 +127,18 @@ export function createAuth({
   db,
   config,
   avatarFetch = fetch,
+  bus,
+  now = Date.now,
   mailTransport,
 }: {
   db: Db;
   config: AuthConfig;
-  /** fetches a person's GitHub photo at sign-in */
+  /** fetches a person's GitHub photo at sign-in and when a day-old one is refreshed */
   avatarFetch?: typeof fetch;
+  /** where a changed GitHub photo is published to open pages */
+  bus?: EventBus;
+  /** the clock that spaces photo refreshes */
+  now?: () => number;
   /** sends sign-in emails; Resend with RESEND_API_KEY by default */
   mailTransport?: MailTransport;
 }): TrailAuth {
@@ -166,6 +173,8 @@ export function createAuth({
       ...windowLimiter({ max: 10, windowMs: 60 * 60_000 }),
     },
   ];
+
+  const photos = githubPhotos({ db, avatarFetch, bus, now });
 
   const userRow = (userId: string) =>
     db.select().from(user).where(eq(user.id, userId)).get();
@@ -282,8 +291,8 @@ export function createAuth({
               name: row.name,
             };
             const access = syncActor(db, identity, owner);
-            // not awaited: sign-in never waits on GitHub, and storeGitHubPhoto never rejects
-            if (access) void storeGitHubPhoto(db, access.actor, avatarFetch);
+            // in the background: sign-in never waits on GitHub
+            if (access) photos.signedIn(access.actor);
           },
         },
       },
@@ -486,7 +495,12 @@ export function createAuth({
     },
     viewer: async (c, next) => {
       const { response, headers } = await sessionOf(c.req.raw.headers);
-      c.set("viewer", viewerFor(response?.user.id));
+      const viewer = viewerFor(response?.user.id);
+      c.set("viewer", viewer);
+      // only here, not in resolveViewer or isLetIn: a person loading the app, not a stream's heartbeat or a photo
+      if ("actor" in viewer && viewer.actor.githubId !== null) {
+        photos.seen(viewer.actor);
+      }
       await next();
       for (const cookie of headers.getSetCookie()) {
         c.res.headers.append("set-cookie", cookie);

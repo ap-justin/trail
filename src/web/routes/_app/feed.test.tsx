@@ -9,11 +9,10 @@ import {
   serveFeed,
   signedInAs,
 } from "@/test/app";
-import { FakeEventSource, installFakeEventSource } from "@/test/event-source";
+import { FakeEventSource } from "@/test/event-source";
 import { commentEntry, statusEntry } from "@/test/fixtures";
 import { server } from "@/test/server";
 
-installFakeEventSource();
 afterEach(() => {
   vi.useRealTimers();
 });
@@ -94,7 +93,7 @@ describe("live entries, replayed", () => {
 /** Reports the list's top as in or out of view, the way the feed's IntersectionObserver would. */
 function watchTop() {
   let report: IntersectionObserverCallback = () => {};
-  // unstubbed after each test by installFakeEventSource
+  // unstubbed after each test by installFakeEventSource, from the setup file
   vi.stubGlobal(
     "IntersectionObserver",
     class extends window.IntersectionObserver {
@@ -181,7 +180,7 @@ describe("the session behind a stream", () => {
 
 describe("connection", () => {
   test("a dropped stream shows Reconnecting and keeps the rows; open clears it", async () => {
-    const { stream } = await openFeed();
+    const { stream, asked } = await openFeed();
     expect(screen.getAllByText("Live")).not.toHaveLength(0);
     stream.fail();
     expect(
@@ -194,6 +193,8 @@ describe("connection", () => {
     stream.open();
     expect(screen.queryByText(/Reconnecting/)).not.toBeInTheDocument();
     expect(screen.getAllByText("Live")).not.toHaveLength(0);
+    // the reopened stream reads what the gap missed; left in flight, that read lands in the next test
+    await waitFor(() => expect(asked).toHaveLength(2));
   });
 
   test("a reset event reads the feed again", async () => {

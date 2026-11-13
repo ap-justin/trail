@@ -8,25 +8,50 @@ import {
 } from "../service/webhooks.js";
 import { setupTestApp } from "../test-app.js";
 
-const draining = new AbortController();
-// a receiver that answers only when told to; a held ping waits on its signal like a real request
-let hold: Promise<void> | null = null;
-let held = 0;
-const { app, bot, request, addProject } = setupTestApp({
+// the main app's receiver counts what it is sent; no test depends on another's count
+let sent = 0;
+const { app, bot, request, addProject, addBot } = setupTestApp({
   webhooks: {
-    signal: draining.signal,
-    transport: async ({ signal }) => {
-      if (hold) {
-        held++;
-        await new Promise((_, fail) =>
-          signal?.addEventListener("abort", () => fail(signal.reason)),
-        );
-      }
+    transport: async () => {
+      sent++;
       return { status: 200 };
     },
   },
 });
 const project = addProject("ping");
+
+// a receiver that waits on the ping's own signal, like a real request, behind its own shutdown controller
+const draining = new AbortController();
+let held = 0;
+const shutdownApp = setupTestApp({
+  webhooks: {
+    signal: draining.signal,
+    transport: async ({ signal }) => {
+      held++;
+      await new Promise((_, fail) =>
+        signal?.addEventListener("abort", () => fail(signal.reason)),
+      );
+      return { status: 200 };
+    },
+  },
+});
+const shutdownProject = shutdownApp.addProject("shutdown");
+
+// an app whose shutdown began before the ping
+const lateAborted = new AbortController();
+lateAborted.abort();
+let lateSent = 0;
+const late = setupTestApp({
+  webhooks: {
+    signal: lateAborted.signal,
+    transport: async () => {
+      lateSent++;
+      return { status: 200 };
+    },
+  },
+});
+const lateProject = late.addProject("late");
+
 const clients: Client[] = [];
 afterAll(async () => {
   await Promise.all(clients.map((c) => c.close()));
@@ -134,9 +159,15 @@ test("a webhook still inside its window keeps its limit when the idle sweep runs
 });
 
 test("a shutdown cuts a ping in flight, and the answer says why", async () => {
-  const id = await newWebhook("shutdown");
-  hold = Promise.resolve();
-  const inFlight = ping(id);
+  const created = await shutdownApp.request("POST", "/api/v1/webhooks", {
+    json: {
+      url: "https://bot.example.com/shutdown",
+      secret: "whsec_ping_0123456789abcdef",
+      projects: [shutdownProject.key],
+    },
+  });
+  const id = ((await created.json()) as Body).id as string;
+  const inFlight = shutdownApp.request("POST", `/api/v1/webhooks/${id}/ping`);
   for (let i = 0; i < 100 && held === 0; i++) {
     await new Promise((r) => setTimeout(r, 5));
   }
@@ -152,19 +183,6 @@ test("a shutdown cuts a ping in flight, and the answer says why", async () => {
 });
 
 test("a ping that arrives after shutdown began is never sent, and the answer says why", async () => {
-  const aborted = new AbortController();
-  aborted.abort();
-  let sent = 0;
-  const late = setupTestApp({
-    webhooks: {
-      signal: aborted.signal,
-      transport: async () => {
-        sent++;
-        return { status: 200 };
-      },
-    },
-  });
-  const lateProject = late.addProject("late");
   const created = await late.request("POST", "/api/v1/webhooks", {
     json: {
       url: "https://bot.example.com/late",
@@ -180,5 +198,25 @@ test("a ping that arrives after shutdown began is never sent, and the answer say
     status: null,
     error: "trail is shutting down: test again in a minute",
   });
-  expect(sent).toBe(0);
+  expect(lateSent).toBe(0);
+});
+
+test("pings to an unknown or another bot's webhook are not-found every time, never a 429, and burn nothing of the owner's allowance", async () => {
+  const id = await newWebhook("owned");
+  const stranger = addBot("stranger");
+  const before = sent;
+  for (let i = 0; i < PING_LIMIT * 3; i++) {
+    const foreign = await request("POST", `/api/v1/webhooks/${id}/ping`, {
+      key: stranger.key,
+    });
+    expect(foreign.status, `foreign ping ${i + 1}`).toBe(404);
+    const unknown = await request("POST", "/api/v1/webhooks/wh_nope/ping");
+    expect(unknown.status, `unknown ping ${i + 1}`).toBe(404);
+  }
+  // the owner still has the whole allowance, and the limit is live for it
+  for (let i = 0; i < PING_LIMIT; i++) {
+    expect((await ping(id)).status, `owner ping ${i + 1}`).toBe(200);
+  }
+  expect((await ping(id)).status).toBe(429);
+  expect(sent - before).toBe(PING_LIMIT);
 });

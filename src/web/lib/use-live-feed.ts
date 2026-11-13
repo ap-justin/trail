@@ -4,8 +4,14 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { useEffect, useEffectEvent, useReducer, useRef, useState } from "react";
+import {
+  type ActorUpdate,
+  applyActorUpdate,
+  withActorPhoto,
+} from "@/lib/actor-photos";
 import { api, type FeedFilter, isNotFound } from "@/lib/api";
 import type { EntryView } from "@/lib/api-types";
+import { holdFeedStream } from "@/lib/feed-stream-holds";
 import { statusOf } from "@/lib/loadable";
 import { keys } from "@/lib/queries";
 
@@ -29,6 +35,7 @@ type ArrivalAction =
   | { type: "received"; entry: EntryView; hold: boolean }
   | { type: "read"; items: EntryView[]; hold: boolean }
   | { type: "show_pending" }
+  | { type: "actor"; update: ActorUpdate }
   | { type: "clear" };
 
 const noArrivals: Arrivals = { page: null, shown: [], pending: [] };
@@ -70,6 +77,10 @@ function arrivals(state: Arrivals, action: ArrivalAction): Arrivals {
         shown: [...state.pending, ...state.shown],
         pending: [],
       };
+    case "actor": {
+      const { actorId, photoUrl } = action.update;
+      return withActorPhoto(state, actorId, photoUrl);
+    }
     case "clear":
       return noArrivals;
   }
@@ -101,6 +112,8 @@ export function useLiveFeed(
   const [attempt, setAttempt] = useState(0);
   const [atTop, setAtTop] = useState(true);
   const received = useRef(new Set<string>());
+  // set by the first open under this filter; any later open follows a gap
+  const opened = useRef(false);
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
   // once anything is held, later entries wait behind it so the order holds
   const hold = !atTop || state.pending.length > 0;
@@ -115,6 +128,7 @@ export function useLiveFeed(
     setConnection("connecting");
     setAttempt(0);
     received.current = new Set();
+    opened.current = false;
   }
 
   const loading = feed.isPending || feed.isPlaceholderData;
@@ -154,6 +168,13 @@ export function useLiveFeed(
       queryKey: keys.feed({ actor, project }),
     });
   });
+  const readEverything = useEffectEvent(() => {
+    void queryClient.invalidateQueries();
+  });
+  const onActor = useEffectEvent((update: ActorUpdate) => {
+    dispatch({ type: "actor", update });
+    applyActorUpdate(queryClient, update);
+  });
   const recheckSession = useEffectEvent(() => {
     void queryClient.invalidateQueries({ queryKey: keys.me });
   });
@@ -178,8 +199,11 @@ export function useLiveFeed(
     let retry: ReturnType<typeof setTimeout> | undefined;
     source.addEventListener("open", () => {
       setConnection("open");
-      // a new stream starts from now: read what the gap missed
-      if (attempt > 0) refetch();
+      // a new stream starts from now: read what the gap missed, photos included,
+      // since `actor` events are never replayed
+      if (opened.current) readEverything();
+      else if (attempt > 0) refetch();
+      opened.current = true;
     });
     source.addEventListener("error", () => {
       setConnection("reconnecting");
@@ -193,6 +217,9 @@ export function useLiveFeed(
     source.addEventListener("message", (event) => {
       onEntry(JSON.parse(event.data) as EntryView);
     });
+    source.addEventListener("actor", (event) => {
+      onActor(JSON.parse((event as MessageEvent<string>).data) as ActorUpdate);
+    });
     // the server fell too far behind to replay what this stream missed
     source.addEventListener("reset", () => {
       refetch();
@@ -203,6 +230,9 @@ export function useLiveFeed(
       clearTimeout(retry);
     };
   }, [actor, project, attempt]);
+
+  // the shell's own stream stays closed while this one carries the photo changes
+  useEffect(() => holdFeedStream(), []);
 
   useEffect(() => {
     const scheduled = timers.current;
