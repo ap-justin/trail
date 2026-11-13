@@ -298,14 +298,26 @@ describe("project", () => {
     );
   }
 
-  test("a status update reads name, title pill, Bot badge like every other view; the issue list's assignee never carries it", () => {
+  test("a status update reads avatar, name, Bot badge, then the title pill before the date on its own row; the issue list's assignee never carries it", () => {
     renderProject();
     // the issue table (1440), its rows (375) and both updates are all in the DOM
     const pills = screen.getAllByTitle("Release manager");
     expect(pills).toHaveLength(1);
-    const update = pills[0]?.closest("li");
+    const pill = pills[0] as HTMLElement;
+    const update = pill.closest("li");
     if (!update) throw new Error("no status update");
-    expectNamePillBadge(update, "Tara", "Release manager");
+    const name = within(update).getByText("Tara");
+    const badge = within(update).getByText("Bot");
+    const health = within(update).getByText("On track");
+    // row 1: name, badge, health; the name truncates rather than pushing the row wider
+    expect(name.parentElement).toBe(badge.parentElement);
+    expect(health.closest("div")).toBe(name.parentElement);
+    expect(name).toHaveClass("min-w-0", "truncate");
+    // row 2: the pill, then the date, in a row of their own after row 1
+    const row2 = pill.parentElement;
+    expect(row2).not.toBe(name.parentElement);
+    expect(row2?.previousElementSibling).toBe(name.parentElement);
+    expect(pill.nextElementSibling?.tagName).toBe("TIME");
     expect(pillsIn(screen.getByRole("table"), "Release manager")).toHaveLength(
       0,
     );

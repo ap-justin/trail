@@ -1,5 +1,5 @@
 import { Fragment, useId, useState } from "react";
-import { ActorAvatar, ActorBadge, ActorName } from "@/components/actor";
+import { ActorAvatar, ActorBadge, BotTitle } from "@/components/actor";
 import { AppLink, RowLink } from "@/components/app-link";
 import { Markdown } from "@/components/markdown";
 import {
@@ -361,17 +361,21 @@ function IssueListBody({
 function StatusUpdateItem({ update }: { update: WebStatusUpdateView }) {
   return (
     <li className="flex flex-col gap-1 border-b py-3 last:border-b-0 max-lg:px-4 max-lg:py-3.5 max-lg:last:border-b">
+      {/* not ActorName: here the title rides the date's row, under the name */}
       <div className="flex min-w-0 items-center gap-2">
         <ActorAvatar actor={update.author} size="xs" />
-        <ActorName actor={update.author} nameClassName="font-medium" />
+        <span className="min-w-0 truncate font-medium">
+          {update.author.name}
+        </span>
+        <ActorBadge kind={update.author.kind} />
         <HealthPill health={update.health} className="ml-auto" />
       </div>
-      <time
-        dateTime={update.createdAt}
-        className="-mt-0.5 pl-6.5 text-xs text-muted-foreground"
-      >
-        {formatAbsolute(update.createdAt)}
-      </time>
+      <div className="-mt-0.5 flex min-w-0 items-center gap-2 pl-6.5 text-xs text-muted-foreground">
+        <BotTitle actor={update.author} />
+        <time dateTime={update.createdAt} className="shrink-0">
+          {formatAbsolute(update.createdAt)}
+        </time>
+      </div>
       <Markdown>{update.body}</Markdown>
     </li>
   );
