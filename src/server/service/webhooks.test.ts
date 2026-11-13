@@ -300,3 +300,29 @@ test("dropping a project keeps the deliveries already made to it", async () => {
   await api("PATCH", `/webhooks/${hook.id}`, { projects: [a] });
   expect(deliveriesByProject()).toEqual([`${b}:delivered`]);
 });
+
+test("an event and its deliveries are written in one transaction: a failed queueing leaves no event", async () => {
+  const key = await newProject();
+  await subscribe([key], "https://bot.example.com/atomic");
+  db.$client.exec(
+    "create trigger refuse_delivery before insert on webhook_delivery begin select raise(abort, 'queueing failed'); end",
+  );
+  try {
+    const res = await request("POST", "/api/v1/issues", {
+      json: { projectId: key, title: "never saved" },
+    });
+    expect(res.status).toBe(500);
+  } finally {
+    db.$client.exec("drop trigger refuse_delivery");
+  }
+  const titles = db.$client.prepare("select title from issue").pluck().all();
+  expect(titles).not.toContain("never saved");
+  expect(
+    db.$client
+      .prepare(
+        "select count(*) from activity_event where action = 'issue.created' and project_id = (select id from project where key = ?)",
+      )
+      .pluck()
+      .get(key),
+  ).toBe(0);
+});

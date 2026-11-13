@@ -2,7 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { afterAll, beforeEach, expect, test } from "vitest";
 import { webhookSubscription } from "../db/schema.js";
-import { createBot } from "../service/keys.js";
+import { createBot, createKey } from "../service/keys.js";
 import { setupTestApp } from "../test-app.js";
 
 const sent: string[] = [];
@@ -206,4 +206,68 @@ test("a signed-in person gets no MCP tools: every webhook call is a 401 and chan
     url: "https://bot.example.com/person",
     projects: [a.key],
   });
+});
+
+test("a key without the read action is refused every webhook tool", async () => {
+  const owner = createBot(db, "mcp-writer");
+  const full = await connect(owner.key);
+  const mine = await call(full, "create_webhook", {
+    url: "https://bot.example.com/writer",
+    secret: SECRET,
+    projects: [a.key],
+  });
+  const writer = await connect(
+    createKey(db, owner.actor.id, { actions: ["issues"] }).key,
+  );
+  const calls: [string, Body][] = [
+    [
+      "create_webhook",
+      { url: "https://bot.example.com/w", secret: SECRET, projects: [a.key] },
+    ],
+    ["list_webhooks", {}],
+    ["update_webhook", { webhookId: mine.id, projects: [a.key] }],
+    ["rotate_webhook_secret", { webhookId: mine.id, secret: NEXT_SECRET }],
+    ["delete_webhook", { webhookId: mine.id }],
+    ["test_webhook", { webhookId: mine.id }],
+  ];
+  for (const [tool, args] of calls) {
+    const res = await raw(writer, tool, args);
+    expect(res.isError, tool).toBe(true);
+    expect(res.text, tool).toMatch(/^forbidden_action:/);
+  }
+});
+
+test("a key narrower than a webhook can't list, change, test or delete it", async () => {
+  const owner = createBot(db, "mcp-wide-owner");
+  const wide = await connect(owner.key);
+  const made = await call(wide, "create_webhook", {
+    url: "https://bot.example.com/wide-mcp",
+    secret: SECRET,
+    projects: [a.key, b.key],
+  });
+  const narrow = await connect(
+    createKey(db, owner.actor.id, { projects: [a.key] }).key,
+  );
+  expect((await call(narrow, "list_webhooks")).items).toEqual([]);
+  for (const [tool, args] of [
+    ["update_webhook", { projects: [a.key] }],
+    ["rotate_webhook_secret", { secret: NEXT_SECRET }],
+    ["delete_webhook", {}],
+    ["test_webhook", {}],
+  ] as const) {
+    const res = await raw(narrow, tool, { webhookId: made.id, ...args });
+    expect(res.isError, tool).toBe(true);
+    expect(res.text, tool).toMatch(/^not_found:/);
+  }
+  const dup = await raw(narrow, "create_webhook", {
+    url: "https://bot.example.com/wide-mcp",
+    secret: SECRET,
+    projects: [a.key],
+  });
+  expect(dup.isError).toBe(true);
+  expect(dup.text).not.toContain(made.id);
+  // still there for the key that sees it
+  expect(
+    (await call(wide, "list_webhooks")).items.map((w: Body) => w.id),
+  ).toContain(made.id);
 });

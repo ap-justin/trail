@@ -158,7 +158,7 @@ describe("sendWebhook over the real transport", () => {
     body: "{}",
   });
 
-  test("a redirect fails the delivery for good, telling the bot to set the final URL", async () => {
+  test("a redirect is never followed and is retried, telling the bot to set the final URL", async () => {
     seen.length = 0;
     respond = (res) => {
       res.statusCode = 301;
@@ -173,7 +173,7 @@ describe("sendWebhook over the real transport", () => {
       expect(result).toMatchObject({
         ok: false,
         status: 301,
-        retryable: false,
+        retryable: true,
       });
       expect(result.ok === false && result.error).toContain(
         "does not follow redirects",
@@ -270,10 +270,10 @@ describe("sendWebhook's status classes", () => {
     [410, false],
     [500, true],
     [503, true],
-    [301, false],
-    [302, false],
-    [307, false],
-    [399, false],
+    [301, true],
+    [302, true],
+    [307, true],
+    [399, true],
   ])("%i is retryable: %s", async (status, retryable) => {
     expect(await send(status)).toMatchObject({ ok: false, status, retryable });
   });

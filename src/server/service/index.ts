@@ -360,6 +360,26 @@ export function createService({
     return hook.projects.every((key) => scoped.some((p) => p.key === key));
   }
 
+  /** The 409 for a URL the bot already uses: names the webhook only when this key can manage it. */
+  function twinConflict(
+    actor: ActingActor,
+    twinId: string,
+    from: Db | Tx,
+    advice: string,
+  ) {
+    try {
+      ownWebhook(actor, twinId, from);
+    } catch (error) {
+      if (!(error instanceof NotFoundError)) throw error;
+      return new ConflictError(
+        "this bot already has a webhook to that URL that this key can't manage: use a different URL, or ask for a key that reaches that webhook's projects",
+      );
+    }
+    return new ConflictError(
+      `webhook ${twinId} already sends to this URL: ${advice}`,
+    );
+  }
+
   /** The calling bot's webhook, or a 404: another bot's and one the key's scope doesn't cover read as missing. */
   function ownWebhook(actor: ActingActor, id: string, from: Db | Tx = db) {
     const row = from
@@ -1890,8 +1910,11 @@ export function createService({
             )
             .get();
           if (twin) {
-            throw new ConflictError(
-              `webhook ${twin.id} already sends to this URL: change it with update_webhook, or use a different URL`,
+            throw twinConflict(
+              actor,
+              twin.id,
+              tx,
+              "change it with update_webhook, or use a different URL",
             );
           }
           const row = insertSubscription(tx, webhooks, {
@@ -1967,8 +1990,11 @@ export function createService({
               )
               .get();
             if (twin) {
-              throw new ConflictError(
-                `webhook ${twin.id} already sends to this URL: use a different URL, or delete that webhook`,
+              throw twinConflict(
+                actor,
+                twin.id,
+                tx,
+                "use a different URL, or delete that webhook",
               );
             }
           }

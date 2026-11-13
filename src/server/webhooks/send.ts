@@ -75,7 +75,8 @@ export type SendResult =
 
 // a 401/403/404 is often a receiver mid-deploy or mid-rotation, so every 4xx
 // retries; 410 Gone is the one 4xx that says stop
-const retryableStatus = (status: number) => status >= 400 && status !== 410;
+// a 3xx is retried too, never followed: the bot can fix the URL while the delivery waits
+const retryableStatus = (status: number) => status >= 300 && status !== 410;
 
 /** A short, safe description of a failure: a code or message, never a URL or a secret. */
 function describe(error: unknown): string {

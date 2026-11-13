@@ -667,3 +667,31 @@ test("a ping that fails leaves the failure count and the pause alone", async () 
     lastSuccessAt: null,
   });
 });
+
+test("a create that collides with a webhook this key can't manage doesn't name it", async () => {
+  const wideBot = createBot(db, "twin-bot");
+  const url = "https://bot.example.com/twin";
+  const wide = await create({ url, projects: [a.key, b.key] }, wideBot.key);
+  expect(wide.status).toBe(201);
+  const narrow = createKey(db, wideBot.actor.id, { projects: [a.key] }).key;
+  const refused = await create({ url, projects: [a.key] }, narrow);
+  expect(refused.status).toBe(409);
+  expect(refused.body.error.code).toBe("conflict");
+  expect(refused.text).not.toContain(wide.body.id);
+  expect(refused.body.error.message).toContain("this key can't manage");
+  // a key that sees it still gets the id
+  const seen = await create({ url, projects: [a.key] }, wideBot.key);
+  expect(seen.status).toBe(409);
+  expect(seen.body.error.message).toContain(wide.body.id);
+  // and so does a change of URL onto it
+  const other = await create(
+    { url: "https://bot.example.com/twin2", projects: [a.key] },
+    narrow,
+  );
+  const moved = await call("PATCH", `/webhooks/${other.body.id}`, {
+    json: { url },
+    key: narrow,
+  });
+  expect(moved.status).toBe(409);
+  expect(moved.text).not.toContain(wide.body.id);
+});
