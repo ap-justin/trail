@@ -1,9 +1,14 @@
 import type { IncomingHttpHeaders, ServerResponse } from "node:http";
 import { createServer, globalAgent, type Server } from "node:https";
-import type { AddressInfo } from "node:net";
+import { type AddressInfo, createServer as createNetServer } from "node:net";
 import type { TLSSocket } from "node:tls";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
-import { defaultSendDeps, httpsTransport, sendWebhook } from "./send.js";
+import {
+  CONNECT_TIMEOUT_MS,
+  defaultSendDeps,
+  httpsTransport,
+  sendWebhook,
+} from "./send.js";
 import { TEST_TLS_CERT, TEST_TLS_KEY } from "./test-tls.js";
 
 // The real transport against a TLS server on the loopback. The vetted address
@@ -276,5 +281,193 @@ describe("sendWebhook's status classes", () => {
     [399, true],
   ])("%i is retryable: %s", async (status, retryable) => {
     expect(await send(status)).toMatchObject({ ok: false, status, retryable });
+  });
+});
+
+describe("sendWebhook's fallback to the other address family", () => {
+  const V4 = "93.184.216.34";
+  const V6 = "2606:2800:220:1:248:1893:25c8:1946";
+  const tried: string[] = [];
+  const send = (
+    addresses: string[],
+    transport: (address: string) => Promise<{ status: number }>,
+  ) => {
+    tried.length = 0;
+    return sendWebhook(
+      {
+        ...defaultSendDeps,
+        resolve: async () => addresses,
+        transport: ({ address }) => {
+          tried.push(address);
+          return transport(address);
+        },
+      },
+      {
+        url: "https://bot.example.com/hook",
+        secret: "s",
+        deliveryId: "d",
+        body: "{}",
+      },
+    );
+  };
+  const refused = Object.assign(new Error("connect ECONNREFUSED"), {
+    code: "ECONNREFUSED",
+  });
+
+  test("a refused connection to the first address is tried on the other family", async () => {
+    const result = await send([V6, V4], async (address) => {
+      if (address === V6) throw refused;
+      return { status: 200 };
+    });
+    expect(result).toEqual({ ok: true, status: 200 });
+    expect(tried).toEqual([V6, V4]);
+  });
+
+  test.each(["ENETUNREACH", "EHOSTUNREACH", "EADDRNOTAVAIL", "ETIMEDOUT"])(
+    "%s on the first address falls back too",
+    async (code) => {
+      const result = await send([V4, V6], async (address) => {
+        if (address === V4) throw Object.assign(new Error(code), { code });
+        return { status: 204 };
+      });
+      expect(result).toMatchObject({ ok: true });
+      expect(tried).toEqual([V4, V6]);
+    },
+  );
+
+  test("an answer from the first address is final, whatever its status", async () => {
+    const result = await send([V6, V4], async () => ({ status: 503 }));
+    expect(result).toMatchObject({ ok: false, status: 503 });
+    expect(tried).toEqual([V6]);
+  });
+
+  test("a failure after the connection opened is not retried elsewhere", async () => {
+    const result = await send([V6, V4], async () => {
+      throw Object.assign(new Error("socket hang up"), { code: "ECONNRESET" });
+    });
+    expect(result).toMatchObject({ ok: false, error: "ECONNRESET" });
+    expect(tried).toEqual([V6]);
+  });
+
+  test("with one family there is nothing to fall back to", async () => {
+    const result = await send([V4, "93.184.216.35"], async () => {
+      throw refused;
+    });
+    expect(result).toMatchObject({ ok: false, error: "ECONNREFUSED" });
+    expect(tried).toEqual([V4]);
+  });
+
+  test("when both families refuse, the failure is the last one's and retryable", async () => {
+    const result = await send([V6, V4], async () => {
+      throw refused;
+    });
+    expect(result).toMatchObject({ ok: false, retryable: true });
+    expect(tried).toEqual([V6, V4]);
+  });
+
+  test("only an address with another to fall back to gets the short connect cap", async () => {
+    const capped: [string, number | undefined][] = [];
+    const deps = (addresses: string[]) => ({
+      ...defaultSendDeps,
+      resolve: async () => addresses,
+      transport: async (c: Parameters<typeof httpsTransport>[0]) => {
+        capped.push([c.address, c.connectTimeoutMs]);
+        if (c.address === V6) throw refused;
+        return { status: 200 };
+      },
+    });
+    const call = {
+      url: "https://bot.example.com/hook",
+      secret: "s",
+      deliveryId: "d",
+      body: "{}",
+    };
+    await sendWebhook(deps([V6, V4]), call);
+    // the fallback is the last address left, so like a lone one it has the whole deadline to connect
+    expect(capped).toEqual([
+      [V6, CONNECT_TIMEOUT_MS],
+      [V4, undefined],
+    ]);
+    capped.length = 0;
+    await sendWebhook(deps([V4]), call);
+    expect(capped).toEqual([[V4, undefined]]);
+  });
+
+  test.each([
+    ["a shutdown", "shutdown"],
+    ["the attempt's deadline", "deadline"],
+  ] as const)(
+    "%s between the first failure and the fallback connects to nothing more",
+    async (_, cause) => {
+      tried.length = 0;
+      const shutdown = new AbortController();
+      const deadline = new AbortController();
+      const stop = cause === "shutdown" ? shutdown : deadline;
+      const result = await sendWebhook(
+        {
+          ...defaultSendDeps,
+          resolve: async () => [V6, V4],
+          deadline: () => deadline.signal,
+          transport: async ({ address }) => {
+            tried.push(address);
+            stop.abort();
+            throw Object.assign(new Error("connect ETIMEDOUT"), {
+              code: "ETIMEDOUT",
+            });
+          },
+        },
+        {
+          url: "https://bot.example.com/hook",
+          secret: "s",
+          deliveryId: "d",
+          body: "{}",
+        },
+        shutdown.signal,
+      );
+      expect(tried).toEqual([V6]);
+      expect(result).toMatchObject({ ok: false, retryable: true });
+    },
+  );
+
+  test("an address of either family inside a private range refuses the whole host before any connection", async () => {
+    for (const addresses of [
+      [V4, "fd00:ec2::254"],
+      [V6, "10.0.0.5"],
+    ]) {
+      const result = await send(addresses, async () => ({ status: 200 }));
+      expect(result).toMatchObject({ ok: false, retryable: true });
+      expect(tried).toEqual([]);
+    }
+  });
+
+  test("over the real transport, a closed port on the first address falls back to the one that answers", async () => {
+    seen.length = 0;
+    // the vetted addresses are public, as the check demands; each is swapped for the loopback just below it,
+    // the IPv4 one at a port nothing listens on and the IPv6 one at the server
+    const closed = await new Promise<number>((done) => {
+      const probe = createNetServer().listen(0, "127.0.0.1", () => {
+        const { port: free } = probe.address() as AddressInfo;
+        probe.close(() => done(free));
+      });
+    });
+    const result = await sendWebhook(
+      {
+        ...defaultSendDeps,
+        resolve: async () => [V4, V6],
+        transport: (c) => {
+          const url = new URL(c.url);
+          url.port = String(c.address === V4 ? closed : port);
+          return httpsTransport({ ...c, url, address: "127.0.0.1" });
+        },
+      },
+      {
+        url: `https://bot.example.com:${port}/fallback`,
+        secret: "whsec_send_0123456789abcdef",
+        deliveryId: "d-2",
+        body: "{}",
+      },
+    );
+    expect(result).toEqual({ ok: true, status: 200 });
+    expect(seen.map((s) => s.url)).toEqual(["/fallback"]);
   });
 });

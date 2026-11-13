@@ -39,6 +39,7 @@ import {
   ForbiddenError,
   ForbiddenScopeError,
   NotFoundError,
+  RateLimitedError,
   ValidationError,
 } from "./errors.js";
 import {
@@ -92,8 +93,11 @@ import {
 } from "./visible.js";
 import {
   countOwn,
+  createPingLimiter,
   enqueueDeliveries,
   insertSubscription,
+  PING_LIMIT,
+  PING_WINDOW_MS,
   resume,
   setProjects,
   validSecret,
@@ -319,6 +323,8 @@ export function createService({
   bus: EventBus;
   webhooks: WebhookSettings;
 }) {
+  const pings = createPingLimiter(() => webhooks.now());
+
   /** Actors with their photo's hash; the bytes stay in actor_photo. */
   const selectWithPhotoHash = () =>
     db
@@ -2078,6 +2084,13 @@ export function createService({
         ownWebhook(actor, id),
       );
       const { view, cipher } = ownWebhook(actor, id);
+      const wait = pings.take(id);
+      if (wait !== null) {
+        throw new RateLimitedError(
+          `webhook ${id} was tested ${PING_LIMIT} times in the last ${PING_WINDOW_MS / 1000} seconds, the most allowed: try again in ${wait} seconds`,
+          wait,
+        );
+      }
       const secret = openSecret(webhooks.key, id, cipher);
       if (secret === null) {
         return {
@@ -2098,12 +2111,18 @@ export function createService({
           message: "A test call from trail: your webhook is set up.",
         },
       });
-      const result = await sendWebhook(webhooks, {
-        url: view.url,
-        secret,
-        deliveryId: newId(),
-        body,
-      });
+      const result = await sendWebhook(
+        webhooks,
+        { url: view.url, secret, deliveryId: newId(), body },
+        webhooks.signal,
+      );
+      if (webhooks.signal?.aborted) {
+        return {
+          delivered: false,
+          status: null,
+          error: "trail is shutting down: test again in a minute",
+        };
+      }
       return result.ok
         ? { delivered: true, status: result.status, error: null }
         : { delivered: false, status: result.status, error: result.error };

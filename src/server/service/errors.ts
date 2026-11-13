@@ -53,3 +53,15 @@ export class PayloadTooLargeError extends ServiceError {
   readonly code = "payload_too_large";
   override readonly name = "PayloadTooLargeError";
 }
+
+/** A call made more often than its limit allows; `retryAfter` is the seconds until one would pass. */
+export class RateLimitedError extends ServiceError {
+  readonly code = "rate_limited";
+  override readonly name = "RateLimitedError";
+  constructor(
+    message: string,
+    readonly retryAfter: number,
+  ) {
+    super(message);
+  }
+}

@@ -20,6 +20,8 @@ import type { Tx } from "./tx.js";
 
 /** What the service needs to store secrets and to send a test call. */
 export type WebhookSettings = SendDeps & {
+  /** aborts when the server is shutting down: a test call in flight is cut off */
+  signal?: AbortSignal;
   key: SecretKey;
   /** the origin links in a webhook point at; with none, a webhook carries no links */
   publicUrl: string | undefined;
@@ -32,6 +34,7 @@ export function webhookSettings(
     transport?: Transport;
     now?: () => number;
     publicUrl?: string | undefined;
+    signal?: AbortSignal;
   } = {},
 ): WebhookSettings {
   return {
@@ -47,6 +50,37 @@ export const WEBHOOKS_PER_BOT_MAX = 20;
 export const WEBHOOK_PROJECTS_MAX = 50;
 export const WEBHOOK_SECRET_MIN = 16;
 export const WEBHOOK_SECRET_MAX = 256;
+
+/** Test calls one webhook may send per window: enough to debug a routine, too few to use trail as a request cannon. */
+export const PING_LIMIT = 5;
+export const PING_WINDOW_MS = 60_000;
+
+/** A sliding window of ping times per webhook, in memory: a restart forgets it, which only ever allows a few extra. */
+export function createPingLimiter(now: () => number) {
+  const sent = new Map<string, number[]>();
+  return {
+    /** Records a ping and returns null, or returns the seconds to wait when the webhook is at its limit. */
+    take(webhookId: string): number | null {
+      const t = now();
+      const recent = (sent.get(webhookId) ?? []).filter(
+        (at) => at > t - PING_WINDOW_MS,
+      );
+      const oldest = recent[0];
+      if (oldest !== undefined && recent.length >= PING_LIMIT) {
+        sent.set(webhookId, recent);
+        return Math.ceil((oldest + PING_WINDOW_MS - t) / 1000);
+      }
+      sent.set(webhookId, [...recent, t]);
+      // webhooks that stopped pinging leave nothing behind
+      if (sent.size > 1000) {
+        for (const [id, times] of sent) {
+          if (times.every((at) => at <= t - PING_WINDOW_MS)) sent.delete(id);
+        }
+      }
+      return null;
+    },
+  };
+}
 
 export type Webhook = {
   id: string;

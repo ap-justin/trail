@@ -36,8 +36,11 @@ const webDir = fileURLToPath(
 );
 const streams = new LiveStreams();
 const bus = createEventBus();
+// aborts at the start of a drain, so a test call to a slow receiver doesn't hold the shutdown
+const draining = new AbortController();
 const webhooks = webhookSettings(deriveSecretKey(config.BETTER_AUTH_SECRET), {
   publicUrl: config.BETTER_AUTH_URL,
+  signal: draining.signal,
 });
 const webhookWorker = createWebhookWorker({ db, bus, settings: webhooks });
 const server = serve(
@@ -56,7 +59,10 @@ if (!(server instanceof Server)) throw new Error("expected an HTTP/1 server");
 
 onShutdownSignal({
   server,
-  onDraining: () => void streams.end(),
+  onDraining: () => {
+    draining.abort();
+    void streams.end();
+  },
   // a stream the deadline cut can still be mid-query: the database closes after its last
   onClosed: async () => {
     await streams.end();

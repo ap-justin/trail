@@ -3,6 +3,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { afterAll, beforeEach, expect, test } from "vitest";
 import { webhookSubscription } from "../db/schema.js";
 import { createBot, createKey } from "../service/keys.js";
+import { PING_LIMIT, PING_WINDOW_MS } from "../service/webhooks.js";
 import { setupTestApp } from "../test-app.js";
 
 const sent: string[] = [];
@@ -147,6 +148,53 @@ test("another bot's webhook, a hidden project and an internal URL are refused", 
   expect(insecure.text).toMatch(/^validation_failed:.*https/);
 });
 
+test("update_webhook onto a URL the bot already uses is a conflict that names the twin only to a key that can manage it", async () => {
+  const wide = await connect(bot.key);
+  const create = (url: string, projects: string[]) =>
+    call(wide, "create_webhook", { url, secret: SECRET, projects });
+  const both = await create("https://bot.example.com/both", [a.key, b.key]);
+  const mine = await create("https://bot.example.com/mine", [a.key]);
+  const near = await create("https://bot.example.com/near", [a.key]);
+
+  const onto = await raw(wide, "update_webhook", {
+    webhookId: mine.id,
+    url: both.url,
+  });
+  expect(onto.isError).toBe(true);
+  expect(onto.text).toMatch(/^conflict: /);
+  expect(onto.text).toContain(`webhook ${both.id} already sends to this URL`);
+
+  const narrow = await connect(
+    createKey(db, bot.actor.id, { projects: [a.key] }).key,
+  );
+  // the twin follows B too, which this key can't reach: it is not named
+  const hidden = await raw(narrow, "update_webhook", {
+    webhookId: mine.id,
+    url: both.url,
+  });
+  expect(hidden.isError).toBe(true);
+  expect(hidden.text).toMatch(/^conflict: .*this key can't manage/);
+  expect(hidden.text).not.toContain(both.id);
+  // one it reaches is named, as to the wide key
+  const seen = await raw(narrow, "update_webhook", {
+    webhookId: mine.id,
+    url: near.url,
+  });
+  expect(seen.isError).toBe(true);
+  expect(seen.text).toContain(`webhook ${near.id} already sends to this URL`);
+
+  // none of the refusals changed the webhook, and its own URL is no conflict
+  const listed = await call(wide, "list_webhooks");
+  expect(listed.items.find((w: Body) => w.id === mine.id).url).toBe(
+    "https://bot.example.com/mine",
+  );
+  const same = await call(wide, "update_webhook", {
+    webhookId: mine.id,
+    url: "https://bot.example.com/mine",
+  });
+  expect(same.url).toBe("https://bot.example.com/mine");
+});
+
 test("the tool descriptions walk a bot through hooking up an OpenBot routine", async () => {
   const client = await connect(bot.key);
   const { tools } = await client.listTools();
@@ -155,6 +203,9 @@ test("the tool descriptions walk a bot through hooking up an OpenBot routine", a
   expect(create).toContain("Never paste the secret into chat");
   expect(create).toContain("test_webhook");
   expect(create).toContain("x-openbot-signature");
+  expect(tools.find((t) => t.name === "test_webhook")?.description).toContain(
+    `${PING_LIMIT} tests per ${PING_WINDOW_MS / 1000} seconds`,
+  );
   for (const name of ["create_webhook", "rotate_webhook_secret"]) {
     const tool = tools.find((t) => t.name === name);
     expect(JSON.stringify(tool?.inputSchema)).toContain("never");

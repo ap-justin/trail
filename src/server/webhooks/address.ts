@@ -169,7 +169,7 @@ const pointsInside = (host: string) =>
 export async function checkWebhookUrl(
   raw: string,
   resolve: Resolve = resolveHost,
-): Promise<{ url: URL; address: string }> {
+): Promise<{ url: URL; address: string; fallback?: string }> {
   const url = parseWebhookUrl(raw);
   // an IPv6 literal's hostname keeps its brackets
   const host = url.hostname.replace(/^\[|\]$/g, "");
@@ -192,5 +192,7 @@ export async function checkWebhookUrl(
     );
   }
   if (addresses.some(isInternalAddress)) throw pointsInside(host);
-  return { url, address: first };
+  // every address passed the check above, so the one of the other family is as safe to connect to
+  const fallback = addresses.find((a) => isIP(a) !== isIP(first));
+  return { url, address: first, ...(fallback !== undefined && { fallback }) };
 }

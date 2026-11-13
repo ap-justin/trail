@@ -1,4 +1,5 @@
 import { createHmac } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
 import {
   createServer,
   request as httpRequest,
@@ -6,8 +7,11 @@ import {
   type Server,
 } from "node:http";
 import { type AddressInfo, createServer as createTcpServer } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, expect, test, vi } from "vitest";
+import { migrate, openDatabase } from "../db/client.js";
 import { webhookDelivery, webhookSubscription } from "../db/schema.js";
 import { isPending, unfollowedDeliveries } from "../service/webhooks.js";
 import { projectKey, setupTestApp, testWebhookSettings } from "../test-app.js";
@@ -18,6 +22,8 @@ import {
   createWebhookWorker,
   expireQuery,
   headsQuery,
+  purgeBatch,
+  purgeQueries,
 } from "./worker.js";
 
 // A receiver on the loopback. trail refuses loopback addresses, so the transport
@@ -1246,16 +1252,12 @@ const planOf = (query: { toSQL(): { sql: string; params: unknown[] } }) => {
 
 test("the queries on pending deliveries use the partial index on them", async () => {
   reset();
-  const pendingIdx = "webhook_delivery_pending_idx";
+  // either partial index on pending rows seeks by subscription; the planner may pick the age one
+  const pendingIdx = "webhook_delivery_pending";
   const unfollowed = planOf(unfollowedDeliveries(db, "sub-1", ["p-1"]));
   expect(
     unfollowed.some((s) => s.includes(pendingIdx)),
     unfollowed.join("\n"),
-  ).toBe(true);
-  const expiry = planOf(expireQuery(db, 0));
-  expect(
-    expiry.some((s) => s.includes(pendingIdx)),
-    expiry.join("\n"),
   ).toBe(true);
   const resume = planOf(
     db
@@ -1267,4 +1269,276 @@ test("the queries on pending deliveries use the partial index on them", async ()
     resume.some((s) => s.includes(pendingIdx)),
     resume.join("\n"),
   ).toBe(true);
+});
+
+test("expiry reads only the expired part of a backlog, never every pending row", async () => {
+  reset();
+  const ageIdx = "webhook_delivery_pending_age_idx";
+  for (const [label, query] of [
+    ["one subscription", expireQuery(db, 0, "sub-1")],
+    ["every subscription", expireQuery(db, 0)],
+  ] as const) {
+    const plan = planOf(query);
+    expect(
+      plan.some((s) => s.includes(ageIdx)),
+      `${label}:\n${plan.join("\n")}`,
+    ).toBe(true);
+    // a full scan of the table, or of the by-order index, would read the whole backlog
+    expect(
+      plan.some((s) => /SCAN webhook_delivery( |$)/.test(s)),
+      `${label}:\n${plan.join("\n")}`,
+    ).toBe(false);
+    expect(
+      plan.some((s) => s.includes("webhook_delivery_pending_idx")),
+      `${label}:\n${plan.join("\n")}`,
+    ).toBe(false);
+  }
+});
+
+const subscription = (id: string) =>
+  db
+    .select()
+    .from(webhookSubscription)
+    .where(eq(webhookSubscription.id, id))
+    .get();
+
+test("a delivery attempt never changes the webhook's updatedAt; the bot's own changes do", async () => {
+  reset();
+  const key = await newProject();
+  const hook = await subscribe([key], "https://bot.example.com/updated");
+  const created = subscription(hook.id)?.updatedAt.getTime();
+  // the column's clock is the wall clock, so let a millisecond pass before any write
+  await sleep(5);
+  await api("POST", "/issues", { projectId: key, title: "delivered" });
+  const w = worker();
+  await until(w, () => received.length >= 1);
+  await w.tick();
+  expect(subscription(hook.id)).toMatchObject({ consecutiveFailures: 0 });
+  expect(subscription(hook.id)?.lastSuccessAt).not.toBeNull();
+  expect(subscription(hook.id)?.updatedAt.getTime()).toBe(created);
+
+  // failures too, up to the pause that they cause
+  statuses.push(503, 503, 503, 503, 503, 503, 503, 503, 503, 503);
+  await api("POST", "/issues", { projectId: key, title: "failing" });
+  const pausing = worker({ pauseAfter: 2 });
+  await until(pausing, () => subscription(hook.id)?.pausedAt != null);
+  expect(subscription(hook.id)?.lastError).toBe("HTTP 503");
+  expect(subscription(hook.id)?.updatedAt.getTime()).toBe(created);
+
+  await sleep(5);
+  const resumed = await api("PATCH", `/webhooks/${hook.id}`, {});
+  expect(new Date(resumed.updatedAt).getTime()).toBeGreaterThan(created ?? 0);
+  expect(resumed.paused).toBe(false);
+});
+
+test("a delivery's body is dropped once it is delivered, and kept while it may be sent again", async () => {
+  reset();
+  const key = await newProject();
+  await subscribe([key], "https://bot.example.com/bodies");
+  await api("POST", "/issues", { projectId: key, title: "bodies" });
+  statuses.push(503);
+  const w = worker({ backoffMs: [SECOND] });
+  await w.tick();
+  const [failing] = rows();
+  expect(failing).toMatchObject({ status: "pending", attempts: 1 });
+  expect(failing?.body).toContain("bodies");
+  const sentBody = received[0]?.body;
+
+  advance(SECOND);
+  await w.tick();
+  const [done] = rows();
+  expect(done).toMatchObject({ status: "delivered", attempts: 2, body: null });
+  // the retry sent the same bytes as the first attempt
+  expect(received[1]?.body).toBe(sentBody);
+});
+
+test("finished deliveries go after their keep time, in batches, and nothing else does", async () => {
+  reset();
+  const key = await newProject();
+  await subscribe([key], "https://bot.example.com/retention");
+  for (let i = 0; i < 8; i++) {
+    await api("POST", "/issues", { projectId: key, title: `retention ${i}` });
+  }
+  const day = 24 * HOUR;
+  const at = (daysAgo: number) => clock - daysAgo * day;
+  // [status, deliveredAt, createdAt] by the days ago each is, in queue order
+  const plan = [
+    ["delivered", 8, 9],
+    ["delivered", 7.5, 7.6],
+    ["delivered", 6, 6.5],
+    ["failed", null, 31],
+    ["failed", null, 30.5],
+    ["failed", null, 29],
+    ["pending", null, 40],
+    ["delivered", 1, 1],
+  ] as const;
+  const queued = rows().sort((x, y) => x.seq - y.seq);
+  expect(queued).toHaveLength(plan.length);
+  queued.forEach((row, i) => {
+    const [status, deliveredAgo, createdAgo] = plan[i] ?? [];
+    db.update(webhookDelivery)
+      .set({
+        status,
+        deliveredAt: deliveredAgo == null ? null : new Date(at(deliveredAgo)),
+        createdAt: new Date(at(createdAgo ?? 0)),
+      })
+      .where(eq(webhookDelivery.id, row.id))
+      .run();
+  });
+  const left = () =>
+    rows()
+      .sort((x, y) => x.seq - y.seq)
+      .map((r) => plan.findIndex((_, i) => queued[i]?.id === r.id));
+  const keep = { deliveredMs: 7 * day, failedMs: 30 * day };
+
+  // two of each kind are old, and a batch of 1 takes one of each
+  expect(purgeBatch(db, clock, keep, 1)).toBe(2);
+  expect(left()).toEqual([1, 2, 4, 5, 6, 7]);
+  expect(purgeBatch(db, clock, keep, 1)).toBe(2);
+  expect(purgeBatch(db, clock, keep, 1)).toBe(0);
+  // the pending delivery is 40 days old and stays: only finished ones age out
+  expect(left()).toEqual([2, 5, 6, 7]);
+
+  // the timer's pass loops batches until nothing old is left
+  db.update(webhookDelivery)
+    .set({ status: "delivered", deliveredAt: new Date(at(9)) })
+    .where(eq(webhookDelivery.id, queued[5]?.id ?? ""))
+    .run();
+  const w = worker({
+    deliveredKeepMs: 7 * day,
+    failedKeepMs: 30 * day,
+    purgeBatch: 1,
+  });
+  await w.purge();
+  expect(left()).toEqual([2, 6, 7]);
+});
+
+test("the retention deletes read only the finished rows past their keep time", async () => {
+  reset();
+  const keep = { deliveredMs: 1, failedMs: 1 };
+  const plans = purgeQueries(db, clock, keep, 500).map((query) =>
+    db.$client
+      .prepare(`explain query plan ${query.toSQL().sql}`)
+      .all(...query.toSQL().params)
+      .map((step) => (step as { detail: string }).detail),
+  );
+  const [delivered = [], failed = []] = plans;
+  expect(
+    delivered.some((s) => s.includes("webhook_delivery_delivered_idx")),
+    delivered.join("\n"),
+  ).toBe(true);
+  expect(
+    failed.some((s) => s.includes("webhook_delivery_failed_idx")),
+    failed.join("\n"),
+  ).toBe(true);
+  for (const plan of plans) {
+    expect(
+      plan.some((s) => /SCAN webhook_delivery( |$)/.test(s)),
+      plan.join("\n"),
+    ).toBe(false);
+  }
+});
+
+const DAY = 24 * HOUR;
+/** Queues `count` deliveries, then marks every delivery in the table delivered `daysAgo` days ago. */
+async function deliveredRows(count: number, daysAgo: number) {
+  const key = await newProject();
+  await subscribe([key], `https://bot.example.com/aged-${key}`);
+  for (let i = 0; i < count; i++) {
+    await api("POST", "/issues", { projectId: key, title: `aged ${i}` });
+  }
+  db.update(webhookDelivery)
+    .set({
+      status: "delivered",
+      deliveredAt: new Date(clock - daysAgo * DAY),
+    })
+    .run();
+}
+
+test("every purge pass deletes, not just the first", async () => {
+  reset();
+  await deliveredRows(1, 8);
+  const w = worker({ deliveredKeepMs: 7 * DAY, purgeBatch: 500 });
+  // fewer old rows than a batch: the pass finishes without a macrotask turn
+  await w.purge();
+  expect(rows()).toHaveLength(0);
+
+  await deliveredRows(2, 8);
+  await w.purge();
+  expect(rows()).toHaveLength(0);
+});
+
+test("start() purges on its timer and stop() waits for the pass in flight", async () => {
+  reset();
+  const w = worker({ deliveredKeepMs: 7 * DAY, purgeMs: 10, purgeBatch: 1 });
+  w.start();
+  try {
+    // rows that age out after start's own pass: only the timer can take them
+    await sleep(30);
+    await deliveredRows(3, 8);
+    for (let i = 0; i < 100 && rows().length > 0; i++) await sleep(10);
+    expect(rows()).toHaveLength(0);
+
+    await deliveredRows(3, 8);
+    let settled = false;
+    void w.purge().then(() => {
+      settled = true;
+    });
+    await w.stop();
+    expect(settled).toBe(true);
+  } finally {
+    await w.stop();
+  }
+});
+
+test("one purge() empties a backlog many batches deep", async () => {
+  reset();
+  await deliveredRows(23, 8);
+  const w = worker({ deliveredKeepMs: 7 * DAY, purgeBatch: 4 });
+  await w.purge();
+  expect(rows()).toHaveLength(0);
+});
+
+test("the retention deletes keep to the age indexes when most finished rows are old", () => {
+  // its own file: statistics that see a table of mostly old finished rows, as a
+  // server's boot-time ANALYZE does once retention falls behind
+  const dir = mkdtempSync(join(tmpdir(), "trail-purge-plan-"));
+  const scratch = openDatabase(join(dir, "trail.db"));
+  try {
+    migrate(scratch);
+    const sqlite = scratch.$client;
+    sqlite.pragma("foreign_keys = OFF");
+    const old = clock - 60 * DAY;
+    sqlite
+      .prepare(
+        `with recursive n(i) as (select 1 union all select i + 1 from n where i < 10000)
+         insert into webhook_delivery (id, subscription_id, event_id, seq, type, status, body, next_attempt_at, created_at, delivered_at)
+         select 'd' || i, 's' || (i % 10), 'e' || i, i, 'issue.created',
+           case when i % 10 = 0 then 'pending' when i % 10 = 1 then 'failed' else 'delivered' end,
+           case when i % 10 = 0 then 'body' end,
+           @old, @old + i, case when i % 10 > 1 then @old + i end
+         from n`,
+      )
+      .run({ old });
+    sqlite.exec("analyze");
+    const keep = { deliveredMs: 7 * DAY, failedMs: 30 * DAY };
+    const plans = purgeQueries(scratch, clock, keep, 500).map((query) =>
+      sqlite
+        .prepare(`explain query plan ${query.toSQL().sql}`)
+        .all(...query.toSQL().params)
+        .map((step) => (step as { detail: string }).detail),
+    );
+    const [delivered = [], failed = []] = plans;
+    expect(
+      delivered.some((s) => s.includes("webhook_delivery_delivered_idx")),
+      delivered.join("\n"),
+    ).toBe(true);
+    expect(
+      failed.some((s) => s.includes("webhook_delivery_failed_idx")),
+      failed.join("\n"),
+    ).toBe(true);
+  } finally {
+    scratch.$client.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

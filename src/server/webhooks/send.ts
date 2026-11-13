@@ -10,10 +10,25 @@ export type Transport = (call: {
   headers: Record<string, string>;
   body: string;
   signal?: AbortSignal;
+  /** fails the connect with ETIMEDOUT past this; unset, only `signal` bounds it */
+  connectTimeoutMs?: number;
 }) => Promise<{ status: number }>;
 
 /** The whole attempt, connect to response head, not an idle gap: a receiver that drips bytes still runs out. */
 export const SEND_TIMEOUT_MS = 10_000;
+/** How long a connection may take to open before the other address family is tried; a lone address gets the whole deadline. */
+export const CONNECT_TIMEOUT_MS = 3_000;
+
+// a connection that never opened: nothing was sent, so another address can be tried
+const connectFailures = new Set([
+  "ECONNREFUSED",
+  "ENETUNREACH",
+  "EHOSTUNREACH",
+  "EADDRNOTAVAIL",
+  "ETIMEDOUT",
+]);
+const failedToConnect = (error: unknown) =>
+  connectFailures.has((error as { code?: string } | null)?.code ?? "");
 
 /**
  * https straight to the vetted address, so a DNS answer that changes after the
@@ -27,6 +42,7 @@ export const httpsTransport: Transport = ({
   headers,
   body,
   signal,
+  connectTimeoutMs,
 }) =>
   new Promise((resolve, reject) => {
     const hostname = url.hostname.replace(/^\[|\]$/g, "");
@@ -51,6 +67,22 @@ export const httpsTransport: Transport = ({
       },
     );
     req.on("error", reject);
+    // a first address that drops packets would otherwise spend the whole deadline before the fallback is tried
+    req.on("socket", (socket) => {
+      if (connectTimeoutMs === undefined || !socket.connecting) return;
+      const timer = setTimeout(
+        () =>
+          req.destroy(
+            Object.assign(new Error("connect timed out"), {
+              code: "ETIMEDOUT",
+            }),
+          ),
+        connectTimeoutMs,
+      );
+      timer.unref();
+      socket.once("connect", () => clearTimeout(timer));
+      socket.once("close", () => clearTimeout(timer));
+    });
     req.end(body);
   });
 
@@ -113,7 +145,7 @@ export async function sendWebhook(
 ): Promise<SendResult> {
   let deadline: AbortSignal | undefined;
   try {
-    const { url, address } = await checkWebhookUrl(
+    const { url, address, fallback } = await checkWebhookUrl(
       call.url,
       signal ? resolveUntil(deps.resolve, signal) : deps.resolve,
     );
@@ -124,12 +156,23 @@ export async function sendWebhook(
       now: deps.now(),
     });
     deadline = deps.deadline();
-    const { status } = await deps.transport({
-      url,
-      address,
-      headers,
-      body: call.body,
-      signal: signal ? AbortSignal.any([signal, deadline]) : deadline,
+    const give = signal ? AbortSignal.any([signal, deadline]) : deadline;
+    const post = (to: string, connectTimeoutMs?: number) =>
+      deps.transport({
+        url,
+        address: to,
+        headers,
+        body: call.body,
+        signal: give,
+        connectTimeoutMs,
+      });
+    const firstCap = fallback === undefined ? undefined : CONNECT_TIMEOUT_MS;
+    const { status } = await post(address, firstCap).catch((error) => {
+      // a host whose first address is unreachable (an IPv6 route that isn't there) may still answer on the other family
+      if (fallback === undefined || !failedToConnect(error) || give.aborted) {
+        throw error;
+      }
+      return post(fallback);
     });
     if (status >= 200 && status < 300) return { ok: true, status };
     return {

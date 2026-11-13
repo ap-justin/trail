@@ -111,7 +111,33 @@ test("the spec lists the error statuses each operation can return", async () => 
     ),
     "DELETE /webhooks/{id}": withForbidden(withNotFound(list)),
     "PUT /webhooks/{id}/secret": withForbidden(withNotFound(write("200"))),
-    "POST /webhooks/{id}/ping": withForbidden(withNotFound(list)),
+    "POST /webhooks/{id}/ping": [
+      ...withForbidden(withNotFound(list)),
+      "415",
+      "429",
+    ].sort(),
+  });
+});
+
+test("the ping's 429 declares the Retry-After header the route always sets", async () => {
+  const res = await request("GET", "/api/v1/openapi.json", { key: null });
+  const spec = (await res.json()) as {
+    paths: Record<
+      string,
+      Record<
+        string,
+        { responses: Record<string, { headers?: Record<string, unknown> }> }
+      >
+    >;
+  };
+  expect(
+    spec.paths["/webhooks/{id}/ping"]?.post?.responses["429"]?.headers,
+  ).toEqual({
+    "Retry-After": {
+      description: expect.any(String),
+      required: true,
+      schema: { type: "integer", minimum: 1 },
+    },
   });
 });
 
