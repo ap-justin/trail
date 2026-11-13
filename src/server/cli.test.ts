@@ -355,6 +355,13 @@ test.each([
   ["key list with an argument", ["key", "list", "x"]],
   ["bot rename without a bot", ["bot", "rename"]],
   ["bot rename without a name", ["bot", "rename", "someone"]],
+  ["bot title without a bot", ["bot", "title"]],
+  ["bot title without a title or --clear", ["bot", "title", "someone"]],
+  [
+    "bot title --clear with a title",
+    ["bot", "title", "someone", "x", "--clear"],
+  ],
+  ["--clear on another command", ["bot", "rename", "a", "b", "--clear"]],
 ])("%s is a usage error: exit 2, usage on stderr", (_, argv) => {
   const { code, stdout, stderr } = run(...argv);
   expect(code).toBe(2);
@@ -505,6 +512,77 @@ test("bot rename to a blank name exits 2 and leaves the bot's name", () => {
   expect(stdout).toBe("");
   expect(stderr).toMatch(/^trail: .*display name must not be empty/);
   expect(withDb((db) => resolveKey(db, key))?.displayName).toBe("Blank Target");
+});
+
+const titleOf = (key: string) => withDb((db) => resolveKey(db, key))?.title;
+
+test("bot title sets a bot's title by label, trimmed, then --clear removes it", () => {
+  const key = createdKey(
+    run("bot", "create", "Titled Bot", "--label", "titled-agent").stdout,
+  );
+  const id = withDb((db) => resolveKey(db, key))?.id as string;
+  const set = run("bot", "title", "titled-agent", "  Release manager ");
+  expect(set.stderr).toBe("");
+  expect(set.code).toBe(0);
+  expect(set.stdout).toBe(`actor  ${id}\nfrom   -\nto     Release manager\n`);
+  expect(titleOf(key)).toBe("Release manager");
+
+  const cleared = run("bot", "title", "titled-agent", "--clear");
+  expect(cleared.code).toBe(0);
+  expect(cleared.stdout).toBe(
+    `actor  ${id}\nfrom   Release manager\nto     -\n`,
+  );
+  expect(titleOf(key)).toBeNull();
+});
+
+test("bot title by id or name, unquoted, keeps 40 characters and refuses 41 or blank with exit 2", () => {
+  const key = createdKey(run("bot", "create", "Long Titled").stdout);
+  const id = withDb((db) => resolveKey(db, key))?.id as string;
+  expect(run("bot", "title", id, "On", "call").code).toBe(0);
+  expect(titleOf(key)).toBe("On call");
+  const forty = "t".repeat(40);
+  expect(run("bot", "title", "LONG TITLED", forty).code).toBe(0);
+  expect(titleOf(key)).toBe(forty);
+  for (const title of ["u".repeat(41), "  \t"]) {
+    const { code, stdout, stderr } = run("bot", "title", id, title);
+    expect(code).toBe(2);
+    expect(stdout).toBe("");
+    expect(stderr).toMatch(/^trail: title must /);
+  }
+  expect(titleOf(key)).toBe(forty);
+});
+
+test("bot title refuses a person, an unknown bot and an ambiguous ref with exit 1, changing nothing", () => {
+  const person = withDb((db) =>
+    createHuman(db, { displayName: "Titled Person" }),
+  );
+  const personRun = run("bot", "title", person.id, "Boss");
+  expect(personRun.code).toBe(1);
+  expect(personRun.stderr).toBe(
+    `trail: ${person.id} is a person, not a bot: only bots have titles\n`,
+  );
+  const unknown = run("bot", "title", "agent-nobody", "X");
+  expect(unknown.code).toBe(1);
+  expect(unknown.stderr).toMatch(
+    /^trail: no bot with id, label or name agent-nobody/,
+  );
+  const labelled = createdKey(
+    run("bot", "create", "Amb Title L", "--label", "amb-title").stdout,
+  );
+  const named = createdKey(run("bot", "create", "amb-title").stdout);
+  const ambiguous = run("bot", "title", "amb-title", "Either");
+  expect(ambiguous.code).toBe(1);
+  expect(ambiguous.stdout).toBe("");
+  expect(ambiguous.stderr).toMatch(
+    /^trail: "amb-title" matches more than one bot/,
+  );
+  expect(titleOf(labelled)).toBeNull();
+  expect(titleOf(named)).toBeNull();
+  expect(
+    withDb((db) => db.select().from(actor).all()).find(
+      (a) => a.id === person.id,
+    )?.title,
+  ).toBeNull();
 });
 
 test("--help prints usage on stdout and exits 0", () => {

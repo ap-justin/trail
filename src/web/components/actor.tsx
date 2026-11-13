@@ -35,6 +35,45 @@ export function ActorBadge({
   );
 }
 
+/**
+ * A bot's title as a pill, between its name and its Bot badge, inside `actorNameGroup`;
+ * nothing for a person or a bot without one. Capped in width, it ellipsizes and keeps the
+ * whole title in its tooltip.
+ * `surface="card"` sits it on the background inside a muted comment header.
+ */
+export function BotTitle({
+  actor,
+  surface = "muted",
+  className,
+}: {
+  actor: Pick<WebActorView, "kind" | "title">;
+  surface?: "muted" | "card";
+  className?: string;
+}) {
+  if (actor.kind !== "bot" || !actor.title) return null;
+  return (
+    <span
+      title={actor.title}
+      className={cn(
+        "inline-flex h-4.5 max-w-36 min-w-0 shrink-4 items-center rounded-4xl border border-border px-2 text-2xs leading-none font-normal text-secondary-foreground lg:max-w-48",
+        surface === "card" ? "bg-background" : "bg-muted",
+        className,
+      )}
+    >
+      <span className="truncate">{actor.title}</span>
+    </span>
+  );
+}
+
+/**
+ * Holds an actor's name, `BotTitle` and badge. One line while they fit; past that the
+ * pill and badge wrap under the name, and a name too long for a line of its own
+ * truncates (give it `min-w-0 truncate`), so the page never overflows and the pill is
+ * never squeezed past its label.
+ */
+export const actorNameGroup =
+  "inline-flex max-w-full min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5";
+
 export const avatarSizes = {
   xs: "size-4.5 text-2xs",
   sm: "size-6 text-2xs",

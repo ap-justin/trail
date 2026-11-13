@@ -233,6 +233,7 @@ export function issueRoutes(db: Db, service: Service) {
             name: member.actor.displayName,
             kind: "human" as const,
             photoUrl: photoUrlOf(db, member.actor.id),
+            title: null,
           },
           project: found.project,
           issue: { key: found.key, title: found.row.title },

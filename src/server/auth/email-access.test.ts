@@ -46,6 +46,7 @@ test("an email invitee signs in as a member and sees exactly its projects", asyn
       name: "lena",
       kind: "human",
       photoUrl: null,
+      title: null,
     },
     projects: [{ key: mine.key, name: "Mine" }],
     ownerName: owner,

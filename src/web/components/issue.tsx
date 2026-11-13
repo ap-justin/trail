@@ -1,6 +1,11 @@
 import { GitPullRequestIcon } from "lucide-react";
 import { type FormEvent, type ReactNode, useId, useState } from "react";
-import { ActorAvatar, ActorBadge } from "@/components/actor";
+import {
+  ActorAvatar,
+  ActorBadge,
+  actorNameGroup,
+  BotTitle,
+} from "@/components/actor";
 import { AppLink } from "@/components/app-link";
 import { Markdown } from "@/components/markdown";
 import { IssueError, IssueSkeleton, NotFoundPanel } from "@/components/states";
@@ -70,12 +75,23 @@ export function IssueBreadcrumb({
   );
 }
 
-function Actor({ actor }: { actor: WebActorView }) {
+function Actor({
+  actor,
+  titleSurface,
+}: {
+  actor: WebActorView;
+  titleSurface?: "card";
+}) {
   return (
     <>
       <ActorAvatar actor={actor} size="xs" />
-      <span className="font-medium text-foreground">{actor.name}</span>{" "}
-      <ActorBadge kind={actor.kind} />{" "}
+      <span className={actorNameGroup}>
+        <span className="min-w-0 truncate font-medium text-foreground">
+          {actor.name}
+        </span>{" "}
+        <BotTitle actor={actor} surface={titleSurface} />{" "}
+        <ActorBadge kind={actor.kind} />
+      </span>{" "}
     </>
   );
 }
@@ -108,20 +124,34 @@ function Header({ issue }: { issue: WebIssueView }) {
   );
 }
 
-/** One label and its value; on the 1440 rail a row, in the 375 grid a cell pair. */
+/**
+ * One label and its value; on the 1440 rail a row, in the 375 grid a cell pair.
+ * `itemClassName` lands on both cells, `valueClassName` on the value alone: grid
+ * placement, which the `contents` wrapper can't carry.
+ */
 function Property({
   label,
   children,
   className,
+  itemClassName,
+  valueClassName,
 }: {
   label: string;
   children: ReactNode;
   className?: string;
+  itemClassName?: string;
+  valueClassName?: string;
 }) {
   return (
     <div className={cn("contents", className)}>
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="flex min-w-0 flex-wrap items-center gap-1 lg:gap-2">
+      <dt className={cn("text-muted-foreground", itemClassName)}>{label}</dt>
+      <dd
+        className={cn(
+          "flex min-w-0 flex-wrap items-center gap-1 lg:gap-2",
+          itemClassName,
+          valueClassName,
+        )}
+      >
         {children}
       </dd>
     </div>
@@ -157,18 +187,36 @@ function Properties({ issue }: { issue: WebIssueView }) {
         <Property label="Estimate">
           {issue.estimate === null ? none : `${issue.estimate} h`}
         </Property>
-        <Property label="Assignee">
+        {/* below lg, Labels then Assignee take full-width rows after the pairs */}
+        <Property
+          label="Assignee"
+          // at lg the label stays on the name's row, above the title's
+          itemClassName="max-lg:order-2 lg:self-start"
+          valueClassName="max-lg:col-span-3"
+        >
           {issue.assignee ? (
-            <span className="flex min-w-0 items-center gap-1 lg:gap-2">
+            // at lg a grid with the title on a second row, indented past the avatar;
+            // below, one line that wraps the pill and badge under a long name
+            <span className="flex min-w-0 items-center gap-1.5 lg:grid lg:grid-cols-[auto_auto_minmax(0,1fr)] lg:justify-items-start lg:gap-x-2 lg:gap-y-1">
               <ActorAvatar actor={issue.assignee} size="xs" />
-              <span className="truncate">{issue.assignee.name}</span>
-              <ActorBadge kind={issue.assignee.kind} />
+              <span className={cn(actorNameGroup, "lg:contents")}>
+                <span className="min-w-0 truncate">{issue.assignee.name}</span>
+                <BotTitle
+                  actor={issue.assignee}
+                  className="lg:col-span-2 lg:col-start-2 lg:row-start-2"
+                />
+                <ActorBadge kind={issue.assignee.kind} />
+              </span>
             </span>
           ) : (
             <span className="text-muted-foreground">Unassigned</span>
           )}
         </Property>
-        <Property label="Labels">
+        <Property
+          label="Labels"
+          itemClassName="max-lg:order-1"
+          valueClassName="max-lg:col-span-3"
+        >
           {issue.labels.length === 0
             ? none
             : issue.labels.map((label) => (
@@ -329,7 +377,7 @@ function CommentCard({
       className={cn("relative my-2 rounded-xl border before:top-4", dot)}
     >
       <div className="flex items-center gap-1.5 rounded-t-xl border-b bg-muted px-3 py-2">
-        <Actor actor={entry.actor} />
+        <Actor actor={entry.actor} titleSurface="card" />
         {entry.comment.sourceAuthor && (
           <span className="text-2xs text-muted-foreground">
             originally by {entry.comment.sourceAuthor}

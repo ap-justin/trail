@@ -23,6 +23,7 @@ export const selectWebActors = (db: Db) =>
       id: actor.id,
       name: actor.displayName,
       kind: actor.kind,
+      title: actor.title,
       photoHash: actorPhoto.hash,
     })
     .from(actor)

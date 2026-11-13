@@ -7,7 +7,7 @@ import { useEffect, useEffectEvent, useReducer, useRef, useState } from "react";
 import {
   type ActorUpdate,
   applyActorUpdate,
-  withActorPhoto,
+  withActorUpdate,
 } from "@/lib/actor-photos";
 import { api, type FeedFilter, isNotFound } from "@/lib/api";
 import type { EntryView } from "@/lib/api-types";
@@ -77,10 +77,8 @@ function arrivals(state: Arrivals, action: ArrivalAction): Arrivals {
         shown: [...state.pending, ...state.shown],
         pending: [],
       };
-    case "actor": {
-      const { actorId, photoUrl } = action.update;
-      return withActorPhoto(state, actorId, photoUrl);
-    }
+    case "actor":
+      return withActorUpdate(state, action.update);
     case "clear":
       return noArrivals;
   }
@@ -199,7 +197,7 @@ export function useLiveFeed(
     let retry: ReturnType<typeof setTimeout> | undefined;
     source.addEventListener("open", () => {
       setConnection("open");
-      // a new stream starts from now: read what the gap missed, photos included,
+      // a new stream starts from now: read what the gap missed, photos and titles included,
       // since `actor` events are never replayed
       if (opened.current) readEverything();
       else if (attempt > 0) refetch();
@@ -231,7 +229,7 @@ export function useLiveFeed(
     };
   }, [actor, project, attempt]);
 
-  // the shell's own stream stays closed while this one carries the photo changes
+  // the shell's own stream stays closed while this one carries the actor changes
   useEffect(() => holdFeedStream(), []);
 
   useEffect(() => {

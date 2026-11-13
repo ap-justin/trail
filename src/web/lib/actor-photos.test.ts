@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { withActorPhoto } from "@/lib/actor-photos";
+import { type ActorUpdate, withActorUpdate } from "@/lib/actor-photos";
 import {
   commentEntry,
   kai,
@@ -10,7 +10,13 @@ import {
 
 const newPhoto = photoUrlFor("a-kai", "9c");
 
-describe("withActorPhoto", () => {
+/** Kai's state after an event: the given photo, no title unless one is passed. */
+const kaiNow = (
+  photoUrl: string | null,
+  title: string | null = null,
+): ActorUpdate => ({ actorId: "a-kai", photoUrl, title });
+
+describe("withActorUpdate", () => {
   test("sets the photo on every object carrying the actor's id and a photoUrl, however deep", () => {
     const data = {
       items: [
@@ -19,7 +25,7 @@ describe("withActorPhoto", () => {
       ],
       filters: { actors: [kai, maya], projects: [] },
     };
-    const next = withActorPhoto(data, "a-kai", newPhoto);
+    const next = withActorUpdate(data, kaiNow(newPhoto));
     expect(next.items[0]?.actor).toEqual({ ...kai, photoUrl: newPhoto });
     expect(next.filters.actors[0]).toEqual({ ...kai, photoUrl: newPhoto });
     expect(next.filters.actors[1]).toBe(maya);
@@ -30,28 +36,47 @@ describe("withActorPhoto", () => {
   });
 
   test("null clears the photo", () => {
-    expect(withActorPhoto({ actor: kaiWithPhoto }, "a-kai", null)).toEqual({
+    expect(withActorUpdate({ actor: kaiWithPhoto }, kaiNow(null))).toEqual({
       actor: { ...kai, photoUrl: null },
     });
   });
 
   test("returns the same reference when nothing names the actor", () => {
     const data = { items: [commentEntry("e1", "2026-11-13T10:00:00Z")] };
-    expect(withActorPhoto(data, "a-nobody", newPhoto)).toBe(data);
+    expect(
+      withActorUpdate(data, { ...kaiNow(newPhoto), actorId: "a-nobody" }),
+    ).toBe(data);
   });
 
   test("returns the same reference when the actor already has that photo", () => {
     const data = { actor: kaiWithPhoto };
-    expect(withActorPhoto(data, "a-kai", kaiWithPhoto.photoUrl)).toBe(data);
+    expect(withActorUpdate(data, kaiNow(kaiWithPhoto.photoUrl))).toBe(data);
   });
 
   test("leaves an object with the id but no photoUrl of its own alone", () => {
     const comment = { id: "a-kai", body: "same id, not an actor" };
-    expect(withActorPhoto(comment, "a-kai", newPhoto)).toBe(comment);
+    expect(withActorUpdate(comment, kaiNow(newPhoto))).toBe(comment);
   });
 
   test("passes primitives and undefined through", () => {
-    expect(withActorPhoto(undefined, "a-kai", newPhoto)).toBeUndefined();
-    expect(withActorPhoto("a-kai", "a-kai", newPhoto)).toBe("a-kai");
+    expect(withActorUpdate(undefined, kaiNow(newPhoto))).toBeUndefined();
+    expect(withActorUpdate("a-kai", kaiNow(newPhoto))).toBe("a-kai");
+  });
+
+  test("sets, changes and clears a bot's title beside its photo", () => {
+    const data = { actor: kai };
+    const titled = withActorUpdate(data, kaiNow(null, "Platform Engineer"));
+    expect(titled).toEqual({ actor: { ...kai, title: "Platform Engineer" } });
+    expect(withActorUpdate(titled, kaiNow(null, "Release manager"))).toEqual({
+      actor: { ...kai, title: "Release manager" },
+    });
+    expect(withActorUpdate(titled, kaiNow(null))).toEqual(data);
+  });
+
+  test("leaves an issue's title alone though it shares the actor's id", () => {
+    const issueLike = { id: "a-kai", title: "Back up the volume" };
+    expect(withActorUpdate(issueLike, kaiNow(null, "Platform Engineer"))).toBe(
+      issueLike,
+    );
   });
 });

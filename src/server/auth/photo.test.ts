@@ -464,7 +464,11 @@ test("a photo last checked over a day ago is fetched again when the app loads, p
     "https://avatars.githubusercontent.com/u/8001?s=128",
   ]);
   expect(updates).toEqual([
-    { actorId: actorIdOf(8001), photoUrl: photoPath(8001, JPEG) },
+    {
+      actorId: actorIdOf(8001),
+      photoUrl: photoPath(8001, JPEG),
+      title: null,
+    },
   ]);
   const me = (await (await loadApp(cookie)).json()) as {
     actor: { photoUrl: string };
@@ -630,7 +634,11 @@ test("a sign-in that changes the photo publishes it; one with the same bytes doe
   await photoLands(8204, PNG);
   await vi.waitFor(() =>
     expect(updates).toEqual([
-      { actorId: actorIdOf(8204), photoUrl: photoPath(8204, PNG) },
+      {
+        actorId: actorIdOf(8204),
+        photoUrl: photoPath(8204, PNG),
+        title: null,
+      },
     ]),
   );
   await signIn("signing", { githubId: 8204 });
@@ -639,7 +647,15 @@ test("a sign-in that changes the photo publishes it; one with the same bytes doe
   await signIn("signing", { githubId: 8204 });
   await photoLands(8204, JPEG);
   expect(updates).toEqual([
-    { actorId: actorIdOf(8204), photoUrl: photoPath(8204, PNG) },
-    { actorId: actorIdOf(8204), photoUrl: photoPath(8204, JPEG) },
+    {
+      actorId: actorIdOf(8204),
+      photoUrl: photoPath(8204, PNG),
+      title: null,
+    },
+    {
+      actorId: actorIdOf(8204),
+      photoUrl: photoPath(8204, JPEG),
+      title: null,
+    },
   ]);
 });

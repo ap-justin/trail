@@ -93,7 +93,7 @@ describe("the shell's actor stream", () => {
     const { reads, stream } = await openIssue();
     stream.open();
     await waitFor(() => expect(reads.me).toBe(2));
-    stream.actor({ actorId: kai.id, photoUrl: null });
+    stream.actor({ actorId: kai.id, photoUrl: null, title: null });
     await settle();
     expect(reads).toEqual({ me: 2, issue: 1 });
   });

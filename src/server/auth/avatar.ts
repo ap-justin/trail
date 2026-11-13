@@ -79,7 +79,8 @@ async function storeGitHubPhoto(
   try {
     const bytes = await fetchAvatar(person.githubId, avatarFetch);
     const { photoUrl, changed } = setActorPhoto(db, person.id, bytes);
-    if (changed) bus?.publishActor({ actorId: person.id, photoUrl });
+    if (changed)
+      bus?.publishActor({ actorId: person.id, photoUrl, title: null });
     else touchActorPhoto(db, person.id);
   } catch (e) {
     const reason = e instanceof Error ? e.message : String(e);

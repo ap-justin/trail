@@ -1,5 +1,5 @@
 import { Fragment, useId, useState } from "react";
-import { ActorAvatar, ActorBadge } from "@/components/actor";
+import { ActorAvatar, ActorBadge, BotTitle } from "@/components/actor";
 import { AppLink, RowLink } from "@/components/app-link";
 import { Markdown } from "@/components/markdown";
 import {
@@ -367,12 +367,12 @@ function StatusUpdateItem({ update }: { update: WebStatusUpdateView }) {
         <ActorBadge kind={update.author.kind} />
         <HealthPill health={update.health} className="ml-auto" />
       </div>
-      <time
-        dateTime={update.createdAt}
-        className="-mt-0.5 pl-6.5 text-xs text-muted-foreground"
-      >
-        {formatAbsolute(update.createdAt)}
-      </time>
+      <div className="-mt-0.5 flex min-w-0 items-center gap-2 pl-6.5 text-xs text-muted-foreground">
+        <BotTitle actor={update.author} />
+        <time dateTime={update.createdAt} className="shrink-0">
+          {formatAbsolute(update.createdAt)}
+        </time>
+      </div>
       <Markdown>{update.body}</Markdown>
     </li>
   );

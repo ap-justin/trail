@@ -126,6 +126,7 @@ export const actor = sqliteTable(
     githubLogin: text("github_login"),
     // a bot's agent id in the system that runs it
     label: text("label"),
+    title: text("title"),
     // the address a person let in by email signs in with; such a person has no GitHub account here
     email: text("email"),
     // the human who signed in first as TRAIL_OWNER_GITHUB
@@ -160,6 +161,10 @@ export const actor = sqliteTable(
     uniqueIndex("actor_email_unique")
       .on(t.email)
       .where(sql`${c(t.email)} is not null`),
+    check(
+      "actor_title_check",
+      sql`${c(t.title)} is null or (${c(t.kind)} = 'bot' and length(${c(t.title)}) between 1 and 40 and ${c(t.title)} = trim(${c(t.title)}))`,
+    ),
     // target of api_key's (actor_id, actor_kind) key, which pins keys to bots
     unique("actor_id_kind_unique").on(t.id, t.kind),
     // lower() folds ASCII only, like nocase: 'Équipe' and 'équipe' are two bots

@@ -50,6 +50,7 @@ describe("session", () => {
         name: "dana.okafor",
         kind: "human",
         photoUrl: null,
+        title: null,
       },
     };
     let meReads = 0;

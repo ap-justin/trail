@@ -5,8 +5,15 @@ export type ActivityEvent = typeof activityEvent.$inferSelect;
 
 export type Subscriber = (event: ActivityEvent) => void;
 
-/** An actor's photo set, replaced or cleared: live-only, never an activity event. */
-export type ActorUpdate = { actorId: string; photoUrl: string | null };
+/**
+ * An actor's photo or title changed: both as they are now, so the latest update
+ * alone is the actor's state. Live-only, never an activity event.
+ */
+export type ActorUpdate = {
+  actorId: string;
+  photoUrl: string | null;
+  title: string | null;
+};
 
 export type ActorSubscriber = (update: ActorUpdate) => void;
 

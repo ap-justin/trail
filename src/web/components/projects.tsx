@@ -1,4 +1,9 @@
-import { ActorAvatar, ActorBadge } from "@/components/actor";
+import {
+  ActorAvatar,
+  ActorBadge,
+  actorNameGroup,
+  BotTitle,
+} from "@/components/actor";
 import { RowLink } from "@/components/app-link";
 import { MarkdownText } from "@/components/markdown-text";
 import {
@@ -72,11 +77,16 @@ function LatestUpdate({
     return <p className="text-muted-foreground">No status update yet</p>;
   }
   const author = (
-    <div className="flex items-center gap-2">
+    <div className="flex min-w-0 items-center gap-2">
       <ActorAvatar actor={update.author} size="xs" />
-      <span className="font-medium">{update.author.name}</span>
-      <ActorBadge kind={update.author.kind} />
-      <span className="text-muted-foreground">
+      <span className={actorNameGroup}>
+        <span className="min-w-0 truncate font-medium">
+          {update.author.name}
+        </span>
+        <BotTitle actor={update.author} />
+        <ActorBadge kind={update.author.kind} />
+      </span>
+      <span className="shrink-0 whitespace-nowrap text-muted-foreground">
         <Age iso={update.createdAt} now={now} ago />
       </span>
     </div>

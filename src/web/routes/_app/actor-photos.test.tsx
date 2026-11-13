@@ -100,7 +100,7 @@ describe("an actor event on the feed", () => {
 
   test("swaps the actor's avatar in every row in place, with no read and no new row", async () => {
     const { asked, stream, queryClient } = await openFeed();
-    stream.actor({ actorId: kai.id, photoUrl: kaiPhoto });
+    stream.actor({ actorId: kai.id, photoUrl: kaiPhoto, title: null });
     expect(rowFor("e1")?.querySelector("img")).toHaveAttribute("src", kaiPhoto);
     expect(rowFor("e3")?.querySelector("img")).toHaveAttribute("src", kaiPhoto);
     expect(rowFor("e2")?.querySelector("img")).toBeNull();
@@ -112,8 +112,8 @@ describe("an actor event on the feed", () => {
 
   test("a null photo puts the initials back", async () => {
     const { stream } = await openFeed();
-    stream.actor({ actorId: kai.id, photoUrl: kaiPhoto });
-    stream.actor({ actorId: kai.id, photoUrl: null });
+    stream.actor({ actorId: kai.id, photoUrl: kaiPhoto, title: null });
+    stream.actor({ actorId: kai.id, photoUrl: null, title: null });
     const avatar = rowFor("e1")?.querySelector('[data-actor-kind="bot"]');
     expect(avatar?.querySelector("img")).toBeNull();
     expect(avatar).toHaveTextContent("K");
@@ -122,7 +122,7 @@ describe("an actor event on the feed", () => {
   test("rows the stream delivered take the new photo too", async () => {
     const { stream } = await openFeed();
     stream.send(commentEntry("e9", minutesAgo(0)), 9);
-    stream.actor({ actorId: kai.id, photoUrl: kaiPhoto });
+    stream.actor({ actorId: kai.id, photoUrl: kaiPhoto, title: null });
     expect(rowFor("e9")?.querySelector("img")).toHaveAttribute("src", kaiPhoto);
   });
 
@@ -130,7 +130,7 @@ describe("an actor event on the feed", () => {
     const { stream } = await openFeed();
     const account = screen.getByRole("button", { name: "Account: Maya Chen" });
     expect(account.querySelector("img")).toBeNull();
-    stream.actor({ actorId: maya.id, photoUrl: mayaPhoto });
+    stream.actor({ actorId: maya.id, photoUrl: mayaPhoto, title: null });
     // the shell reads /me from the query cache, which tells its readers on its next tick
     await waitFor(() =>
       expect(account.querySelector("img")).toHaveAttribute("src", mayaPhoto),
@@ -147,10 +147,10 @@ describe("an actor event off the feed", () => {
   test("swaps the avatar on an issue page without reading it again", async () => {
     const { reads, stream, queryClient } = await openIssue();
     expect(imgsOf(kaiPhoto)).toHaveLength(0);
-    stream.actor({ actorId: kai.id, photoUrl: kaiPhoto });
+    stream.actor({ actorId: kai.id, photoUrl: kaiPhoto, title: null });
     // the assignee and each timeline row Kai wrote
     await waitFor(() => expect(imgsOf(kaiPhoto).length).toBeGreaterThan(1));
-    stream.actor({ actorId: kai.id, photoUrl: null });
+    stream.actor({ actorId: kai.id, photoUrl: null, title: null });
     await waitFor(() => expect(imgsOf(kaiPhoto)).toHaveLength(0));
     await readsSettled(queryClient);
     expect(reads.count).toBe(1);
@@ -161,7 +161,11 @@ describe("an actor event off the feed", () => {
     const { queryClient } = renderApp("/account");
     expect(await screen.findByRole("heading", { name: "Theme" })).toBeVisible();
     await openAndSettleSession(FakeEventSource.current, queryClient);
-    FakeEventSource.current.actor({ actorId: maya.id, photoUrl: mayaPhoto });
+    FakeEventSource.current.actor({
+      actorId: maya.id,
+      photoUrl: mayaPhoto,
+      title: null,
+    });
     // the account panel's avatar and the sidebar menu's
     await waitFor(() => expect(imgsOf(mayaPhoto)).toHaveLength(2));
   });
@@ -182,7 +186,11 @@ describe("an actor event off the feed", () => {
     list = people.map((p) =>
       p.username === "mayachen" ? { ...p, photoUrl: mayaPhoto } : p,
     );
-    FakeEventSource.current.actor({ actorId: maya.id, photoUrl: mayaPhoto });
+    FakeEventSource.current.actor({
+      actorId: maya.id,
+      photoUrl: mayaPhoto,
+      title: null,
+    });
     // the people row, beside the account menu that updated in place
     await waitFor(() => expect(imgsOf(mayaPhoto)).toHaveLength(2));
     expect(reads).toBe(2);
@@ -204,7 +212,7 @@ describe("the shell's stream", () => {
     expect(others).toEqual([]);
     // the feed's stream carries the photos the shell's did
     feed?.open();
-    feed?.actor({ actorId: maya.id, photoUrl: mayaPhoto });
+    feed?.actor({ actorId: maya.id, photoUrl: mayaPhoto, title: null });
     const account = screen.getByRole("button", { name: "Account: Maya Chen" });
     await waitFor(() =>
       expect(account.querySelector("img")).toHaveAttribute("src", mayaPhoto),
@@ -219,7 +227,7 @@ describe("the shell's stream", () => {
     // nothing was missed while the feed's stream was open, so its first open reads nothing
     const before = reads.count;
     reopened?.open();
-    reopened?.actor({ actorId: kai.id, photoUrl: kaiPhoto });
+    reopened?.actor({ actorId: kai.id, photoUrl: kaiPhoto, title: null });
     await waitFor(() => expect(imgsOf(kaiPhoto).length).toBeGreaterThan(0));
     await readsSettled(queryClient);
     expect(reads.count).toBe(before);

@@ -76,6 +76,7 @@ import {
   labelKey,
   nonBlank,
   optionalRef,
+  validBotTitle,
   validEstimate,
   validHealth,
   validLabelNames,
@@ -331,6 +332,30 @@ export function createService({
       .select({ ...getTableColumns(actorTable), photoHash: actorPhoto.hash })
       .from(actorTable)
       .leftJoin(actorPhoto, eq(actorPhoto.actorId, actorTable.id));
+
+  /** Tells live actor subscribers the actor's photo and title as they are now. */
+  function publishActor(actorId: string) {
+    const now = withPhotoUrl(
+      selectWithPhotoHash()
+        .where(eq(actorTable.id, actorId))
+        .get() as ActorWithHash,
+    );
+    bus.publishActor({ actorId, photoUrl: now.photoUrl, title: now.title });
+  }
+
+  function setTitle(actorId: string, title: string | null) {
+    const changed = db
+      .update(actorTable)
+      .set({ title })
+      .where(
+        and(
+          eq(actorTable.id, actorId),
+          sql`${actorTable.title} is not ${title}`,
+        ),
+      )
+      .run().changes;
+    if (changed > 0) publishActor(actorId);
+  }
 
   /** Project keys or ids as the project ids a webhook follows; one the key can't see is a 404, as everywhere. */
   function webhookProjectIds(actor: ActingActor, refs: string[]): string[] {
@@ -1796,16 +1821,27 @@ export function createService({
      */
     setMyPhoto(actor: ActingActor, bytes: Uint8Array): { photoUrl: string } {
       const { photoUrl, changed } = setActorPhoto(db, actor.id, bytes);
-      if (changed) bus.publishActor({ actorId: actor.id, photoUrl });
+      if (changed) publishActor(actor.id);
       return { photoUrl };
     },
 
     /** Removes the calling actor's photo, if it has one, and publishes the removal. Any key may. */
     clearMyPhoto(actor: ActingActor): { photoUrl: null } {
-      if (clearActorPhoto(db, actor.id)) {
-        bus.publishActor({ actorId: actor.id, photoUrl: null });
-      }
+      if (clearActorPhoto(db, actor.id)) publishActor(actor.id);
       return { photoUrl: null };
+    },
+
+    /** Sets the calling bot's title, trimmed, and publishes it when it changed. Any key may. */
+    setMyTitle(actor: ActingActor, raw: string): { title: string } {
+      const title = validBotTitle(raw);
+      setTitle(actor.id, title);
+      return { title };
+    },
+
+    /** Clears the calling bot's title, publishing the removal when it had one. Any key may. */
+    clearMyTitle(actor: ActingActor): { title: null } {
+      setTitle(actor.id, null);
+      return { title: null };
     },
 
     /**

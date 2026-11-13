@@ -11,6 +11,7 @@ import {
 } from "../db/schema.js";
 import { ConflictError, NotFoundError, ValidationError } from "./errors.js";
 import type { Tx } from "./tx.js";
+import { validBotTitle } from "./validate.js";
 
 export type Actor = typeof actor.$inferSelect;
 
@@ -200,6 +201,26 @@ function onlyBotByLabelOrName(tx: Tx, ref: string): Actor | undefined {
 }
 
 /**
+ * The bot whose actor id, label or name (ignoring the case of A-Z) is `ref`; an
+ * id wins outright, and a label or name matching two bots is ambiguous. An id
+ * that is a person's is refused, `why` saying what that person can't have.
+ */
+function botByRef(tx: Tx, ref: string, why: string): Actor {
+  const bot =
+    tx.select().from(actor).where(eq(actor.id, ref)).get() ??
+    onlyBotByLabelOrName(tx, ref);
+  if (!bot) {
+    throw new NotFoundError(
+      `no bot with id, label or name ${ref}: \`trail key list\` shows each bot's id, name and label`,
+    );
+  }
+  if (bot.kind !== "bot") {
+    throw new ConflictError(`${bot.id} is a person, not a bot: ${why}`);
+  }
+  return bot;
+}
+
+/**
  * Sets a bot's display name. `botRef` is its actor id, label or current name
  * (names match ignoring the case of A-Z); an id wins outright, and a label or
  * name matching two bots is ambiguous and refused. A bot may take its own name
@@ -213,19 +234,11 @@ export function renameBot(
   const name = displayNameOf(newName);
   return db.transaction(
     (tx) => {
-      const bot =
-        tx.select().from(actor).where(eq(actor.id, botRef)).get() ??
-        onlyBotByLabelOrName(tx, botRef);
-      if (!bot) {
-        throw new NotFoundError(
-          `no bot with id, label or name ${botRef}: \`trail key list\` shows each bot's id, name and label`,
-        );
-      }
-      if (bot.kind !== "bot") {
-        throw new ConflictError(
-          `${bot.id} is a person, not a bot: people's names come from their sign-in`,
-        );
-      }
+      const bot = botByRef(
+        tx,
+        botRef,
+        "people's names come from their sign-in",
+      );
       const twin = tx
         .select()
         .from(actor)
@@ -246,6 +259,26 @@ export function renameBot(
         .where(eq(actor.id, bot.id))
         .run();
       return { id: bot.id, oldName: bot.displayName, newName: name };
+    },
+    { behavior: "immediate" },
+  );
+}
+
+/**
+ * Sets a bot's title, trimmed, or clears it with null; `botRef` finds the bot
+ * as `renameBot`'s does. People are refused: only bots have titles.
+ */
+export function setBotTitle(
+  db: Db,
+  botRef: string,
+  newTitle: string | null,
+): { id: string; oldTitle: string | null; newTitle: string | null } {
+  const title = newTitle === null ? null : validBotTitle(newTitle);
+  return db.transaction(
+    (tx) => {
+      const bot = botByRef(tx, botRef, "only bots have titles");
+      tx.update(actor).set({ title }).where(eq(actor.id, bot.id)).run();
+      return { id: bot.id, oldTitle: bot.title, newTitle: title };
     },
     { behavior: "immediate" },
   );

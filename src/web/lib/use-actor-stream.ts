@@ -7,9 +7,9 @@ import { keys } from "@/lib/queries";
 import { RECONNECT_MS } from "@/lib/use-live-feed";
 
 /**
- * Keeps every signed-in page's photos current: an `only=actors` `/events` stream. The feed
- * page's own stream carries those events too, so this one stays closed while a feed page
- * holds its own.
+ * Keeps every signed-in page's photos and bot titles current: an `only=actors` `/events`
+ * stream. The feed page's own stream carries those events too, so this one stays closed
+ * while a feed page holds its own.
  */
 export function useActorStream() {
   const queryClient = useQueryClient();

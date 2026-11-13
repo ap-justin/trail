@@ -71,6 +71,7 @@ test("feed actors and the feed's bot filter carry the photo URL, null without on
     name: "pictured",
     kind: "bot",
     photoUrl: botUrl,
+    title: null,
   });
   expect(actorOf(plain.actor.id).photoUrl).toBeNull();
   const filter = (id: string) =>
