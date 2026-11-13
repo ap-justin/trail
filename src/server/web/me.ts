@@ -2,6 +2,7 @@ import { createRoute } from "@hono/zod-openapi";
 import { eq } from "drizzle-orm";
 import { type MeView, meSchema } from "../../shared/schemas.js";
 import { jsonContent } from "../api/routes.js";
+import type { TrailAuth } from "../auth/auth.js";
 import type { Viewer } from "../auth/viewer.js";
 import type { Db } from "../db/client.js";
 import { actor } from "../db/schema.js";
@@ -24,19 +25,35 @@ export function ownerName(db: Db, ownerLogin: string): string {
   return row?.name ?? ownerLogin;
 }
 
-function meOf(db: Db, viewer: Viewer, owner: string): MeView {
-  if (viewer.kind === "anonymous" || viewer.kind === "not_invited") {
+function meOf(
+  db: Db,
+  viewer: Viewer,
+  shared: Pick<MeView, "ownerName" | "emailSignIn">,
+): MeView {
+  if (viewer.kind === "anonymous") {
     return {
       state: viewer.kind,
-      login: viewer.kind === "anonymous" ? null : viewer.login,
+      login: null,
+      email: null,
       actor: null,
       projects: [],
-      ownerName: owner,
+      ...shared,
+    };
+  }
+  if (viewer.kind === "not_invited") {
+    return {
+      state: viewer.kind,
+      login: viewer.login,
+      email: "email" in viewer ? viewer.email : null,
+      actor: null,
+      projects: [],
+      ...shared,
     };
   }
   return {
     state: viewer.kind,
     login: viewer.login,
+    email: viewer.actor.githubId === null ? viewer.actor.email : null,
     actor: {
       id: viewer.actor.id,
       name: viewer.actor.displayName,
@@ -44,13 +61,19 @@ function meOf(db: Db, viewer: Viewer, owner: string): MeView {
       photoUrl: photoUrlOf(db, viewer.actor.id),
     },
     projects: viewer.projects.map(({ key, name }) => ({ key, name })),
-    ownerName: owner,
+    ...shared,
   };
 }
 
 /** `GET /me`, which answers every viewer, signed in or not. */
-export function meRoutes(db: Db, ownerLogin: string) {
+export function meRoutes(db: Db, auth: TrailAuth) {
   return createWebRouter().openapi(getMe, (c) =>
-    c.json(meOf(db, c.var.viewer, ownerName(db, ownerLogin)), 200),
+    c.json(
+      meOf(db, c.var.viewer, {
+        ownerName: ownerName(db, auth.ownerLogin),
+        emailSignIn: auth.emailSignIn,
+      }),
+      200,
+    ),
   );
 }

@@ -25,8 +25,9 @@ function servePeople() {
       body: text ? JSON.parse(text) : null,
     });
   };
-  const person = (username: string, projectKeys: string[]): PersonView => ({
-    username,
+  const person = (entry: string, projectKeys: string[]): PersonView => ({
+    username: entry.includes("@") ? null : entry,
+    email: entry.includes("@") ? entry : null,
     owner: false,
     pending: true,
     name: null,
@@ -38,19 +39,22 @@ function servePeople() {
     http.get("/api/web/people", () => HttpResponse.json({ items: list })),
     http.post("/api/web/people", async ({ request }) => {
       await record(request);
-      const added = person("newbie", []);
+      const { username } = (writes.at(-1)?.body ?? {}) as { username: string };
+      const added = person(username, []);
       list = [...list, added];
       return HttpResponse.json(added, { status: 201 });
     }),
     http.put("/api/web/people/:username", async ({ request, params }) => {
       await record(request);
       const updated = person(String(params.username), ["TRL"]);
-      list = list.map((p) => (p.username === params.username ? updated : p));
+      list = list.map((p) =>
+        (p.username ?? p.email) === params.username ? updated : p,
+      );
       return HttpResponse.json(updated);
     }),
     http.delete("/api/web/people/:username", async ({ request, params }) => {
       await record(request);
-      list = list.filter((p) => p.username !== params.username);
+      list = list.filter((p) => (p.username ?? p.email) !== params.username);
       return new HttpResponse(null, { status: 204 });
     }),
   );
@@ -92,7 +96,7 @@ function holdWrites(method: "put" | "delete") {
 
 function row(username: string) {
   const li = document.querySelector<HTMLElement>(
-    `li[data-username="${username}"]`,
+    `li[data-person="${username}"]`,
   );
   if (!li) throw new Error(`no row for @${username}`);
   return within(li);
@@ -141,7 +145,10 @@ describe("managing people", () => {
     const writes = servePeople();
     renderApp("/people");
     await screen.findByText("@kai-dev");
-    await userEvent.type(screen.getByLabelText("GitHub username"), "newbie");
+    await userEvent.type(
+      screen.getByLabelText("GitHub username or email"),
+      "newbie",
+    );
     await userEvent.click(screen.getByRole("button", { name: "Invite" }));
     expect(await screen.findByText("@newbie")).toBeInTheDocument();
     expect(writes).toEqual([
@@ -265,7 +272,7 @@ describe("managing people", () => {
     );
     await waitFor(() =>
       expect(
-        document.querySelector('li[data-username="kai-dev"]'),
+        document.querySelector('li[data-person="kai-dev"]'),
       ).not.toBeInTheDocument(),
     );
     expect(
@@ -310,7 +317,7 @@ describe("managing people", () => {
     await deletes.release("mayachen");
     await waitFor(() =>
       expect(
-        document.querySelector('li[data-username="mayachen"]'),
+        document.querySelector('li[data-person="mayachen"]'),
       ).not.toBeInTheDocument(),
     );
     expect(
@@ -318,7 +325,7 @@ describe("managing people", () => {
     ).toBeInTheDocument();
   });
 
-  test("a failed invite shows the server's message", async () => {
+  test("already invited: the server's message sits at the field", async () => {
     signedInAs("owner");
     servePeople();
     server.use(
@@ -327,7 +334,8 @@ describe("managing people", () => {
           {
             error: {
               code: "conflict",
-              message: "@mayachen is already invited",
+              message:
+                "@mayachen is already invited. Change their projects in the list below.",
             },
           },
           { status: 409 },
@@ -336,10 +344,84 @@ describe("managing people", () => {
     );
     renderApp("/people");
     await screen.findByText("@kai-dev");
-    await userEvent.type(screen.getByLabelText("GitHub username"), "mayachen");
+    await userEvent.type(
+      screen.getByLabelText("GitHub username or email"),
+      "mayachen",
+    );
     await userEvent.click(screen.getByRole("button", { name: "Invite" }));
+    const field = screen.getByLabelText("GitHub username or email");
+    await waitFor(() => expect(field).toHaveAttribute("aria-invalid", "true"));
+    expect(field).toHaveAccessibleDescription(
+      expect.stringContaining(
+        "@mayachen is already invited. Change their projects in the list below.",
+      ),
+    );
+  });
+
+  test("a GitHub handle typed with its @ is invited and then removed by the bare username", async () => {
+    signedInAs("owner");
+    const writes = servePeople();
+    renderApp("/people");
+    await screen.findByText("@kai-dev");
+    await userEvent.type(
+      screen.getByLabelText("GitHub username or email"),
+      "@Newbie",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Invite" }));
+    expect(await screen.findByText("@newbie")).toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Edit projects for @newbie" }),
+    );
+    await userEvent.click(
+      row("newbie").getByRole("button", { name: "Save projects" }),
+    );
+    await waitFor(() => expect(writes).toHaveLength(2));
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Remove @newbie" }),
+    );
+    await userEvent.click(
+      row("newbie").getByRole("button", { name: "Remove" }),
+    );
+    await waitFor(() => expect(writes).toHaveLength(3));
     expect(
-      await screen.findByText("@mayachen is already invited"),
-    ).toBeInTheDocument();
+      writes.map(({ method, path, body }) => [method, path, body]),
+    ).toEqual([
+      ["POST", "/api/web/people", { username: "newbie", projectKeys: [] }],
+      ["PUT", "/api/web/people/newbie", { projectKeys: [] }],
+      ["DELETE", "/api/web/people/newbie", null],
+    ]);
+  });
+
+  test("an email invite posts the address, and the person is removed by it", async () => {
+    signedInAs("owner");
+    const writes = servePeople();
+    renderApp("/people");
+    await screen.findByText("@kai-dev");
+    await userEvent.type(
+      screen.getByLabelText("GitHub username or email"),
+      "Sam@Studio.example",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Invite" }));
+    const sam = await screen.findByText("sam@studio.example");
+    expect(sam).toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Remove sam@studio.example" }),
+    );
+    await userEvent.click(
+      row("sam@studio.example").getByRole("button", { name: "Remove" }),
+    );
+    await waitFor(() => expect(sam).not.toBeInTheDocument());
+    expect(writes).toEqual([
+      {
+        method: "POST",
+        path: "/api/web/people",
+        body: { username: "sam@studio.example", projectKeys: [] },
+      },
+      {
+        method: "DELETE",
+        path: "/api/web/people/sam%40studio.example",
+        body: null,
+      },
+    ]);
   });
 });

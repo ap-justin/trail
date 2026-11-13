@@ -3,7 +3,9 @@ import { act, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, test } from "vitest";
-import { renderApp, serveFeed, signedInAs } from "@/test/app";
+import type { MeView } from "@/lib/api-types";
+import { keys } from "@/lib/queries";
+import { meView, renderApp, serveFeed, signedInAs } from "@/test/app";
 import { installFakeEventSource } from "@/test/event-source";
 import { server } from "@/test/server";
 
@@ -39,6 +41,55 @@ describe("session", () => {
     ).toBeInTheDocument();
     expect(signedOut).toBe(true);
     expect(router.state.location.pathname).toBe("/sign-in");
+  });
+
+  test("a person signed in by email is let in, shown by their address, and signing out forgets it", async () => {
+    const emailMember: MeView = {
+      ...meView("member"),
+      login: null,
+      email: "dana@example.com",
+      actor: {
+        id: "a-dana",
+        name: "dana.okafor",
+        kind: "human",
+        photoUrl: null,
+      },
+    };
+    let meReads = 0;
+    server.use(
+      http.get("/api/web/me", () => {
+        meReads++;
+        return HttpResponse.json(emailMember);
+      }),
+      http.post("/api/auth/sign-out", () =>
+        HttpResponse.json({ success: true }),
+      ),
+    );
+    serveFeed();
+    const { router, queryClient } = renderApp("/");
+    expect(await screen.findByText("No activity yet")).toBeInTheDocument();
+    const account = screen.getByRole("button", {
+      name: "Account: dana.okafor",
+    });
+    expect(account).toHaveTextContent("dana@example.com");
+
+    const readsBeforeSignOut = meReads;
+    await userEvent.click(account);
+    await userEvent.click(
+      await screen.findByRole("menuitem", { name: "Sign out" }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Sign in to trail" }),
+    ).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/sign-in");
+    // what sign-out wrote to the cache, not a fresh /me: the address is gone with the session
+    expect(meReads).toBe(readsBeforeSignOut);
+    expect(queryClient.getQueryData<MeView>(keys.me)).toMatchObject({
+      state: "anonymous",
+      login: null,
+      email: null,
+      actor: null,
+    });
   });
 
   test("Sign out from another page lands on plain sign-in, with no way back to it", async () => {

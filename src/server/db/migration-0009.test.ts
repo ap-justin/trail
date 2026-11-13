@@ -61,6 +61,8 @@ test("a database holding 0008 keys keeps every key, unscoped, and still authenti
     (before as object[]).map((r) => ({ ...r, actions: null })),
   );
   expect(rows(db, "select * from api_key_project")).toEqual([]);
+  // the server's queries name every current column, so they run on a file migrated to the end
+  migrate(db);
   expect(authenticateKey(db, live)).toMatchObject({
     id: "b1",
     displayName: "Tara",

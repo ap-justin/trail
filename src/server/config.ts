@@ -36,19 +36,44 @@ const serverSchema = databaseSchema
     BETTER_AUTH_URL: optional.pipe(z.url().optional()),
     GITHUB_CLIENT_ID: optional,
     GITHUB_CLIENT_SECRET: optional,
+    // the sign-in email's From, e.g. `trail <trail@mail.example.com>`, on a domain Resend has verified
+    EMAIL_FROM: optional,
+    RESEND_API_KEY: optional,
   })
-  .transform(({ GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, ...rest }) => ({
-    ...rest,
-    github: githubOAuth({
+  .transform(
+    ({
       GITHUB_CLIENT_ID,
       GITHUB_CLIENT_SECRET,
-      BETTER_AUTH_URL: rest.BETTER_AUTH_URL,
+      EMAIL_FROM,
+      RESEND_API_KEY,
+      ...rest
+    }) => ({
+      ...rest,
+      github: githubOAuth({
+        GITHUB_CLIENT_ID,
+        GITHUB_CLIENT_SECRET,
+        BETTER_AUTH_URL: rest.BETTER_AUTH_URL,
+      }),
+      email: emailSignIn({
+        EMAIL_FROM,
+        RESEND_API_KEY,
+        BETTER_AUTH_URL: rest.BETTER_AUTH_URL,
+      }),
     }),
-  }));
+  );
 
 export type GitHubOAuth =
   | { clientId: string; clientSecret: string }
   | { missing: string[] };
+
+export type EmailSignIn =
+  | { from: string; resendApiKey: string }
+  | { missing: string[] };
+
+const missingOf = (vars: Record<string, string | undefined>) =>
+  Object.entries(vars)
+    .filter(([, value]) => !value)
+    .map(([name]) => name);
 
 /** GitHub sign-in's credentials, or the variables it still needs. */
 function githubOAuth(
@@ -57,13 +82,28 @@ function githubOAuth(
     string | undefined
   >,
 ): GitHubOAuth {
-  const missing = Object.entries(vars)
-    .filter(([, value]) => !value)
-    .map(([name]) => name);
+  const missing = missingOf(vars);
   const { GITHUB_CLIENT_ID: clientId, GITHUB_CLIENT_SECRET: clientSecret } =
     vars;
   if (missing.length > 0 || !clientId || !clientSecret) return { missing };
   return { clientId, clientSecret };
+}
+
+/**
+ * Email sign-in's sender and Resend key, or the variables it still needs. It
+ * needs BETTER_AUTH_URL too: without it the link would be built from the
+ * request's Host, which a requester could point at their own server.
+ */
+function emailSignIn(
+  vars: Record<
+    "EMAIL_FROM" | "RESEND_API_KEY" | "BETTER_AUTH_URL",
+    string | undefined
+  >,
+): EmailSignIn {
+  const missing = missingOf(vars);
+  const { EMAIL_FROM: from, RESEND_API_KEY: resendApiKey } = vars;
+  if (missing.length > 0 || !from || !resendApiKey) return { missing };
+  return { from, resendApiKey };
 }
 
 export type DatabaseConfig = z.infer<typeof databaseSchema>;

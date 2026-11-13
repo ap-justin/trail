@@ -54,6 +54,25 @@ test("GitHub sign-in is on only with its credentials and BETTER_AUTH_URL", () =>
   });
 });
 
+const email = {
+  EMAIL_FROM: "trail <trail@mail.example>",
+  RESEND_API_KEY: "re_test",
+  BETTER_AUTH_URL: "https://trail.example",
+};
+
+test("email sign-in is on only with a sender, a Resend key and BETTER_AUTH_URL", () => {
+  expect(loadConfig({ ...required, ...email }).email).toEqual({
+    from: "trail <trail@mail.example>",
+    resendApiKey: "re_test",
+  });
+  expect(
+    loadConfig({ ...required, ...email, RESEND_API_KEY: "" }).email,
+  ).toEqual({ missing: ["RESEND_API_KEY"] });
+  expect(loadConfig(required).email).toEqual({
+    missing: ["EMAIL_FROM", "RESEND_API_KEY", "BETTER_AUTH_URL"],
+  });
+});
+
 test("the CLI and db:migrate need only the database path", () => {
   expect(loadDatabaseConfig({}).DATABASE_PATH).toBe("./data/trail.db");
 });

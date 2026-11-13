@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { browser } from "@/lib/browser";
-import { renderApp, serveFeed, signedInAs } from "@/test/app";
+import { meView, renderApp, serveFeed, signedInAs } from "@/test/app";
 import { installFakeEventSource } from "@/test/event-source";
 import { issue } from "@/test/fixtures";
 import { server } from "@/test/server";
@@ -232,5 +232,172 @@ describe("a member", () => {
     // the feed read is still in flight at the pathname change: wait for it to land (the
     // empty feed replaces the skeleton) so it cannot reach a later test's handlers
     await screen.findByRole("heading", { name: "No activity yet" });
+  });
+});
+
+describe("a sign-in link by email", () => {
+  const linkFails = (status: number, code: string, headers?: HeadersInit) =>
+    http.post("/api/auth/sign-in/magic-link", () =>
+      HttpResponse.json(
+        { error: { code, message: `trail says ${code}` } },
+        { status, headers },
+      ),
+    );
+
+  async function askForLink(address = "dana@example.com") {
+    await userEvent.type(
+      await screen.findByRole("textbox", { name: "Email" }),
+      address,
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Email me a sign-in link" }),
+    );
+  }
+
+  test("posts the address with a return to the feed, then says to check email", async () => {
+    signedInAs("anonymous");
+    const sent: unknown[] = [];
+    server.use(
+      http.post("/api/auth/sign-in/magic-link", async ({ request }) => {
+        sent.push(await request.json());
+        return HttpResponse.json({ status: true });
+      }),
+    );
+    renderApp("/sign-in");
+    await askForLink();
+    expect(await screen.findByText("Check your email")).toBeInTheDocument();
+    expect(sent).toEqual([{ email: "dana@example.com", callbackURL: "/" }]);
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Use a different address" }),
+    );
+    expect(screen.getByRole("textbox", { name: "Email" })).toHaveValue("");
+  });
+
+  test.each([
+    ["/projects/TRL?status=done", "/projects/TRL?status=done"],
+    ["//evil.example", "/"],
+    ["https://evil.example/", "/"],
+  ])(
+    "arriving with redirect %j asks for a link returning to %j",
+    async (target, callbackURL) => {
+      signedInAs("anonymous");
+      const sent: unknown[] = [];
+      server.use(
+        http.post("/api/auth/sign-in/magic-link", async ({ request }) => {
+          sent.push(await request.json());
+          return HttpResponse.json({ status: true });
+        }),
+      );
+      renderApp(`/sign-in?redirect=${encodeURIComponent(target)}`);
+      await askForLink();
+      await screen.findByText("Check your email");
+      expect(sent).toEqual([{ email: "dana@example.com", callbackURL }]);
+    },
+  );
+
+  test("400 invalid_email marks the field", async () => {
+    signedInAs("anonymous");
+    server.use(linkFails(400, "invalid_email"));
+    renderApp("/sign-in");
+    await askForLink();
+    const field = screen.getByRole("textbox", { name: "Email" });
+    await waitFor(() => expect(field).toHaveAttribute("aria-invalid", "true"));
+    expect(field).toHaveFocus();
+    expect(
+      screen.getByText("Enter an email address, like you@example.com."),
+    ).toBeInTheDocument();
+  });
+
+  test("429 rate_limited says how many minutes to wait from Retry-After, and the address stays", async () => {
+    signedInAs("anonymous");
+    server.use(linkFails(429, "rate_limited", { "retry-after": "540" }));
+    renderApp("/sign-in");
+    await askForLink();
+    expect(
+      await screen.findByText("Too many requests, try again in 9 minutes."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Email" })).toHaveValue(
+      "dana@example.com",
+    );
+    expect(screen.queryByText(/trail says/)).not.toBeInTheDocument();
+  });
+
+  test("503 sign_in_unavailable turns the form into the email-off line", async () => {
+    signedInAs("anonymous");
+    server.use(linkFails(503, "sign_in_unavailable"));
+    renderApp("/sign-in");
+    await askForLink();
+    expect(
+      await screen.findByText(
+        "Email sign-in isn't available right now. Only invited accounts can sign in.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  test("with email off on the server, there is no way to ask for a link; GitHub stays", async () => {
+    server.use(
+      http.get("/api/web/me", () =>
+        HttpResponse.json({ ...meView("anonymous"), emailSignIn: false }),
+      ),
+    );
+    renderApp("/sign-in");
+    expect(
+      await screen.findByText(
+        "Email sign-in isn't available right now. Only invited accounts can sign in.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Continue with GitHub" }),
+    ).toBeEnabled();
+  });
+
+  test("?error=INVALID_TOKEN shows that the link didn't work, not the generic failure", async () => {
+    signedInAs("anonymous");
+    renderApp("/sign-in?error=INVALID_TOKEN");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "That link didn't work",
+    );
+    expect(
+      screen.queryByText("Something went wrong on our side. Try again."),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Email" })).toBeInTheDocument();
+  });
+});
+
+describe("signed in by email with an address not on the list", () => {
+  const emailStranger = () =>
+    http.get("/api/web/me", () =>
+      HttpResponse.json({
+        ...meView("not_invited"),
+        login: null,
+        email: "dana@example.com",
+      }),
+    );
+
+  test("shows the address, and a different account signs out to sign-in without starting GitHub", async () => {
+    server.use(
+      emailStranger(),
+      http.post("/api/auth/sign-out", () => {
+        signedInAs("anonymous");
+        return HttpResponse.json({ success: true });
+      }),
+    );
+    // any POST to sign-in/social would fail the test as unanswered (test/setup.ts)
+    renderApp("/sign-in");
+    expect(
+      await screen.findByRole("heading", { name: "You're not invited yet" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("main")).toHaveTextContent(
+      "dana@example.com signed in by email, but that address isn't on the list.",
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Sign in with a different account" }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Sign in to trail" }),
+    ).toBeInTheDocument();
   });
 });

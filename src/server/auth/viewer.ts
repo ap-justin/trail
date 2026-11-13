@@ -12,10 +12,12 @@ export type Viewer =
   | { kind: "anonymous" }
   /** signed in with GitHub but neither the owner nor invited: no actor, no data */
   | { kind: "not_invited"; login: string }
+  /** signed in by email, but no email invite names the lowercased address */
+  | { kind: "not_invited"; login: null; email: string }
   | {
       kind: "member" | "owner";
-      /** lowercased GitHub login */
-      login: string;
+      /** lowercased GitHub login; null for a person let in by email, whose address is `actor.email` */
+      login: string | null;
       actor: HumanActor;
       /** the owner sees every project; a member, those its invite lists */
       projects: VisibleProject[];

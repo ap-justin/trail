@@ -207,6 +207,7 @@ export function issue(overrides: Partial<WebIssueView> = {}): WebIssueView {
 export const people: PersonView[] = [
   {
     username: "justinsalas",
+    email: null,
     owner: true,
     pending: false,
     name: "Justin Salas",
@@ -216,6 +217,7 @@ export const people: PersonView[] = [
   },
   {
     username: "mayachen",
+    email: null,
     owner: false,
     pending: false,
     name: "Maya Chen",
@@ -225,6 +227,7 @@ export const people: PersonView[] = [
   },
   {
     username: "kai-dev",
+    email: null,
     owner: false,
     pending: true,
     name: null,

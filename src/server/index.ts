@@ -20,6 +20,11 @@ if ("missing" in config.github) {
     `GitHub sign-in is off until ${config.github.missing.join(" and ")} is set; bots are unaffected`,
   );
 }
+if ("missing" in config.email) {
+  console.warn(
+    `Email sign-in is off until ${config.email.missing.join(" and ")} is set; GitHub sign-in is unaffected`,
+  );
+}
 const auth = createAuth({ db, config });
 // vite builds the SPA to dist/web, beside this module once bundled to dist/index.js;
 // under tsx this is src/server/index.ts, and `./web` there is the API's source

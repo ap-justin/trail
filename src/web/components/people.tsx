@@ -23,12 +23,18 @@ import {
 } from "@/components/ui/popover";
 import type { PersonView, WebProjectRefView } from "@/lib/api-types";
 import { cn } from "@/lib/utils";
+import { INVITEE_HINT, parseInvitee } from "../../shared/invitee";
 
+/** `username` is the server's field name; it holds a GitHub username or an email address. */
 export type Invite = { username: string; projectKeys: string[] };
+
+/** Why the last invite failed. `atField` marks a refusal of the entry itself, such as already invited. */
+export type InviteError = { message: string; atField: boolean };
 
 /** A save or remove on one person's row, reported at that row's control. */
 export type RowMutation = {
-  username: string;
+  /** The person's id, as `personId` gives it. */
+  id: string;
   action: "save" | "remove";
   pending: boolean;
   /** Why it failed, shown on the row; null when it didn't. */
@@ -42,36 +48,46 @@ export type PeopleViewProps = {
   /** Every project the owner can give access to. */
   projects: WebProjectRefView[];
   onRetry: () => void;
-  /** The username arrives lowercased, without the @; an empty project list is allowed. */
+  /** The entry arrives trimmed and lowercased, without a leading @; an empty project list is allowed. */
   onInvite: (invite: Invite) => void;
   invitePending: boolean;
-  /** Why the last invite failed, under the invite row; null when it didn't. */
-  inviteError: ReactNode;
-  onSaveProjects: (username: string, projectKeys: string[]) => void;
-  onRemove: (username: string) => void;
-  /** One entry per row with a save or remove in flight or just failed, matched by username. */
+  /** Why the last invite failed; null when it didn't. */
+  inviteError: InviteError | null;
+  /** Called with the person's id, as `personId` gives it. */
+  onSaveProjects: (id: string, projectKeys: string[]) => void;
+  onRemove: (id: string) => void;
+  /** One entry per row with a save or remove in flight or just failed, matched by id. */
   rowMutations: RowMutation[];
 };
 
-// GitHub's rule, as `githubUsername` in src/shared/schemas.ts: 1-39 of a-z, 0-9 and single inner hyphens
-const githubUsername = /^[a-z0-9](?:-?[a-z0-9]){0,38}$/;
-
-/** Trims, drops a leading @ and lowercases, then checks; returns the username or the message. */
-export function parseUsername(
-  raw: string,
-): { username: string } | { error: string } {
-  const username = raw.trim().replace(/^@/, "").toLowerCase();
-  if (!username) return { error: "Add a GitHub username." };
-  if (!githubUsername.test(username)) {
-    return {
-      error: "Use letters, digits and single hyphens, up to 39 characters.",
-    };
-  }
-  return { username };
+/**
+ * A GitHub username or an email address, as `parseInvitee` reads it, after dropping the
+ * @ someone may type before a username; null when it is neither.
+ */
+export function parseEntry(raw: string): string | null {
+  const invitee = parseInvitee(raw.trim().replace(/^@/, ""));
+  if (!invitee) return null;
+  return "email" in invitee ? invitee.email : invitee.username;
 }
 
-const displayName = (person: PersonView) =>
-  person.name ?? `@${person.username}`;
+/** The person's {username} in /people/{username}: the GitHub username, or the email of an email invite. */
+export const personId = (person: PersonView) =>
+  person.username ?? person.email ?? "";
+
+/** What stands for the person where they have no name: @username, or their email address. */
+const handleOf = (person: PersonView) =>
+  person.username === null ? (person.email ?? "") : `@${person.username}`;
+
+/** An address's part before the @, as initials: dana.okafor is DO, sam is SA. */
+function emailInitials(email: string): string {
+  const local = email.slice(0, email.indexOf("@"));
+  const words = local.split(/[._+-]+/).filter(Boolean);
+  const letters =
+    words.length > 1
+      ? `${words[0]?.[0] ?? ""}${words.at(-1)?.[0] ?? ""}`
+      : local.slice(0, 2);
+  return letters.toUpperCase() || "?";
+}
 
 function PersonAvatar({ person }: { person: PersonView }) {
   if (!person.pending) {
@@ -94,7 +110,7 @@ function PersonAvatar({ person }: { person: PersonView }) {
         avatarSizes.md,
       )}
     >
-      ?
+      {person.email === null ? "?" : emailInitials(person.email)}
     </span>
   );
 }
@@ -204,7 +220,7 @@ function InviteForm({
   projects: WebProjectRefView[];
   onInvite: (invite: Invite) => void;
   pending: boolean;
-  error: ReactNode;
+  error: InviteError | null;
 }) {
   const [username, setUsername] = useState("");
   const [projectKeys, setProjectKeys] = useState<string[]>([]);
@@ -233,24 +249,29 @@ function InviteForm({
     status: useId(),
   };
 
-  const check = (value: string) => {
-    const parsed = parseUsername(value);
-    return "error" in parsed ? parsed.error : null;
-  };
+  const check = (value: string) =>
+    parseEntry(value) === null ? INVITEE_HINT : null;
+  const answered = editedSinceInvite ? null : error;
+  // the server refused the entry itself, so the refusal sits at the field like the client's own
+  const refusal = answered?.atField ? answered.message : null;
+  const fieldError = usernameError ?? refusal;
+  useEffect(() => {
+    if (refusal) inputRef.current?.focus();
+  }, [refusal]);
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (pending) return;
     setSubmitted(true);
-    const parsed = parseUsername(username);
-    if ("error" in parsed) {
-      setUsernameError(parsed.error);
+    const entry = parseEntry(username);
+    if (entry === null) {
+      setUsernameError(INVITEE_HINT);
       inputRef.current?.focus();
       return;
     }
     setUsernameError(null);
     setEditedSinceInvite(false);
-    onInvite({ username: parsed.username, projectKeys });
+    onInvite({ username: entry, projectKeys });
   };
 
   return (
@@ -264,39 +285,31 @@ function InviteForm({
         Invite someone
       </h2>
       <div className="flex flex-col gap-2 lg:flex-row lg:items-start">
-        <div className="flex flex-col gap-1 lg:w-60">
+        <div className="flex flex-col gap-1 lg:w-80">
           <label htmlFor={ids.username} className="sr-only">
-            GitHub username
+            GitHub username or email
           </label>
-          <div className="relative">
-            <span
-              aria-hidden="true"
-              className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground"
-            >
-              @
-            </span>
-            <Input
-              id={ids.username}
-              ref={inputRef}
-              value={username}
-              autoComplete="off"
-              spellCheck={false}
-              onChange={(event) => {
-                const next = event.currentTarget.value;
-                setUsername(next);
-                setEditedSinceInvite(true);
-                if (submitted) setUsernameError(check(next));
-              }}
-              aria-invalid={usernameError ? true : undefined}
-              aria-describedby={
-                usernameError ? `${ids.error} ${ids.hint}` : ids.hint
-              }
-              className="pl-6 max-lg:h-10"
-            />
-          </div>
-          {usernameError && (
+          <Input
+            id={ids.username}
+            ref={inputRef}
+            value={username}
+            autoComplete="off"
+            spellCheck={false}
+            onChange={(event) => {
+              const next = event.currentTarget.value;
+              setUsername(next);
+              setEditedSinceInvite(true);
+              if (submitted) setUsernameError(check(next));
+            }}
+            aria-invalid={fieldError ? true : undefined}
+            aria-describedby={
+              fieldError ? `${ids.error} ${ids.hint}` : ids.hint
+            }
+            className="max-lg:h-10"
+          />
+          {fieldError && (
             <p id={ids.error} className="text-xs text-destructive">
-              {usernameError}
+              {fieldError}
             </p>
           )}
         </div>
@@ -315,10 +328,11 @@ function InviteForm({
         </Button>
       </div>
       <p id={ids.hint} className="text-xs text-muted-foreground">
-        They sign in with GitHub and see only the projects you pick.
+        GitHub invitees sign in with GitHub; email invitees get a sign-in link
+        by email. They see only the projects you pick.
       </p>
       <p id={ids.status} role="status" className="text-xs text-destructive">
-        {editedSinceInvite ? null : error}
+        {answered && !answered.atField ? answered.message : null}
       </p>
     </form>
   );
@@ -356,8 +370,8 @@ function PersonRow({
 }: {
   person: PersonView;
   projects: WebProjectRefView[];
-  onSaveProjects: (username: string, projectKeys: string[]) => void;
-  onRemove: (username: string) => void;
+  onSaveProjects: (id: string, projectKeys: string[]) => void;
+  onRemove: (id: string) => void;
   mutation: RowMutation | null;
 }) {
   const [mode, setMode] = useState<Mode>("view");
@@ -408,14 +422,14 @@ function PersonRow({
     else removeRef.current?.focus();
   }, [mode]);
 
-  const name = displayName(person);
-  const handle = `@${person.username}`;
+  const handle = handleOf(person);
+  const name = person.name ?? handle;
   const firstName = person.name?.split(/\s+/)[0] ?? handle;
   const editing = mode === "edit";
 
   return (
     <li
-      data-username={person.username}
+      data-person={personId(person)}
       className={cn(
         "flex flex-col gap-2 border-b px-4 py-3 lg:flex-row lg:flex-wrap lg:items-center lg:gap-3 lg:px-2",
         editing && "lg:my-1.5 lg:rounded-xl lg:border lg:bg-muted",
@@ -441,7 +455,9 @@ function PersonRow({
               "Invited · hasn't signed in"
             ) : (
               <>
-                {person.name && handle}
+                {person.name && (
+                  <span className="font-mono text-xs">{handle}</span>
+                )}
                 {person.owner && (
                   <span className="lg:hidden"> · All projects</span>
                 )}
@@ -463,7 +479,7 @@ function PersonRow({
             event.preventDefault();
             if (busy) return;
             setSent("save");
-            onSaveProjects(person.username, draft);
+            onSaveProjects(personId(person), draft);
           }}
         >
           <fieldset className="flex flex-col gap-1">
@@ -533,7 +549,7 @@ function PersonRow({
                 onClick={() => {
                   if (busy) return;
                   setSent("remove");
-                  onRemove(person.username);
+                  onRemove(personId(person));
                 }}
               >
                 {removing ? "Removing…" : "Remove"}
@@ -579,7 +595,7 @@ function PersonRow({
 }
 
 /**
- * The owner's People page: invite by GitHub username with the projects they may see,
+ * The owner's People page: invite by GitHub username or email with the projects they may see,
  * then everyone with access. The owner's row has no actions.
  */
 export function PeopleView(props: PeopleViewProps) {
@@ -592,14 +608,14 @@ export function PeopleView(props: PeopleViewProps) {
     shownPeople.current = props.people;
     // a removed row took its focused Remove button with it; anything else keeps focus where it is
     if (document.activeElement !== document.body) return;
-    const now = new Set(props.people.map((p) => p.username));
-    const goneAt = before.findIndex((p) => !now.has(p.username));
+    const now = new Set(props.people.map(personId));
+    const goneAt = before.findIndex((p) => !now.has(personId(p)));
     if (goneAt === -1) return;
-    const next = before.slice(goneAt + 1).find((p) => now.has(p.username));
+    const next = before.slice(goneAt + 1).find((p) => now.has(personId(p)));
     const nextEdit =
       next &&
       listRef.current?.querySelector<HTMLButtonElement>(
-        `[data-username="${next.username}"] [data-row-action="edit"]`,
+        `[data-person="${personId(next)}"] [data-row-action="edit"]`,
       );
     (nextEdit ?? headingRef.current)?.focus();
   }, [props.people]);
@@ -641,14 +657,14 @@ export function PeopleView(props: PeopleViewProps) {
           <ul ref={listRef} className="border-t">
             {props.people.map((person) => (
               <PersonRow
-                key={person.username}
+                key={personId(person)}
                 person={person}
                 projects={props.projects}
                 onSaveProjects={props.onSaveProjects}
                 onRemove={props.onRemove}
                 mutation={
                   props.rowMutations.find(
-                    (write) => write.username === person.username,
+                    (write) => write.id === personId(person),
                   ) ?? null
                 }
               />

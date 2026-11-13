@@ -42,9 +42,16 @@ export const avatarSizes = {
   lg: "size-9 text-xs",
 } as const;
 
-/** Bots: first letter. People: first and last initials. */
+/**
+ * Bots: first letter. People: first and last initials, with dots and underscores
+ * splitting words too: a person who signs in by email is named for the part of their
+ * address before the @ (`syncEmailActor` in src/server/auth/identity.ts), so dana.okafor is DO.
+ */
 function initials(actor: Pick<WebActorView, "name" | "kind">): string {
-  const words = actor.name.trim().split(/\s+/).filter(Boolean);
+  const words = actor.name
+    .trim()
+    .split(/[\s._]+/)
+    .filter(Boolean);
   const first = words[0]?.[0] ?? "?";
   if (actor.kind === "bot" || words.length < 2) return first.toUpperCase();
   return `${first}${words.at(-1)?.[0] ?? ""}`.toUpperCase();
