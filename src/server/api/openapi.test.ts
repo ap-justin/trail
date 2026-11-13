@@ -113,6 +113,7 @@ test("the spec lists the error statuses each operation can return", async () => 
     "PUT /webhooks/{id}/secret": withForbidden(withNotFound(write("200"))),
     "POST /webhooks/{id}/ping": [
       ...withForbidden(withNotFound(list)),
+      "415",
       "429",
     ].sort(),
   });

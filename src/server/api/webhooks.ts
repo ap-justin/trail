@@ -160,6 +160,10 @@ const pingWebhook = createRoute({
         },
       },
     },
+    415: jsonContent(
+      errorSchema,
+      "A body was sent that is not application/json; the ping takes none, and an empty body of any type is fine",
+    ),
     ...readErrors,
     ...notFoundError,
   },

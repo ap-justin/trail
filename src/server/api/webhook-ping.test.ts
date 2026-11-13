@@ -109,7 +109,7 @@ test("the limiter forgets a ping after the window and forgets idle webhooks", ()
   expect(limiter.take("w")).toBe(1);
   clock += 1_000;
   expect(limiter.take("w")).toBeNull();
-  // the one slot taken is the next to free, a second after the earlier ones
+  // the take just above recorded a ping; the oldest left in the window is the second one, so a slot frees in 1 second
   expect(limiter.take("w")).toBe(1);
   clock += 120_000;
   for (let i = 0; i < PING_LIMIT; i++) expect(limiter.take("w")).toBeNull();

@@ -105,20 +105,29 @@ test.each([
   expect(res.status).toBe(201);
 });
 
-test("a write with no body and no Content-Type still works, and reads and deletes are untouched", async () => {
+test("a write with no body still works whatever its Content-Type, and reads and deletes are untouched", async () => {
   const id = await newWebhook();
   expect((await send("POST", `/webhooks/${id}/ping`, {})).status).toBe(200);
   expect((await send("GET", `/webhooks/${id}`, {})).status).toBe(200);
   expect((await send("DELETE", `/webhooks/${id}`, {})).status).toBe(200);
-  // a form type on a write that takes no body is still a refusal of the type
+  // with nothing to read, the type is not looked at; a body of the same type is refused
   const other = await newWebhook();
-  expect(
-    (
-      await send("POST", `/webhooks/${other}/ping`, {
-        type: "application/x-www-form-urlencoded",
-      })
-    ).status,
-  ).toBe(415);
+  for (const type of ["application/x-www-form-urlencoded", "text/plain", ""]) {
+    expect(
+      (await send("POST", `/webhooks/${other}/ping`, { type })).status,
+      type,
+    ).toBe(200);
+  }
+  const empty = await send("POST", `/webhooks/${other}/ping`, {
+    type: "text/plain",
+    body: "",
+  });
+  expect(empty.status).toBe(200);
+  const withBody = await send("POST", `/webhooks/${other}/ping`, {
+    type: "application/x-www-form-urlencoded",
+    body: "a=b",
+  });
+  expect(withBody.status).toBe(415);
 });
 
 test("the photo upload keeps taking raw bytes, of any type", async () => {

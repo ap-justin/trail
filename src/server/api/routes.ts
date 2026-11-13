@@ -29,8 +29,8 @@ const jsonType = /^\s*application\/json\s*(;|$)/i;
 /**
  * Refuses a write whose body isn't declared application/json with a 415: a
  * form or text body would otherwise read as an empty one and a write could
- * succeed having changed nothing. A write with no body and no Content-Type
- * (a ping, a delete) passes. The photo upload takes raw bytes and is exempt.
+ * succeed having changed nothing. A write with no body (a ping, a delete)
+ * passes whatever its Content-Type says, since nothing is read. The photo upload takes raw bytes and is exempt.
  */
 export const jsonBodiesOnly = createMiddleware(async (c, next) => {
   const method = c.req.method;
@@ -44,7 +44,7 @@ export const jsonBodiesOnly = createMiddleware(async (c, next) => {
   const hasBody =
     c.req.header("transfer-encoding") !== undefined ||
     !["", "0"].includes(c.req.header("content-length") ?? "");
-  if (type === undefined ? hasBody : !jsonType.test(type)) {
+  if (hasBody && (type === undefined || !jsonType.test(type))) {
     return errorResponse(
       c,
       415,
