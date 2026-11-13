@@ -3,6 +3,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { afterAll, beforeEach, expect, test } from "vitest";
 import { webhookSubscription } from "../db/schema.js";
 import { createBot, createKey } from "../service/keys.js";
+import { PING_LIMIT, PING_WINDOW_MS } from "../service/webhooks.js";
 import { setupTestApp } from "../test-app.js";
 
 const sent: string[] = [];
@@ -202,6 +203,9 @@ test("the tool descriptions walk a bot through hooking up an OpenBot routine", a
   expect(create).toContain("Never paste the secret into chat");
   expect(create).toContain("test_webhook");
   expect(create).toContain("x-openbot-signature");
+  expect(tools.find((t) => t.name === "test_webhook")?.description).toContain(
+    `${PING_LIMIT} tests per ${PING_WINDOW_MS / 1000} seconds`,
+  );
   for (const name of ["create_webhook", "rotate_webhook_secret"]) {
     const tool = tools.find((t) => t.name === name);
     expect(JSON.stringify(tool?.inputSchema)).toContain("never");

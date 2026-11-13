@@ -83,16 +83,32 @@ test("the history before 0011 is untouched and the foreign keys hold", () => {
   expect(rows(db, "pragma foreign_key_check")).toEqual([]);
 });
 
-test("the four webhook tables exist, strict, and start empty", () => {
-  for (const table of [
-    "webhook_subscription",
-    "webhook_subscription_project",
-    "webhook_delivery",
-  ]) {
-    expect(rows(db, `select count(*) as n from ${table}`)).toEqual([{ n: 0 }]);
+const webhookTables = [
+  "webhook_subscription",
+  "webhook_subscription_project",
+  "webhook_delivery",
+];
+
+test("the three webhook tables are strict", () => {
+  for (const table of webhookTables) {
     expect(
       rows(db, "select strict from pragma_table_list where name = ?", table),
     ).toEqual([{ strict: 1 }]);
+  }
+});
+
+// its own database: the shared one has rows from the other tests by the time this runs
+test("the three webhook tables start empty", () => {
+  const fresh = openDatabase(join(dir, "empty.db"));
+  try {
+    migrate(fresh, through(11));
+    for (const table of webhookTables) {
+      expect(rows(fresh, `select count(*) as n from ${table}`), table).toEqual([
+        { n: 0 },
+      ]);
+    }
+  } finally {
+    fresh.$client.close();
   }
 });
 

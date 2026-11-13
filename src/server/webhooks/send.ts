@@ -10,11 +10,13 @@ export type Transport = (call: {
   headers: Record<string, string>;
   body: string;
   signal?: AbortSignal;
+  /** fails the connect with ETIMEDOUT past this; unset, only `signal` bounds it */
+  connectTimeoutMs?: number;
 }) => Promise<{ status: number }>;
 
 /** The whole attempt, connect to response head, not an idle gap: a receiver that drips bytes still runs out. */
 export const SEND_TIMEOUT_MS = 10_000;
-/** How long a connection may take to open before the other address family is tried. */
+/** How long a connection may take to open before the other address family is tried; a lone address gets the whole deadline. */
 export const CONNECT_TIMEOUT_MS = 3_000;
 
 // a connection that never opened: nothing was sent, so another address can be tried
@@ -40,6 +42,7 @@ export const httpsTransport: Transport = ({
   headers,
   body,
   signal,
+  connectTimeoutMs,
 }) =>
   new Promise((resolve, reject) => {
     const hostname = url.hostname.replace(/^\[|\]$/g, "");
@@ -64,9 +67,9 @@ export const httpsTransport: Transport = ({
       },
     );
     req.on("error", reject);
-    // a host that drops packets would hold the attempt to its whole deadline
+    // a first address that drops packets would otherwise spend the whole deadline before the fallback is tried
     req.on("socket", (socket) => {
-      if (!socket.connecting) return;
+      if (connectTimeoutMs === undefined || !socket.connecting) return;
       const timer = setTimeout(
         () =>
           req.destroy(
@@ -74,7 +77,7 @@ export const httpsTransport: Transport = ({
               code: "ETIMEDOUT",
             }),
           ),
-        CONNECT_TIMEOUT_MS,
+        connectTimeoutMs,
       );
       timer.unref();
       socket.once("connect", () => clearTimeout(timer));
@@ -154,15 +157,17 @@ export async function sendWebhook(
     });
     deadline = deps.deadline();
     const give = signal ? AbortSignal.any([signal, deadline]) : deadline;
-    const post = (to: string) =>
+    const post = (to: string, connectTimeoutMs?: number) =>
       deps.transport({
         url,
         address: to,
         headers,
         body: call.body,
         signal: give,
+        connectTimeoutMs,
       });
-    const { status } = await post(address).catch((error) => {
+    const firstCap = fallback === undefined ? undefined : CONNECT_TIMEOUT_MS;
+    const { status } = await post(address, firstCap).catch((error) => {
       // a host whose first address is unreachable (an IPv6 route that isn't there) may still answer on the other family
       if (fallback === undefined || !failedToConnect(error) || give.aborted) {
         throw error;

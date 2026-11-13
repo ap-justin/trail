@@ -1,4 +1,5 @@
 import { and, asc, eq, inArray, isNull, lt, type SQL, sql } from "drizzle-orm";
+import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { WEBHOOK_PAUSE_AFTER } from "../../shared/schemas.js";
 import type { Db } from "../db/client.js";
 import {
@@ -86,12 +87,15 @@ export function purgeQueries(
   keep: { deliveredMs: number; failedMs: number },
   limit: number,
 ) {
-  // the status as a literal, so the planner matches the partial indexes
-  const ids = (where: SQL | undefined) =>
+  // the status as a literal, so the planner matches the partial indexes; ordered
+  // by the indexed age, oldest first, or statistics that see mostly old rows
+  // turn the LIMIT into a table scan under the write lock
+  const ids = (where: SQL | undefined, age: SQLiteColumn) =>
     db
       .select({ id: webhookDelivery.id })
       .from(webhookDelivery)
       .where(where)
+      .orderBy(asc(age))
       .limit(limit);
   return [
     ids(
@@ -99,12 +103,14 @@ export function purgeQueries(
         sql`${webhookDelivery.status} = 'delivered'`,
         lt(webhookDelivery.deliveredAt, new Date(now - keep.deliveredMs)),
       ),
+      webhookDelivery.deliveredAt,
     ),
     ids(
       and(
         sql`${webhookDelivery.status} = 'failed'`,
         lt(webhookDelivery.createdAt, new Date(now - keep.failedMs)),
       ),
+      webhookDelivery.createdAt,
     ),
   ].map((rows) =>
     db.delete(webhookDelivery).where(inArray(webhookDelivery.id, rows)),
@@ -394,19 +400,24 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
    * database or the event loop. Never rejects.
    */
   function purge(): Promise<void> {
-    purging ??= (async () => {
-      try {
-        while (!abort.signal.aborted) {
-          if (purgeBatch(db, settings.now(), keep, batch) < batch) break;
-          await new Promise((done) => setImmediate(done));
-        }
-      } catch (error) {
-        console.error("webhook purge failed", error);
-      } finally {
-        purging = null;
+    if (purging) return purging;
+    // .finally runs a microtask later, so it clears after the assignment even when the pass never awaits
+    const pass = purgePass().finally(() => {
+      purging = null;
+    });
+    purging = pass;
+    return pass;
+  }
+
+  async function purgePass() {
+    try {
+      while (!abort.signal.aborted) {
+        if (purgeBatch(db, settings.now(), keep, batch) < batch) break;
+        await new Promise((done) => setImmediate(done));
       }
-    })();
-    return purging;
+    } catch (error) {
+      console.error("webhook purge failed", error);
+    }
   }
 
   return {

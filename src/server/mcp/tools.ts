@@ -45,6 +45,7 @@ import {
   PHOTO_MAX_BYTES,
   photoTooLarge,
 } from "../service/photos.js";
+import { PING_LIMIT, PING_WINDOW_MS } from "../service/webhooks.js";
 import { WEBHOOK_DELIVERY, WEBHOOK_SETUP } from "../webhooks/docs.js";
 
 const projectId = z
@@ -560,7 +561,7 @@ export function registerTools(
   server.registerTool(
     "test_webhook",
     {
-      description: `Send one signed trail.ping to a webhook now and see what its receiver answered: delivered, the HTTP status, and an error when it failed. Run it after create_webhook to check your OpenBot routine accepts the signature, and after a pause before you update the webhook. A webhook takes 5 tests per minute; a sixth is refused as rate_limited with the seconds to wait. Needs the read action. ${ownWebhooks}`,
+      description: `Send one signed trail.ping to a webhook now and see what its receiver answered: delivered, the HTTP status, and an error when it failed. Run it after create_webhook to check your OpenBot routine accepts the signature, and after a pause before you update the webhook. A webhook takes ${PING_LIMIT} tests per ${PING_WINDOW_MS / 1000} seconds; past that a test is refused as rate_limited with the seconds to wait. Needs the read action. ${ownWebhooks}`,
       inputSchema: z.strictObject({ webhookId }),
       annotations: { ...create, openWorldHint: true },
     },

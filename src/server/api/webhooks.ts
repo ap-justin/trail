@@ -147,10 +147,19 @@ const pingWebhook = createRoute({
   responses: {
     200: jsonContent(webhookTestResultSchema, "What the receiver answered"),
     ...forbiddenError("read"),
-    429: jsonContent(
-      errorSchema,
-      "The webhook was pinged too often; wait the seconds in the Retry-After header (code rate_limited)",
-    ),
+    429: {
+      ...jsonContent(
+        errorSchema,
+        "The webhook was pinged too often; wait the seconds in the Retry-After header (code rate_limited)",
+      ),
+      headers: {
+        "Retry-After": {
+          description: "Seconds until the webhook takes another ping",
+          required: true,
+          schema: { type: "integer", minimum: 1 },
+        },
+      },
+    },
     ...readErrors,
     ...notFoundError,
   },

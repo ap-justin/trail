@@ -3,7 +3,12 @@ import { createServer, globalAgent, type Server } from "node:https";
 import { type AddressInfo, createServer as createNetServer } from "node:net";
 import type { TLSSocket } from "node:tls";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
-import { defaultSendDeps, httpsTransport, sendWebhook } from "./send.js";
+import {
+  CONNECT_TIMEOUT_MS,
+  defaultSendDeps,
+  httpsTransport,
+  sendWebhook,
+} from "./send.js";
 import { TEST_TLS_CERT, TEST_TLS_KEY } from "./test-tls.js";
 
 // The real transport against a TLS server on the loopback. The vetted address
@@ -359,6 +364,70 @@ describe("sendWebhook's fallback to the other address family", () => {
     expect(result).toMatchObject({ ok: false, retryable: true });
     expect(tried).toEqual([V6, V4]);
   });
+
+  test("only an address with another to fall back to gets the short connect cap", async () => {
+    const capped: [string, number | undefined][] = [];
+    const deps = (addresses: string[]) => ({
+      ...defaultSendDeps,
+      resolve: async () => addresses,
+      transport: async (c: Parameters<typeof httpsTransport>[0]) => {
+        capped.push([c.address, c.connectTimeoutMs]);
+        if (c.address === V6) throw refused;
+        return { status: 200 };
+      },
+    });
+    const call = {
+      url: "https://bot.example.com/hook",
+      secret: "s",
+      deliveryId: "d",
+      body: "{}",
+    };
+    await sendWebhook(deps([V6, V4]), call);
+    // the fallback is the last address left, so like a lone one it has the whole deadline to connect
+    expect(capped).toEqual([
+      [V6, CONNECT_TIMEOUT_MS],
+      [V4, undefined],
+    ]);
+    capped.length = 0;
+    await sendWebhook(deps([V4]), call);
+    expect(capped).toEqual([[V4, undefined]]);
+  });
+
+  test.each([
+    ["a shutdown", "shutdown"],
+    ["the attempt's deadline", "deadline"],
+  ] as const)(
+    "%s between the first failure and the fallback connects to nothing more",
+    async (_, cause) => {
+      tried.length = 0;
+      const shutdown = new AbortController();
+      const deadline = new AbortController();
+      const stop = cause === "shutdown" ? shutdown : deadline;
+      const result = await sendWebhook(
+        {
+          ...defaultSendDeps,
+          resolve: async () => [V6, V4],
+          deadline: () => deadline.signal,
+          transport: async ({ address }) => {
+            tried.push(address);
+            stop.abort();
+            throw Object.assign(new Error("connect ETIMEDOUT"), {
+              code: "ETIMEDOUT",
+            });
+          },
+        },
+        {
+          url: "https://bot.example.com/hook",
+          secret: "s",
+          deliveryId: "d",
+          body: "{}",
+        },
+        shutdown.signal,
+      );
+      expect(tried).toEqual([V6]);
+      expect(result).toMatchObject({ ok: false, retryable: true });
+    },
+  );
 
   test("an address of either family inside a private range refuses the whole host before any connection", async () => {
     for (const addresses of [

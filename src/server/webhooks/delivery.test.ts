@@ -1,4 +1,5 @@
 import { createHmac } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
 import {
   createServer,
   request as httpRequest,
@@ -6,8 +7,11 @@ import {
   type Server,
 } from "node:http";
 import { type AddressInfo, createServer as createTcpServer } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, expect, test, vi } from "vitest";
+import { migrate, openDatabase } from "../db/client.js";
 import { webhookDelivery, webhookSubscription } from "../db/schema.js";
 import { isPending, unfollowedDeliveries } from "../service/webhooks.js";
 import { projectKey, setupTestApp, testWebhookSettings } from "../test-app.js";
@@ -1432,5 +1436,109 @@ test("the retention deletes read only the finished rows past their keep time", a
       plan.some((s) => /SCAN webhook_delivery( |$)/.test(s)),
       plan.join("\n"),
     ).toBe(false);
+  }
+});
+
+const DAY = 24 * HOUR;
+/** Queues `count` deliveries, then marks every delivery in the table delivered `daysAgo` days ago. */
+async function deliveredRows(count: number, daysAgo: number) {
+  const key = await newProject();
+  await subscribe([key], `https://bot.example.com/aged-${key}`);
+  for (let i = 0; i < count; i++) {
+    await api("POST", "/issues", { projectId: key, title: `aged ${i}` });
+  }
+  db.update(webhookDelivery)
+    .set({
+      status: "delivered",
+      deliveredAt: new Date(clock - daysAgo * DAY),
+    })
+    .run();
+}
+
+test("every purge pass deletes, not just the first", async () => {
+  reset();
+  await deliveredRows(1, 8);
+  const w = worker({ deliveredKeepMs: 7 * DAY, purgeBatch: 500 });
+  // fewer old rows than a batch: the pass finishes without a macrotask turn
+  await w.purge();
+  expect(rows()).toHaveLength(0);
+
+  await deliveredRows(2, 8);
+  await w.purge();
+  expect(rows()).toHaveLength(0);
+});
+
+test("start() purges on its timer and stop() waits for the pass in flight", async () => {
+  reset();
+  const w = worker({ deliveredKeepMs: 7 * DAY, purgeMs: 10, purgeBatch: 1 });
+  w.start();
+  try {
+    // rows that age out after start's own pass: only the timer can take them
+    await sleep(30);
+    await deliveredRows(3, 8);
+    for (let i = 0; i < 100 && rows().length > 0; i++) await sleep(10);
+    expect(rows()).toHaveLength(0);
+
+    await deliveredRows(3, 8);
+    let settled = false;
+    void w.purge().then(() => {
+      settled = true;
+    });
+    await w.stop();
+    expect(settled).toBe(true);
+  } finally {
+    await w.stop();
+  }
+});
+
+test("one purge() empties a backlog many batches deep", async () => {
+  reset();
+  await deliveredRows(23, 8);
+  const w = worker({ deliveredKeepMs: 7 * DAY, purgeBatch: 4 });
+  await w.purge();
+  expect(rows()).toHaveLength(0);
+});
+
+test("the retention deletes keep to the age indexes when most finished rows are old", () => {
+  // its own file: statistics that see a table of mostly old finished rows, as a
+  // server's boot-time ANALYZE does once retention falls behind
+  const dir = mkdtempSync(join(tmpdir(), "trail-purge-plan-"));
+  const scratch = openDatabase(join(dir, "trail.db"));
+  try {
+    migrate(scratch);
+    const sqlite = scratch.$client;
+    sqlite.pragma("foreign_keys = OFF");
+    const old = clock - 60 * DAY;
+    sqlite
+      .prepare(
+        `with recursive n(i) as (select 1 union all select i + 1 from n where i < 10000)
+         insert into webhook_delivery (id, subscription_id, event_id, seq, type, status, body, next_attempt_at, created_at, delivered_at)
+         select 'd' || i, 's' || (i % 10), 'e' || i, i, 'issue.created',
+           case when i % 10 = 0 then 'pending' when i % 10 = 1 then 'failed' else 'delivered' end,
+           case when i % 10 = 0 then 'body' end,
+           @old, @old + i, case when i % 10 > 1 then @old + i end
+         from n`,
+      )
+      .run({ old });
+    sqlite.exec("analyze");
+    const keep = { deliveredMs: 7 * DAY, failedMs: 30 * DAY };
+    const plans = purgeQueries(scratch, clock, keep, 500).map((query) =>
+      sqlite
+        .prepare(`explain query plan ${query.toSQL().sql}`)
+        .all(...query.toSQL().params)
+        .map((step) => (step as { detail: string }).detail),
+    );
+    const [delivered = [], failed = []] = plans;
+    expect(
+      delivered.some((s) => s.includes("webhook_delivery_delivered_idx")),
+      delivered.join("\n"),
+    ).toBe(true);
+    expect(
+      failed.some((s) => s.includes("webhook_delivery_failed_idx")),
+      failed.join("\n"),
+    ).toBe(true);
+  } finally {
+    scratch.$client.close();
+    rmSync(dir, { recursive: true, force: true });
   }
 });

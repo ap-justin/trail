@@ -1,7 +1,11 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { afterAll, expect, test } from "vitest";
-import { createPingLimiter, PING_LIMIT } from "../service/webhooks.js";
+import {
+  createPingLimiter,
+  PING_LIMIT,
+  PING_WINDOW_MS,
+} from "../service/webhooks.js";
 import { setupTestApp } from "../test-app.js";
 
 const draining = new AbortController();
@@ -112,6 +116,23 @@ test("the limiter forgets a ping after the window and forgets idle webhooks", ()
   expect(limiter.take("w")).not.toBeNull();
 });
 
+test("a webhook still inside its window keeps its limit when the idle sweep runs", () => {
+  let clock = 0;
+  const limiter = createPingLimiter(() => clock);
+  limiter.take("busy");
+  for (let i = 0; i < 1000; i++) limiter.take(`idle-${i}`);
+  clock = 30_000;
+  for (let i = 0; i < PING_LIMIT - 1; i++) limiter.take("busy");
+  // the first busy ping is now 61 seconds old, the other four 31; every idle webhook has gone quiet
+  clock = 61_000;
+  // 1002 webhooks are tracked, so this ping sweeps
+  expect(limiter.take("trigger")).toBeNull();
+  expect(limiter.take("busy")).toBeNull();
+  expect(limiter.take("busy")).toBe(
+    Math.ceil((30_000 + PING_WINDOW_MS - clock) / 1000),
+  );
+});
+
 test("a shutdown cuts a ping in flight, and the answer says why", async () => {
   const id = await newWebhook("shutdown");
   hold = Promise.resolve();
@@ -128,4 +149,36 @@ test("a shutdown cuts a ping in flight, and the answer says why", async () => {
     status: null,
     error: "trail is shutting down: test again in a minute",
   });
+});
+
+test("a ping that arrives after shutdown began is never sent, and the answer says why", async () => {
+  const aborted = new AbortController();
+  aborted.abort();
+  let sent = 0;
+  const late = setupTestApp({
+    webhooks: {
+      signal: aborted.signal,
+      transport: async () => {
+        sent++;
+        return { status: 200 };
+      },
+    },
+  });
+  const lateProject = late.addProject("late");
+  const created = await late.request("POST", "/api/v1/webhooks", {
+    json: {
+      url: "https://bot.example.com/late",
+      secret: "whsec_ping_0123456789abcdef",
+      projects: [lateProject.key],
+    },
+  });
+  const id = ((await created.json()) as Body).id as string;
+  const res = await late.request("POST", `/api/v1/webhooks/${id}/ping`);
+  expect(res.status).toBe(200);
+  expect(await res.json()).toEqual({
+    delivered: false,
+    status: null,
+    error: "trail is shutting down: test again in a minute",
+  });
+  expect(sent).toBe(0);
 });
