@@ -1888,6 +1888,17 @@ export function createService({
       const refuseAtLimit = (from: Db | Tx) => {
         const count = countOwn(from, actor.id);
         if (count >= WEBHOOKS_PER_BOT_MAX) {
+          // a count or advice about webhooks this key can't see would describe them
+          const own = from
+            .select()
+            .from(webhookSubscription)
+            .where(eq(webhookSubscription.actorId, actor.id))
+            .all();
+          if (!webhooksOf(from, own).every((w) => withinScope(actor, w))) {
+            throw new ConflictError(
+              `this bot has reached its limit of ${WEBHOOKS_PER_BOT_MAX} webhooks, and this key can't manage all of them: a key that reaches every project the bot follows can delete one to make room`,
+            );
+          }
           throw new ConflictError(
             `this bot already has ${count} webhooks, the most allowed: delete one you no longer use, or add the project to one you have with update_webhook`,
           );

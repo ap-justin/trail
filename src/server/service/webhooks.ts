@@ -132,6 +132,30 @@ export function insertSubscription(
 }
 
 /**
+ * 'pending' as SQL text, not a bound parameter: the planner matches the partial
+ * index on pending deliveries only when it sees the literal.
+ */
+export const isPending = sql`${webhookDelivery.status} = 'pending'`;
+
+/** The subscription's pending deliveries whose event is in none of `projectIds`. */
+export const unfollowedDeliveries = (
+  tx: Tx | Db,
+  subscriptionId: string,
+  projectIds: string[],
+) =>
+  tx
+    .select({ id: webhookDelivery.id })
+    .from(webhookDelivery)
+    .innerJoin(activityEvent, eq(activityEvent.id, webhookDelivery.eventId))
+    .where(
+      and(
+        eq(webhookDelivery.subscriptionId, subscriptionId),
+        isPending,
+        notInArray(activityEvent.projectId, projectIds),
+      ),
+    );
+
+/**
  * Replaces the projects a subscription follows. Its pending deliveries for a
  * project it no longer follows go with them, since the worker never re-checks
  * following; sent and failed ones stay as history. A project followed again
@@ -148,19 +172,13 @@ export function setProjects(
   tx.insert(webhookSubscriptionProject)
     .values(projectIds.map((projectId) => ({ subscriptionId, projectId })))
     .run();
-  const unfollowed = tx
-    .select({ id: webhookDelivery.id })
-    .from(webhookDelivery)
-    .innerJoin(activityEvent, eq(activityEvent.id, webhookDelivery.eventId))
-    .where(
-      and(
-        eq(webhookDelivery.subscriptionId, subscriptionId),
-        eq(webhookDelivery.status, "pending"),
-        notInArray(activityEvent.projectId, projectIds),
-      ),
-    );
   tx.delete(webhookDelivery)
-    .where(inArray(webhookDelivery.id, unfollowed))
+    .where(
+      inArray(
+        webhookDelivery.id,
+        unfollowedDeliveries(tx, subscriptionId, projectIds),
+      ),
+    )
     .run();
 }
 
@@ -189,12 +207,7 @@ export function resume(tx: Tx, subscriptionId: string, now: number) {
       nextAttemptAt: new Date(now),
       createdAt: sql`${webhookDelivery.createdAt} + ${waitedThrough}`,
     })
-    .where(
-      and(
-        eq(webhookDelivery.subscriptionId, subscriptionId),
-        eq(webhookDelivery.status, "pending"),
-      ),
-    )
+    .where(and(eq(webhookDelivery.subscriptionId, subscriptionId), isPending))
     .run();
 }
 

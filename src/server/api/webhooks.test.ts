@@ -269,6 +269,7 @@ test("the same URL twice is a 409 naming the first", async () => {
   const first = await create({ url: "https://bot.example.com/dup" });
   const again = await create({ url: "https://bot.example.com/dup" });
   expect(again.status).toBe(409);
+  expect(again.body.error.code).toBe("conflict");
   expect(again.body.error.message).toContain(first.body.id);
 });
 
@@ -279,6 +280,7 @@ test("moving a webhook onto another of the bot's URLs is a 409 naming it; its ow
     json: { url: "https://bot.example.com/one" },
   });
   expect(onto.status).toBe(409);
+  expect(onto.body.error.code).toBe("conflict");
   expect(onto.body.error.message).toContain(first);
   // the host is case-insensitive, so this is the same URL
   const shouted = await call("PATCH", `/webhooks/${second}`, {
@@ -693,5 +695,36 @@ test("a create that collides with a webhook this key can't manage doesn't name i
     key: narrow,
   });
   expect(moved.status).toBe(409);
+  expect(moved.body.error.code).toBe("conflict");
   expect(moved.text).not.toContain(wide.body.id);
+});
+
+test("at the limit, a key that can't manage every webhook gets a message with no count of the hidden ones", async () => {
+  const hoarder = createBot(db, "hoarder");
+  for (let i = 0; i < 20; i++) {
+    // the last five follow a project the narrow key can't reach
+    const made = await create(
+      {
+        url: `https://bot.example.com/hoard/${i}`,
+        projects: [i < 15 ? a.key : b.key],
+      },
+      hoarder.key,
+    );
+    expect(made.status).toBe(201);
+  }
+  const narrow = createKey(db, hoarder.actor.id, { projects: [a.key] }).key;
+  const over = await create({ url: "https://bot.example.com/hoard/x" }, narrow);
+  expect(over.status).toBe(409);
+  expect(over.body.error.code).toBe("conflict");
+  expect(over.body.error.message).toContain("can't manage all of them");
+  expect(over.body.error.message).not.toMatch(/already has \d+/);
+  expect(over.body.error.message).not.toContain("update_webhook");
+  // the key that sees them all keeps the count and the advice
+  const full = await create(
+    { url: "https://bot.example.com/hoard/y" },
+    hoarder.key,
+  );
+  expect(full.status).toBe(409);
+  expect(full.body.error.code).toBe("conflict");
+  expect(full.body.error.message).toContain("20 webhooks");
 });

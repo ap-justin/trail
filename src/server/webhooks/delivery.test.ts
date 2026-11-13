@@ -6,13 +6,19 @@ import {
   type Server,
 } from "node:http";
 import { type AddressInfo, createServer as createTcpServer } from "node:net";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import { webhookDelivery, webhookSubscription } from "../db/schema.js";
+import { isPending, unfollowedDeliveries } from "../service/webhooks.js";
 import { projectKey, setupTestApp, testWebhookSettings } from "../test-app.js";
 import { deriveSecretKey, sealSecret } from "./secret.js";
 import { sendWebhook, type Transport } from "./send.js";
-import { BACKOFF_MS, createWebhookWorker, headsQuery } from "./worker.js";
+import {
+  BACKOFF_MS,
+  createWebhookWorker,
+  expireQuery,
+  headsQuery,
+} from "./worker.js";
 
 // A receiver on the loopback. trail refuses loopback addresses, so the transport
 // under test stands where the TLS connection would be: it posts the signed
@@ -1197,4 +1203,68 @@ test("the heads are each unpaused webhook's oldest pending delivery, in event or
   expect(heads()).toEqual([queue(behind.id)[0]?.id, queue(ahead.id)[1]?.id]);
   expect(heads(ahead.id)).toEqual([queue(ahead.id)[1]?.id]);
   expect(heads(paused.id)).toEqual([]);
+});
+
+test("a redirect keeps the delivery pending and counts toward the pause", async () => {
+  reset();
+  const key = await newProject();
+  const hook = await subscribe([key], "https://bot.example.com/moved");
+  statuses.push(302, 302);
+  await api("POST", "/issues", { projectId: key, title: "redirected" });
+  const w = worker({ pauseAfter: 2, backoffMs: [5] });
+  await w.tick();
+  const row = () => rows().find((r) => r.subscriptionId === hook.id);
+  expect(row()).toMatchObject({
+    status: "pending",
+    attempts: 1,
+    lastStatus: 302,
+  });
+  expect(row()?.lastError).toContain("set the subscription to the final URL");
+  expect((await api("GET", `/webhooks/${hook.id}`)).consecutiveFailures).toBe(
+    1,
+  );
+  advance(10);
+  await w.tick();
+  expect(row()).toMatchObject({ status: "pending", attempts: 2 });
+  expect(await api("GET", `/webhooks/${hook.id}`)).toMatchObject({
+    paused: true,
+    consecutiveFailures: 2,
+  });
+});
+
+// the plan, and the SQL text: 'pending' is a literal there, not a bound value, which is
+// what lets the planner match the partial index whatever SQLite binds at prepare time
+const planOf = (query: { toSQL(): { sql: string; params: unknown[] } }) => {
+  const { sql, params } = query.toSQL();
+  expect(params).not.toContain("pending");
+  expect(sql).toContain("'pending'");
+  return db.$client
+    .prepare(`explain query plan ${sql}`)
+    .all(...params)
+    .map((step) => (step as { detail: string }).detail);
+};
+
+test("the queries on pending deliveries use the partial index on them", async () => {
+  reset();
+  const pendingIdx = "webhook_delivery_pending_idx";
+  const unfollowed = planOf(unfollowedDeliveries(db, "sub-1", ["p-1"]));
+  expect(
+    unfollowed.some((s) => s.includes(pendingIdx)),
+    unfollowed.join("\n"),
+  ).toBe(true);
+  const expiry = planOf(expireQuery(db, 0));
+  expect(
+    expiry.some((s) => s.includes(pendingIdx)),
+    expiry.join("\n"),
+  ).toBe(true);
+  const resume = planOf(
+    db
+      .select({ id: webhookDelivery.id })
+      .from(webhookDelivery)
+      .where(and(eq(webhookDelivery.subscriptionId, "sub-1"), isPending)),
+  );
+  expect(
+    resume.some((s) => s.includes(pendingIdx)),
+    resume.join("\n"),
+  ).toBe(true);
 });

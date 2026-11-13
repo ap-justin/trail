@@ -7,7 +7,7 @@ import {
   webhookSubscription,
 } from "../db/schema.js";
 import type { ActivityEvent, EventBus } from "../events/bus.js";
-import type { WebhookSettings } from "../service/webhooks.js";
+import { isPending, type WebhookSettings } from "../service/webhooks.js";
 import { buildEnvelope } from "./payload.js";
 import { openSecret } from "./secret.js";
 import { type SendResult, sendWebhook } from "./send.js";
@@ -47,6 +47,26 @@ type Delivery = typeof webhookDelivery.$inferSelect;
  * Driven from the subscriptions, one index probe each: a paused subscription's
  * backlog only grows, and a query driven from the deliveries reads all of it.
  */
+/** Marks failed the pending deliveries of unpaused subscriptions created before `cutoff`. */
+export function expireQuery(db: Db, cutoff: number, subscriptionId?: string) {
+  return db
+    .update(webhookDelivery)
+    .set({
+      status: "failed",
+      lastError: sql`coalesce(${webhookDelivery.lastError}, 'not delivered within the retry window')`,
+    })
+    .where(
+      and(
+        isPending,
+        subscriptionId === undefined
+          ? undefined
+          : eq(webhookDelivery.subscriptionId, subscriptionId),
+        lt(webhookDelivery.createdAt, new Date(cutoff)),
+        sql`${webhookDelivery.subscriptionId} in (select id from webhook_subscription where paused_at is null)`,
+      ),
+    );
+}
+
 export function headsQuery(db: Db, subscriptionId?: string) {
   return db
     .select({ delivery: webhookDelivery })
@@ -97,22 +117,7 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
 
   /** Fails what an unpaused subscription couldn't deliver in the window; a paused one's deliveries wait. */
   function expire(now: number, subscriptionId?: string) {
-    db.update(webhookDelivery)
-      .set({
-        status: "failed",
-        lastError: sql`coalesce(${webhookDelivery.lastError}, 'not delivered within the retry window')`,
-      })
-      .where(
-        and(
-          eq(webhookDelivery.status, "pending"),
-          subscriptionId === undefined
-            ? undefined
-            : eq(webhookDelivery.subscriptionId, subscriptionId),
-          lt(webhookDelivery.createdAt, new Date(now - giveUpMs)),
-          sql`${webhookDelivery.subscriptionId} in (select id from webhook_subscription where paused_at is null)`,
-        ),
-      )
-      .run();
+    expireQuery(db, now - giveUpMs, subscriptionId).run();
   }
 
   /** Each unpaused subscription's oldest pending delivery, when it is due. */

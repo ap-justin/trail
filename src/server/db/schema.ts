@@ -600,7 +600,7 @@ export const webhookSubscription = sqliteTable(
       .notNull()
       .references(() => actor.id),
     url: text("url").notNull(),
-    // the signing secret, AES-256-GCM under a key derived from the server's own secret (service/webhooks.ts);
+    // the signing secret, AES-256-GCM under a key derived from the server's own secret (webhooks/secret.ts);
     // never the plain secret, and never read back out through the API
     secretCipher: text("secret_cipher").notNull(),
     createdAt: createdAt(),

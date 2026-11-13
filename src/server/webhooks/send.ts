@@ -104,7 +104,7 @@ const resolveUntil =
 /**
  * Signs and sends one webhook, checking the URL's address first. Never throws:
  * a refused address and a network error are retryable failures, as are every
- * 4xx but 410 and every 5xx; 410, a 3xx and any other non-2xx status are not.
+ * 3xx (never followed), every 4xx but 410 and every 5xx; only 410 is not.
  */
 export async function sendWebhook(
   deps: SendDeps,
