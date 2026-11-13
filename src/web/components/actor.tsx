@@ -36,8 +36,8 @@ export function ActorBadge({
 }
 
 /**
- * A bot's title as a pill, between its name and its Bot badge (`ActorName` places it);
- * nothing for a person or a bot without one. Capped in width, it ellipsizes and keeps the
+ * A bot's title as a pill; `ActorName` places it between the name and the Bot badge.
+ * Nothing for a person or a bot without one. Capped in width, it ellipsizes and keeps the
  * whole title in its tooltip.
  * `surface="card"` sits it on the background inside a muted comment header.
  */

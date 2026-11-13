@@ -73,6 +73,15 @@ test("a title with a control or bidi character, or of invisible characters alone
     "\u200B",
     "\u200C\u200D\u2060",
     "\uFEFF\u200B",
+    "\u200E\u200F",
+    "\u061C",
+    "\u00AD",
+    "\u3164",
+    "\u2800",
+    "\uFE0F",
+    "\u{E0100}",
+    "\u{E0020}\u{E007F}",
+    "\u00A0\u3000\u200E",
   ]) {
     const res = await putTitle({ title }, mine.key);
     expect(res.status, JSON.stringify(title)).toBe(422);
