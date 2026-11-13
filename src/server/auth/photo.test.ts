@@ -510,7 +510,7 @@ test("the app loading again within the hour fetches nothing more, even after a f
   expect(calls).toHaveLength(2);
 });
 
-test("a person without a photo is fetched for at most hourly", async () => {
+test("a person without a photo is fetched at most hourly", async () => {
   answer = async () => new Response(TEXT);
   const cookie = await addMember("photoless", [], { githubId: 8005 });
   await photoGivenUp("photoless");

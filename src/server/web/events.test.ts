@@ -1,7 +1,13 @@
 import { count, desc, eq, max } from "drizzle-orm";
 import { afterEach, expect, test, vi } from "vitest";
-import { activityEvent, session, user, webhookDelivery } from "../db/schema.js";
-import { readEventStream, setupTestApp } from "../test-app.js";
+import {
+  activityEvent,
+  actor,
+  session,
+  user,
+  webhookDelivery,
+} from "../db/schema.js";
+import { readEventStream, setupTestApp, TEST_OWNER } from "../test-app.js";
 import { OTHER_PNG, PNG } from "../test-images.js";
 
 const {
@@ -624,23 +630,61 @@ test("a bot's new photo, and its removal, arrive as an actor event with no id", 
   await stream.cancel();
 });
 
-test("a stream filtered to another project and actor, and a member's with no projects, still get every actor event", async () => {
+const actorIdOf = (login: string) =>
+  db.select().from(actor).where(eq(actor.githubLogin, login)).get()?.id ?? "";
+
+test("an owner's filtered stream still gets every actor event, and a member with no shared project gets none but their own", async () => {
   const p = addProject("ActorFiltered");
   const other = addBot("filtered-other");
   const pictured = addBot("filtered-pictured");
   const filtered = await openStream(ownerCookie, {
     query: `?project=${p.key}&actor=${other.actor.id}`,
   });
-  const bare = await openStream(await addMember("no-projects", []));
+  const bareCookie = await addMember("no-projects", []);
+  const bare = await openStream(bareCookie);
+  const bareActors = await openStream(bareCookie, { query: "?only=actors" });
   const { photoUrl } = (await (await putPhoto(pictured.key, PNG)).json()) as {
     photoUrl: string;
   };
-  for (const stream of [filtered, bare]) {
-    expect(await stream.next()).toStrictEqual(
-      actorMessage(pictured.actor.id, photoUrl),
-    );
+  expect(await filtered.next()).toStrictEqual(
+    actorMessage(pictured.actor.id, photoUrl),
+  );
+  // a member's own update closes the batch: the one before it was held back
+  const own = actorIdOf("no-projects");
+  bus.publishActor({ actorId: own, photoUrl: "/mine" });
+  for (const stream of [bare, bareActors]) {
+    expect(await stream.next()).toStrictEqual(actorMessage(own, "/mine"));
     await stream.cancel();
   }
+  await filtered.cancel();
+});
+
+test("a member hears of a bot acting in their projects and of people they share one with, and of no one else", async () => {
+  const mine = addProject("ActorMine");
+  const hidden = addProject("ActorHidden");
+  const seen = addBot("seen-bot");
+  const unseen = addBot("unseen-bot");
+  await file(mine.id, "seen acts here", seen.key);
+  await file(hidden.id, "unseen acts there", unseen.key);
+  const cookie = await addMember("sharer", [mine.id]);
+  await addMember("co-member", [mine.id, hidden.id]);
+  await addMember("stranger", [hidden.id]);
+  const stream = await openStream(cookie);
+  const own = actorIdOf("sharer");
+  const ownerId = actorIdOf(TEST_OWNER);
+  const updates = [
+    unseen.actor.id,
+    seen.actor.id,
+    actorIdOf("stranger"),
+    actorIdOf("co-member"),
+    ownerId,
+    own,
+  ];
+  for (const actorId of updates) bus.publishActor({ actorId, photoUrl: "/x" });
+  for (const actorId of [seen.actor.id, actorIdOf("co-member"), ownerId, own]) {
+    expect(await stream.next()).toStrictEqual(actorMessage(actorId, "/x"));
+  }
+  await stream.cancel();
 });
 
 test("an identical re-upload sends no actor event, and updates to one actor queued together arrive as its last", async () => {

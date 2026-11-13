@@ -1,5 +1,5 @@
 import { createRoute, z } from "@hono/zod-openapi";
-import { eq, max } from "drizzle-orm";
+import { and, eq, inArray, max } from "drizzle-orm";
 import { type SSEStreamingApi, streamSSE } from "hono/streaming";
 import { errorSchema, eventsQuerySchema } from "../../shared/schemas.js";
 import { errorResponse } from "../api/errors.js";
@@ -7,7 +7,7 @@ import { jsonContent } from "../api/routes.js";
 import type { TrailAuth } from "../auth/auth.js";
 import { inviteOf } from "../auth/identity.js";
 import type { Db } from "../db/client.js";
-import { activityEvent, invite, projectMember } from "../db/schema.js";
+import { activityEvent, actor, invite, projectMember } from "../db/schema.js";
 import type { ActivityEvent, EventBus } from "../events/bus.js";
 import type { FeedFilters } from "../service/paging.js";
 import { entriesByEvent } from "./entries.js";
@@ -88,7 +88,7 @@ const streamEvents = createRoute({
     200: {
       content: { "text/event-stream": { schema: z.string() } },
       description:
-        "Feed entries as they happen, each event's seq its id; Last-Event-ID resumes after that seq. A `reset` event means the client is too far behind: refetch /feed. An `actor` event, `{actorId, photoUrl}` with no id, says an actor's photo was set, replaced or removed (photoUrl null): every stream gets it, whatever its filters, and it is not a feed entry, so Last-Event-ID never replays it. With only=actors the stream carries `actor` events and heartbeats alone.",
+        "Feed entries as they happen, each event's seq its id; Last-Event-ID resumes after that seq. A `reset` event means the client is too far behind: refetch /feed. An `actor` event, `{actorId, photoUrl}` with no id, says an actor's photo was set, replaced or removed (photoUrl null): sent whatever the stream's filters, but only to a viewer who can see that actor (the owner sees all; a member sees themselves, bots acting in their projects and people who share a project with them), and it is not a feed entry, so Last-Event-ID never replays it. With only=actors the stream carries `actor` events and heartbeats alone.",
     },
     404: jsonContent(errorSchema, "No such project to filter by"),
     429: jsonContent(
@@ -117,6 +117,48 @@ function projectsNow(db: Db, member: Member): Set<string> | "all" {
     .where(inviteOf(member.actor))
     .all();
   return new Set(rows.map((r) => r.projectId));
+}
+
+/**
+ * Whether the member may hear of this actor's photo changing: the owner hears of
+ * everyone; a member of themselves, of a bot acting in one of their projects
+ * (`botsActingIn`'s rule in feed.ts) and of a person who shares a project with
+ * them, the owner being in every project. Read at each delivery, so a project
+ * taken away stops it at once.
+ */
+function mayHearOf(db: Db, member: Member, actorId: string): boolean {
+  const visible = projectsNow(db, member);
+  if (visible === "all" || actorId === member.actor.id) return true;
+  if (visible.size === 0) return false;
+  const row = db.select().from(actor).where(eq(actor.id, actorId)).get();
+  if (!row) return false;
+  if (row.kind === "bot") {
+    return (
+      db
+        .select({ one: activityEvent.id })
+        .from(activityEvent)
+        .where(
+          and(
+            eq(activityEvent.actorId, actorId),
+            inArray(activityEvent.projectId, [...visible]),
+          ),
+        )
+        .limit(1)
+        .all().length > 0
+    );
+  }
+  if (row.isOwner) return true;
+  const theirs = db
+    .select({ projectId: projectMember.projectId })
+    .from(projectMember)
+    .innerJoin(invite, eq(invite.id, projectMember.inviteId))
+    .where(
+      row.githubId === null
+        ? eq(invite.email, row.email ?? "")
+        : eq(invite.githubId, row.githubId),
+    )
+    .all();
+  return theirs.some((r) => visible.has(r.projectId));
 }
 
 const matches = (filters: FeedFilters, event: ActivityEvent) =>
@@ -265,8 +307,9 @@ export function eventRoutes(
           if (actorUpdates.size > 0) {
             const updates = [...actorUpdates];
             actorUpdates.clear();
-            // global and without an id: not a feed entry, so Last-Event-ID stays the entries'
+            // without an id: not a feed entry, so Last-Event-ID stays the entries'
             for (const [actorId, photoUrl] of updates) {
+              if (!mayHearOf(db, member, actorId)) continue;
               await stream.writeSSE({
                 event: "actor",
                 data: JSON.stringify({ actorId, photoUrl }),
