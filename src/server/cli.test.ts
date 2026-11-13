@@ -353,6 +353,8 @@ test.each([
   ["--label on a command without one", ["key", "list", "--label", "x"]],
   ["--key-only on key revoke", ["key", "revoke", "00000000", "--key-only"]],
   ["key list with an argument", ["key", "list", "x"]],
+  ["bot rename without a bot", ["bot", "rename"]],
+  ["bot rename without a name", ["bot", "rename", "someone"]],
 ])("%s is a usage error: exit 2, usage on stderr", (_, argv) => {
   const { code, stdout, stderr } = run(...argv);
   expect(code).toBe(2);
@@ -363,7 +365,10 @@ test.each([
 test.each([
   ["id", (bot: { id: string }) => bot.id],
   ["label", (bot: { label: string | null }) => bot.label as string],
-  ["current name", (bot: { displayName: string }) => bot.displayName],
+  [
+    "current name",
+    (bot: { displayName: string }) => bot.displayName.toUpperCase(),
+  ],
 ])(
   "bot rename by %s renames the bot and its key still resolves to it",
   (form, ref) => {
@@ -372,16 +377,17 @@ test.each([
       run("bot", "create", `Before ${form}`, "--label", `ren-${tag}`).stdout,
     );
     const before = withDb((db) => resolveKey(db, created));
+    if (before?.kind !== "bot") throw new Error("bot not created");
     const { code, stdout, stderr } = run(
       "bot",
       "rename",
-      ref(before as never),
+      ref(before),
       `After ${form}`,
     );
     expect(code).toBe(0);
     expect(stderr).toBe("");
     expect(stdout).toBe(
-      `actor  ${before?.id}\nfrom   Before ${form}\nto     After ${form}\n`,
+      `actor  ${before.id}\nfrom   Before ${form}\nto     After ${form}\n`,
     );
     expect(stdout).not.toContain("trail_");
     expect(withDb((db) => resolveKey(db, created))).toEqual({
@@ -394,11 +400,21 @@ test.each([
 test("bot rename accepts its own name in another case and an unquoted name", () => {
   const { stdout } = run("bot", "create", "Casey Bot");
   const id = /^actor\s+(\S+)$/m.exec(stdout)?.[1] as string;
+  const key = createdKey(stdout);
   expect(run("bot", "rename", id, "casey bot").code).toBe(0);
+  expect(withDb((db) => resolveKey(db, key))?.displayName).toBe("casey bot");
   expect(run("bot", "rename", id, "  Casey", "Two  ").code).toBe(0);
-  expect(withDb((db) => resolveKey(db, createdKey(stdout)))?.displayName).toBe(
-    "Casey Two",
-  );
+  expect(withDb((db) => resolveKey(db, key))?.displayName).toBe("Casey Two");
+});
+
+test("bot rename to its own exact name exits 0 and leaves the name", () => {
+  const key = createdKey(run("bot", "create", "Same Name").stdout);
+  const id = withDb((db) => resolveKey(db, key))?.id as string;
+  const { code, stdout, stderr } = run("bot", "rename", id, "Same Name");
+  expect(stderr).toBe("");
+  expect(code).toBe(0);
+  expect(stdout).toBe(`actor  ${id}\nfrom   Same Name\nto     Same Name\n`);
+  expect(withDb((db) => resolveKey(db, key))?.displayName).toBe("Same Name");
 });
 
 test("bot rename to another bot's name, ignoring case, exits 1 and changes nothing", () => {
@@ -414,6 +430,32 @@ test("bot rename to another bot's name, ignoring case, exits 1 and changes nothi
   expect(stdout).toBe("");
   expect(stderr).toMatch(/^trail: a bot named "Taken Name" already exists/);
   expect(withDb((db) => resolveKey(db, key))?.displayName).toBe("Free Name");
+});
+
+test("bot rename by id wins over another bot named that id", () => {
+  const a = createdKey(run("bot", "create", "Shadowed A").stdout);
+  const aId = withDb((db) => resolveKey(db, a))?.id as string;
+  const b = createdKey(run("bot", "create", aId).stdout);
+  const { code, stderr } = run("bot", "rename", aId, "Renamed A");
+  expect(stderr).toBe("");
+  expect(code).toBe(0);
+  expect(withDb((db) => resolveKey(db, a))?.displayName).toBe("Renamed A");
+  expect(withDb((db) => resolveKey(db, b))?.displayName).toBe(aId);
+});
+
+test("bot rename of a ref matching two bots by label and name exits 1 and renames neither", () => {
+  const labelled = createdKey(
+    run("bot", "create", "Ambiguous L", "--label", "amb-ref").stdout,
+  );
+  const named = createdKey(run("bot", "create", "amb-ref").stdout);
+  const { code, stdout, stderr } = run("bot", "rename", "amb-ref", "Either");
+  expect(code).toBe(1);
+  expect(stdout).toBe("");
+  expect(stderr).toMatch(/^trail: "amb-ref" matches more than one bot/);
+  expect(withDb((db) => resolveKey(db, labelled))?.displayName).toBe(
+    "Ambiguous L",
+  );
+  expect(withDb((db) => resolveKey(db, named))?.displayName).toBe("amb-ref");
 });
 
 test("bot rename of an unknown bot exits 1", () => {
@@ -434,15 +476,35 @@ test("bot rename refuses a person", () => {
     )?.displayName,
   ).toBe("Pat Person");
   // a person's name is not a way to reach them
-  expect(run("bot", "rename", "Pat Person", "Patty").code).toBe(1);
+  const byName = run("bot", "rename", "Pat Person", "Patty");
+  expect(byName.code).toBe(1);
+  expect(byName.stderr).toMatch(/no bot with id, label or name/);
 });
 
-test("bot rename with a missing argument or a blank name exits 2", () => {
-  expect(run("bot", "rename").code).toBe(2);
-  expect(run("bot", "rename", "someone").code).toBe(2);
-  const { code, stderr } = run("bot", "rename", "Free Name", "   ");
+test("bot rename by a person's id refuses the person even when a bot is named that id", () => {
+  const person = withDb((db) => createHuman(db, { displayName: "Sam Person" }));
+  const bot = createdKey(run("bot", "create", person.id).stdout);
+  const { code, stdout, stderr } = run("bot", "rename", person.id, "Sammy");
+  expect(code).toBe(1);
+  expect(stdout).toBe("");
+  expect(stderr).toBe(
+    `trail: ${person.id} is a person, not a bot: people's names come from their sign-in\n`,
+  );
+  expect(withDb((db) => resolveKey(db, bot))?.displayName).toBe(person.id);
+  expect(
+    withDb((db) => db.select().from(actor).all()).find(
+      (a) => a.id === person.id,
+    )?.displayName,
+  ).toBe("Sam Person");
+});
+
+test("bot rename to a blank name exits 2 and leaves the bot's name", () => {
+  const key = createdKey(run("bot", "create", "Blank Target").stdout);
+  const { code, stdout, stderr } = run("bot", "rename", "Blank Target", "   ");
   expect(code).toBe(2);
-  expect(stderr).toMatch(/display name must not be empty/);
+  expect(stdout).toBe("");
+  expect(stderr).toMatch(/^trail: .*display name must not be empty/);
+  expect(withDb((db) => resolveKey(db, key))?.displayName).toBe("Blank Target");
 });
 
 test("--help prints usage on stdout and exits 0", () => {

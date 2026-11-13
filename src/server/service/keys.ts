@@ -176,11 +176,34 @@ export function createBot(
   );
 }
 
+/** The one bot whose label is `ref` or whose name is `ref` ignoring the case of A-Z; two is ambiguous. */
+function onlyBotByLabelOrName(tx: Tx, ref: string): Actor | undefined {
+  const matches = tx
+    .select()
+    .from(actor)
+    .where(
+      and(
+        eq(actor.kind, "bot"),
+        or(
+          eq(actor.label, ref),
+          sql`lower(${actor.displayName}) = lower(${ref})`,
+        ),
+      ),
+    )
+    .all();
+  if (matches.length > 1) {
+    throw new ConflictError(
+      `"${ref}" matches more than one bot (${matches.map((m) => m.id).join(", ")}): use a bot's id`,
+    );
+  }
+  return matches[0];
+}
+
 /**
  * Sets a bot's display name. `botRef` is its actor id, label or current name
- * (names match ignoring the case of A-Z); a name that is also another bot's id
- * or label is ambiguous and refused. A bot may take its own name in another
- * case. People are refused: their names come from their sign-in.
+ * (names match ignoring the case of A-Z); an id wins outright, and a label or
+ * name matching two bots is ambiguous and refused. A bot may take its own name
+ * in another case. People are refused: their names come from their sign-in.
  */
 export function renameBot(
   db: Db,
@@ -190,26 +213,9 @@ export function renameBot(
   const name = displayNameOf(newName);
   return db.transaction(
     (tx) => {
-      const matches = tx
-        .select()
-        .from(actor)
-        .where(
-          or(
-            eq(actor.id, botRef),
-            and(eq(actor.kind, "bot"), eq(actor.label, botRef)),
-            and(
-              eq(actor.kind, "bot"),
-              sql`lower(${actor.displayName}) = lower(${botRef})`,
-            ),
-          ),
-        )
-        .all();
-      if (matches.length > 1) {
-        throw new ConflictError(
-          `"${botRef}" matches more than one bot (${matches.map((m) => m.id).join(", ")}): use a bot's id`,
-        );
-      }
-      const bot = matches[0];
+      const bot =
+        tx.select().from(actor).where(eq(actor.id, botRef)).get() ??
+        onlyBotByLabelOrName(tx, botRef);
       if (!bot) {
         throw new NotFoundError(
           `no bot with id, label or name ${botRef}: \`trail key list\` shows each bot's id, name and label`,
