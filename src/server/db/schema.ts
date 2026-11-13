@@ -724,8 +724,9 @@ export const webhookDelivery = sqliteTable(
 );
 
 // better-auth's tables, as `npx auth@latest generate` emits them for the drizzle adapter,
-// plus the unique github_id. better-auth writes every column itself; a person's identity
-// in trail is the actor row, which the sign-in links by github_id.
+// plus the unique github_id, which is null for an email sign-in after migration 0012.
+// better-auth writes every column itself; a person's identity in trail is the actor row,
+// which a GitHub sign-in links by github_id and an email sign-in by email.
 
 export const user = sqliteTable(
   "user",

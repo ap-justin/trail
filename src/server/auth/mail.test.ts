@@ -32,7 +32,7 @@ test("a refusal from Resend rejects with its status and body", async () => {
 });
 
 const url =
-  "https://trail.example/sign-in/confirm?token=b7Xk2mQe9Ls4PvTa8Ncd5JhWrU3yZo0G&callbackURL=%2F&email=dana%40example.com";
+  "https://trail.example/sign-in/confirm?token=b7Xk2mQe9Ls4PvTa8Ncd5JhWrU3yZo0G&callbackURL=%2F";
 
 test("the plain-text email is the designed copy around the link", () => {
   expect(signInEmail(url).text).toBe(`Use this link to sign in to trail:

@@ -92,8 +92,8 @@ function loosePath(pathname: string): string {
  * The SPA page an emailed link opens; only its POST to /magic-link/confirm uses
  * the token. `email` is for the page to show: the token alone decides who signs in.
  */
-const confirmPage = (token: string, callbackURL: string, email?: string) =>
-  `/sign-in/confirm?${new URLSearchParams({ token, callbackURL, ...(email && { email }) })}`;
+const confirmPage = (token: string, callbackURL: string) =>
+  `/sign-in/confirm?${new URLSearchParams({ token, callbackURL })}`;
 
 // Fly's proxy sets it and overwrites any value the client sent
 const clientIpHeaders = ["fly-client-ip"];
@@ -180,7 +180,7 @@ export function createAuth({
   function deliverLink(to: string, token: string, callbackURL: string) {
     if (!email || !sendMail || !config.BETTER_AUTH_URL) return;
     const url = new URL(
-      confirmPage(token, callbackURL, to),
+      confirmPage(token, callbackURL),
       config.BETTER_AUTH_URL,
     ).toString();
     setImmediate(() => {

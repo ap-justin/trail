@@ -335,13 +335,10 @@ export function NotInvitedView({
  * mail scanner that opens the link uses nothing up.
  */
 export function ConfirmSignInView({
-  email,
   onConfirm,
   pending,
   error,
 }: {
-  /** The address the link was sent to, when the link carries it. */
-  email?: string;
   onConfirm: () => void;
   /** True from the press until the browser has left, so a second press sends nothing. */
   pending: boolean;
@@ -351,17 +348,7 @@ export function ConfirmSignInView({
   return (
     <SignInCard title="Sign in to trail">
       <p className="mb-5 text-muted-foreground">
-        {email ? (
-          <>
-            Continue to sign in as{" "}
-            <KeyText className="whitespace-normal wrap-anywhere text-foreground">
-              {email}
-            </KeyText>
-            .
-          </>
-        ) : (
-          "Continue to sign in with the link from your email."
-        )}
+        Continue to sign in with the link from your email.
       </p>
       {/* mounted while empty so the message is announced when it arrives */}
       <p role="status" className="text-xs text-destructive not-empty:mb-3">

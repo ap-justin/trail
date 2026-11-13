@@ -11,7 +11,7 @@ afterEach(() => {
 });
 
 const page =
-  "/sign-in/confirm?token=tok-1&callbackURL=%2Fprojects%2FTRL&email=dana%40example.com";
+  "/sign-in/confirm?token=tok-1&callbackURL=%2Fprojects%2FTRL&email=mallory%40example.com";
 
 function serveConfirm(answer: () => Response) {
   const sent: unknown[] = [];
@@ -32,8 +32,10 @@ describe("/sign-in/confirm", () => {
       await screen.findByRole("heading", { name: "Sign in to trail" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("main")).toHaveTextContent(
-      "Continue to sign in as dana@example.com.",
+      "Continue to sign in with the link from your email.",
     );
+    // an address in the URL is never shown: it isn't the link owner's to claim
+    expect(screen.queryByText(/mallory/)).not.toBeInTheDocument();
   });
 
   test("Sign in posts the token and return path, then loads the page it answers with", async () => {

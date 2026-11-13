@@ -690,7 +690,7 @@ export const meSchema = z.object({
   }),
   emailSignIn: z.boolean().meta({
     description:
-      "Whether this server can email a sign-in link; false until EMAIL_FROM and RESEND_API_KEY are set.",
+      "Whether this server can email a sign-in link; false until EMAIL_FROM, RESEND_API_KEY and BETTER_AUTH_URL are all set.",
   }),
 });
 

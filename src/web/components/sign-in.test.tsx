@@ -310,7 +310,6 @@ describe("confirming a sign-in link", () => {
   type ConfirmProps = ComponentProps<typeof ConfirmSignInView>;
   function renderConfirm(overrides: Partial<ConfirmProps> = {}) {
     const props: ConfirmProps = {
-      email: "dana@example.com",
       onConfirm: vi.fn(),
       pending: false,
       ...overrides,
@@ -323,19 +322,11 @@ describe("confirming a sign-in link", () => {
     };
   }
 
-  test("names the address and offers Sign in on the sign-in card", () => {
+  test("offers Sign in on the sign-in card without naming an address", () => {
     renderConfirm();
     expect(
       screen.getByRole("heading", { name: "Sign in to trail" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("main")).toHaveTextContent(
-      "Continue to sign in as dana@example.com.",
-    );
-    expect(screen.getByText("dana@example.com")).toHaveClass("font-mono");
-  });
-
-  test("without the address, says what the link does without naming one", () => {
-    renderConfirm({ email: undefined });
     expect(screen.getByRole("main")).toHaveTextContent(
       "Continue to sign in with the link from your email.",
     );

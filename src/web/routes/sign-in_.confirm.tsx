@@ -13,10 +13,9 @@ import { samePath } from "../../shared/paths";
 export const Route = createFileRoute("/sign-in_/confirm")({
   validateSearch: (
     search: Record<string, unknown>,
-  ): { token?: string; callbackURL?: string; email?: string } => ({
+  ): { token?: string; callbackURL?: string } => ({
     token: typeof search.token === "string" ? search.token : undefined,
     callbackURL: samePath(search.callbackURL),
-    email: typeof search.email === "string" ? search.email : undefined,
   }),
   beforeLoad: ({ search }) => {
     if (!search.token) {
@@ -27,7 +26,7 @@ export const Route = createFileRoute("/sign-in_/confirm")({
 });
 
 function ConfirmSignIn() {
-  const { token = "", callbackURL = "/", email } = Route.useSearch();
+  const { token = "", callbackURL = "/" } = Route.useSearch();
   const navigate = useNavigate();
   const confirm = useMutation({
     mutationFn: () => api.confirmLink(token, callbackURL),
@@ -43,7 +42,6 @@ function ConfirmSignIn() {
     confirm.error instanceof ApiError && confirm.error.code === BAD_LINK;
   return (
     <ConfirmSignInView
-      email={email}
       // still pending once it succeeded: the browser is on its way
       pending={confirm.isPending || confirm.isSuccess}
       onConfirm={() => confirm.mutate()}

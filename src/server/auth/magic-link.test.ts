@@ -28,12 +28,7 @@ test("an invited address is emailed a sign-in link from EMAIL_FROM", async () =>
   });
   const link = new URL(sent?.text.match(/https?:\/\/\S+/)?.[0] ?? "");
   expect(link.origin + link.pathname).toBe("http://localhost/sign-in/confirm");
-  expect([...link.searchParams.keys()]).toEqual([
-    "token",
-    "callbackURL",
-    "email",
-  ]);
-  expect(link.searchParams.get("email")).toBe("dana@example.com");
+  expect([...link.searchParams.keys()]).toEqual(["token", "callbackURL"]);
   expect(sent?.html).toContain(
     `href="${link.toString().replaceAll("&", "&amp;")}"`,
   );
@@ -284,7 +279,7 @@ test("the link returns to the path the person asked from", async () => {
   await deliveries();
   const link = linkSentTo("kim@example.com");
   expect(new URL(link).searchParams.get("callbackURL")).toBe(path);
-  expect(new URL(link).searchParams.get("email")).toBe("kim@example.com");
+  expect(new URL(link).searchParams.has("email")).toBe(false);
   expect(await (await confirmLink(link)).json()).toEqual({ redirectTo: path });
 });
 
