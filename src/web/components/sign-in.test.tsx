@@ -2,7 +2,12 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { describe, expect, test, vi } from "vitest";
-import { EMAIL_HINT, NotInvitedView, SignInView } from "@/components/sign-in";
+import {
+  ConfirmSignInView,
+  EMAIL_HINT,
+  NotInvitedView,
+  SignInView,
+} from "@/components/sign-in";
 
 type Props = ComponentProps<typeof SignInView>;
 
@@ -172,7 +177,9 @@ describe("email sign-in", () => {
     const { rerender } = renderSignIn();
     const status = screen.getAllByRole("status")[1];
     expect(status).toBeEmptyDOMElement();
-    rerender({ emailLink: { status: "rate_limited" } });
+    rerender({
+      emailLink: { status: "rate_limited", retryAfterSeconds: null },
+    });
     expect(status).toHaveTextContent(
       "Too many requests, try again in a few minutes.",
     );
@@ -273,5 +280,86 @@ describe("not invited", () => {
       screen.getByRole("button", { name: "Sign in with a different account" }),
     );
     expect(onSignInAgain).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("rate-limited with the server's wait", () => {
+  test.each([
+    [1, "Too many requests, try again in 1 minute."],
+    [60, "Too many requests, try again in 1 minute."],
+    [61, "Too many requests, try again in 2 minutes."],
+    [600, "Too many requests, try again in 10 minutes."],
+  ])("%i seconds reads %j", (seconds, line) => {
+    renderSignIn({
+      emailLink: { status: "rate_limited", retryAfterSeconds: seconds },
+    });
+    expect(screen.getAllByRole("status")[1]).toHaveTextContent(line);
+  });
+
+  test("without a wait, the designed line stands", () => {
+    renderSignIn({
+      emailLink: { status: "rate_limited", retryAfterSeconds: null },
+    });
+    expect(screen.getAllByRole("status")[1]).toHaveTextContent(
+      "Too many requests, try again in a few minutes.",
+    );
+  });
+});
+
+describe("confirming a sign-in link", () => {
+  type ConfirmProps = ComponentProps<typeof ConfirmSignInView>;
+  function renderConfirm(overrides: Partial<ConfirmProps> = {}) {
+    const props: ConfirmProps = {
+      email: "dana@example.com",
+      onConfirm: vi.fn(),
+      pending: false,
+      ...overrides,
+    };
+    const view = render(<ConfirmSignInView {...props} />);
+    return {
+      props,
+      rerender: (next: Partial<ConfirmProps>) =>
+        view.rerender(<ConfirmSignInView {...props} {...next} />),
+    };
+  }
+
+  test("names the address and offers Sign in on the sign-in card", () => {
+    renderConfirm();
+    expect(
+      screen.getByRole("heading", { name: "Sign in to trail" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("main")).toHaveTextContent(
+      "Continue to sign in as dana@example.com.",
+    );
+    expect(screen.getByText("dana@example.com")).toHaveClass("font-mono");
+  });
+
+  test("without the address, says what the link does without naming one", () => {
+    renderConfirm({ email: undefined });
+    expect(screen.getByRole("main")).toHaveTextContent(
+      "Continue to sign in with the link from your email.",
+    );
+  });
+
+  test("Sign in confirms once; while in flight it reads Signing in… and holds", async () => {
+    const user = userEvent.setup();
+    const { props, rerender } = renderConfirm();
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(props.onConfirm).toHaveBeenCalledTimes(1);
+    rerender({ pending: true });
+    const held = screen.getByRole("button", { name: "Signing in…" });
+    expect(held).toHaveAttribute("aria-disabled", "true");
+    await user.click(held);
+    expect(props.onConfirm).toHaveBeenCalledTimes(1);
+  });
+
+  test("a failure is announced on the card through a status already in place", () => {
+    const { rerender } = renderConfirm();
+    const status = screen.getByRole("status");
+    expect(status).toBeEmptyDOMElement();
+    rerender({ error: "Something went wrong on our side. Try again." });
+    expect(status).toHaveTextContent(
+      "Something went wrong on our side. Try again.",
+    );
   });
 });

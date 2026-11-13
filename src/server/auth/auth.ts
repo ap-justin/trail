@@ -3,6 +3,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { magicLink } from "better-auth/plugins";
 import { eq } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
+import { samePath } from "../../shared/paths.js";
 import { parseInvitee } from "../../shared/schemas.js";
 import type { Config } from "../config.js";
 import type { Db } from "../db/client.js";
@@ -62,14 +63,50 @@ const noTokens = { accessToken: null, refreshToken: null, idToken: null };
 
 // the routes that start or finish a GitHub sign-in
 const signInPath = /^\/api\/auth\/(sign-in\/social|callback\/github)\/?$/;
-// the route that asks for a sign-in link
-const linkRequestPath = /^\/api\/auth\/sign-in\/magic-link\/?$/;
+// the magic-link routes trail answers itself, as `loosePath` reads them
+const linkRequestPath = "/api/auth/sign-in/magic-link";
+const linkConfirmPath = "/api/auth/magic-link/confirm";
+const linkVerifyPath = "/api/auth/magic-link/verify";
+
+/**
+ * A pathname read as loosely as any router might: percent-decoded, slashes
+ * collapsed, no trailing slash, lowercased. Matching on it means no spelling of
+ * a magic-link route slips past trail to better-auth's own.
+ */
+function loosePath(pathname: string): string {
+  let path = pathname;
+  for (let i = 0; i < 3; i++) {
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(path);
+    } catch {
+      break;
+    }
+    if (decoded === path) break;
+    path = decoded;
+  }
+  return path.replace(/\/+/g, "/").replace(/\/$/, "").toLowerCase() || "/";
+}
+
+/**
+ * The SPA page an emailed link opens; only its POST to /magic-link/confirm uses
+ * the token. `email` is for the page to show: the token alone decides who signs in.
+ */
+const confirmPage = (token: string, callbackURL: string, email?: string) =>
+  `/sign-in/confirm?${new URLSearchParams({ token, callbackURL, ...(email && { email }) })}`;
 
 // Fly's proxy sets it and overwrites any value the client sent
 const clientIpHeaders = ["fly-client-ip"];
 
 const LINK_MINUTES = 15;
 const linkWindowMs = LINK_MINUTES * 60_000;
+
+const minutes = (seconds: number) => {
+  const n = Math.ceil(seconds / 60);
+  return n === 1 ? "1 minute" : `${n} minutes`;
+};
+
+const notFound = () => new Response("Not Found", { status: 404 });
 
 /** A JSON error as the rest of trail's API answers one. */
 const errorJson = (
@@ -113,9 +150,22 @@ export function createAuth({
   const sendMail =
     mailTransport ?? (email ? resendTransport(email.resendApiKey) : null);
 
-  // every request counts, invited or not, so the limit says nothing about who is invited
-  const linksPerAddress = windowLimiter({ max: 3, windowMs: linkWindowMs });
-  const linksPerIp = windowLimiter({ max: 10, windowMs: linkWindowMs });
+  // every request counts, invited or not, so the limits say nothing about who is invited.
+  // Per address across IPs only loosely: a strict one would let anyone lock a person out
+  const linkLimits = [
+    {
+      key: (a: string, ip: string) => `${a} ${ip}`,
+      ...windowLimiter({ max: 3, windowMs: linkWindowMs }),
+    },
+    {
+      key: (_: string, ip: string) => ip,
+      ...windowLimiter({ max: 10, windowMs: linkWindowMs }),
+    },
+    {
+      key: (a: string) => a,
+      ...windowLimiter({ max: 10, windowMs: 60 * 60_000 }),
+    },
+  ];
 
   const userRow = (userId: string) =>
     db.select().from(user).where(eq(user.id, userId)).get();
@@ -127,8 +177,12 @@ export function createAuth({
       : accessOfEmail(db, row.email);
 
   /** Sends the link, after the request has been answered and never failing it. */
-  function deliverLink(to: string, url: string) {
-    if (!email || !sendMail) return;
+  function deliverLink(to: string, token: string, callbackURL: string) {
+    if (!email || !sendMail || !config.BETTER_AUTH_URL) return;
+    const url = new URL(
+      confirmPage(token, callbackURL, to),
+      config.BETTER_AUTH_URL,
+    ).toString();
     setImmediate(() => {
       sendMail({ from: email.from, to, ...signInEmail(url) }).catch(
         (e: unknown) => {
@@ -162,8 +216,9 @@ export function createAuth({
             // a leaked database holds no live link
             storeToken: "hashed",
             // called for every address alike, so the answer and its timing don't tell who is invited
-            sendMagicLink: async ({ email: to, url }) => {
-              if (isEmailInvited(db, to)) deliverLink(to, url);
+            sendMagicLink: async ({ email: to, token, metadata }) => {
+              const callbackURL = samePath(metadata?.callbackURL) ?? "/";
+              if (isEmailInvited(db, to)) deliverLink(to, token, callbackURL);
             },
           }),
         ]
@@ -190,14 +245,19 @@ export function createAuth({
       : {},
     // one GitHub account is one user: never join a second account to a user by matching email
     account: { accountLinking: { enabled: false } },
-    disabledPaths: ["/update-user", "/change-email", "/delete-user"],
+    // the magic-link routes too: trail answers them in `handler` and calls the plugin through auth.api
+    disabledPaths: [
+      "/update-user",
+      "/change-email",
+      "/delete-user",
+      "/sign-in/magic-link",
+      "/magic-link/verify",
+    ],
     // a failed GitHub callback lands on trail's sign-in page as ?error=<code>, not better-auth's own /api/auth/error
     onAPIError: { errorURL: "/sign-in" },
     advanced: {
       ipAddress: { ipAddressHeaders: clientIpHeaders },
     },
-    // asking for a link is limited per address and per IP in `requestLink`; verifying keeps the plugin's limit
-    rateLimit: { customRules: { "/sign-in/magic-link": false } },
     databaseHooks: {
       // trail never calls GitHub as a person, so their tokens are never kept
       account: {
@@ -265,19 +325,41 @@ export function createAuth({
     };
   }
 
+  async function isTrustedOrigin(request: Request): Promise<boolean> {
+    const origin = request.headers.get("origin");
+    if (!origin) return false;
+    // without a baseURL better-auth trusts the origin it infers from each request
+    if (!config.BETTER_AUTH_URL) return origin === new URL(request.url).origin;
+    return (await auth.$context).isTrustedOrigin(origin);
+  }
+
+  const badOrigin = () =>
+    errorJson(
+      403,
+      "INVALID_ORIGIN",
+      "send the request from trail's own pages: its Origin header is missing or another site's",
+    );
+
+  const fieldsOf = async (
+    request: Request,
+  ): Promise<Record<string, unknown>> => {
+    const body: unknown = await request.json().catch(() => null);
+    return typeof body === "object" && body !== null ? { ...body } : {};
+  };
+
   /**
-   * `POST /api/auth/sign-in/magic-link`, in front of better-auth's: checks the
-   * address and the limits, then hands better-auth a body trail wrote, so an
-   * error always lands on /sign-in and nothing else rides along.
+   * `POST /api/auth/sign-in/magic-link` {email, callbackURL?}: checks the
+   * origin, the address and the limits, then has the plugin make the token.
+   * The plugin's own route is disabled, so nothing else rides along.
    */
   async function requestLink(request: Request): Promise<Response> {
     if (emailUnavailable) {
       return errorJson(503, "sign_in_unavailable", emailUnavailable);
     }
-    const body: unknown = await request.json().catch(() => null);
-    const fields = (typeof body === "object" && body) || {};
-    const entry = "email" in fields ? fields.email : undefined;
-    const invitee = typeof entry === "string" ? parseInvitee(entry) : null;
+    if (!(await isTrustedOrigin(request))) return badOrigin();
+    const fields = await fieldsOf(request);
+    const invitee =
+      typeof fields.email === "string" ? parseInvitee(fields.email) : null;
     if (!invitee || !("email" in invitee)) {
       return errorJson(
         400,
@@ -289,53 +371,101 @@ export function createAuth({
     const ip =
       clientIpHeaders.map((h) => request.headers.get(h)).find(Boolean) ??
       "unknown";
-    const wait = Math.max(linksPerAddress.wait(address), linksPerIp.wait(ip));
+    const wait = Math.max(
+      ...linkLimits.map((limit) => limit.wait(limit.key(address, ip))),
+    );
     if (wait > 0) {
       return errorJson(
         429,
         "rate_limited",
-        `too many sign-in links asked for: try again in ${Math.ceil(wait / 60)} minutes`,
+        `too many sign-in links asked for: try again in ${minutes(wait)}`,
         { "retry-after": String(wait) },
       );
     }
-    linksPerAddress.take(address);
-    linksPerIp.take(ip);
-    const callbackURL =
-      "callbackURL" in fields && typeof fields.callbackURL === "string"
-        ? fields.callbackURL
-        : "/";
-    const headers = new Headers(request.headers);
-    headers.delete("content-length");
-    headers.set("content-type", "application/json");
-    return auth.handler(
-      new Request(request.url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          email: address,
-          callbackURL,
-          errorCallbackURL: "/sign-in",
-        }),
-      }),
-    );
+    for (const limit of linkLimits) limit.take(limit.key(address, ip));
+    const callbackURL = samePath(fields.callbackURL) ?? "/";
+    return auth.api.signInMagicLink({
+      body: { email: address, metadata: { callbackURL } },
+      headers: request.headers,
+      asResponse: true,
+    });
+  }
+
+  /**
+   * `POST /api/auth/magic-link/confirm` {token, callbackURL?}: the only use of
+   * a link's token, made by the confirm page, so a mail scanner's GET can't
+   * spend it. Sets the session cookie and answers where to go.
+   */
+  async function confirmLink(request: Request): Promise<Response> {
+    if (!(await isTrustedOrigin(request))) return badOrigin();
+    const fields = await fieldsOf(request);
+    const redirectTo = samePath(fields.callbackURL) ?? "/";
+    const verified =
+      typeof fields.token === "string" && fields.token !== ""
+        ? await auth.api.magicLinkVerify({
+            query: { token: fields.token },
+            headers: request.headers,
+            asResponse: true,
+          })
+        : null;
+    if (verified?.status === 200) {
+      const res = Response.json({ redirectTo });
+      for (const cookie of verified.headers.getSetCookie()) {
+        res.headers.append("set-cookie", cookie);
+      }
+      return res;
+    }
+    // a failed verify redirects with ?error=<code>; INVALID_TOKEN covers expired, used and unknown tokens
+    const location = verified?.headers.get("location") ?? "/";
+    const code =
+      new URL(location, "http://trail.invalid").searchParams.get("error") ??
+      "INVALID_TOKEN";
+    return code === "INVALID_TOKEN"
+      ? errorJson(
+          400,
+          code,
+          "this sign-in link was already used, has expired, or is not one trail sent: ask for a new one",
+        )
+      : errorJson(500, code, "the sign-in link could not be used: try again");
+  }
+
+  /**
+   * Answers a magic-link route by `loosePath`, or null for any other route.
+   * The plugin's GET verify never runs: it would let a mail scanner spend the
+   * token, so it forwards to the confirm page instead.
+   */
+  async function magicLinkRoute(request: Request): Promise<Response | null> {
+    const url = new URL(request.url);
+    const path = loosePath(url.pathname);
+    const post = request.method === "POST";
+    if (path === linkRequestPath)
+      return post ? requestLink(request) : notFound();
+    if (!email) {
+      return path === linkConfirmPath || path === linkVerifyPath
+        ? notFound()
+        : null;
+    }
+    if (path === linkConfirmPath)
+      return post ? confirmLink(request) : notFound();
+    if (path === linkVerifyPath) {
+      const token = url.searchParams.get("token") ?? "";
+      const callbackURL = samePath(url.searchParams.get("callbackURL")) ?? "/";
+      return new Response(null, {
+        status: 302,
+        headers: { location: confirmPage(token, callbackURL) },
+      });
+    }
+    return null;
   }
 
   const trail: TrailAuth = {
     ownerLogin: owner,
     emailSignIn: email !== null,
-    async isTrustedOrigin(request) {
-      const origin = request.headers.get("origin");
-      if (!origin) return false;
-      // without a baseURL better-auth trusts the origin it infers from each request
-      if (!config.BETTER_AUTH_URL)
-        return origin === new URL(request.url).origin;
-      return (await auth.$context).isTrustedOrigin(origin);
-    },
+    isTrustedOrigin,
     async handler(request) {
+      const link = await magicLinkRoute(request);
+      if (link) return link;
       const path = new URL(request.url).pathname;
-      if (request.method === "POST" && linkRequestPath.test(path)) {
-        return requestLink(request);
-      }
       if (signInUnavailable && signInPath.test(path)) {
         const error = {
           code: "sign_in_unavailable",

@@ -5,32 +5,22 @@ import {
 } from "@tanstack/react-query";
 import { createFileRoute, Navigate, redirect } from "@tanstack/react-router";
 import {
+  BAD_LINK,
   type EmailLink,
   NotInvitedView,
+  SIGN_IN_FAILED,
   SignInView,
 } from "@/components/sign-in";
 import { ApiError, api } from "@/lib/api";
 import { browser } from "@/lib/browser";
 import { isMember, keys, meQuery } from "@/lib/queries";
-
-/**
- * A path on this site, or nothing. A browser reads `//`, a backslash, or a `/` after
- * stripped whitespace as the start of another host.
- */
-function samePath(value: unknown): string | undefined {
-  if (typeof value !== "string" || !value.startsWith("/")) return;
-  if (value.startsWith("//") || /[\\\s]/.test(value)) return;
-  return value;
-}
-
-// better-auth's code for a sign-in link that was already used or has expired
-const BAD_LINK = "INVALID_TOKEN";
+import { samePath } from "../../shared/paths";
 
 /** What a failed GitHub round trip's `?error=` code tells the viewer; better-auth's codes are its own. */
 function signInFailure(code: unknown): string | undefined {
   if (typeof code !== "string" || code === "" || code === BAD_LINK) return;
   if (code === "access_denied") return "Sign-in was canceled on GitHub.";
-  return "Something went wrong on our side. Try again.";
+  return SIGN_IN_FAILED;
 }
 
 const codeOf = (error: Error | null) =>
@@ -71,7 +61,9 @@ function SignIn() {
     mutationFn: api.signOut,
     onSettled: () => queryClient.invalidateQueries({ queryKey: keys.me }),
   });
-  const emailLink = useMutation({ mutationFn: api.emailLink });
+  const emailLink = useMutation({
+    mutationFn: (email: string) => api.emailLink(email, returnTo),
+  });
 
   // a /me refetch can let this viewer in while the page is open; href wins over to
   if (isMember(me)) return <Navigate to="/" href={returnTo} />;
@@ -119,7 +111,11 @@ function linkStateOf(mutation: {
     case "invalid_email":
       return { status: "refused" };
     case "rate_limited":
-      return { status: "rate_limited" };
+      return {
+        status: "rate_limited",
+        retryAfterSeconds:
+          mutation.error instanceof ApiError ? mutation.error.retryAfter : null,
+      };
     default:
       return { status: "failed", message: mutation.error.message };
   }

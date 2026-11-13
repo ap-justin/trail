@@ -4,7 +4,17 @@ import { accessOfEmail, syncEmailActor } from "../auth/identity.js";
 import { actor } from "../db/schema.js";
 import { setupTestApp } from "../test-app.js";
 
-const { db, request, signIn, owner, addMember, addProject } = setupTestApp();
+const {
+  db,
+  request,
+  signIn,
+  owner,
+  addMember,
+  addProject,
+  inviteEmail,
+  signInWithEmail,
+  viewerOf,
+} = setupTestApp();
 
 // biome-ignore lint/suspicious/noExplicitAny: loose response bodies for field reads
 type Body = any;
@@ -236,12 +246,12 @@ test("PUT or DELETE of a username with no invite is a 404", async () => {
   expect((await people("DELETE", `/people/${owner}`)).status).toBe(404);
 });
 
-test("DELETE removes the invite: the person is shut out at once, and its actor stays", async () => {
+test("DELETE removes the invite: the person is signed out at once, and its actor stays", async () => {
   const cookie = await addMember("leaver", [alpha.id], { githubId: 9001 });
   expect((await as(cookie)("GET", "/projects")).status).toBe(200);
   const res = await people("DELETE", "/people/leaver");
   expect(res).toEqual({ status: 204, body: null });
-  expect((await as(cookie)("GET", "/projects")).status).toBe(403);
+  expect((await as(cookie)("GET", "/projects")).status).toBe(401);
   expect(
     db.select().from(actor).where(eq(actor.githubId, 9001)).get(),
   ).toMatchObject({
@@ -295,3 +305,67 @@ test("a 77-character username that only fits the shape is a 422", async () => {
   });
   expect(res.status).toBe(422);
 });
+
+test("removing a GitHub invite ends its sessions, so a re-invite needs a fresh sign-in", async () => {
+  const cookie = await addMember("returner", [alpha.id], { githubId: 5001 });
+  const other = await addMember("stayer", [alpha.id]);
+  expect(await viewerOf(cookie)).toMatchObject({ kind: "member" });
+  expect((await people("DELETE", "/people/returner")).status).toBe(204);
+  expect(
+    (await people("POST", "/people", { username: "returner", projectKeys: [] }))
+      .status,
+  ).toBe(201);
+  expect(await viewerOf(cookie)).toEqual({ kind: "anonymous" });
+  expect(await viewerOf(other)).toMatchObject({ kind: "member" });
+  expect(await viewerOf(ownerCookie)).toMatchObject({ kind: "owner" });
+});
+
+test("removing an email invite ends its sessions, so a re-invite needs a fresh sign-in", async () => {
+  inviteEmail("again@example.com", [alpha.id]);
+  const cookie = await signInWithEmail("again@example.com");
+  expect(await viewerOf(cookie)).toMatchObject({ kind: "member" });
+  expect((await people("DELETE", "/people/again@example.com")).status).toBe(
+    204,
+  );
+  expect(
+    (
+      await people("POST", "/people", {
+        username: "again@example.com",
+        projectKeys: [alpha.key],
+      })
+    ).status,
+  ).toBe(201);
+  expect(await viewerOf(cookie)).toEqual({ kind: "anonymous" });
+  expect(
+    await viewerOf(await signInWithEmail("again@example.com")),
+  ).toMatchObject({ kind: "member" });
+});
+
+test("a GitHub handle typed with a leading @ is the username, in POST, PUT and DELETE", async () => {
+  const created = await people("POST", "/people", {
+    username: " @At-Handle ",
+    projectKeys: [alpha.key],
+  });
+  expect(created.status).toBe(201);
+  expect(created.body).toMatchObject({ username: "at-handle", email: null });
+
+  const path = `/people/${encodeURIComponent("@At-Handle")}`;
+  const moved = await people("PUT", path, { projectKeys: [beta.key] });
+  expect(moved.status).toBe(200);
+  expect(moved.body).toMatchObject({
+    username: "at-handle",
+    projects: [{ key: beta.key, name: "Beta" }],
+  });
+  expect(await people("DELETE", path)).toEqual({ status: 204, body: null });
+  expect((await people("DELETE", "/people/at-handle")).status).toBe(404);
+});
+
+test.each(["@@double", "@dana@example.com", "@"])(
+  "%j is neither a handle nor an address",
+  async (entry) => {
+    expect(
+      (await people("POST", "/people", { username: entry, projectKeys: [] }))
+        .status,
+    ).toBe(422);
+  },
+);

@@ -13,16 +13,17 @@ export const INVITEE_HINT =
   "Enter a GitHub username or an email address, like devon-r or devon@example.com.";
 
 /**
- * Whom an invite entry names, decided by shape: with an @ it is an email
- * address, without one a GitHub username. Trimmed and lowercased; null when it
- * is neither.
+ * Whom an invite entry names, decided by shape: with an @ past a leading one it
+ * is an email address, otherwise a GitHub username, typed with or without its
+ * @. Trimmed and lowercased; null when it is neither.
  */
 export function parseInvitee(
   entry: string,
 ): { username: string } | { email: string } | null {
   const value = entry.trim().toLowerCase();
-  if (value.includes("@")) {
+  const handle = value.startsWith("@") ? value.slice(1) : value;
+  if (handle.includes("@")) {
     return emailAddress.safeParse(value).success ? { email: value } : null;
   }
-  return githubUsername.safeParse(value).success ? { username: value } : null;
+  return githubUsername.safeParse(handle).success ? { username: handle } : null;
 }

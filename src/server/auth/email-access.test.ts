@@ -14,7 +14,7 @@ const {
   requestEmailLink,
   deliveries,
   linkSentTo,
-  openLink,
+  confirmLink,
   owner,
 } = setupTestApp();
 
@@ -93,7 +93,7 @@ test("a link whose invite was removed before it was opened signs in as not invit
   expect((await requestEmailLink("omar@example.com")).status).toBe(200);
   await deliveries();
   db.delete(invite).where(eq(invite.id, inviteId)).run();
-  const res = await openLink(linkSentTo("omar@example.com"));
+  const res = await confirmLink(linkSentTo("omar@example.com"));
   const cookie = sessionCookie(res);
   expect(cookie).not.toBe("");
   expect(await me(cookie)).toMatchObject({

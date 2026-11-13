@@ -274,6 +274,28 @@ describe("a sign-in link by email", () => {
     expect(screen.getByRole("textbox", { name: "Email" })).toHaveValue("");
   });
 
+  test.each([
+    ["/projects/TRL?status=done", "/projects/TRL?status=done"],
+    ["//evil.example", "/"],
+    ["https://evil.example/", "/"],
+  ])(
+    "arriving with redirect %j asks for a link returning to %j",
+    async (target, callbackURL) => {
+      signedInAs("anonymous");
+      const sent: unknown[] = [];
+      server.use(
+        http.post("/api/auth/sign-in/magic-link", async ({ request }) => {
+          sent.push(await request.json());
+          return HttpResponse.json({ status: true });
+        }),
+      );
+      renderApp(`/sign-in?redirect=${encodeURIComponent(target)}`);
+      await askForLink();
+      await screen.findByText("Check your email");
+      expect(sent).toEqual([{ email: "dana@example.com", callbackURL }]);
+    },
+  );
+
   test("400 invalid_email marks the field", async () => {
     signedInAs("anonymous");
     server.use(linkFails(400, "invalid_email"));
@@ -287,13 +309,13 @@ describe("a sign-in link by email", () => {
     ).toBeInTheDocument();
   });
 
-  test("429 rate_limited says to try again in a few minutes, and the address stays", async () => {
+  test("429 rate_limited says how many minutes to wait from Retry-After, and the address stays", async () => {
     signedInAs("anonymous");
-    server.use(linkFails(429, "rate_limited", { "retry-after": "600" }));
+    server.use(linkFails(429, "rate_limited", { "retry-after": "540" }));
     renderApp("/sign-in");
     await askForLink();
     expect(
-      await screen.findByText("Too many requests, try again in a few minutes."),
+      await screen.findByText("Too many requests, try again in 9 minutes."),
     ).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Email" })).toHaveValue(
       "dana@example.com",

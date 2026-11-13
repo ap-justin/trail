@@ -13,6 +13,7 @@ import {
 } from "../../shared/schemas.js";
 import { handleNotFound } from "../api/errors.js";
 import { jsonBody, jsonContent } from "../api/routes.js";
+import { endSessionsOfInvite } from "../auth/identity.js";
 import type { Db } from "../db/client.js";
 import {
   actor,
@@ -84,11 +85,9 @@ const ownerOnly = createMiddleware<WebEnv>(async (c, next) => {
 
 type Invitee = { username: string } | { email: string };
 
-/** The invitee a {username} path segment names: with an @ an email, else a GitHub username. */
-const inviteeOfParam = (param: string): Invitee => {
-  const value = param.trim().toLowerCase();
-  return value.includes("@") ? { email: value } : { username: value };
-};
+/** The invitee a {username} path segment names, read as `parseInvitee` reads an entry; one it can't read matches no invite. */
+const inviteeOfParam = (param: string): Invitee =>
+  parseInvitee(param) ?? { username: param.trim().toLowerCase() };
 
 const handleOf = (invitee: Invitee) =>
   "email" in invitee ? invitee.email : `@${invitee.username}`;
@@ -272,9 +271,19 @@ export function peopleRoutes(db: Db) {
     })
     .openapi(removePerson, (c) => {
       const invitee = inviteeOfParam(c.req.valid("param").username);
-      // project_member rows go with it (on delete cascade)
-      const { changes } = db.delete(invite).where(inviteFor(invitee)).run();
-      if (changes === 0) throw noInvite(invitee);
+      db.transaction(
+        (tx) => {
+          // project_member rows go with it (on delete cascade)
+          const removed = tx
+            .delete(invite)
+            .where(inviteFor(invitee))
+            .returning()
+            .get();
+          if (!removed) throw noInvite(invitee);
+          endSessionsOfInvite(tx, removed);
+        },
+        { behavior: "immediate" },
+      );
       return c.body(null, 204);
     });
 }

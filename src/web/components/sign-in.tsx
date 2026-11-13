@@ -38,6 +38,12 @@ function SignInCard({
 
 const cardButton = "h-11 w-full text-sm lg:h-10";
 
+/** better-auth's `?error=` code for a sign-in link that was already used, has expired or is unknown. */
+export const BAD_LINK = "INVALID_TOKEN";
+
+/** The card's line for a failure whose detail is the server's, not the viewer's. */
+export const SIGN_IN_FAILED = "Something went wrong on our side. Try again.";
+
 /** Where asking for a sign-in link stands. */
 export type EmailLink =
   | { status: "idle" }
@@ -45,11 +51,19 @@ export type EmailLink =
   | { status: "sent" }
   /** The server refused the address. */
   | { status: "refused" }
-  | { status: "rate_limited" }
+  /** `retryAfterSeconds`: the server's Retry-After; null without one. */
+  | { status: "rate_limited"; retryAfterSeconds: number | null }
   /** Anything else, such as no connection, with the message to show. */
   | { status: "failed"; message: string };
 
 export const EMAIL_HINT = "Enter an email address, like you@example.com.";
+
+/** A Retry-After in seconds as whole minutes, rounded up. */
+function waitOf(seconds: number | null): string {
+  if (seconds === null) return "a few minutes";
+  const minutes = Math.ceil(seconds / 60);
+  return minutes === 1 ? "1 minute" : `${minutes} minutes`;
+}
 
 const isEmail = (value: string) => {
   const parsed = parseInvitee(value);
@@ -139,7 +153,7 @@ function EmailForm({
       {/* mounted while empty so a failure is announced when it arrives */}
       <p role="status" className="text-xs text-destructive not-empty:mt-2">
         {link.status === "rate_limited"
-          ? "Too many requests, try again in a few minutes."
+          ? `Too many requests, try again in ${waitOf(link.retryAfterSeconds)}.`
           : link.status === "failed"
             ? link.message
             : null}
@@ -311,6 +325,57 @@ export function NotInvitedView({
       </p>
       <Button variant="outline" className={cardButton} onClick={onSignInAgain}>
         Sign in with a different account
+      </Button>
+    </SignInCard>
+  );
+}
+
+/**
+ * `/sign-in/confirm`, where a sign-in link lands: nothing is spent until Sign in, so a
+ * mail scanner that opens the link uses nothing up.
+ */
+export function ConfirmSignInView({
+  email,
+  onConfirm,
+  pending,
+  error,
+}: {
+  /** The address the link was sent to, when the link carries it. */
+  email?: string;
+  onConfirm: () => void;
+  /** True from the press until the browser has left, so a second press sends nothing. */
+  pending: boolean;
+  /** Why the last press failed; empty when it didn't. */
+  error?: ReactNode;
+}) {
+  return (
+    <SignInCard title="Sign in to trail">
+      <p className="mb-5 text-muted-foreground">
+        {email ? (
+          <>
+            Continue to sign in as{" "}
+            <KeyText className="whitespace-normal wrap-anywhere text-foreground">
+              {email}
+            </KeyText>
+            .
+          </>
+        ) : (
+          "Continue to sign in with the link from your email."
+        )}
+      </p>
+      {/* mounted while empty so the message is announced when it arrives */}
+      <p role="status" className="text-xs text-destructive not-empty:mb-3">
+        {error}
+      </p>
+      <Button
+        aria-disabled={pending || undefined}
+        aria-busy={pending || undefined}
+        className={cardButton}
+        onClick={() => {
+          if (!pending) onConfirm();
+        }}
+      >
+        {pending ? "Signing in…" : "Sign in"}
       </Button>
     </SignInCard>
   );

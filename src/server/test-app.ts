@@ -281,11 +281,15 @@ export function setupTestApp({
   let clientIps = 0;
   /**
    * Asks for a sign-in link for `email` as a browser on the SPA does, from
-   * `ip` (by default a fresh one, so no test shares another's IP limit).
+   * `ip` (by default a fresh one, so no test shares another's IP limit), to
+   * return to `callbackURL`.
    */
   function requestEmailLink(
     email: string,
-    { ip = `198.51.100.${++clientIps}` }: { ip?: string } = {},
+    {
+      ip = `198.51.100.${++clientIps}`,
+      callbackURL,
+    }: { ip?: string; callbackURL?: string } = {},
   ) {
     return app.request("/api/auth/sign-in/magic-link", {
       method: "POST",
@@ -294,7 +298,7 @@ export function setupTestApp({
         "content-type": "application/json",
         "fly-client-ip": ip,
       },
-      body: JSON.stringify({ email }),
+      body: JSON.stringify({ email, callbackURL }),
     });
   }
 
@@ -309,11 +313,38 @@ export function setupTestApp({
   /** Waits out the delivery that runs after a link request has been answered. */
   const deliveries = () => new Promise((resolve) => setTimeout(resolve, 20));
 
-  /** Opens a sign-in link as the browser the email was read in does. */
+  /** A plain GET of `link`, as a mail scanner or a browser opening it does. */
   const openLink = (link: string) => app.request(link);
 
   /**
-   * Signs in by email: asks for a link, then opens it. Returns the session's
+   * What the confirm page does with the emailed link: POSTs its token and
+   * callbackURL, from the app's own Origin unless `origin` overrides it (null sends none),
+   * with `email` in the body as a page that wrongly sent it would.
+   */
+  function confirmLink(
+    link: string,
+    {
+      origin = TEST_ORIGIN,
+      email,
+    }: { origin?: string | null; email?: string } = {},
+  ) {
+    const query = new URL(link).searchParams;
+    return app.request("/api/auth/magic-link/confirm", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(origin === null ? {} : { origin }),
+      },
+      body: JSON.stringify({
+        token: query.get("token"),
+        callbackURL: query.get("callbackURL") ?? undefined,
+        email,
+      }),
+    });
+  }
+
+  /**
+   * Signs in by email: asks for a link, then confirms it. Returns the session's
    * Cookie header, "" when the link made none.
    */
   async function signInWithEmail(email: string): Promise<string> {
@@ -324,7 +355,7 @@ export function setupTestApp({
       );
     }
     await deliveries();
-    return sessionCookie(await openLink(linkSentTo(email)));
+    return sessionCookie(await confirmLink(linkSentTo(email)));
   }
 
   /** Invites `email` to these projects; returns the invite's id. */
@@ -389,6 +420,7 @@ export function setupTestApp({
     linkSentTo,
     deliveries,
     openLink,
+    confirmLink,
     signInWithEmail,
     inviteEmail,
     /** Ends every event stream, as a drain does; resolves once each has stopped. */

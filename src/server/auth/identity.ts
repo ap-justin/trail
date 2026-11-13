@@ -1,6 +1,13 @@
-import { and, asc, eq, isNull, ne, type SQL, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, ne, type SQL, sql } from "drizzle-orm";
 import type { Db } from "../db/client.js";
-import { actor, invite, project, projectMember } from "../db/schema.js";
+import {
+  actor,
+  invite,
+  project,
+  projectMember,
+  session,
+  user,
+} from "../db/schema.js";
 import type { Tx } from "../service/tx.js";
 
 /** A person who signs in with GitHub; `githubLogin` is lowercased. */
@@ -207,6 +214,32 @@ export function accessOfEmail(
     isOwner: false,
     inviteId: found.inviteId,
   };
+}
+
+/**
+ * Ends every session of whoever `removed` let in: the GitHub account that
+ * claimed it, or the sign-ins of its address. Call with the invite's removal,
+ * so a later invite of the same person waits for a fresh sign-in.
+ */
+export function endSessionsOfInvite(
+  tx: Db | Tx,
+  removed: { githubId: number | null; email: string | null },
+): void {
+  const holder =
+    removed.githubId !== null
+      ? eq(user.githubId, removed.githubId)
+      : removed.email !== null
+        ? eq(user.email, removed.email)
+        : undefined;
+  if (!holder) return;
+  tx.delete(session)
+    .where(
+      inArray(
+        session.userId,
+        tx.select({ id: user.id }).from(user).where(holder),
+      ),
+    )
+    .run();
 }
 
 /** The invite `person` is let in through, if it still exists: by GitHub id, or by email. */

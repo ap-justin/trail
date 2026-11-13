@@ -19,6 +19,8 @@ export class ApiError extends Error {
     readonly status: number,
     readonly code: string,
     message: string,
+    /** Seconds the server's Retry-After asks to wait; null without one. */
+    readonly retryAfter: number | null = null,
   ) {
     super(message);
     this.name = "ApiError";
@@ -49,10 +51,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     const error = (body as { error?: { code?: string; message?: string } })
       ?.error;
+    const retryAfter = Number(response.headers.get("retry-after") ?? "");
     throw new ApiError(
       response.status,
       error?.code ?? "http_error",
       error?.message ?? `trail answered ${response.status}.`,
+      Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : null,
     );
   }
   return body as T;
@@ -132,12 +136,18 @@ export const api = {
     ),
   /**
    * Asks for a sign-in link at `email`. The answer is the same whether or not the address
-   * is invited; the link returns to `/`, or on a bad link to `/sign-in?error=<code>`.
+   * is invited. The link opens /sign-in/confirm, which signs in and goes on to `callbackURL`.
    */
-  emailLink: (email: string) =>
+  emailLink: (email: string, callbackURL: string) =>
     request<{ status: boolean }>(
       "/api/auth/sign-in/magic-link",
-      json("POST", { email, callbackURL: "/" }),
+      json("POST", { email, callbackURL }),
+    ),
+  /** Spends a sign-in link's token: sets the session cookie and answers where to go. */
+  confirmLink: (token: string, callbackURL: string) =>
+    request<{ redirectTo: string }>(
+      "/api/auth/magic-link/confirm",
+      json("POST", { token, callbackURL }),
     ),
   signOut: () => request<unknown>("/api/auth/sign-out", json("POST", {})),
   eventsUrl: (filter: FeedFilter) => web(`/events${query(filter)}`),

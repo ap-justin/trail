@@ -15,6 +15,7 @@ import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppSplatRouteImport } from './routes/_app/$'
 import { Route as AppAccountRouteImport } from './routes/_app/account'
 import { Route as AppPeopleRouteImport } from './routes/_app/people'
+import { Route as SignInConfirmRouteImport } from './routes/sign-in_.confirm'
 import { Route as AppIssuesKeyRouteImport } from './routes/_app/issues/$key'
 import { Route as AppProjectsIndexRouteImport } from './routes/_app/projects/index'
 import { Route as AppProjectsKeyRouteImport } from './routes/_app/projects/$key'
@@ -48,6 +49,11 @@ const AppPeopleRoute = AppPeopleRouteImport.update({
   path: '/people',
   getParentRoute: () => AppRoute,
 } as any)
+const SignInConfirmRoute = SignInConfirmRouteImport.update({
+  id: '/sign-in_/confirm',
+  path: '/sign-in/confirm',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AppIssuesKeyRoute = AppIssuesKeyRouteImport.update({
   id: '/issues/$key',
   path: '/issues/$key',
@@ -70,6 +76,7 @@ export interface FileRoutesByFullPath {
   '/$': typeof AppSplatRoute
   '/account': typeof AppAccountRoute
   '/people': typeof AppPeopleRoute
+  '/sign-in/confirm': typeof SignInConfirmRoute
   '/issues/$key': typeof AppIssuesKeyRoute
   '/projects/$key': typeof AppProjectsKeyRoute
   '/projects/': typeof AppProjectsIndexRoute
@@ -79,6 +86,7 @@ export interface FileRoutesByTo {
   '/$': typeof AppSplatRoute
   '/account': typeof AppAccountRoute
   '/people': typeof AppPeopleRoute
+  '/sign-in/confirm': typeof SignInConfirmRoute
   '/': typeof AppIndexRoute
   '/issues/$key': typeof AppIssuesKeyRoute
   '/projects/$key': typeof AppProjectsKeyRoute
@@ -91,6 +99,7 @@ export interface FileRoutesById {
   '/_app/$': typeof AppSplatRoute
   '/_app/account': typeof AppAccountRoute
   '/_app/people': typeof AppPeopleRoute
+  '/sign-in_/confirm': typeof SignInConfirmRoute
   '/_app/': typeof AppIndexRoute
   '/_app/issues/$key': typeof AppIssuesKeyRoute
   '/_app/projects/$key': typeof AppProjectsKeyRoute
@@ -104,6 +113,7 @@ export interface FileRouteTypes {
     | '/$'
     | '/account'
     | '/people'
+    | '/sign-in/confirm'
     | '/issues/$key'
     | '/projects/$key'
     | '/projects/'
@@ -113,6 +123,7 @@ export interface FileRouteTypes {
     | '/$'
     | '/account'
     | '/people'
+    | '/sign-in/confirm'
     | '/'
     | '/issues/$key'
     | '/projects/$key'
@@ -124,6 +135,7 @@ export interface FileRouteTypes {
     | '/_app/$'
     | '/_app/account'
     | '/_app/people'
+    | '/sign-in_/confirm'
     | '/_app/'
     | '/_app/issues/$key'
     | '/_app/projects/$key'
@@ -133,6 +145,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   AppRoute: typeof AppRouteWithChildren
   SignInRoute: typeof SignInRoute
+  SignInConfirmRoute: typeof SignInConfirmRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -178,6 +191,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/people'
       preLoaderRoute: typeof AppPeopleRouteImport
       parentRoute: typeof AppRoute
+    }
+    '/sign-in_/confirm': {
+      id: '/sign-in_/confirm'
+      path: '/sign-in/confirm'
+      fullPath: '/sign-in/confirm'
+      preLoaderRoute: typeof SignInConfirmRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/_app/issues/$key': {
       id: '/_app/issues/$key'
@@ -228,6 +248,7 @@ const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 const rootRouteChildren: RootRouteChildren = {
   AppRoute: AppRouteWithChildren,
   SignInRoute: SignInRoute,
+  SignInConfirmRoute: SignInConfirmRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

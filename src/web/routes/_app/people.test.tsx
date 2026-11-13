@@ -358,6 +358,40 @@ describe("managing people", () => {
     );
   });
 
+  test("a GitHub handle typed with its @ is invited and then removed by the bare username", async () => {
+    signedInAs("owner");
+    const writes = servePeople();
+    renderApp("/people");
+    await screen.findByText("@kai-dev");
+    await userEvent.type(
+      screen.getByLabelText("GitHub username or email"),
+      "@Newbie",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Invite" }));
+    expect(await screen.findByText("@newbie")).toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Edit projects for @newbie" }),
+    );
+    await userEvent.click(
+      row("newbie").getByRole("button", { name: "Save projects" }),
+    );
+    await waitFor(() => expect(writes).toHaveLength(2));
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Remove @newbie" }),
+    );
+    await userEvent.click(
+      row("newbie").getByRole("button", { name: "Remove" }),
+    );
+    await waitFor(() => expect(writes).toHaveLength(3));
+    expect(
+      writes.map(({ method, path, body }) => [method, path, body]),
+    ).toEqual([
+      ["POST", "/api/web/people", { username: "newbie", projectKeys: [] }],
+      ["PUT", "/api/web/people/newbie", { projectKeys: [] }],
+      ["DELETE", "/api/web/people/newbie", null],
+    ]);
+  });
+
   test("an email invite posts the address, and the person is removed by it", async () => {
     signedInAs("owner");
     const writes = servePeople();
