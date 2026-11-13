@@ -20,6 +20,7 @@ Bots create projects, issues, comments and progress over MCP and REST. Humans re
 - The human UI is a Vite SPA in `src/web`. Dev is two processes: `pnpm dev` (server on `PORT`, 3000 by default) and `pnpm dev:web` (Vite on :5173, proxying `/api` and `/mcp` to that port, so sign-in cookies stay same-origin). `pnpm build` writes the server bundle to `dist/` and the SPA to `dist/web`. Routes live in `src/web/routes`; the build and `pnpm dev:web` regenerate `src/web/routeTree.gen.ts`, which is committed so `pnpm typecheck` stands alone. `src/web` imports server types with `import type` only; lint enforces it.
 - Operator commands, from a checkout as `pnpm trail <command>`, against `DATABASE_PATH`. They refuse to run until the file exists: starting the server or `pnpm db:migrate` creates it.
   - `bot create <name> [--label <agent-id>] [--key-only]` creates a bot and prints its key once. `--label` is the bot's id in the system that runs it; names (ignoring the case of A-Z) and labels are unique among bots. `--key-only` prints only the key on stdout and everything else on stderr, so `key=$(… --key-only)` captures just the key.
+  - `bot rename <bot-id-label-or-name> <new name>` sets a bot's display name and prints its id, old name and new name. Its id, label, keys, scopes, photo and history stay; past activity shows the new name. The same name rules as `bot create` apply (renaming to its own name in another case is fine). People can't be renamed here: their names come from their sign-in.
   - `key create <bot-id-or-label> [--key-only]` mints another key for an existing bot.
   - `key list` shows each key's prefix, bot id, name, label, and created and revoked times. It never shows a key or its hash.
   - `key revoke <prefix>` revokes a key by its prefix or the full key.
@@ -28,6 +29,7 @@ Bots create projects, issues, comments and progress over MCP and REST. Humans re
   ```sh
   fly ssh console -a trail-justin -C "env DATABASE_PATH=/data/trail.db node /app/dist/cli.js bot create <name> --label <agent-id> --key-only"
   fly ssh console -a trail-justin -C "env DATABASE_PATH=/data/trail.db node /app/dist/cli.js key create <agent-id> --key-only"
+  fly ssh console -a trail-justin -C "env DATABASE_PATH=/data/trail.db node /app/dist/cli.js bot rename <agent-id> <new name>"
   ```
 
   `-C` runs the command without a shell, so the env is set with `env` and the path is absolute, whatever directory the session starts in. The machine normally stays running, but it can be stopped during a deploy or after the server exits; if `fly ssh console` finds none running, wake it with a request first (`curl -fsS https://trail-justin.fly.dev/health`). Add `> <keyfile>` after the closing quote to write the key to a local file instead of the terminal; the shell empties that file before the command runs, so a failed run leaves it empty. Run `key list` the same way to see what exists.

@@ -6,7 +6,12 @@ import { afterAll, expect, test } from "vitest";
 import { runCli } from "./cli.js";
 import { migrate, openDatabase } from "./db/client.js";
 import { actor, project } from "./db/schema.js";
-import { createBot, listKeys, resolveKey } from "./service/keys.js";
+import {
+  createBot,
+  createHuman,
+  listKeys,
+  resolveKey,
+} from "./service/keys.js";
 
 const dir = mkdtempSync(join(tmpdir(), "trail-cli-"));
 const DATABASE_PATH = join(dir, "trail.db");
@@ -353,6 +358,91 @@ test.each([
   expect(code).toBe(2);
   expect(stdout).toBe("");
   expect(stderr).toMatch(/^trail: .+\nUsage:/);
+});
+
+test.each([
+  ["id", (bot: { id: string }) => bot.id],
+  ["label", (bot: { label: string | null }) => bot.label as string],
+  ["current name", (bot: { displayName: string }) => bot.displayName],
+])(
+  "bot rename by %s renames the bot and its key still resolves to it",
+  (form, ref) => {
+    const tag = form.replace(" ", "-");
+    const created = createdKey(
+      run("bot", "create", `Before ${form}`, "--label", `ren-${tag}`).stdout,
+    );
+    const before = withDb((db) => resolveKey(db, created));
+    const { code, stdout, stderr } = run(
+      "bot",
+      "rename",
+      ref(before as never),
+      `After ${form}`,
+    );
+    expect(code).toBe(0);
+    expect(stderr).toBe("");
+    expect(stdout).toBe(
+      `actor  ${before?.id}\nfrom   Before ${form}\nto     After ${form}\n`,
+    );
+    expect(stdout).not.toContain("trail_");
+    expect(withDb((db) => resolveKey(db, created))).toEqual({
+      ...before,
+      displayName: `After ${form}`,
+    });
+  },
+);
+
+test("bot rename accepts its own name in another case and an unquoted name", () => {
+  const { stdout } = run("bot", "create", "Casey Bot");
+  const id = /^actor\s+(\S+)$/m.exec(stdout)?.[1] as string;
+  expect(run("bot", "rename", id, "casey bot").code).toBe(0);
+  expect(run("bot", "rename", id, "  Casey", "Two  ").code).toBe(0);
+  expect(withDb((db) => resolveKey(db, createdKey(stdout)))?.displayName).toBe(
+    "Casey Two",
+  );
+});
+
+test("bot rename to another bot's name, ignoring case, exits 1 and changes nothing", () => {
+  run("bot", "create", "Taken Name");
+  const key = createdKey(run("bot", "create", "Free Name").stdout);
+  const { code, stdout, stderr } = run(
+    "bot",
+    "rename",
+    "Free Name",
+    "TAKEN name",
+  );
+  expect(code).toBe(1);
+  expect(stdout).toBe("");
+  expect(stderr).toMatch(/^trail: a bot named "Taken Name" already exists/);
+  expect(withDb((db) => resolveKey(db, key))?.displayName).toBe("Free Name");
+});
+
+test("bot rename of an unknown bot exits 1", () => {
+  const { code, stdout, stderr } = run("bot", "rename", "agent-nobody", "X");
+  expect(code).toBe(1);
+  expect(stdout).toBe("");
+  expect(stderr).toMatch(/^trail: no bot with id, label or name agent-nobody/);
+});
+
+test("bot rename refuses a person", () => {
+  const person = withDb((db) => createHuman(db, { displayName: "Pat Person" }));
+  const { code, stderr } = run("bot", "rename", person.id, "Patty");
+  expect(code).toBe(1);
+  expect(stderr).toMatch(/is a person, not a bot/);
+  expect(
+    withDb((db) => db.select().from(actor).all()).find(
+      (a) => a.id === person.id,
+    )?.displayName,
+  ).toBe("Pat Person");
+  // a person's name is not a way to reach them
+  expect(run("bot", "rename", "Pat Person", "Patty").code).toBe(1);
+});
+
+test("bot rename with a missing argument or a blank name exits 2", () => {
+  expect(run("bot", "rename").code).toBe(2);
+  expect(run("bot", "rename", "someone").code).toBe(2);
+  const { code, stderr } = run("bot", "rename", "Free Name", "   ");
+  expect(code).toBe(2);
+  expect(stderr).toMatch(/display name must not be empty/);
 });
 
 test("--help prints usage on stdout and exits 0", () => {

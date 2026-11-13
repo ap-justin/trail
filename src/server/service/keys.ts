@@ -176,6 +176,75 @@ export function createBot(
   );
 }
 
+/**
+ * Sets a bot's display name. `botRef` is its actor id, label or current name
+ * (names match ignoring the case of A-Z); a name that is also another bot's id
+ * or label is ambiguous and refused. A bot may take its own name in another
+ * case. People are refused: their names come from their sign-in.
+ */
+export function renameBot(
+  db: Db,
+  botRef: string,
+  newName: string,
+): { id: string; oldName: string; newName: string } {
+  const name = displayNameOf(newName);
+  return db.transaction(
+    (tx) => {
+      const matches = tx
+        .select()
+        .from(actor)
+        .where(
+          or(
+            eq(actor.id, botRef),
+            and(eq(actor.kind, "bot"), eq(actor.label, botRef)),
+            and(
+              eq(actor.kind, "bot"),
+              sql`lower(${actor.displayName}) = lower(${botRef})`,
+            ),
+          ),
+        )
+        .all();
+      if (matches.length > 1) {
+        throw new ConflictError(
+          `"${botRef}" matches more than one bot (${matches.map((m) => m.id).join(", ")}): use a bot's id`,
+        );
+      }
+      const bot = matches[0];
+      if (!bot) {
+        throw new NotFoundError(
+          `no bot with id, label or name ${botRef}: \`trail key list\` shows each bot's id, name and label`,
+        );
+      }
+      if (bot.kind !== "bot") {
+        throw new ConflictError(
+          `${bot.id} is a person, not a bot: people's names come from their sign-in`,
+        );
+      }
+      const twin = tx
+        .select()
+        .from(actor)
+        .where(
+          and(
+            eq(actor.kind, "bot"),
+            sql`lower(${actor.displayName}) = lower(${name})`,
+          ),
+        )
+        .get();
+      if (twin && twin.id !== bot.id) {
+        throw new ConflictError(
+          `a bot named "${twin.displayName}" already exists (${twin.id}), and bot names match ignoring the case of A-Z: pick another name than "${name}"`,
+        );
+      }
+      tx.update(actor)
+        .set({ displayName: name })
+        .where(eq(actor.id, bot.id))
+        .run();
+      return { id: bot.id, oldName: bot.displayName, newName: name };
+    },
+    { behavior: "immediate" },
+  );
+}
+
 /** Mints another key, scoped to `scope`, for the bot with this actor id or label. */
 export function createKey(
   db: Db,
