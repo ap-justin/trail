@@ -11,18 +11,24 @@ export type WebEnv = { Variables: { viewer: Viewer; member: Member } };
 
 export const createWebRouter = () => createRouter<WebEnv>();
 
-/** 401 without a session, 403 not_invited for an account not on the list; sets `member`. */
+/** 401 without a session, 403 not_invited for an account or address not on the list; sets `member`. */
 export const requireMember = createMiddleware<WebEnv>(async (c, next) => {
   const viewer = c.var.viewer;
   if (viewer.kind === "anonymous") {
-    return errorResponse(c, 401, "unauthorized", "sign in with GitHub");
+    return errorResponse(
+      c,
+      401,
+      "unauthorized",
+      "sign in with GitHub or email",
+    );
   }
   if (viewer.kind === "not_invited") {
+    const who = viewer.login === null ? viewer.email : `@${viewer.login}`;
     return errorResponse(
       c,
       403,
       "not_invited",
-      `@${viewer.login} is not invited: ask the owner to invite this GitHub username, then sign in again`,
+      `${who} is not invited: ask the owner to invite your GitHub username or email address, then sign in again`,
     );
   }
   c.set("member", viewer);

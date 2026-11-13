@@ -4,9 +4,10 @@ import { describe, expect, test, vi } from "vitest";
 import {
   PeopleView,
   type PeopleViewProps,
-  parseUsername,
+  parseEntry,
   type RowMutation,
 } from "@/components/people";
+import type { PersonView } from "@/lib/api-types";
 import { allProjects, people, photoUrlFor } from "@/test/fixtures";
 
 function renderPeople(overrides: Partial<PeopleViewProps> = {}) {
@@ -29,7 +30,7 @@ function renderPeople(overrides: Partial<PeopleViewProps> = {}) {
 
 const row = (username: string) => {
   const item = document.querySelector<HTMLElement>(
-    `[data-username="${username}"]`,
+    `[data-person="${username}"]`,
   );
   if (!item) throw new Error(`no row for ${username}`);
   return within(item);
@@ -45,7 +46,7 @@ describe("people list", () => {
       ),
     });
     const avatar = (username: string) =>
-      document.querySelector(`[data-username="${username}"] [data-actor-kind]`);
+      document.querySelector(`[data-person="${username}"] [data-actor-kind]`);
     expect(avatar("mayachen")?.querySelector("img")).toHaveAttribute(
       "src",
       photoUrlFor("a-maya", "77"),
@@ -61,27 +62,27 @@ describe("people list", () => {
       ),
     });
     const pending = document.querySelector(
-      '[data-username="kai-dev"] .border-dashed',
+      '[data-person="kai-dev"] .border-dashed',
     );
     expect(pending).toHaveTextContent("?");
     expect(pending).toHaveClass("rounded-full");
     expect(
-      document.querySelector('[data-username="kai-dev"] [data-actor-kind]'),
+      document.querySelector('[data-person="kai-dev"] [data-actor-kind]'),
     ).toBeNull();
 
     const unnamed = document.querySelector(
-      '[data-username="mayachen"] [data-actor-kind]',
+      '[data-person="mayachen"] [data-actor-kind]',
     );
     expect(unnamed).toHaveTextContent("?");
     expect(
-      document.querySelector('[data-username="mayachen"] .border-dashed'),
+      document.querySelector('[data-person="mayachen"] .border-dashed'),
     ).toBeNull();
   });
 
   test("the owner row comes first and has no actions", () => {
     renderPeople();
     const items = screen.getAllByRole("listitem");
-    expect(items[0]).toHaveAttribute("data-username", "justinsalas");
+    expect(items[0]).toHaveAttribute("data-person", "justinsalas");
     expect(row("justinsalas").queryAllByRole("button")).toEqual([]);
     expect(row("justinsalas").getByText("Owner")).toBeInTheDocument();
   });
@@ -174,8 +175,8 @@ describe("people list", () => {
   });
 });
 
-const failedSave = (username: string): RowMutation => ({
-  username,
+const failedSave = (id: string): RowMutation => ({
+  id,
   action: "save",
   pending: false,
   error: "Couldn't save. Try again.",
@@ -232,7 +233,7 @@ describe("after a row changes", () => {
         {...props}
         rowMutations={[
           {
-            username: "kai-dev",
+            id: "kai-dev",
             action: "remove",
             pending: false,
             error: "Couldn't remove @kai-dev. Try again.",
@@ -279,13 +280,13 @@ describe("after a row changes", () => {
     const { props, rerender } = renderPeople();
     await saveFor("mayachen");
     const savingMaya: RowMutation = {
-      username: "mayachen",
+      id: "mayachen",
       action: "save",
       pending: true,
       error: null,
     };
     const removingKai: RowMutation = {
-      username: "kai-dev",
+      id: "kai-dev",
       action: "remove",
       pending: true,
       error: null,
@@ -304,7 +305,7 @@ describe("after a row changes", () => {
   test("one row's write in flight leaves the other rows free to save", async () => {
     const { props } = renderPeople({
       rowMutations: [
-        { username: "kai-dev", action: "save", pending: true, error: null },
+        { id: "kai-dev", action: "save", pending: true, error: null },
       ],
     });
     await saveFor("mayachen");
@@ -344,7 +345,7 @@ describe("after a row changes", () => {
     const { props, rerender } = renderPeople();
     await confirmRemove("kai-dev");
     const removing: RowMutation = {
-      username: "kai-dev",
+      id: "kai-dev",
       action: "remove",
       pending: true,
       error: null,
@@ -402,38 +403,157 @@ describe("after a row changes", () => {
   });
 });
 
-describe("invite", () => {
-  const username = () =>
-    screen.getByRole("textbox", { name: "GitHub username" });
+describe("people invited by email", () => {
+  const dana: PersonView = {
+    username: null,
+    email: "dana@example.com",
+    owner: false,
+    pending: false,
+    name: "dana.okafor",
+    photoUrl: null,
+    projects: [{ key: "TRL", name: "trail" }],
+    invitedAt: "2026-11-12T10:00:00.000Z",
+  };
+  const sam: PersonView = {
+    ...dana,
+    email: "sam@studio.example",
+    pending: true,
+    name: null,
+    projects: [],
+  };
+  const withEmailPeople = () =>
+    renderPeople({ people: [...people, dana, sam] });
 
-  test("shows the line about what they'll see", () => {
-    renderPeople();
+  test("a signed-in one shows their address in mono where @username goes, under their name", () => {
+    withEmailPeople();
     expect(
-      screen.getByText(
-        "They sign in with GitHub and see only the projects you pick.",
-      ),
+      row("dana@example.com").getByText("dana.okafor"),
+    ).toBeInTheDocument();
+    expect(row("dana@example.com").getByText("dana@example.com")).toHaveClass(
+      "font-mono",
+    );
+  });
+
+  test("a signed-in one has a round, neutral initials avatar and no photo", () => {
+    withEmailPeople();
+    const avatar = document.querySelector(
+      '[data-person="dana@example.com"] [data-actor-kind]',
+    );
+    expect(avatar).toHaveAttribute("data-actor-kind", "human");
+    expect(avatar).toHaveClass("rounded-full", "bg-muted");
+    expect(avatar).not.toHaveClass("bg-bot-muted");
+    expect(avatar).toHaveTextContent("DO");
+    expect(avatar?.querySelector("img")).toBeNull();
+  });
+
+  test("a pending one is named by the address, with its initials in the dashed circle", () => {
+    withEmailPeople();
+    expect(
+      row("sam@studio.example").getByText("sam@studio.example"),
+    ).toBeInTheDocument();
+    expect(
+      row("sam@studio.example").getByText("Invited · hasn't signed in"),
+    ).toBeInTheDocument();
+    const pending = document.querySelector(
+      '[data-person="sam@studio.example"] .border-dashed',
+    );
+    expect(pending).toHaveTextContent("SA");
+    expect(pending).toHaveClass("rounded-full");
+  });
+
+  test("each control names the person by their address", () => {
+    withEmailPeople();
+    expect(
+      row("dana@example.com").getByRole("button", {
+        name: "Edit projects for dana@example.com",
+      }),
     ).toBeInTheDocument();
   });
 
-  test("an invalid username gets an inline message, focus, and no invite", async () => {
+  test("Remove and Save projects call back with the address", async () => {
+    const user = userEvent.setup();
+    const { props } = withEmailPeople();
+    await user.click(
+      screen.getByRole("button", { name: "Remove dana@example.com" }),
+    );
+    expect(
+      row("dana@example.com").getByText("Remove dana@example.com?"),
+    ).toBeInTheDocument();
+    await user.click(
+      row("dana@example.com").getByRole("button", { name: "Remove" }),
+    );
+    expect(props.onRemove).toHaveBeenCalledWith("dana@example.com");
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "Edit projects for sam@studio.example",
+      }),
+    );
+    await user.click(
+      row("sam@studio.example").getByRole("checkbox", { name: "OPB OpenBot" }),
+    );
+    await user.click(
+      row("sam@studio.example").getByRole("button", { name: "Save projects" }),
+    );
+    expect(props.onSaveProjects).toHaveBeenCalledWith("sam@studio.example", [
+      "OPB",
+    ]);
+  });
+});
+
+describe("invite", () => {
+  const entry = () =>
+    screen.getByRole("textbox", { name: "GitHub username or email" });
+
+  test("shows the line about how each kind signs in and what they'll see", () => {
+    renderPeople();
+    expect(entry()).toHaveAccessibleDescription(
+      "GitHub invitees sign in with GitHub; email invitees get a sign-in link by email. They see only the projects you pick.",
+    );
+  });
+
+  test.each(["devon@", "devon--r", "", "dev on@example.com"])(
+    "%j gets the inline message, focus, and no invite",
+    async (typed) => {
+      const user = userEvent.setup();
+      const { props } = renderPeople();
+      if (typed) await user.type(entry(), typed);
+      await user.click(screen.getByRole("button", { name: "Invite" }));
+      expect(entry()).toHaveFocus();
+      expect(entry()).toHaveAttribute("aria-invalid", "true");
+      expect(
+        screen.getByText(
+          "Enter a GitHub username or an email address, like devon-r or devon@example.com.",
+        ),
+      ).toBeInTheDocument();
+      expect(props.onInvite).not.toHaveBeenCalled();
+    },
+  );
+
+  test("the message clears as soon as the entry is fixed", async () => {
+    const user = userEvent.setup();
+    renderPeople();
+    await user.type(entry(), "devon@");
+    await user.click(screen.getByRole("button", { name: "Invite" }));
+    await user.type(entry(), "example.com");
+    expect(entry()).not.toHaveAttribute("aria-invalid");
+  });
+
+  test("an email address goes out trimmed and lowercased", async () => {
     const user = userEvent.setup();
     const { props } = renderPeople();
-    await user.type(username(), "devon--r");
+    await user.type(entry(), " Priya@Studio.example ");
     await user.click(screen.getByRole("button", { name: "Invite" }));
-    expect(
-      screen.getByText(
-        "Use letters, digits and single hyphens, up to 39 characters.",
-      ),
-    ).toBeInTheDocument();
-    expect(username()).toHaveFocus();
-    expect(username()).toHaveAttribute("aria-invalid", "true");
-    expect(props.onInvite).not.toHaveBeenCalled();
+    expect(props.onInvite).toHaveBeenCalledWith({
+      username: "priya@studio.example",
+      projectKeys: [],
+    });
   });
 
   test("an empty project set is allowed; the username goes out lowercased without the @", async () => {
     const user = userEvent.setup();
     const { props } = renderPeople();
-    await user.type(username(), " @Devon-R ");
+    await user.type(entry(), " @Devon-R ");
     await user.click(screen.getByRole("button", { name: "Invite" }));
     expect(props.onInvite).toHaveBeenCalledWith({
       username: "devon-r",
@@ -444,7 +564,7 @@ describe("invite", () => {
   test("projects picked in the popover go with the invite", async () => {
     const user = userEvent.setup();
     const { props } = renderPeople();
-    await user.type(username(), "devon-r");
+    await user.type(entry(), "devon-r");
     await user.click(screen.getByRole("button", { name: /^Projects:/ }));
     await user.click(
       await screen.findByRole("checkbox", { name: "TRL trail" }),
@@ -460,40 +580,75 @@ describe("invite", () => {
 });
 
 describe("invite failure", () => {
-  test("clears once the username is edited", async () => {
+  const already = {
+    message:
+      "dana@example.com is already invited. Change their projects in the list below.",
+    atField: true,
+  };
+
+  async function inviteThenFail(error: PeopleViewProps["inviteError"]) {
     const user = userEvent.setup();
     const { props, rerender } = renderPeople();
-    const input = screen.getByRole("textbox", { name: "GitHub username" });
-    await user.type(input, "devon-r");
+    const input = screen.getByRole("textbox", {
+      name: "GitHub username or email",
+    });
+    await user.type(input, "dana@example.com");
     await user.click(screen.getByRole("button", { name: "Invite" }));
     rerender(<PeopleView {...props} invitePending />);
-    rerender(
-      <PeopleView {...props} inviteError="@devon-r is already invited." />,
+    rerender(<PeopleView {...props} inviteError={error} />);
+    return { user, input };
+  }
+
+  test("already invited: the field is marked, the message sits under it, and focus moves there", async () => {
+    const { input } = await inviteThenFail(already);
+    expect(input).toHaveFocus();
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(input).toHaveAccessibleDescription(
+      expect.stringContaining(already.message),
     );
-    expect(
-      screen.getByText("@devon-r is already invited."),
-    ).toBeInTheDocument();
+    expect(screen.getAllByRole("status")[0]).toBeEmptyDOMElement();
+  });
+
+  test("clears once the entry is edited", async () => {
+    const { user, input } = await inviteThenFail(already);
     await user.type(input, "x");
-    expect(
-      screen.queryByText("@devon-r is already invited."),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText(already.message)).not.toBeInTheDocument();
+    expect(input).not.toHaveAttribute("aria-invalid");
+  });
+
+  test("a failure that isn't about the entry is announced below the form, the field unmarked", async () => {
+    const { input } = await inviteThenFail({
+      message: "Couldn't reach trail. Check your connection, then try again.",
+      atField: false,
+    });
+    expect(input).not.toHaveAttribute("aria-invalid");
+    expect(screen.getAllByRole("status")[0]).toHaveTextContent(
+      "Couldn't reach trail. Check your connection, then try again.",
+    );
   });
 });
 
-describe("parseUsername", () => {
+describe("parseEntry", () => {
   test.each([
     ["devon-r", "devon-r"],
     ["@Devon-R", "devon-r"],
     ["a", "a"],
     ["a".repeat(39), "a".repeat(39)],
-  ])("accepts %s", (raw, username) => {
-    expect(parseUsername(raw)).toEqual({ username });
+    [" Dana@Example.com ", "dana@example.com"],
+  ])("accepts %s", (raw, parsed) => {
+    expect(parseEntry(raw)).toBe(parsed);
   });
 
-  test.each(["", "-devon", "devon-", "dev--on", "dev_on", "a".repeat(40)])(
-    "refuses %j",
-    (raw) => {
-      expect(parseUsername(raw)).toHaveProperty("error");
-    },
-  );
+  test.each([
+    "",
+    "-devon",
+    "devon-",
+    "dev--on",
+    "dev_on",
+    "a".repeat(40),
+    "devon@",
+    "@devon@example",
+  ])("refuses %j", (raw) => {
+    expect(parseEntry(raw)).toBeNull();
+  });
 });

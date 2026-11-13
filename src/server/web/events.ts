@@ -5,6 +5,7 @@ import { errorSchema, eventsQuerySchema } from "../../shared/schemas.js";
 import { errorResponse } from "../api/errors.js";
 import { jsonContent } from "../api/routes.js";
 import type { TrailAuth } from "../auth/auth.js";
+import { inviteOf } from "../auth/identity.js";
 import type { Db } from "../db/client.js";
 import { activityEvent, invite, projectMember } from "../db/schema.js";
 import type { ActivityEvent, EventBus } from "../events/bus.js";
@@ -103,9 +104,8 @@ function projectsNow(db: Db, member: Member): Set<string> | "all" {
   const rows = db
     .select({ projectId: projectMember.projectId })
     .from(projectMember)
-    .innerJoin(invite, eq(invite.username, projectMember.username))
-    // the invite the account claimed, whatever its login is now
-    .where(eq(invite.githubId, member.actor.githubId))
+    .innerJoin(invite, eq(invite.id, projectMember.inviteId))
+    .where(inviteOf(member.actor))
     .all();
   return new Set(rows.map((r) => r.projectId));
 }

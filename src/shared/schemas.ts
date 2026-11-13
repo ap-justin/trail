@@ -673,7 +673,12 @@ export const viewerStates = [
 export const meSchema = z.object({
   state: z.enum(viewerStates),
   login: z.string().nullable().meta({
-    description: "The lowercased GitHub login; null when anonymous.",
+    description:
+      "The lowercased GitHub login; null when anonymous or signed in by email.",
+  }),
+  email: z.string().nullable().meta({
+    description:
+      "The lowercased address of a person signed in by email, shown where a GitHub person's @login is; null otherwise.",
   }),
   actor: webActorSchema.nullable().meta({
     description: "Null until let in: anonymous or not_invited.",
@@ -682,6 +687,10 @@ export const meSchema = z.object({
   ownerName: z.string().meta({
     description:
       "The owner actor's name, or TRAIL_OWNER_GITHUB before the owner has signed in.",
+  }),
+  emailSignIn: z.boolean().meta({
+    description:
+      "Whether this server can email a sign-in link; false until EMAIL_FROM and RESEND_API_KEY are set.",
   }),
 });
 
@@ -856,12 +865,19 @@ export const searchSchema = z.object({
 });
 
 export const personSchema = z.object({
-  username: z.string(),
+  username: z.string().nullable().meta({
+    description:
+      "The lowercased GitHub username; null for a person invited by email. With `email`, the person's {username} in /people/{username}.",
+  }),
+  email: z.string().nullable().meta({
+    description:
+      "The lowercased email address of a person invited by email; null for a GitHub invite and the owner.",
+  }),
   owner: z.boolean().meta({
     description: "The owner's row, which comes first and is not an invite.",
   }),
   pending: z.boolean().meta({
-    description: "Invited, and no one with this login has signed in yet.",
+    description: "Invited, and the person hasn't signed in yet.",
   }),
   name: z.string().nullable().meta({
     description: "The person's display name once signed in.",
@@ -877,19 +893,13 @@ export const peopleSchema = z.object({ items: z.array(personSchema) });
 
 const projectKeys = z.array(z.string().min(1).max(10)).max(1000);
 
-// GitHub's username rule, checked after lowercasing: 1-39 of a-z, 0-9 and single inner hyphens
-const githubUsername = z
-  .string()
-  .trim()
-  .toLowerCase()
-  .max(39)
-  .regex(
-    /^[a-z0-9](?:-?[a-z0-9]){0,38}$/,
-    "must be a GitHub username: up to 39 letters, digits and single inner hyphens",
-  );
+export { INVITEE_HINT, parseInvitee } from "./invitee.js";
 
 export const personCreateSchema = z.strictObject({
-  username: githubUsername,
+  username: z.string().meta({
+    description:
+      "A GitHub username or an email address, told apart by the @; trimmed and lowercased.",
+  }),
   projectKeys,
 });
 

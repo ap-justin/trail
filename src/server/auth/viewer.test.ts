@@ -37,10 +37,15 @@ test("the owner signs in as owner and sees every project", async () => {
 const bindOwner = () => signIn(owner, { githubId: TEST_OWNER_ID });
 
 const invite = (username: string, ...projectIds: string[]) => {
-  db.insert(inviteTable).values({ username, invitedBy: bot.actor.id }).run();
+  const { id: inviteId } = db
+    .insert(inviteTable)
+    .values({ username, invitedBy: bot.actor.id })
+    .returning()
+    .get();
   for (const projectId of projectIds) {
-    db.insert(projectMember).values({ username, projectId }).run();
+    db.insert(projectMember).values({ inviteId, projectId }).run();
   }
+  return inviteId;
 };
 
 test("an invited account is a member with exactly its projects, and gets an actor on sign-in", async () => {
@@ -113,13 +118,11 @@ test("removing the invite makes a live session not_invited on its next request",
 });
 
 test("a project added to a member shows on its next request", async () => {
-  invite("barbara");
+  const inviteId = invite("barbara");
   const cookie = await signIn("barbara");
   expect(await viewerOf(cookie)).toMatchObject({ projects: [] });
   const added = addProject();
-  db.insert(projectMember)
-    .values({ username: "barbara", projectId: added.id })
-    .run();
+  db.insert(projectMember).values({ inviteId, projectId: added.id }).run();
   expect(await viewerOf(cookie)).toMatchObject({
     projects: [{ id: added.id }],
   });

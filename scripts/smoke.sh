@@ -2,7 +2,8 @@
 # Boots the built bundle (dist/) on a throwaway database and exercises it:
 # /health, the SPA's index.html and an asset of it from dist/web, a deep link falling back to index.html (JSON 404
 # for an unknown /api path), a security header on a page, unauthenticated 401s on /api/v1, /api/web and /mcp, a bearer
-# key minted by the built CLI on /api/v1 and /mcp, and better-auth's mount answering sign-in with no GitHub app.
+# key minted by the built CLI on /api/v1 and /mcp, and better-auth's mount answering sign-in with no GitHub app
+# and a sign-in link request with no mail provider.
 # Run after `pnpm build`; `pnpm smoke` does both. Deliberately no --env-file:
 # a developer's .env must not leak into the check.
 set -eu
@@ -103,4 +104,11 @@ code=$(curl -s -o "$dir/auth.json" -w '%{http_code}' -X POST "$base/api/auth/sig
 [ "$code" = 503 ] && grep -q GITHUB_CLIENT_ID "$dir/auth.json" || {
   echo "/api/auth/sign-in/social gave $code: $(cat "$dir/auth.json")" >&2; exit 1;
 }
+# no EMAIL_FROM/RESEND_API_KEY either: asking for a sign-in link is off, says which variable is missing, and /me says so
+code=$(curl -s -o "$dir/link.json" -w '%{http_code}' -X POST "$base/api/auth/sign-in/magic-link" \
+  -H 'Content-Type: application/json' -H "Origin: $base" -d '{"email":"smoke@example.com"}')
+[ "$code" = 503 ] && grep -q RESEND_API_KEY "$dir/link.json" || {
+  echo "/api/auth/sign-in/magic-link gave $code: $(cat "$dir/link.json")" >&2; exit 1;
+}
+curl -fsS "$base/api/web/me" | grep -q '"emailSignIn":false' || { echo "/api/web/me did not say email sign-in is off" >&2; exit 1; }
 echo "smoke ok: dist boots, migrates, serves the SPA, mints a key, serves /api/v1, /api/web and /mcp, and mounts /api/auth on :$PORT"

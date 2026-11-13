@@ -34,7 +34,7 @@ export function createWeb({
   web.onError(handleError);
   web.use(auth.viewer);
   // registered above the member guard, which never runs for it
-  web.route("/", meRoutes(db, auth.ownerLogin));
+  web.route("/", meRoutes(db, auth));
   web.use(requireMember);
   web.use(requireOwnOrigin(auth));
   web.use(limitBody(MAX_BODY_BYTES));

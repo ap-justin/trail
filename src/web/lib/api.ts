@@ -130,6 +130,15 @@ export const api = {
         errorCallbackURL: "/sign-in",
       }),
     ),
+  /**
+   * Asks for a sign-in link at `email`. The answer is the same whether or not the address
+   * is invited; the link returns to `/`, or on a bad link to `/sign-in?error=<code>`.
+   */
+  emailLink: (email: string) =>
+    request<{ status: boolean }>(
+      "/api/auth/sign-in/magic-link",
+      json("POST", { email, callbackURL: "/" }),
+    ),
   signOut: () => request<unknown>("/api/auth/sign-out", json("POST", {})),
   eventsUrl: (filter: FeedFilter) => web(`/events${query(filter)}`),
 };

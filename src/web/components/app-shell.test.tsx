@@ -35,7 +35,7 @@ describe("People nav", () => {
   test("the owner sees People in the sidebar and the tab bar", () => {
     renderShell({
       name: "Justin Salas",
-      login: "justin",
+      handle: "@justin",
       isOwner: true,
       photoUrl: null,
     });
@@ -50,7 +50,7 @@ describe("People nav", () => {
   test("a member sees no People item anywhere", () => {
     renderShell({
       name: "Maya Chen",
-      login: "mayachen",
+      handle: "@mayachen",
       isOwner: false,
       photoUrl: null,
     });
@@ -64,7 +64,7 @@ describe("People nav", () => {
 test("the current section is marked for assistive tech", () => {
   renderShell({
     name: "Maya Chen",
-    login: "mayachen",
+    handle: "@mayachen",
     isOwner: false,
     photoUrl: null,
   });
@@ -79,7 +79,7 @@ test("the current section is marked for assistive tech", () => {
 test("the viewer's photo shows in the sidebar's account menu (hidden below lg) and loads eagerly atop the account panel", () => {
   const viewer: ShellViewer = {
     name: "Maya Chen",
-    login: "mayachen",
+    handle: "@mayachen",
     isOwner: false,
     photoUrl: photoUrlFor("a-maya", "77"),
   };
@@ -110,6 +110,7 @@ test("the shell's viewer carries the photo URL `/me` gives the signed-in actor",
   const me: MeView = {
     state: "member",
     login: "mayachen",
+    email: null,
     actor: {
       id: "a-maya",
       name: "Maya Chen",
@@ -118,18 +119,37 @@ test("the shell's viewer carries the photo URL `/me` gives the signed-in actor",
     },
     projects: [],
     ownerName: "Justin Salas",
+    emailSignIn: true,
   };
   expect(sessionOf(me)?.viewer).toEqual({
     name: "Maya Chen",
-    login: "mayachen",
+    handle: "@mayachen",
     isOwner: false,
     photoUrl: photoUrlFor("a-maya", "77"),
   });
 });
 
+test("a person who signs in by email is let into the shell, shown by their address", () => {
+  const me: MeView = {
+    state: "member",
+    login: null,
+    email: "dana@example.com",
+    actor: { id: "a-dana", name: "dana.okafor", kind: "human", photoUrl: null },
+    projects: [],
+    ownerName: "Justin Salas",
+    emailSignIn: true,
+  };
+  expect(sessionOf(me)?.viewer).toEqual({
+    name: "dana.okafor",
+    handle: "dana@example.com",
+    isOwner: false,
+    photoUrl: null,
+  });
+});
+
 const owner: ShellViewer = {
   name: "Justin Salas",
-  login: "justin",
+  handle: "@justin",
   isOwner: true,
   photoUrl: null,
 };

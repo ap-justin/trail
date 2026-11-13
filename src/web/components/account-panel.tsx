@@ -32,7 +32,7 @@ export function AccountPanel({
         />
         <div className="flex min-w-0 flex-1 flex-col">
           <span className="truncate font-medium">{viewer.name}</span>
-          <KeyText className="truncate font-normal">@{viewer.login}</KeyText>
+          <KeyText className="truncate font-normal">{viewer.handle}</KeyText>
         </div>
         <ActorBadge kind="human" />
       </div>

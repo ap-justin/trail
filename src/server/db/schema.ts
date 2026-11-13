@@ -94,6 +94,12 @@ const jsonSetOf = (column: AnySQLiteColumn, values: readonly string[]) => {
 const githubLoginShape = (column: AnySQLiteColumn) =>
   sql`length(${c(column)}) between 1 and 39 and ${c(column)} not glob '*[^a-z0-9-]*' and ${c(column)} not glob '-*' and ${c(column)} not glob '*-' and ${c(column)} not glob '*--*'`;
 
+// an email address, lowercased: 3-254 characters, one @ between a non-empty local part and a
+// dotted domain, no whitespace. The full grammar is the API's; this keeps out what would dodge
+// the unique index or never be an address
+const emailShape = (column: AnySQLiteColumn) =>
+  sql`length(${c(column)}) between 3 and 254 and ${c(column)} = lower(${c(column)}) and ${c(column)} glob '?*@?*.?*' and ${c(column)} not glob '*@*@*' and ${c(column)} not glob ('*[' || char(9, 10, 13, 32) || ']*')`;
+
 const id = () =>
   text("id")
     .primaryKey()
@@ -120,6 +126,8 @@ export const actor = sqliteTable(
     githubLogin: text("github_login"),
     // a bot's agent id in the system that runs it
     label: text("label"),
+    // the address a person let in by email signs in with; such a person has no GitHub account here
+    email: text("email"),
     // the human who signed in first as TRAIL_OWNER_GITHUB
     isOwner: integer("is_owner", { mode: "boolean" }).notNull().default(false),
     createdAt: createdAt(),
@@ -145,6 +153,13 @@ export const actor = sqliteTable(
     uniqueIndex("actor_github_login_unique")
       .on(t.githubLogin)
       .where(sql`${c(t.githubLogin)} is not null`),
+    check(
+      "actor_email_check",
+      sql`${c(t.email)} is null or (${c(t.kind)} = 'human' and ${c(t.githubId)} is null and ${emailShape(t.email)})`,
+    ),
+    uniqueIndex("actor_email_unique")
+      .on(t.email)
+      .where(sql`${c(t.email)} is not null`),
     // target of api_key's (actor_id, actor_kind) key, which pins keys to bots
     unique("actor_id_kind_unique").on(t.id, t.kind),
     // lower() folds ASCII only, like nocase: 'Équipe' and 'équipe' are two bots
@@ -269,27 +284,40 @@ export const apiKeyProject = sqliteTable(
 );
 
 /**
- * A person the owner let in, by lowercased GitHub username. Pending until an
- * account signs in under that username and binds github_id; from then on it is
- * that account's, whatever its login. Deleting it revokes access and leaves the
- * actor and everything it wrote.
+ * A person the owner let in, by lowercased GitHub username or by email address:
+ * exactly one of the two. A GitHub invite is pending until an account signs in
+ * under that username and binds github_id; from then on it is that account's,
+ * whatever its login. An email invite belongs to the human actor with that
+ * email. Deleting it revokes access and leaves the actor and everything it wrote.
  */
 export const invite = sqliteTable(
   "invite",
   {
-    username: text("username").primaryKey(),
+    // the People API names a person by username or email, never by this
+    id: integer("id").primaryKey(),
+    username: text("username").unique(),
+    email: text("email").unique(),
     invitedBy: text("invited_by")
       .notNull()
       .references(() => actor.id),
     // the account that first claimed the username; GitHub frees a username on
     // rename, so access follows this id, not the name. Migration 0007's trigger
     // refuses rewriting it once set; drizzle-kit doesn't see triggers, so a
-    // generated rebuild of invite drops it.
+    // generated rebuild of invite drops it (0012 re-creates it by hand).
     githubId: integer("github_id"),
     createdAt: createdAt(),
   },
   (t) => [
     check("invite_username_check", githubLoginShape(t.username)),
+    check("invite_email_check", emailShape(t.email)),
+    check(
+      "invite_kind_check",
+      sql`(${c(t.username)} is null) <> (${c(t.email)} is null)`,
+    ),
+    check(
+      "invite_github_id_check",
+      sql`${c(t.githubId)} is null or ${c(t.username)} is not null`,
+    ),
     uniqueIndex("invite_github_id_unique")
       .on(t.githubId)
       .where(sql`${c(t.githubId)} is not null`),
@@ -300,18 +328,18 @@ export const invite = sqliteTable(
 export const projectMember = sqliteTable(
   "project_member",
   {
-    username: text("username")
+    inviteId: integer("invite_id")
       .notNull()
-      .references(() => invite.username, { onDelete: "cascade" }),
+      .references(() => invite.id, { onDelete: "cascade" }),
     projectId: text("project_id")
       .notNull()
       .references(() => project.id, { onDelete: "cascade" }),
     createdAt: createdAt(),
   },
   (t) => [
-    // the key serves "which projects can this username see"
-    primaryKey({ columns: [t.username, t.projectId] }),
-    index("project_member_project_username_idx").on(t.projectId, t.username),
+    // the key serves "which projects can this invite see"
+    primaryKey({ columns: [t.inviteId, t.projectId] }),
+    index("project_member_project_invite_idx").on(t.projectId, t.inviteId),
   ],
 );
 
@@ -699,25 +727,35 @@ export const webhookDelivery = sqliteTable(
 // plus the unique github_id. better-auth writes every column itself; a person's identity
 // in trail is the actor row, which the sign-in links by github_id.
 
-export const user = sqliteTable("user", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  email: text("email").notNull().unique(),
-  emailVerified: integer("email_verified", { mode: "boolean" })
-    .default(false)
-    .notNull(),
-  image: text("image"),
-  createdAt: integer("created_at", { mode: "timestamp_ms" })
-    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
-    .notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp_ms" })
-    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
-    .$onUpdate(() => new Date())
-    .notNull(),
-  // GitHub's numeric user id and lowercased login, refreshed from the profile on every sign-in
-  githubId: integer("github_id").notNull().unique(),
-  githubLogin: text("github_login").notNull(),
-});
+export const user = sqliteTable(
+  "user",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    email: text("email").notNull().unique(),
+    emailVerified: integer("email_verified", { mode: "boolean" })
+      .default(false)
+      .notNull(),
+    image: text("image"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+    // GitHub's numeric user id and lowercased login, refreshed from the profile on every
+    // sign-in; both null for a person signed in by email, whose address is `email`
+    githubId: integer("github_id").unique(),
+    githubLogin: text("github_login"),
+  },
+  (t) => [
+    check(
+      "user_github_check",
+      sql`(${c(t.githubId)} is null) = (${c(t.githubLogin)} is null)`,
+    ),
+  ],
+);
 
 export const session = sqliteTable(
   "session",

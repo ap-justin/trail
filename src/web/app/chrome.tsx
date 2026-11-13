@@ -22,11 +22,13 @@ export type Session = {
 
 /** The signed-in viewer `/me` describes, or null when it lets no one in. */
 export function sessionOf(me: MeView): Session | null {
-  if (!isMember(me) || !me.actor || !me.login) return null;
+  if (!isMember(me) || !me.actor) return null;
+  const handle = me.login === null ? me.email : `@${me.login}`;
+  if (!handle) return null;
   return {
     viewer: {
       name: me.actor.name,
-      login: me.login,
+      handle,
       isOwner: me.state === "owner",
       photoUrl: me.actor.photoUrl,
     },
@@ -83,6 +85,7 @@ export function AppChrome({
               ...me,
               state: "anonymous",
               login: null,
+              email: null,
               actor: null,
               projects: [],
             }

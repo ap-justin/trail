@@ -1,9 +1,11 @@
 import { createRoute, z } from "@hono/zod-openapi";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, or, type SQL } from "drizzle-orm";
 import { createMiddleware } from "hono/factory";
 import {
   errorSchema,
+  INVITEE_HINT,
   type PersonView,
+  parseInvitee,
   peopleSchema,
   personCreateSchema,
   personSchema,
@@ -28,6 +30,7 @@ import { photoUrl, photoUrlOf } from "../service/photos.js";
 import type { Tx } from "../service/tx.js";
 import { createWebRouter, type WebEnv } from "./env.js";
 
+// a person's {username}: the GitHub username, or the email address of an email invite
 const usernameParam = z.object({ username: z.string().min(1) });
 
 const listPeople = createRoute({
@@ -47,7 +50,7 @@ const invitePerson = createRoute({
     409: jsonContent(errorSchema, "Already invited, or the owner"),
     422: jsonContent(
       errorSchema,
-      "Not a GitHub username, or an unknown project key",
+      "Neither a GitHub username nor an email address, or an unknown project key",
     ),
   },
 });
@@ -58,7 +61,7 @@ const setProjects = createRoute({
   request: { params: usernameParam, body: jsonBody(personUpdateSchema) },
   responses: {
     200: jsonContent(personSchema, "The invite with its new projects"),
-    404: jsonContent(errorSchema, "No invite for that username"),
+    404: jsonContent(errorSchema, "No invite for that username or email"),
     422: jsonContent(errorSchema, "An unknown project key"),
   },
 });
@@ -69,7 +72,7 @@ const removePerson = createRoute({
   request: { params: usernameParam },
   responses: {
     204: { description: "Removed; the person's actor and writes stay" },
-    404: jsonContent(errorSchema, "No invite for that username"),
+    404: jsonContent(errorSchema, "No invite for that username or email"),
   },
 });
 
@@ -79,8 +82,24 @@ const ownerOnly = createMiddleware<WebEnv>(async (c, next) => {
   await next();
 });
 
-const noInvite = (username: string) =>
-  new NotFoundError(`no invite for @${username}`);
+type Invitee = { username: string } | { email: string };
+
+/** The invitee a {username} path segment names: with an @ an email, else a GitHub username. */
+const inviteeOfParam = (param: string): Invitee => {
+  const value = param.trim().toLowerCase();
+  return value.includes("@") ? { email: value } : { username: value };
+};
+
+const handleOf = (invitee: Invitee) =>
+  "email" in invitee ? invitee.email : `@${invitee.username}`;
+
+const inviteFor = (invitee: Invitee): SQL =>
+  "email" in invitee
+    ? eq(invite.email, invitee.email)
+    : eq(invite.username, invitee.username);
+
+const noInvite = (invitee: Invitee) =>
+  new NotFoundError(`no invite for ${handleOf(invitee)}`);
 
 /** The ids of the projects with these keys, in any case; an unknown key is a 422 naming it. */
 function projectIdsOf(tx: Tx, keys: string[]): string[] {
@@ -100,73 +119,89 @@ function projectIdsOf(tx: Tx, keys: string[]): string[] {
   return rows.map((r) => r.id);
 }
 
-function setMemberships(tx: Tx, username: string, projectIds: string[]) {
-  tx.delete(projectMember).where(eq(projectMember.username, username)).run();
+function setMemberships(tx: Tx, inviteId: number, projectIds: string[]) {
+  tx.delete(projectMember).where(eq(projectMember.inviteId, inviteId)).run();
   if (projectIds.length === 0) return;
   tx.insert(projectMember)
-    .values(projectIds.map((projectId) => ({ username, projectId })))
+    .values(projectIds.map((projectId) => ({ inviteId, projectId })))
     .run();
 }
 
-/** The invites for these usernames, or every invite, oldest first. */
-function invitees(db: Db | Tx, usernames?: string[]): PersonView[] {
+/** The invites with these ids, or every invite, oldest first. */
+function invitees(db: Db | Tx, ids?: number[]): PersonView[] {
   const invites = db
     .select()
     .from(invite)
-    .where(usernames ? inArray(invite.username, usernames) : undefined)
-    .orderBy(asc(invite.createdAt), asc(invite.username))
+    .where(ids ? inArray(invite.id, ids) : undefined)
+    .orderBy(asc(invite.createdAt), asc(invite.id))
     .all();
-  const names = invites.map((i) => i.username);
-  if (names.length === 0) return [];
+  if (invites.length === 0) return [];
   const memberships = db
     .select({
-      username: projectMember.username,
+      inviteId: projectMember.inviteId,
       key: project.key,
       name: project.name,
     })
     .from(projectMember)
     .innerJoin(project, eq(project.id, projectMember.projectId))
-    .where(inArray(projectMember.username, names))
+    .where(
+      inArray(
+        projectMember.inviteId,
+        invites.map((i) => i.id),
+      ),
+    )
     .orderBy(asc(project.key))
     .all();
   const claimedIds = invites.flatMap((i) =>
     i.githubId === null ? [] : [i.githubId],
   );
+  const emails = invites.flatMap((i) => (i.email === null ? [] : [i.email]));
   const actors =
-    claimedIds.length === 0
+    claimedIds.length === 0 && emails.length === 0
       ? []
       : db
           .select({
             id: actor.id,
             githubId: actor.githubId,
+            email: actor.email,
             name: actor.displayName,
             photoHash: actorPhoto.hash,
           })
           .from(actor)
           .leftJoin(actorPhoto, eq(actorPhoto.actorId, actor.id))
           .where(
-            and(eq(actor.kind, "human"), inArray(actor.githubId, claimedIds)),
+            and(
+              eq(actor.kind, "human"),
+              or(
+                inArray(actor.githubId, claimedIds),
+                inArray(actor.email, emails),
+              ),
+            ),
           )
           .all();
   return invites.map((i) => {
-    // claimed by the account with this id, whatever its login is now
-    const claimant = actors.find((a) => a.githubId === i.githubId);
+    // a GitHub invite is the account that claimed it, whatever its login is now; an
+    // email invite, the actor its address let in
+    const person =
+      i.githubId !== null
+        ? actors.find((a) => a.githubId === i.githubId)
+        : actors.find((a) => i.email !== null && a.email === i.email);
     return {
       username: i.username,
+      email: i.email,
       owner: false,
-      pending: i.githubId === null,
-      name: claimant?.name ?? null,
-      photoUrl: claimant ? photoUrl(claimant.id, claimant.photoHash) : null,
+      pending: person === undefined,
+      name: person?.name ?? null,
+      photoUrl: person ? photoUrl(person.id, person.photoHash) : null,
       projects: memberships
-        .filter((m) => m.username === i.username)
+        .filter((m) => m.inviteId === i.id)
         .map(({ key, name }) => ({ key, name })),
       invitedAt: i.createdAt.toISOString(),
     };
   });
 }
 
-const one = (db: Db | Tx, username: string) =>
-  invitees(db, [username])[0] as PersonView;
+const one = (db: Db | Tx, id: number) => invitees(db, [id])[0] as PersonView;
 
 export function peopleRoutes(db: Db) {
   const people = createWebRouter();
@@ -177,6 +212,7 @@ export function peopleRoutes(db: Db) {
       const owner = c.var.member;
       const ownerRow: PersonView = {
         username: owner.login,
+        email: null,
         owner: true,
         pending: false,
         name: owner.actor.displayName,
@@ -188,61 +224,57 @@ export function peopleRoutes(db: Db) {
     })
     .openapi(invitePerson, (c) => {
       const owner = c.var.member;
-      const { username, projectKeys } = c.req.valid("json");
-      if (username === owner.login) {
+      const { username: entry, projectKeys } = c.req.valid("json");
+      const invitee = parseInvitee(entry);
+      if (!invitee) throw new ValidationError(INVITEE_HINT);
+      if ("username" in invitee && invitee.username === owner.login) {
         throw new ConflictError(
-          `@${username} is the owner, who sees every project`,
+          `@${invitee.username} is the owner, who sees every project`,
         );
       }
       const created = db.transaction(
         (tx) => {
           const projectIds = projectIdsOf(tx, projectKeys);
-          const taken = tx
-            .select()
-            .from(invite)
-            .where(eq(invite.username, username))
-            .get();
-          if (taken) {
+          if (tx.select().from(invite).where(inviteFor(invitee)).get()) {
             throw new ConflictError(
-              `@${username} is already invited: change their projects instead`,
+              `${handleOf(invitee)} is already invited. Change their projects in the list below.`,
             );
           }
-          tx.insert(invite)
-            .values({ username, invitedBy: owner.actor.id })
-            .run();
-          setMemberships(tx, username, projectIds);
-          return one(tx, username);
+          const { id } = tx
+            .insert(invite)
+            .values({ ...invitee, invitedBy: owner.actor.id })
+            .returning({ id: invite.id })
+            .get();
+          setMemberships(tx, id, projectIds);
+          return one(tx, id);
         },
         { behavior: "immediate" },
       );
       return c.json(created, 201);
     })
     .openapi(setProjects, (c) => {
-      const username = c.req.valid("param").username.toLowerCase();
+      const invitee = inviteeOfParam(c.req.valid("param").username);
       const { projectKeys } = c.req.valid("json");
       const updated = db.transaction(
         (tx) => {
           const found = tx
-            .select()
+            .select({ id: invite.id })
             .from(invite)
-            .where(eq(invite.username, username))
+            .where(inviteFor(invitee))
             .get();
-          if (!found) throw noInvite(username);
-          setMemberships(tx, username, projectIdsOf(tx, projectKeys));
-          return one(tx, username);
+          if (!found) throw noInvite(invitee);
+          setMemberships(tx, found.id, projectIdsOf(tx, projectKeys));
+          return one(tx, found.id);
         },
         { behavior: "immediate" },
       );
       return c.json(updated, 200);
     })
     .openapi(removePerson, (c) => {
-      const username = c.req.valid("param").username.toLowerCase();
+      const invitee = inviteeOfParam(c.req.valid("param").username);
       // project_member rows go with it (on delete cascade)
-      const { changes } = db
-        .delete(invite)
-        .where(eq(invite.username, username))
-        .run();
-      if (changes === 0) throw noInvite(username);
+      const { changes } = db.delete(invite).where(inviteFor(invitee)).run();
+      if (changes === 0) throw noInvite(invitee);
       return c.body(null, 204);
     });
 }

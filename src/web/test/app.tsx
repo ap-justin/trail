@@ -25,16 +25,34 @@ export const ownerName = "Justin Salas";
 export function meView(state: MeView["state"]): MeView {
   switch (state) {
     case "anonymous":
-      return { state, login: null, actor: null, projects: [], ownerName };
+      return {
+        state,
+        login: null,
+        email: null,
+        actor: null,
+        projects: [],
+        ownerName,
+        emailSignIn: true,
+      };
     case "not_invited":
-      return { state, login: "stranger", actor: null, projects: [], ownerName };
+      return {
+        state,
+        login: "stranger",
+        email: null,
+        actor: null,
+        projects: [],
+        ownerName,
+        emailSignIn: true,
+      };
     default:
       return {
         state,
         login: "mayachen",
+        email: null,
         actor: maya,
         projects: allProjects,
         ownerName,
+        emailSignIn: true,
       };
   }
 }

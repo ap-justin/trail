@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterAll, vi } from "vitest";
 import { createApp } from "./app.js";
 import { type AuthConfig, createAuth } from "./auth/auth.js";
+import type { MailMessage } from "./auth/mail.js";
 import { migrate, openDatabase } from "./db/client.js";
 import { invite, project, projectMember } from "./db/schema.js";
 import { type ActivityEvent, createEventBus } from "./events/bus.js";
@@ -41,6 +42,7 @@ export const testAuthConfig: AuthConfig = {
   BETTER_AUTH_SECRET: "test-secret-that-is-at-least-32-characters",
   BETTER_AUTH_URL: TEST_ORIGIN,
   github: { clientId: "test-client-id", clientSecret: "test-client-secret" },
+  email: { from: "trail <trail@mail.example.test>", resendApiKey: "re_test" },
 };
 
 /**
@@ -146,6 +148,8 @@ export function setupTestApp({
   /** the built SPA directory `createApp` serves; none by default */
   webDir?: string;
 } = {}) {
+  /** every sign-in email sent, in order; none leaves the process */
+  const mail: MailMessage[] = [];
   const dir = mkdtempSync(join(tmpdir(), "trail-api-"));
   const db = openDatabase(join(dir, "trail.db"));
   migrate(db);
@@ -161,6 +165,9 @@ export function setupTestApp({
     db,
     config: { ...testAuthConfig, ...authOverrides },
     avatarFetch,
+    mailTransport: async (message) => {
+      mail.push(message);
+    },
   });
   const streams = new LiveStreams();
   const webhooks = testWebhookSettings(webhookOverrides);
@@ -271,6 +278,68 @@ export function setupTestApp({
     });
   }
 
+  let clientIps = 0;
+  /**
+   * Asks for a sign-in link for `email` as a browser on the SPA does, from
+   * `ip` (by default a fresh one, so no test shares another's IP limit).
+   */
+  function requestEmailLink(
+    email: string,
+    { ip = `198.51.100.${++clientIps}` }: { ip?: string } = {},
+  ) {
+    return app.request("/api/auth/sign-in/magic-link", {
+      method: "POST",
+      headers: {
+        origin: TEST_ORIGIN,
+        "content-type": "application/json",
+        "fly-client-ip": ip,
+      },
+      body: JSON.stringify({ email }),
+    });
+  }
+
+  /** The sign-in link in the last email sent to `email`. */
+  function linkSentTo(email: string): string {
+    const message = mail.findLast((m) => m.to === email);
+    const link = message?.text.match(/https?:\/\/\S+/)?.[0];
+    if (!link) throw new Error(`no sign-in link was sent to ${email}`);
+    return link;
+  }
+
+  /** Waits out the delivery that runs after a link request has been answered. */
+  const deliveries = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+  /** Opens a sign-in link as the browser the email was read in does. */
+  const openLink = (link: string) => app.request(link);
+
+  /**
+   * Signs in by email: asks for a link, then opens it. Returns the session's
+   * Cookie header, "" when the link made none.
+   */
+  async function signInWithEmail(email: string): Promise<string> {
+    const asked = await requestEmailLink(email);
+    if (asked.status !== 200) {
+      throw new Error(
+        `link request gave ${asked.status}: ${await asked.text()}`,
+      );
+    }
+    await deliveries();
+    return sessionCookie(await openLink(linkSentTo(email)));
+  }
+
+  /** Invites `email` to these projects; returns the invite's id. */
+  function inviteEmail(email: string, projectIds: string[] = []): number {
+    const { id: inviteId } = db
+      .insert(invite)
+      .values({ email, invitedBy: bot.actor.id })
+      .returning()
+      .get();
+    for (const projectId of projectIds) {
+      db.insert(projectMember).values({ inviteId, projectId }).run();
+    }
+    return inviteId;
+  }
+
   /** A further bot with its own key; pass the key to `request` to write as it. */
   const addBot = (name: string) => createBot(db, name);
 
@@ -288,11 +357,13 @@ export function setupTestApp({
     projectIds: string[],
     account: { githubId?: number; name?: string } = {},
   ): Promise<string> {
-    db.insert(invite)
+    const { id: inviteId } = db
+      .insert(invite)
       .values({ username: login, invitedBy: bot.actor.id })
-      .run();
+      .returning()
+      .get();
     for (const projectId of projectIds) {
-      db.insert(projectMember).values({ username: login, projectId }).run();
+      db.insert(projectMember).values({ inviteId, projectId }).run();
     }
     return signIn(login, account);
   }
@@ -313,6 +384,13 @@ export function setupTestApp({
     signIn,
     signInWithGitHub,
     viewerOf,
+    mail,
+    requestEmailLink,
+    linkSentTo,
+    deliveries,
+    openLink,
+    signInWithEmail,
+    inviteEmail,
     /** Ends every event stream, as a drain does; resolves once each has stopped. */
     endStreams: () => streams.end(),
   };

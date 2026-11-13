@@ -43,8 +43,8 @@ import { cn } from "@/lib/utils";
 
 export type ShellViewer = {
   name: string;
-  /** The GitHub login, without the @. */
-  login: string;
+  /** `@` and the GitHub login, or the email address of a person who signs in by email. */
+  handle: string;
   isOwner: boolean;
   photoUrl: string | null;
 };
@@ -243,7 +243,7 @@ function AccountMenu({
             <span className="text-2xs text-muted-foreground">Owner</span>
           ) : (
             <KeyText className="truncate text-2xs font-normal">
-              @{viewer.login}
+              {viewer.handle}
             </KeyText>
           )}
         </span>

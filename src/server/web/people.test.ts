@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import { expect, test } from "vitest";
+import { accessOfEmail, syncEmailActor } from "../auth/identity.js";
 import { actor } from "../db/schema.js";
 import { setupTestApp } from "../test-app.js";
 
@@ -36,6 +37,7 @@ test("the owner invites a username, lowercased, to projects; it is pending until
     status: 201,
     body: {
       username: "new-person",
+      email: null,
       owner: false,
       pending: true,
       name: null,
@@ -53,6 +55,7 @@ test("the owner invites a username, lowercased, to projects; it is pending until
   expect(status).toBe(200);
   expect(body.items[0]).toEqual({
     username: owner,
+    email: null,
     owner: true,
     pending: false,
     name: "Olive Owner",
@@ -73,10 +76,130 @@ test.each([
   ["a username GitHub would refuse", { username: "-bad-" }, 422],
   ["a username with a double hyphen", { username: "a--b" }, 422],
   ["a 40-character username", { username: "a".repeat(40) }, 422],
+  ["a repeat of an invited email", { username: "repeat@example.com" }, 409],
+  ["an email cut short", { username: "devon@" }, 422],
+  ["an email with no dotted domain", { username: "devon@example" }, 422],
+  ["an email with two @", { username: "de@von@example.com" }, 422],
+  [
+    "a 255-character email",
+    { username: `${"a".repeat(243)}@example.com` },
+    422,
+  ],
 ])("inviting %s is a %i", async (_, { username }, status) => {
   await people("POST", "/people", { username: "repeat", projectKeys: [] });
+  await people("POST", "/people", {
+    username: "repeat@example.com",
+    projectKeys: [],
+  });
   const res = await people("POST", "/people", { username, projectKeys: [] });
   expect(res.status).toBe(status);
+});
+
+test("the owner invites an email address, lowercased, to projects; it is pending until that address signs in", async () => {
+  const created = await people("POST", "/people", {
+    username: "  Priya@Studio.Example ",
+    projectKeys: [alpha.key],
+  });
+  expect(created).toEqual({
+    status: 201,
+    body: {
+      username: null,
+      email: "priya@studio.example",
+      owner: false,
+      pending: true,
+      name: null,
+      photoUrl: null,
+      projects: [{ key: alpha.key, name: "Alpha" }],
+      invitedAt: expect.any(String),
+    },
+  });
+
+  syncEmailActor(db, "priya@studio.example");
+  const { body } = await people("GET", "/people");
+  expect(body.items).toContainEqual({
+    ...created.body,
+    pending: false,
+    name: "priya",
+  });
+});
+
+test("the list carries both kinds of invite, oldest first, after the owner", async () => {
+  await people("POST", "/people", { username: "both-gh", projectKeys: [] });
+  await people("POST", "/people", {
+    username: "both@example.com",
+    projectKeys: [],
+  });
+  const { body } = await people("GET", "/people");
+  const handles = body.items.map((p: Body) => p.username ?? p.email);
+  expect(handles[0]).toBe(owner);
+  expect(handles.indexOf("both-gh")).toBeGreaterThan(0);
+  expect(handles.indexOf("both@example.com")).toBeGreaterThan(
+    handles.indexOf("both-gh"),
+  );
+});
+
+test("an entry that is neither a GitHub username nor an email address is a 422 saying what to enter", async () => {
+  const res = await people("POST", "/people", {
+    username: "devon@",
+    projectKeys: [],
+  });
+  expect(res).toEqual({
+    status: 422,
+    body: {
+      error: {
+        code: "validation_failed",
+        message:
+          "Enter a GitHub username or an email address, like devon-r or devon@example.com.",
+      },
+    },
+  });
+});
+
+test.each([
+  ["an email", "dana@example.com", "DANA@example.com", "dana@example.com"],
+  ["a GitHub username", "kai-dev", "Kai-Dev", "@kai-dev"],
+])(
+  "inviting %s again, in any case, is a 409 naming it",
+  async (_, first, again, named) => {
+    await people("POST", "/people", { username: first, projectKeys: [] });
+    const res = await people("POST", "/people", {
+      username: again,
+      projectKeys: [],
+    });
+    expect(res).toEqual({
+      status: 409,
+      body: {
+        error: {
+          code: "conflict",
+          message: `${named} is already invited. Change their projects in the list below.`,
+        },
+      },
+    });
+  },
+);
+
+test("PUT and DELETE name an email invite by its address, in any case", async () => {
+  await people("POST", "/people", {
+    username: "edit@example.com",
+    projectKeys: [alpha.key],
+  });
+  syncEmailActor(db, "edit@example.com");
+  const path = `/people/${encodeURIComponent("Edit@Example.com")}`;
+
+  const moved = await people("PUT", path, { projectKeys: [beta.key] });
+  expect(moved.status).toBe(200);
+  expect(moved.body).toMatchObject({
+    email: "edit@example.com",
+    projects: [{ key: beta.key, name: "Beta" }],
+  });
+
+  expect(await people("DELETE", path)).toEqual({ status: 204, body: null });
+  expect(accessOfEmail(db, "edit@example.com")).toBeNull();
+  expect((await people("DELETE", path)).status).toBe(404);
+  expect(
+    (await people("PUT", "/people/ghost@example.com", { projectKeys: [] }))
+      .status,
+  ).toBe(404);
 });
 
 test("an unknown project key is a 422 naming the key, and invites no one", async () => {

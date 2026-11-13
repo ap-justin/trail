@@ -15,9 +15,11 @@ test("an anonymous visitor gets 200 with no login, actor or projects, and the ow
     body: {
       state: "anonymous",
       login: null,
+      email: null,
       actor: null,
       projects: [],
       ownerName: owner,
+      emailSignIn: true,
     },
   });
 });
@@ -29,9 +31,11 @@ test("an account not on the list gets 200 not_invited with its login and nothing
     body: {
       state: "not_invited",
       login: "stranger",
+      email: null,
       actor: null,
       projects: [],
       ownerName: owner,
+      emailSignIn: true,
     },
   });
 });
@@ -46,6 +50,7 @@ test("a member gets its actor and exactly its projects; the owner's display name
     body: {
       state: "member",
       login: "ada",
+      email: null,
       actor: {
         id: expect.any(String),
         name: "Ada Lovelace",
@@ -54,6 +59,7 @@ test("a member gets its actor and exactly its projects; the owner's display name
       },
       projects: [{ key: mine.key, name: "Mine" }],
       ownerName: "Olive Owner",
+      emailSignIn: true,
     },
   });
 });

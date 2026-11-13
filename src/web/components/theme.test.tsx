@@ -34,7 +34,7 @@ function Probe() {
 
 const viewer = {
   name: "Maya Chen",
-  login: "mayachen",
+  handle: "@mayachen",
   isOwner: false,
   photoUrl: null,
 };

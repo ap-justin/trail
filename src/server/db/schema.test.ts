@@ -707,22 +707,26 @@ test.each(malformedLogins)("an invite for %j is rejected", (username) => {
 });
 
 test("a username is invited once, and its projects must exist", () => {
-  db.insert(invite).values({ username: "once", invitedBy: human.id }).run();
+  const once = db
+    .insert(invite)
+    .values({ username: "once", invitedBy: human.id })
+    .returning()
+    .get();
   expect(
     errorCode(() =>
       db.insert(invite).values({ username: "once", invitedBy: human.id }).run(),
     ),
-  ).toBe("SQLITE_CONSTRAINT_PRIMARYKEY");
-  const member = (username: string, projectId: string) => () =>
-    db.insert(projectMember).values({ username, projectId }).run();
-  member("once", proj.id)();
-  expect(errorCode(member("once", proj.id))).toBe(
+  ).toBe("SQLITE_CONSTRAINT_UNIQUE");
+  const member = (inviteId: number, projectId: string) => () =>
+    db.insert(projectMember).values({ inviteId, projectId }).run();
+  member(once.id, proj.id)();
+  expect(errorCode(member(once.id, proj.id))).toBe(
     "SQLITE_CONSTRAINT_PRIMARYKEY",
   );
-  expect(errorCode(member("never-invited", proj.id))).toBe(
+  expect(errorCode(member(once.id + 1000, proj.id))).toBe(
     "SQLITE_CONSTRAINT_FOREIGNKEY",
   );
-  expect(errorCode(member("once", "nope"))).toBe(
+  expect(errorCode(member(once.id, "nope"))).toBe(
     "SQLITE_CONSTRAINT_FOREIGNKEY",
   );
 });
@@ -804,11 +808,15 @@ test("removing an invite drops its projects and keeps the person's actor and wri
     .values({ key: "MBR", name: "members", createdBy: bot.id })
     .returning()
     .get();
-  db.insert(invite).values({ username: "leaver", invitedBy: human.id }).run();
+  const leaver = db
+    .insert(invite)
+    .values({ username: "leaver", invitedBy: human.id })
+    .returning()
+    .get();
   db.insert(projectMember)
     .values([
-      { username: "leaver", projectId: proj.id },
-      { username: "leaver", projectId: other.id },
+      { inviteId: leaver.id, projectId: proj.id },
+      { inviteId: leaver.id, projectId: other.id },
     ])
     .run();
   const person = db
@@ -827,7 +835,7 @@ test("removing an invite drops its projects and keeps the person's actor and wri
     db
       .select()
       .from(projectMember)
-      .where(eq(projectMember.username, "leaver"))
+      .where(eq(projectMember.inviteId, leaver.id))
       .all(),
   ).toEqual([]);
   expect(
@@ -847,11 +855,15 @@ test("a project with issues cannot be deleted; one without drops its memberships
     .values({ key: "GONE", name: "gone", createdBy: bot.id })
     .returning()
     .get();
-  db.insert(invite).values({ username: "viewer", invitedBy: human.id }).run();
+  const viewer = db
+    .insert(invite)
+    .values({ username: "viewer", invitedBy: human.id })
+    .returning()
+    .get();
   db.insert(projectMember)
     .values([
-      { username: "viewer", projectId: proj.id },
-      { username: "viewer", projectId: empty.id },
+      { inviteId: viewer.id, projectId: proj.id },
+      { inviteId: viewer.id, projectId: empty.id },
     ])
     .run();
 
@@ -864,21 +876,21 @@ test("a project with issues cannot be deleted; one without drops its memberships
     db
       .select({ projectId: projectMember.projectId })
       .from(projectMember)
-      .where(eq(projectMember.username, "viewer"))
+      .where(eq(projectMember.inviteId, viewer.id))
       .all(),
   ).toEqual([{ projectId: proj.id }]);
 });
 
 test.each([
   [
-    "a username's projects",
-    eq(projectMember.username, "viewer"),
+    "an invite's projects",
+    eq(projectMember.inviteId, 1),
     "sqlite_autoindex_project_member_1",
   ],
   [
-    "a project's usernames",
+    "a project's invites",
     eq(projectMember.projectId, proj.id),
-    "project_member_project_username_idx",
+    "project_member_project_invite_idx",
   ],
 ])("%s are read from an index alone", (_, where, index) => {
   const plan = planOf(db.select().from(projectMember).where(where).toSQL());
