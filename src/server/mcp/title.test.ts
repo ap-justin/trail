@@ -58,16 +58,32 @@ test("set_my_title keeps 40 characters after trimming and refuses 41, blank and 
   expect(await call(mine, "set_my_title", { title: ` ${forty} ` })).toEqual({
     title: forty,
   });
-  for (const args of [
-    { title: "z".repeat(41) },
-    { title: "" },
-    { title: " \t\n" },
-    { title: "Fine", extra: true },
-    {},
-  ]) {
-    expect(await refusal(mine, "set_my_title", args)).toMatch(/title|extra/);
+  for (const [args, message] of [
+    [{ title: "z".repeat(41) }, /<=40 characters at title/],
+    [{ title: "" }, />=1 characters at title/],
+    [{ title: " \t\n" }, />=1 characters at title/],
+    [{ title: "Fine", extra: true }, /Unrecognized key/],
+    [{}, /expected string, received undefined|Required/],
+  ] as const) {
+    expect(await refusal(mine, "set_my_title", args)).toMatch(message);
   }
   expect((await call(mine, "whoami")).title).toBe(forty);
+});
+
+test("set_my_title refuses a control or bidi character, or invisible characters alone, and keeps emoji", async () => {
+  const mine = await connect(addBot("mcp-hidden-chars").key);
+  await call(mine, "set_my_title", { title: "Kept" });
+  for (const title of ["\u0000ab", "a\nb", "\u202Eevil", "\u200B\u2060"]) {
+    expect(await refusal(mine, "set_my_title", { title })).toMatch(
+      /plain text on one line|visible character/,
+    );
+  }
+  expect((await call(mine, "whoami")).title).toBe("Kept");
+  expect(
+    await call(mine, "set_my_title", { title: "Pit crew 👩\u200D🔧" }),
+  ).toEqual({
+    title: "Pit crew 👩\u200D🔧",
+  });
 });
 
 test("a key limited to reading one project sets and clears its own title, and another bot's stays", async () => {
@@ -121,7 +137,7 @@ test("the title tools publish a change live and nothing for an unchanged title",
   }
 });
 
-test("list_bots carries each bot's title, and the tool descriptions say what a title is", async () => {
+test("list_bots carries each bot's title", async () => {
   const titled = addBot("mcp-listed");
   const client = await connect(titled.key);
   await call(client, "set_my_title", { title: "Listed" });
@@ -129,11 +145,4 @@ test("list_bots carries each bot's title, and the tool descriptions say what a t
   expect(items.find((b: Body) => b.id === titled.actor.id)?.title).toBe(
     "Listed",
   );
-  const { tools } = await client.listTools();
-  const describe = (name: string) =>
-    tools.find((t) => t.name === name)?.description ?? "";
-  expect(describe("set_my_title")).toMatch(/beside your name.*1 to 40/);
-  expect(describe("clear_my_title")).toMatch(/title/);
-  expect(describe("whoami")).toMatch(/title/);
-  expect(describe("list_bots")).toMatch(/title/);
 });

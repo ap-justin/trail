@@ -1831,15 +1831,17 @@ export function createService({
       return { photoUrl: null };
     },
 
-    /** Sets the calling bot's title, trimmed, and publishes it when it changed. Any key may. */
+    /** Sets the calling bot's title, trimmed, and publishes it when it changed. Any bot key may. */
     setMyTitle(actor: ActingActor, raw: string): { title: string } {
+      requireBot(actor, "set a title");
       const title = validBotTitle(raw);
       setTitle(actor.id, title);
       return { title };
     },
 
-    /** Clears the calling bot's title, publishing the removal when it had one. Any key may. */
+    /** Clears the calling bot's title, publishing the removal when it had one. Any bot key may. */
     clearMyTitle(actor: ActingActor): { title: null } {
+      requireBot(actor, "clear a title");
       setTitle(actor.id, null);
       return { title: null };
     },

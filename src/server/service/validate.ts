@@ -37,6 +37,25 @@ export function nonBlank(value: string, field: string): string {
 /** In UTF-16 code units, as zod's `.max` counts, so the API schema and the service agree. */
 export const BOT_TITLE_MAX = 40;
 
+// controls (NUL included: SQLite's length() stops at it), line and paragraph separators, bidi embeddings, overrides and isolates
+const titleHiddenFormatting = /[\p{Cc}\u2028\u2029\u202A-\u202E\u2066-\u2069]/u;
+// zero-width joiners stay legal inside a title: emoji sequences need U+200D
+const titleInvisibleOnly = /^[\u200B-\u200D\u2060\uFEFF]+$/u;
+
+/**
+ * Why an already-trimmed title can't be shown as a one-line plain-text role, or
+ * undefined when it can. Shared by the API schema and `validBotTitle`.
+ */
+export function botTitleCharacterProblem(title: string): string | undefined {
+  if (titleHiddenFormatting.test(title)) {
+    return "title must be plain text on one line: no control, line-break or bidi characters";
+  }
+  if (titleInvisibleOnly.test(title)) {
+    return "title must have a visible character";
+  }
+  return undefined;
+}
+
 /** A bot's title, trimmed of all whitespace (the database's trim strips spaces alone). */
 export function validBotTitle(raw: string): string {
   const title = raw.trim();
@@ -46,6 +65,8 @@ export function validBotTitle(raw: string): string {
       `title must be at most ${BOT_TITLE_MAX} characters; got ${title.length}`,
     );
   }
+  const problem = botTitleCharacterProblem(title);
+  if (problem) throw new ValidationError(problem);
   return title;
 }
 

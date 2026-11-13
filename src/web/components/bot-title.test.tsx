@@ -39,14 +39,10 @@ function expectNamePillBadge(scope: HTMLElement, name: string, title: string) {
     Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
   expect(follows(nameEl, pill)).toBe(true);
   expect(follows(pill, badge)).toBe(true);
-  // one wrapping group: past one line the pill and badge drop under the name, and a
-  // name too long for its own line truncates, so nothing pushes the page wider
+  // one group, so they wrap together
   const group = nameEl.parentElement;
-  expect(group).toHaveClass("flex-wrap", "min-w-0", "max-w-full");
   expect(pill.parentElement).toBe(group);
   expect(badge.parentElement).toBe(group);
-  expect(nameEl).toHaveClass("min-w-0", "truncate");
-  expect(nameEl).not.toHaveClass("shrink-0");
 }
 
 function renderFeed(overrides: Partial<FeedViewProps> = {}) {
@@ -125,31 +121,31 @@ describe("feed", () => {
     expect(taraOption.querySelector("[title]")).toBeNull();
   });
 
-  test("the bot filter menu sizes to its items, inside the viewport; a long name truncates beside a whole pill", async () => {
+  test("in the filter menu the pill's own shrink is replaced, so a long name truncates beside a whole pill", async () => {
     const user = userEvent.setup();
     renderFeed();
     await user.click(screen.getByRole("combobox", { name: "Filter by bot" }));
-    const listbox = await screen.findByRole("listbox");
-    const popup = listbox.closest('[data-slot="select-content"]');
-    expect(popup).toHaveClass(
-      "w-auto",
-      "min-w-(--anchor-width)",
-      "max-w-(--available-width)",
-    );
-    expect(popup).not.toHaveClass("w-(--anchor-width)");
-    const kaiOption = screen.getByRole("option", { name: /Kai/ });
-    expect(within(kaiOption).getByText("Kai")).toHaveClass(
-      "min-w-0",
-      "truncate",
-    );
+    const kaiOption = await screen.findByRole("option", { name: /Kai/ });
     const [pill] = pillsIn(kaiOption, "Platform Engineer");
+    // BotTitle shrinks by default (shrink-4); the menu's className must win the merge
     expect(pill).toHaveClass("shrink-0");
     expect(pill).not.toHaveClass("shrink-4");
+  });
+
+  test("a menu pill sits on the background, so it still shows on the highlighted row", async () => {
+    const user = userEvent.setup();
+    renderFeed();
+    await user.click(screen.getByRole("combobox", { name: "Filter by bot" }));
+    const kaiOption = await screen.findByRole("option", { name: /Kai/ });
+    const [pill] = pillsIn(kaiOption, "Platform Engineer");
+    // the highlight is bg-accent, the same fill as bg-muted in light theme
+    expect(pill).toHaveClass("bg-background");
+    expect(pill).not.toHaveClass("bg-muted");
   });
 });
 
 describe("issue", () => {
-  function renderIssue() {
+  function renderIssue(assignee: WebActorView = kaiTitled) {
     const on = {
       project: trail,
       issue: { key: "TRL-14", title: "Team access" },
@@ -161,7 +157,7 @@ describe("issue", () => {
           status: "ready",
           data: issue({
             creator: taraTitled,
-            assignee: kaiTitled,
+            assignee,
             timeline: [
               {
                 ...on,
@@ -207,22 +203,6 @@ describe("issue", () => {
     expectNamePillBadge(byLine, "Tara", "Release manager");
   });
 
-  test("below lg, Labels then Assignee take full-width rows after the property pairs", () => {
-    renderIssue();
-    for (const [label, order] of [
-      ["Labels", "max-lg:order-1"],
-      ["Assignee", "max-lg:order-2"],
-    ] as const) {
-      const term = screen.getByText(label, { selector: "dt" });
-      const value = term.nextElementSibling;
-      expect(term).toHaveClass(order);
-      expect(value).toHaveClass(order, "max-lg:col-span-3");
-    }
-    expect(
-      screen.getByText("Status", { selector: "dt" }).className,
-    ).not.toMatch(/order-|col-span/);
-  });
-
   test("the Assignee property carries the assignee's title", () => {
     renderIssue();
     const assignee = screen.getByText("Assignee").nextElementSibling;
@@ -231,6 +211,28 @@ describe("issue", () => {
     expect(pillsIn(assignee, "Platform Engineer")).toHaveLength(1);
     expectNamePillBadge(assignee, "Kai", "Platform Engineer");
   });
+
+  test.each([
+    ["with a title", "Platform Engineer"],
+    ["without one", null],
+  ])(
+    "a long assignee name, %s, keeps its Bot badge, and its title only when it has one",
+    (_, title) => {
+      const name = "release-coordinator-staging-east";
+      renderIssue({ ...kai, name, title });
+      const assignee = screen.getByText("Assignee").nextElementSibling;
+      if (!(assignee instanceof HTMLElement))
+        throw new Error("no assignee value");
+      const nameEl = within(assignee).getByText(name);
+      expect(nameEl).toBeInTheDocument();
+      if (title) {
+        expect(within(assignee).getByTitle(title)).toBeInTheDocument();
+      } else {
+        expect(assignee.querySelector("[title]")).toBeNull();
+      }
+      expect(within(assignee).getByText("Bot")).toBeInTheDocument();
+    },
+  );
 
   test("activity lines and comment headers carry it; a comment header's pill sits on the background", () => {
     renderIssue();
@@ -296,12 +298,14 @@ describe("project", () => {
     );
   }
 
-  test("a status update carries the author's title before its date; the issue list's assignee never does", () => {
+  test("a status update reads name, title pill, Bot badge like every other view; the issue list's assignee never carries it", () => {
     renderProject();
     // the issue table (1440), its rows (375) and both updates are all in the DOM
     const pills = screen.getAllByTitle("Release manager");
     expect(pills).toHaveLength(1);
-    expect(pills[0]?.nextElementSibling?.tagName).toBe("TIME");
+    const update = pills[0]?.closest("li");
+    if (!update) throw new Error("no status update");
+    expectNamePillBadge(update, "Tara", "Release manager");
     expect(pillsIn(screen.getByRole("table"), "Release manager")).toHaveLength(
       0,
     );

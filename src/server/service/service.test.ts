@@ -101,6 +101,11 @@ test("a human cannot create a project", () => {
   );
 });
 
+test("a human can neither set nor clear a title", () => {
+  rejectsCleanly(() => service.setMyTitle(human, "Owner"), ForbiddenError);
+  rejectsCleanly(() => service.clearMyTitle(human), ForbiddenError);
+});
+
 test("a human files an issue unassigned; naming an assignee is refused and writes nothing", () => {
   const filed = service.createProject(bot, {
     key: projectKey(),

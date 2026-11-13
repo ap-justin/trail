@@ -6,12 +6,7 @@ import {
   useEffectEvent,
   useRef,
 } from "react";
-import {
-  ActorAvatar,
-  ActorBadge,
-  actorNameGroup,
-  BotTitle,
-} from "@/components/actor";
+import { ActorAvatar, ActorName, BotTitle } from "@/components/actor";
 import { RowLink } from "@/components/app-link";
 import { MarkdownText } from "@/components/markdown-text";
 import {
@@ -280,7 +275,8 @@ function FeedFilters({
         options={filters.actors.map((a) => ({
           value: a.id,
           label: a.name,
-          after: <BotTitle actor={a} className="shrink-0" />,
+          // on the background: the highlighted row's bg-accent is bg-muted's fill in light theme
+          after: <BotTitle actor={a} surface="card" className="shrink-0" />,
         }))}
         value={actorFilter}
         onChange={onActorFilterChange}
@@ -507,13 +503,7 @@ function FeedRow({
       <ActorAvatar actor={entry.actor} className="mt-px" />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5 lg:flex-row lg:flex-wrap lg:items-center lg:gap-x-1.5">
         <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 lg:contents">
-          <span className={actorNameGroup}>
-            <span className="min-w-0 truncate font-medium">
-              {entry.actor.name}
-            </span>
-            <BotTitle actor={entry.actor} />
-            <ActorBadge kind={entry.actor.kind} />
-          </span>
+          <ActorName actor={entry.actor} nameClassName="font-medium" />
           {sentence.sourceAuthor && (
             <span className="text-2xs text-muted-foreground">
               originally by {sentence.sourceAuthor}

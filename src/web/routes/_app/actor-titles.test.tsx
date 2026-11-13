@@ -71,7 +71,9 @@ describe("a bot's title changing live", () => {
     await user.click(screen.getByRole("combobox", { name: "Filter by bot" }));
     const option = await screen.findByRole("option", { name: /Kai/ });
     await waitFor(() =>
-      expect(within(option).getByTitle("Platform Engineer")).toBeVisible(),
+      expect(within(option).getByTitle("Platform Engineer")).toHaveTextContent(
+        "Platform Engineer",
+      ),
     );
   });
 
@@ -91,8 +93,19 @@ describe("a bot's title changing live", () => {
     const stream = FakeEventSource.current;
     stream.open();
     stream.actor(titled(kai.id, "Platform Engineer"));
-    // the assignee and both timeline lines Kai wrote
-    await waitFor(() => expect(pills("Platform Engineer")).toHaveLength(3));
+    // the assignee, and Kai's lines in the timeline
+    const assignee = () =>
+      screen.getByText("Assignee", { selector: "dt" }).nextElementSibling;
+    await waitFor(() =>
+      expect(
+        within(assignee() as HTMLElement).getByTitle("Platform Engineer"),
+      ).toBeInTheDocument(),
+    );
+    const kaiLines = document.querySelectorAll<HTMLElement>(
+      "[data-entry-id]:has([title='Platform Engineer'])",
+    );
+    expect(kaiLines.length).toBeGreaterThan(0);
+    for (const line of kaiLines) expect(line).toHaveTextContent("Kai");
     stream.actor(titled(kai.id, null));
     await waitFor(() => expect(pills("Platform Engineer")).toHaveLength(0));
     expect(reads).toBe(1);

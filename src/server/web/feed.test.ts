@@ -159,4 +159,13 @@ test("the bot filter lists each bot with an event in any visible project once, b
       title: null,
     },
   ]);
+  // a person is no filter, and in the feed itself carries a title of null
+  const personEvent = body.items.find((e: Body) => e.actor.kind === "human");
+  expect(personEvent.actor).toEqual({
+    id: expect.any(String),
+    name: expect.any(String),
+    kind: "human",
+    photoUrl: null,
+    title: null,
+  });
 });

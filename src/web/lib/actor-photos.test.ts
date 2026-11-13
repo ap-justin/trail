@@ -1,5 +1,10 @@
+import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, test } from "vitest";
-import { type ActorUpdate, withActorUpdate } from "@/lib/actor-photos";
+import {
+  type ActorUpdate,
+  applyActorUpdate,
+  withActorUpdate,
+} from "@/lib/actor-photos";
 import {
   commentEntry,
   kai,
@@ -73,10 +78,90 @@ describe("withActorUpdate", () => {
     expect(withActorUpdate(titled, kaiNow(null))).toEqual(data);
   });
 
+  test("an update carrying a new photo and a new title sets both on the one actor", () => {
+    const data = { actor: kai };
+    expect(
+      withActorUpdate(data, kaiNow(newPhoto, "Platform Engineer")),
+    ).toEqual({
+      actor: { ...kai, photoUrl: newPhoto, title: "Platform Engineer" },
+    });
+    // each half alone leaves the other as it was
+    const both = { actor: { ...kai, photoUrl: newPhoto, title: "Old" } };
+    expect(withActorUpdate(both, kaiNow(newPhoto, "New"))).toEqual({
+      actor: { ...kai, photoUrl: newPhoto, title: "New" },
+    });
+    expect(withActorUpdate(both, kaiNow(null, "Old"))).toEqual({
+      actor: { ...kai, photoUrl: null, title: "Old" },
+    });
+  });
+
+  test("returns the same reference when photo and title are both unchanged", () => {
+    const data = {
+      actor: { ...kai, photoUrl: newPhoto, title: "Platform Engineer" },
+    };
+    expect(withActorUpdate(data, kaiNow(newPhoto, "Platform Engineer"))).toBe(
+      data,
+    );
+  });
+
   test("leaves an issue's title alone though it shares the actor's id", () => {
     const issueLike = { id: "a-kai", title: "Back up the volume" };
     expect(withActorUpdate(issueLike, kaiNow(null, "Platform Engineer"))).toBe(
       issueLike,
     );
+  });
+});
+
+describe("applyActorUpdate", () => {
+  test("a read already in flight when the update lands can't put the old title and photo back", async () => {
+    const queryClient = new QueryClient();
+    const key = ["feed"];
+    queryClient.setQueryData(key, { actor: kai });
+    // the server built the first response before the change, the second after it
+    const responses = [
+      { actor: kai },
+      { actor: { ...kai, photoUrl: newPhoto, title: "Platform Engineer" } },
+    ];
+    let releaseStale = () => {};
+    let asked = 0;
+    const read = queryClient.fetchQuery({
+      queryKey: key,
+      queryFn: () => {
+        const payload = responses[asked++];
+        if (asked > 1) return payload;
+        return new Promise((resolve) => {
+          releaseStale = () => resolve(payload);
+        });
+      },
+    });
+
+    applyActorUpdate(queryClient, kaiNow(newPhoto, "Platform Engineer"));
+    releaseStale();
+    const answered = await read;
+
+    const current = {
+      actor: { ...kai, photoUrl: newPhoto, title: "Platform Engineer" },
+    };
+    expect(queryClient.getQueryData(key)).toEqual(current);
+    expect(answered).toEqual(current);
+  });
+
+  test("a read that isn't in flight is patched in place, not read again", async () => {
+    const queryClient = new QueryClient();
+    let asked = 0;
+    await queryClient.fetchQuery({
+      queryKey: ["issue"],
+      queryFn: () => {
+        asked++;
+        return { actor: kai };
+      },
+    });
+
+    applyActorUpdate(queryClient, kaiNow(newPhoto, "Platform Engineer"));
+
+    expect(queryClient.getQueryData(["issue"])).toEqual({
+      actor: { ...kai, photoUrl: newPhoto, title: "Platform Engineer" },
+    });
+    expect(asked).toBe(1);
   });
 });

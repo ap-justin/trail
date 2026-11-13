@@ -13,6 +13,7 @@ import {
 } from "../server/service/import.js";
 import {
   BOT_TITLE_MAX,
+  botTitleCharacterProblem,
   ISSUE_LABELS_MAX,
   ISSUE_LINKS_MAX,
 } from "../server/service/validate.js";
@@ -228,10 +229,16 @@ export const botSchema = z
 export const myTitleUpdateSchema = z
   .strictObject({
     // trimmed before the length checks, which zod runs in order
-    title: z.string().trim().min(1).max(BOT_TITLE_MAX).meta({
-      description: titleAbout,
-      example: "Release manager",
-    }),
+    title: z
+      .string()
+      .trim()
+      .min(1)
+      .max(BOT_TITLE_MAX)
+      .superRefine((title, ctx) => {
+        const problem = botTitleCharacterProblem(title);
+        if (problem) ctx.addIssue({ code: "custom", message: problem });
+      })
+      .meta({ description: titleAbout, example: "Release manager" }),
   })
   .openapi("MyTitleUpdate");
 

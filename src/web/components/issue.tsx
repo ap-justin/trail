@@ -1,11 +1,6 @@
 import { GitPullRequestIcon } from "lucide-react";
 import { type FormEvent, type ReactNode, useId, useState } from "react";
-import {
-  ActorAvatar,
-  ActorBadge,
-  actorNameGroup,
-  BotTitle,
-} from "@/components/actor";
+import { ActorAvatar, ActorBadge, ActorName } from "@/components/actor";
 import { AppLink } from "@/components/app-link";
 import { Markdown } from "@/components/markdown";
 import { IssueError, IssueSkeleton, NotFoundPanel } from "@/components/states";
@@ -85,13 +80,11 @@ function Actor({
   return (
     <>
       <ActorAvatar actor={actor} size="xs" />
-      <span className={actorNameGroup}>
-        <span className="min-w-0 truncate font-medium text-foreground">
-          {actor.name}
-        </span>{" "}
-        <BotTitle actor={actor} surface={titleSurface} />{" "}
-        <ActorBadge kind={actor.kind} />
-      </span>{" "}
+      <ActorName
+        actor={actor}
+        nameClassName="font-medium text-foreground"
+        titleSurface={titleSurface}
+      />{" "}
     </>
   );
 }
@@ -195,18 +188,20 @@ function Properties({ issue }: { issue: WebIssueView }) {
           valueClassName="max-lg:col-span-3"
         >
           {issue.assignee ? (
-            // at lg a grid with the title on a second row, indented past the avatar;
+            // at lg a grid with the title on a second row, indented past the avatar: the
+            // name's track shrinks first so the badge's auto track keeps its width, and the
+            // trailing fr track takes what's left so the avatar's auto track never stretches;
             // below, one line that wraps the pill and badge under a long name
-            <span className="flex min-w-0 items-center gap-1.5 lg:grid lg:grid-cols-[auto_auto_minmax(0,1fr)] lg:justify-items-start lg:gap-x-2 lg:gap-y-1">
+            <span className="flex min-w-0 items-center gap-1.5 lg:grid lg:grid-cols-[auto_minmax(0,max-content)_auto_minmax(0,1fr)] lg:justify-items-start lg:gap-x-2 lg:gap-y-1">
               <ActorAvatar actor={issue.assignee} size="xs" />
-              <span className={cn(actorNameGroup, "lg:contents")}>
-                <span className="min-w-0 truncate">{issue.assignee.name}</span>
-                <BotTitle
-                  actor={issue.assignee}
-                  className="lg:col-span-2 lg:col-start-2 lg:row-start-2"
-                />
-                <ActorBadge kind={issue.assignee.kind} />
-              </span>
+              <ActorName
+                actor={issue.assignee}
+                className="lg:contents"
+                // start-aligned, a nowrap name is as wide as its text: capped to its track
+                nameClassName="max-w-full"
+                // across the fr track, so the pill adds no width to the name's track
+                titleClassName="lg:col-span-3 lg:col-start-2 lg:row-start-2"
+              />
             </span>
           ) : (
             <span className="text-muted-foreground">Unassigned</span>

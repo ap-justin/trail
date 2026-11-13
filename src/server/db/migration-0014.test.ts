@@ -9,7 +9,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { eq } from "drizzle-orm";
-import { afterAll, afterEach, beforeAll, expect, test } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  expect,
+  onTestFinished,
+  test,
+} from "vitest";
 import { type Db, migrate, openDatabase } from "./client.js";
 import { actor } from "./schema.js";
 
@@ -43,19 +50,25 @@ const errorCode = (write: () => unknown) => {
   return "no error";
 };
 
-let db: Db;
-
-beforeAll(() => {
-  db = openDatabase(join(dir, "titles.db"));
-  migrate(db, through(13));
-  db.$client.exec(`
+// a database as it stood at 0013, one bot, one person and a project, migrated to 0014
+function legacyDb(file: string): Db {
+  const legacy = openDatabase(join(dir, file));
+  migrate(legacy, through(13));
+  legacy.$client.exec(`
     insert into actor (id, kind, display_name, label, created_at) values
       ('b1', 'bot', 'builder', 'agt_1', 0);
     insert into actor (id, kind, display_name, github_id, github_login, is_owner, created_at) values
       ('h1', 'human', 'Ada', 7, 'ada', 1, 0);
     insert into project (id, key, name, created_by, created_at, updated_at) values ('p1', 'TRL', 'trail', 'b1', 0, 0);
   `);
-  migrate(db, through(14));
+  migrate(legacy, through(14));
+  return legacy;
+}
+
+let db: Db;
+
+beforeAll(() => {
+  db = legacyDb("titles.db");
   return () => db.$client.close();
 });
 
@@ -68,9 +81,14 @@ const setTitle = (id: string, title: string) => () =>
   db.$client.prepare("update actor set title = ? where id = ?").run(title, id);
 
 test("actors from before 0014 keep their data and carry no title", () => {
+  // its own database: the shared one has been written to by the other tests
+  const migrated = legacyDb("legacy.db");
+  onTestFinished(() => {
+    migrated.$client.close();
+  });
   expect(
     rows(
-      db,
+      migrated,
       "select id, kind, display_name, label, github_id, github_login, is_owner, title from actor order by id",
     ),
   ).toEqual([
@@ -95,10 +113,10 @@ test("actors from before 0014 keep their data and carry no title", () => {
       title: null,
     },
   ]);
-  expect(rows(db, "select id, created_by from project")).toEqual([
+  expect(rows(migrated, "select id, created_by from project")).toEqual([
     { id: "p1", created_by: "b1" },
   ]);
-  expect(rows(db, "pragma foreign_key_check")).toEqual([]);
+  expect(rows(migrated, "pragma foreign_key_check")).toEqual([]);
 });
 
 test("a bot's title round-trips through the drizzle table, and is null when unset", () => {

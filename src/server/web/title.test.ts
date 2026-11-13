@@ -99,23 +99,47 @@ const actorMessage = (
 ) => ({ event: "actor", data: JSON.stringify({ actorId, photoUrl, title }) });
 
 test("a bot's title change reaches a member whose project it acts in, and not a member who can't see it", async () => {
+  const gatekeeper = addBot("gatekeeper");
+  const filed = await request("POST", "/api/v1/issues", {
+    key: gatekeeper.key,
+    json: { projectId: project.id, title: "by gatekeeper" },
+  });
+  expect(filed.status).toBe(201);
   const strangerCookie = await addMember("title-stranger", [
     addProject("TitleElsewhere").id,
   ]);
   const seen = await openActorStream(memberCookie);
   const unseen = await openActorStream(strangerCookie);
-  expect((await putTitle(titled.key, "Gatekeeper")).status).toBe(200);
+  expect((await putTitle(gatekeeper.key, "Gatekeeper")).status).toBe(200);
   // the stranger's own event closes the check: anything queued before it would arrive first
   const strangerId = (await web("/me", strangerCookie)).actor.id;
   bus.publishActor({ actorId: strangerId, photoUrl: null, title: null });
   expect(await seen.next()).toStrictEqual(
-    actorMessage(titled.actor.id, null, "Gatekeeper"),
+    actorMessage(gatekeeper.actor.id, null, "Gatekeeper"),
   );
   expect(await unseen.next()).toStrictEqual(
     actorMessage(strangerId, null, null),
   );
   await seen.cancel();
   await unseen.cancel();
+});
+
+test("the owner hears a title change of a bot with no project activity, a member does not", async () => {
+  const idle = addBot("idle-titled");
+  const memberId = (await web("/me", memberCookie)).actor.id;
+  const heardByOwner = await openActorStream(ownerCookie);
+  const heardByMember = await openActorStream(memberCookie);
+  expect((await putTitle(idle.key, "On standby")).status).toBe(200);
+  // the member's own event closes the check, as above
+  bus.publishActor({ actorId: memberId, photoUrl: null, title: null });
+  expect(await heardByOwner.next()).toStrictEqual(
+    actorMessage(idle.actor.id, null, "On standby"),
+  );
+  expect(await heardByMember.next()).toStrictEqual(
+    actorMessage(memberId, null, null),
+  );
+  await heardByOwner.cancel();
+  await heardByMember.cancel();
 });
 
 test("re-setting the same title sends nothing, and a later photo change carries the title with it", async () => {

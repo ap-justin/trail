@@ -1,11 +1,22 @@
 import { expect, test } from "vitest";
 import { createBot } from "../service/keys.js";
 import { setActorPhoto } from "../service/photos.js";
+import { BOT_TITLE_MAX } from "../service/validate.js";
 import { setupTestApp } from "../test-app.js";
 import { PNG } from "../test-images.js";
 
-const { app, db, bot, bus, published, request, addBot, addProject } =
-  setupTestApp();
+const {
+  app,
+  db,
+  bot,
+  bus,
+  published,
+  request,
+  addBot,
+  addProject,
+  owner,
+  signIn,
+} = setupTestApp();
 
 // biome-ignore lint/suspicious/noExplicitAny: loose response bodies for field reads
 type Body = Record<string, any>;
@@ -46,6 +57,51 @@ test("a title of 40 characters after trimming is kept; 41, blank or whitespace i
     expect(((await res.json()) as Body).error.code).toBe("validation_failed");
   }
   expect((await whoami(mine.key)).title).toBe(forty);
+});
+
+test("a title with a control or bidi character, or of invisible characters alone, is a 422 that changes nothing", async () => {
+  const mine = addBot("hidden-chars");
+  await putTitle({ title: "Kept" }, mine.key);
+  for (const title of [
+    "\u0000ab",
+    "Release\u0000manager",
+    "Release\nmanager",
+    "Release\tmanager",
+    "On\u2028call",
+    "\u202Eregenam esaeleR",
+    "Ops \u2066lead\u2069",
+    "\u200B",
+    "\u200C\u200D\u2060",
+    "\uFEFF\u200B",
+  ]) {
+    const res = await putTitle({ title }, mine.key);
+    expect(res.status, JSON.stringify(title)).toBe(422);
+    expect(((await res.json()) as Body).error.code).toBe("validation_failed");
+  }
+  expect((await whoami(mine.key)).title).toBe("Kept");
+});
+
+test("accented letters and emoji, joined sequences included, are a title", async () => {
+  const mine = addBot("plain-chars");
+  for (const title of [
+    "Équipe déploiement",
+    "On call 🚒",
+    "Family 👩\u200D👩\u200D👧",
+  ]) {
+    const res = await putTitle({ title }, mine.key);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ title });
+  }
+});
+
+test("the database's title CHECK allows exactly BOT_TITLE_MAX, so neither bound moves alone", () => {
+  const { sql } = db.$client
+    .prepare(
+      "select sql from sqlite_master where type = 'table' and name = 'actor'",
+    )
+    .get() as { sql: string };
+  const bound = /length\("title"\) between 1 and (\d+)/.exec(sql)?.[1];
+  expect(Number(bound)).toBe(BOT_TITLE_MAX);
 });
 
 test("an unknown key, a missing or non-string title, or a form body is refused and changes nothing", async () => {
@@ -92,6 +148,24 @@ test("without a valid key, setting and clearing a title are 401s", async () => {
     });
     expect(del.status).toBe(401);
   }
+});
+
+test("a signed-in person cannot set or clear a title", async () => {
+  const mine = addBot("person-proof");
+  await putTitle({ title: "Kept" }, mine.key);
+  const cookie = await signIn(owner);
+  const set = await request("PUT", "/api/v1/me/title", {
+    key: null,
+    cookie,
+    json: { title: "Hijacked" },
+  });
+  expect(set.status).toBe(401);
+  const clear = await request("DELETE", "/api/v1/me/title", {
+    key: null,
+    cookie,
+  });
+  expect(clear.status).toBe(401);
+  expect((await whoami(mine.key)).title).toBe("Kept");
 });
 
 test("a title change publishes the bot's photo and title live, never as activity; an unchanged one publishes nothing", async () => {

@@ -52,17 +52,33 @@ export function withActorUpdate<T>(value: T, update: ActorUpdate): T {
 
 /**
  * Puts the new photo and title into every cached read that names the actor. People rows
- * carry no actor id, so the people list is read again instead.
+ * carry no actor id, so the people list is read again instead. A patched read that was
+ * mid-fetch is fetched again: its response may predate the update and would overwrite it.
  */
 export function applyActorUpdate(
   queryClient: QueryClient,
   update: ActorUpdate,
 ) {
+  const inFlight = queryClient
+    .getQueryCache()
+    .findAll({ fetchStatus: "fetching" })
+    .map((query) => ({ query, before: query.state.data }));
   // annotated: an updater over `unknown` data collapses into `unknown` and loses its context
   queryClient.setQueriesData<unknown>({}, (data: unknown) => {
     const next = withActorUpdate(data, update);
     // undefined skips the query: setting the same data would still mark it fresh
     return next === data ? undefined : next;
   });
+  const overtaken = new Set(
+    inFlight
+      .filter(({ query, before }) => query.state.data !== before)
+      .map(({ query }) => query),
+  );
+  if (overtaken.size > 0) {
+    // cancelRefetch (the default) drops the running fetch's response; its callers get the new one
+    void queryClient.refetchQueries({
+      predicate: (query) => overtaken.has(query),
+    });
+  }
   void queryClient.invalidateQueries({ queryKey: keys.people });
 }
