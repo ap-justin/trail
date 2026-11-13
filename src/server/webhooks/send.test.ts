@@ -1,6 +1,11 @@
+import { spawn } from "node:child_process";
 import type { IncomingHttpHeaders, ServerResponse } from "node:http";
 import { createServer, globalAgent, type Server } from "node:https";
-import { type AddressInfo, createServer as createNetServer } from "node:net";
+import {
+  type AddressInfo,
+  connect,
+  createServer as createNetServer,
+} from "node:net";
 import type { TLSSocket } from "node:tls";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import {
@@ -144,6 +149,90 @@ describe("httpsTransport", () => {
       for (const res of held) res.destroy();
     }
   });
+});
+
+// A listener that never accepts (blocked in a child, backlog 1): once its queue
+// is full the kernel drops further SYNs, so a new connection stays half-open
+// the way a firewalled address does. Linux queues; elsewhere the connect may
+// be refused instead.
+describe.runIf(process.platform === "linux")(
+  "httpsTransport's connect timer",
+  () => {
+    let child: ReturnType<typeof spawn>;
+    let stuckPort = 0;
+    const fillers: ReturnType<typeof connect>[] = [];
+    beforeAll(async () => {
+      child = spawn(
+        process.execPath,
+        [
+          "-e",
+          `const s = require("node:net").createServer(() => {});
+           s.listen({ port: 0, host: "127.0.0.1", backlog: 1 }, () => {
+             console.log(s.address().port);
+             Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
+           });`,
+        ],
+        { stdio: ["ignore", "pipe", "inherit"] },
+      );
+      stuckPort = await new Promise<number>((resolve) =>
+        child.stdout?.once("data", (d) => resolve(Number(d))),
+      );
+      for (let i = 0; i < 4; i++) {
+        fillers.push(connect(stuckPort, "127.0.0.1").on("error", () => {}));
+      }
+      await new Promise((r) => setTimeout(r, 200));
+    });
+    afterAll(() => {
+      for (const f of fillers) f.destroy();
+      child.kill("SIGKILL");
+    });
+
+    test("a connection that never opens fails with ETIMEDOUT at the cap, not at the deadline", async () => {
+      const started = Date.now();
+      await expect(
+        httpsTransport({
+          url: new URL(`https://bot.example.com:${stuckPort}/hook`),
+          address: "127.0.0.1",
+          headers: {},
+          body: "{}",
+          // the signal is the backstop a missing timer would hit
+          signal: AbortSignal.timeout(5_000),
+          connectTimeoutMs: 300,
+        }),
+      ).rejects.toMatchObject({ code: "ETIMEDOUT" });
+      expect(Date.now() - started).toBeLessThan(2_000);
+    });
+
+    test("without a cap only the signal bounds it", async () => {
+      await expect(
+        httpsTransport({
+          url: new URL(`https://bot.example.com:${stuckPort}/hook`),
+          address: "127.0.0.1",
+          headers: {},
+          body: "{}",
+          signal: AbortSignal.timeout(600),
+        }),
+      ).rejects.toMatchObject({ code: "ABORT_ERR" });
+    });
+  },
+);
+
+test("the connect cap is cleared once connected: a slow answer past it still lands", async () => {
+  respond = (res) => {
+    setTimeout(() => res.end(), 500);
+  };
+  try {
+    const { status } = await httpsTransport({
+      url: new URL(`https://bot.example.com:${port}/slow-answer`),
+      address: "127.0.0.1",
+      headers: {},
+      body: "{}",
+      connectTimeoutMs: 200,
+    });
+    expect(status).toBe(200);
+  } finally {
+    respond = (res) => res.end();
+  }
 });
 
 describe("sendWebhook over the real transport", () => {

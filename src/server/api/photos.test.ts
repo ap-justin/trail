@@ -3,16 +3,29 @@ import { createBot, revokeKey } from "../service/keys.js";
 import { projectKey, setupTestApp } from "../test-app.js";
 import {
   JPEG,
+  jpegClaiming,
   OTHER_PNG,
   PNG,
+  pngClaiming,
   pngOfSize,
   SVG,
   TEXT,
   WEBP,
+  webpClaiming,
 } from "../test-images.js";
 
-const { app, db, bot, request, addBot, addProject, owner, signIn } =
-  setupTestApp();
+const {
+  app,
+  db,
+  bot,
+  bus,
+  published,
+  request,
+  addBot,
+  addProject,
+  owner,
+  signIn,
+} = setupTestApp();
 const scopeProject = addProject("scoped");
 
 // biome-ignore lint/suspicious/noExplicitAny: loose response bodies for field reads
@@ -57,6 +70,41 @@ test("a new photo replaces the old one under a new URL, and clearing leaves none
   const again = await request("DELETE", "/api/v1/me/photo");
   expect(again.status).toBe(200);
   expect(await again.json()).toEqual({ photoUrl: null });
+});
+
+test("set, replace and clear answer only photoUrl and publish each change live, never as activity", async () => {
+  const live = addBot(`live-${projectKey()}`);
+  const updates: unknown[] = [];
+  const unsubscribe = bus.subscribeActors((update) => updates.push(update));
+  const activityBefore = published.length;
+  try {
+    const set = (await (
+      await putPhoto(PNG, "image/png", live.key)
+    ).json()) as Body;
+    expect(Object.keys(set)).toEqual(["photoUrl"]);
+    const again = (await (
+      await putPhoto(PNG, "image/png", live.key)
+    ).json()) as Body;
+    expect(again).toEqual(set);
+    const replaced = (await (
+      await putPhoto(OTHER_PNG, "image/png", live.key)
+    ).json()) as Body;
+    expect(Object.keys(replaced)).toEqual(["photoUrl"]);
+    const cleared = await request("DELETE", "/api/v1/me/photo", {
+      key: live.key,
+    });
+    expect(await cleared.json()).toEqual({ photoUrl: null });
+    await request("DELETE", "/api/v1/me/photo", { key: live.key });
+
+    expect(updates).toEqual([
+      { actorId: live.actor.id, photoUrl: set.photoUrl },
+      { actorId: live.actor.id, photoUrl: replaced.photoUrl },
+      { actorId: live.actor.id, photoUrl: null },
+    ]);
+    expect(published.length).toBe(activityBefore);
+  } finally {
+    unsubscribe();
+  }
 });
 
 test("a bot's photo calls leave another bot's photo as it was", async () => {
@@ -244,7 +292,7 @@ test.each([
   },
 );
 
-// 10 bytes of JPEG would base64 to 14 characters plus padding; real files are longer
+// the 48 x 48 baseline header is only a few dozen bytes; real files are longer
 const LONG_JPEG = new Uint8Array([...JPEG, ...new Uint8Array(20).fill(0x41)]);
 test.each([
   ["a WebP", WEBP],
@@ -412,4 +460,46 @@ test("a signed-in person cannot set or clear a photo", async () => {
     cookie,
   });
   expect(clear.status).toBe(401);
+});
+
+test("a photo within 256 KB whose header claims more than 1024 pixels a side is a 422 naming its size, and 1024 x 1024 is stored", async () => {
+  const pixels = addBot(`pixels-${projectKey()}`);
+  expect(
+    (await putPhoto(pngClaiming(1024, 1024), "image/png", pixels.key)).status,
+  ).toBe(200);
+  const kept = (await whoami(pixels.key)).photoUrl;
+  for (const [body, width, height] of [
+    [pngClaiming(1025, 1024), 1025, 1024],
+    [jpegClaiming(1024, 1025), 1024, 1025],
+    [webpClaiming("VP8X", 65535, 65535), 65535, 65535],
+  ] as const) {
+    const res = await putPhoto(body, "application/octet-stream", pixels.key);
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({
+      error: {
+        code: "invalid_image",
+        message: `the photo is ${width} x ${height} pixels (${body.length} bytes, within the 256 KB limit, but each side must be at most 1024): resize it to 1024 x 1024 or smaller and send it again`,
+      },
+    });
+  }
+  expect((await whoami(pixels.key)).photoUrl).toBe(kept);
+});
+
+test("a body over 256 KB is a 413 even when its header also claims too many pixels", async () => {
+  const big = pngOfSize(262145);
+  big.set(pngClaiming(4000, 3000));
+  const res = await putPhoto(big, "image/png");
+  expect(res.status).toBe(413);
+  expect(((await res.json()) as Body).error.code).toBe("payload_too_large");
+});
+
+test("the spec documents the pixel limit beside the byte limit", async () => {
+  const spec = (await (
+    await app.request("/api/v1/openapi.json")
+  ).json()) as Body;
+  const op = spec.paths["/me/photo"].put;
+  expect(op.description).toContain(
+    "262144 bytes (256 KB) and 1024 x 1024 pixels",
+  );
+  expect(op.responses["422"].description).toContain("a side over 1024 pixels");
 });

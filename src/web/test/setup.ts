@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup, configure } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, expect } from "vitest";
+import { installFakeEventSource } from "./event-source";
 import { leaks, server } from "./server";
 
 // the first render of a route loads its chunk; on a busy machine that outlasts the 1s default,
@@ -27,6 +28,7 @@ window.matchMedia = (query: string) =>
     removeEventListener() {},
   }) as unknown as MediaQueryList;
 
+installFakeEventSource();
 beforeAll(() => server.listen({ onUnhandledFrame: "error" }));
 afterEach(() => {
   // unmount first: a request a mounted tree fires after the handlers are gone would trip the guard

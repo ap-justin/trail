@@ -1,7 +1,13 @@
-import { desc, eq, max } from "drizzle-orm";
+import { count, desc, eq, max } from "drizzle-orm";
 import { afterEach, expect, test, vi } from "vitest";
-import { activityEvent, session, user } from "../db/schema.js";
-import { readEventStream, setupTestApp } from "../test-app.js";
+import {
+  activityEvent,
+  actor,
+  session,
+  user,
+  webhookDelivery,
+} from "../db/schema.js";
+import { readEventStream, setupTestApp, TEST_OWNER } from "../test-app.js";
 import { OTHER_PNG, PNG } from "../test-images.js";
 
 const {
@@ -506,4 +512,257 @@ test(`a person's stream past ${STREAMS_PER_PERSON} open at once is a 429, until 
     open.push(readEventStream(res));
   });
   for (const stream of open) await stream.cancel();
+});
+
+const ACTOR_STREAMS_PER_PERSON = 20;
+
+test(`a person's actor-only streams leave their ${STREAMS_PER_PERSON} feed streams free`, async () => {
+  const cookie = await addMember("many-shells", []);
+  const shells = [];
+  for (let i = 0; i < STREAMS_PER_PERSON + 1; i++)
+    shells.push(await openStream(cookie, { query: "?only=actors" }));
+  const feeds = [];
+  for (let i = 0; i < STREAMS_PER_PERSON; i++)
+    feeds.push(await openStream(cookie));
+  const refused = await app.request("/api/web/events", { headers: { cookie } });
+  expect(refused.status).toBe(429);
+  for (const stream of [...shells, ...feeds]) await stream.cancel();
+});
+
+test(`a person's actor-only stream past ${ACTOR_STREAMS_PER_PERSON} is a 429, until one closes`, async () => {
+  const cookie = await addMember("too-many-shells", []);
+  const open = [];
+  for (let i = 0; i < ACTOR_STREAMS_PER_PERSON; i++)
+    open.push(await openStream(cookie, { query: "?only=actors" }));
+  const refused = await app.request("/api/web/events?only=actors", {
+    headers: { cookie },
+  });
+  expect(refused.status).toBe(429);
+  expect(await refused.json()).toEqual({
+    error: { code: "too_many_streams", message: expect.any(String) },
+  });
+  await open.pop()?.cancel();
+  await vi.waitFor(async () => {
+    const res = await app.request("/api/web/events?only=actors", {
+      headers: { cookie },
+    });
+    expect(res.status).toBe(200);
+    open.push(readEventStream(res));
+  });
+  for (const stream of open) await stream.cancel();
+});
+
+test("an actor-only stream gets actor events but no feed entries, and never subscribes to the feed", async () => {
+  const p = addProject("ShellOnly");
+  const pictured = addBot("shell-pictured");
+  const subscribe = vi.spyOn(bus, "subscribe");
+  try {
+    const stream = await openStream(ownerCookie, {
+      query: "?only=actors",
+      lastEventId: 0,
+    });
+    await file(p.id, "not for the shell");
+    const { photoUrl } = (await (await putPhoto(pictured.key, PNG)).json()) as {
+      photoUrl: string;
+    };
+    expect(await stream.next()).toStrictEqual(
+      actorMessage(pictured.actor.id, photoUrl),
+    );
+    expect(subscribe).not.toHaveBeenCalled();
+    await stream.cancel();
+  } finally {
+    subscribe.mockRestore();
+  }
+});
+
+test("an actor-only stream with a project or actor filter is a 422", async () => {
+  const p = addProject("ShellFiltered");
+  for (const query of [
+    `?only=actors&project=${p.key}`,
+    `?only=actors&actor=${bot.actor.id}`,
+  ]) {
+    const res = await app.request(`/api/web/events${query}`, {
+      headers: { cookie: ownerCookie },
+    });
+    expect(res.status).toBe(422);
+  }
+});
+
+test("a signed-out member's actor-only stream ends within 15 seconds", async () => {
+  const cookie = await addMember("shell-signout", []);
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const stream = await openStream(cookie, { query: "?only=actors" });
+  expect((await signOut(cookie)).status).toBeLessThan(300);
+  await vi.advanceTimersByTimeAsync(15_000);
+  expect(await stream.next()).toBeNull();
+});
+
+const putPhoto = (key: string, body: Uint8Array) =>
+  app.request("/api/v1/me/photo", {
+    method: "PUT",
+    headers: { authorization: `Bearer ${key}`, "content-type": "image/png" },
+    body,
+  });
+
+const clearPhoto = (key: string) =>
+  app.request("/api/v1/me/photo", {
+    method: "DELETE",
+    headers: { authorization: `Bearer ${key}` },
+  });
+
+const actorMessage = (actorId: string, photoUrl: string | null) => ({
+  event: "actor",
+  data: JSON.stringify({ actorId, photoUrl }),
+});
+
+test("a bot's new photo, and its removal, arrive as an actor event with no id", async () => {
+  const sitter = addBot("sitter");
+  const stream = await openStream(ownerCookie);
+  const put = await putPhoto(sitter.key, PNG);
+  const { photoUrl } = (await put.json()) as { photoUrl: string };
+  expect(await stream.next()).toStrictEqual(
+    actorMessage(sitter.actor.id, photoUrl),
+  );
+  expect((await clearPhoto(sitter.key)).status).toBe(200);
+  expect(await stream.next()).toStrictEqual(
+    actorMessage(sitter.actor.id, null),
+  );
+  await stream.cancel();
+});
+
+const actorIdOf = (login: string) =>
+  db.select().from(actor).where(eq(actor.githubLogin, login)).get()?.id ?? "";
+
+test("an owner's filtered stream still gets every actor event, and a member with no shared project gets none but their own", async () => {
+  const p = addProject("ActorFiltered");
+  const other = addBot("filtered-other");
+  const pictured = addBot("filtered-pictured");
+  const filtered = await openStream(ownerCookie, {
+    query: `?project=${p.key}&actor=${other.actor.id}`,
+  });
+  const bareCookie = await addMember("no-projects", []);
+  const bare = await openStream(bareCookie);
+  const bareActors = await openStream(bareCookie, { query: "?only=actors" });
+  const { photoUrl } = (await (await putPhoto(pictured.key, PNG)).json()) as {
+    photoUrl: string;
+  };
+  expect(await filtered.next()).toStrictEqual(
+    actorMessage(pictured.actor.id, photoUrl),
+  );
+  // a member's own update closes the batch: the one before it was held back
+  const own = actorIdOf("no-projects");
+  bus.publishActor({ actorId: own, photoUrl: "/mine" });
+  for (const stream of [bare, bareActors]) {
+    expect(await stream.next()).toStrictEqual(actorMessage(own, "/mine"));
+    await stream.cancel();
+  }
+  await filtered.cancel();
+});
+
+test("a member hears of a bot acting in their projects and of people they share one with, and of no one else", async () => {
+  const mine = addProject("ActorMine");
+  const hidden = addProject("ActorHidden");
+  const seen = addBot("seen-bot");
+  const unseen = addBot("unseen-bot");
+  await file(mine.id, "seen acts here", seen.key);
+  await file(hidden.id, "unseen acts there", unseen.key);
+  const cookie = await addMember("sharer", [mine.id]);
+  await addMember("co-member", [mine.id, hidden.id]);
+  await addMember("stranger", [hidden.id]);
+  const stream = await openStream(cookie);
+  const own = actorIdOf("sharer");
+  const ownerId = actorIdOf(TEST_OWNER);
+  const updates = [
+    unseen.actor.id,
+    seen.actor.id,
+    actorIdOf("stranger"),
+    actorIdOf("co-member"),
+    ownerId,
+    own,
+  ];
+  for (const actorId of updates) bus.publishActor({ actorId, photoUrl: "/x" });
+  for (const actorId of [seen.actor.id, actorIdOf("co-member"), ownerId, own]) {
+    expect(await stream.next()).toStrictEqual(actorMessage(actorId, "/x"));
+  }
+  await stream.cancel();
+});
+
+test("an identical re-upload sends no actor event, and updates to one actor queued together arrive as its last", async () => {
+  const same = addBot("same-again");
+  const later = addBot("later");
+  expect((await putPhoto(same.key, PNG)).status).toBe(200);
+  const stream = await openStream(ownerCookie);
+  expect((await putPhoto(same.key, PNG)).status).toBe(200);
+  // published in one turn, so none is written before the next replaces it
+  bus.publishActor({ actorId: later.actor.id, photoUrl: "/first" });
+  bus.publishActor({ actorId: later.actor.id, photoUrl: "/last" });
+  expect(await stream.next()).toStrictEqual(
+    actorMessage(later.actor.id, "/last"),
+  );
+  const { photoUrl } = (await (await putPhoto(same.key, OTHER_PNG)).json()) as {
+    photoUrl: string;
+  };
+  expect(await stream.next()).toStrictEqual(
+    actorMessage(same.actor.id, photoUrl),
+  );
+  await stream.cancel();
+});
+
+test("an actor event leaves Last-Event-ID where the entries put it", async () => {
+  const p = addProject("ActorResume");
+  const mover = addBot("mover");
+  const stream = await openStream(ownerCookie);
+  await file(p.id, "before the photo");
+  const before = await stream.nextEntry();
+  expect((await putPhoto(mover.key, PNG)).status).toBe(200);
+  expect((await stream.next())?.event).toBe("actor");
+  await stream.cancel();
+  await file(p.id, "after the photo");
+  const resumed = await openStream(ownerCookie, { lastEventId: before?.seq });
+  expect(await resumed.nextEntry()).toMatchObject({
+    issue: { title: "after the photo" },
+  });
+  await resumed.cancel();
+});
+
+test("an ended stream stops listening for actor updates", async () => {
+  const unsubscribed = vi.fn();
+  const subscribe = bus.subscribeActors.bind(bus);
+  const spy = vi.spyOn(bus, "subscribeActors").mockImplementation((fn) => {
+    const unsubscribe = subscribe(fn);
+    return () => {
+      unsubscribed();
+      return unsubscribe();
+    };
+  });
+  try {
+    const stream = await openStream(ownerCookie);
+    expect(spy).toHaveBeenCalledOnce();
+    await stream.cancel();
+    await vi.waitFor(() => expect(unsubscribed).toHaveBeenCalledOnce());
+  } finally {
+    spy.mockRestore();
+  }
+});
+
+test("a photo change writes no activity event and no webhook delivery", async () => {
+  const p = addProject("ActorQuiet");
+  const hooked = addBot("hooked");
+  const hook = await request("POST", "/api/v1/webhooks", {
+    key: hooked.key,
+    json: {
+      url: "https://bot.example.com/actor-quiet",
+      secret: "whsec_actor_quiet_0123456789abcdef",
+      projects: [p.key],
+    },
+  });
+  expect(hook.status).toBe(201);
+  const rows = () => ({
+    events: db.select({ n: count() }).from(activityEvent).get()?.n,
+    deliveries: db.select({ n: count() }).from(webhookDelivery).get()?.n,
+  });
+  const before = rows();
+  expect((await putPhoto(hooked.key, PNG)).status).toBe(200);
+  expect((await clearPhoto(hooked.key)).status).toBe(200);
+  expect(rows()).toEqual(before);
 });

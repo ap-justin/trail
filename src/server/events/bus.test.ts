@@ -33,3 +33,29 @@ test("a throwing subscriber does not stop publish or the others", () => {
   expect(() => bus.publish(event)).not.toThrow();
   expect(seen).toEqual(["e1"]);
 });
+
+test("an actor subscriber receives each actor update until it unsubscribes, and no activity event", () => {
+  const bus = createEventBus();
+  const actors: unknown[] = [];
+  const events: string[] = [];
+  bus.subscribe((e) => events.push(e.id));
+  const unsubscribe = bus.subscribeActors((u) => actors.push(u));
+  bus.publishActor({ actorId: "a1", photoUrl: "/api/photos/a1/h" });
+  unsubscribe();
+  bus.publishActor({ actorId: "a1", photoUrl: null });
+  expect(actors).toEqual([{ actorId: "a1", photoUrl: "/api/photos/a1/h" }]);
+  expect(events).toEqual([]);
+});
+
+test("a throwing actor subscriber does not stop publishActor or the others", () => {
+  const bus = createEventBus();
+  const seen: (string | null)[] = [];
+  bus.subscribeActors(() => {
+    throw new Error("boom");
+  });
+  bus.subscribeActors((u) => seen.push(u.photoUrl));
+  expect(() =>
+    bus.publishActor({ actorId: "a1", photoUrl: null }),
+  ).not.toThrow();
+  expect(seen).toEqual([null]);
+});

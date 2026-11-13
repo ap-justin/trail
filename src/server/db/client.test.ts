@@ -1,15 +1,17 @@
 import {
   cpSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, expect, test } from "vitest";
+import { afterAll, expect, test, vi } from "vitest";
 import { type Db, migrate, openDatabase } from "./client.js";
 
 const dir = mkdtempSync(join(tmpdir(), "trail-client-"));
@@ -170,6 +172,123 @@ test("a file restored from the pre-migration backup boots into the migration's o
   expect(db.$client.prepare("select title from issue").pluck().get()).toBe(
     "keep me",
   );
+  db.$client.close();
+});
+
+// a migrated file in a directory of its own, with backups from earlier runs beside it
+function withOldBackups(name: string, stamps: number[]) {
+  const path = join(dir, name, "trail.db");
+  const db = openDatabase(path);
+  migrate(db);
+  for (const n of stamps) writeFileSync(`${path}.pre-${n}.bak`, "older run");
+  return { path, db };
+}
+
+const backupsBeside = (path: string) =>
+  readdirSync(dirname(path))
+    .filter((f) => f.includes(".bak"))
+    .sort();
+
+test("a migration keeps only the newest two backups", () => {
+  const { path, db } = withOldBackups("prune", [1, 2, 3, 4]);
+  const next = migrationsWithProjectRebuild();
+
+  migrate(db, next.folder);
+
+  expect(backupsBeside(path)).toEqual(
+    [`trail.db.pre-${next.when}.bak`, "trail.db.pre-4.bak"].sort(),
+  );
+  db.$client.close();
+});
+
+test("a boot with no migration pending still keeps only the newest two backups", () => {
+  const { path, db } = withOldBackups("prune-no-migration", [1, 2, 3, 4]);
+
+  migrate(db);
+
+  expect(backupsBeside(path)).toEqual(
+    ["trail.db.pre-3.bak", "trail.db.pre-4.bak"].sort(),
+  );
+  db.$client.close();
+});
+
+test("backups are ranked by their stamp as a number, not as text", () => {
+  const { path, db } = withOldBackups("prune-numeric", [9, 10]);
+  const next = migrationsWithProjectRebuild();
+
+  migrate(db, next.folder);
+
+  expect(backupsBeside(path)).toEqual(
+    [`trail.db.pre-${next.when}.bak`, "trail.db.pre-10.bak"].sort(),
+  );
+  db.$client.close();
+});
+
+test("the backup this migration made survives even when two newer ones exist", () => {
+  const next = migrationsWithProjectRebuild();
+  const newer = [next.when + 1, next.when + 2];
+  const { path, db } = withOldBackups("prune-keeps-own", [1, ...newer]);
+
+  migrate(db, next.folder);
+
+  expect(backupsBeside(path)).toEqual(
+    [next.when, ...newer].map((n) => `trail.db.pre-${n}.bak`).sort(),
+  );
+  db.$client.close();
+});
+
+test("pruning leaves partial copies, other databases' backups and look-alikes alone", () => {
+  const { path, db } = withOldBackups("prune-others", [1, 2, 3]);
+  const folder = dirname(path);
+  const untouched = [
+    "trail.db.pre-1.bak.partial",
+    "other.db.pre-1.bak",
+    "xtrail.db.pre-1.bak",
+    "trail.db.pre-1.bak.old",
+    "trail.db.pre-.bak",
+    "trail.db.pre-1a.bak",
+  ];
+  for (const file of untouched) writeFileSync(join(folder, file), "not mine");
+
+  migrate(db, migrationsWithProjectRebuild().folder);
+
+  for (const file of untouched)
+    expect(existsSync(join(folder, file))).toBe(true);
+  expect(existsSync(`${path}.pre-1.bak`)).toBe(false);
+  db.$client.close();
+});
+
+test("a failed migration prunes nothing", () => {
+  const { path, db } = withOldBackups("prune-failed", [1, 2, 3]);
+  const next = failingMigration();
+
+  expect(() => migrate(db, next.folder)).toThrow(/NOT NULL/);
+
+  expect(backupsBeside(path)).toEqual(
+    [1, 2, 3, next.when].map((n) => `trail.db.pre-${n}.bak`).sort(),
+  );
+  db.$client.close();
+});
+
+test("a backup that can't be deleted is warned about and the rest still go", () => {
+  const { path, db } = withOldBackups("prune-undeletable", [1, 3]);
+  // rmSync without `recursive` refuses a directory
+  mkdirSync(`${path}.pre-2.bak`);
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+  try {
+    expect(() =>
+      migrate(db, migrationsWithProjectRebuild().folder),
+    ).not.toThrow();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("trail.db.pre-2.bak"),
+      expect.anything(),
+    );
+  } finally {
+    warn.mockRestore();
+  }
+  expect(existsSync(`${path}.pre-2.bak`)).toBe(true);
+  expect(existsSync(`${path}.pre-1.bak`)).toBe(false);
   db.$client.close();
 });
 

@@ -1542,3 +1542,99 @@ test("the retention deletes keep to the age indexes when most finished rows are 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// a database of its own, so breaking it can't reach the shared one
+function withScratchDb(
+  body: (scratch: typeof db, dir: string) => Promise<void>,
+) {
+  return async () => {
+    const dir = mkdtempSync(join(tmpdir(), "trail-purge-fail-"));
+    const scratch = openDatabase(join(dir, "trail.db"));
+    try {
+      migrate(scratch);
+      scratch.$client.pragma("foreign_keys = OFF");
+      await body(scratch, dir);
+    } finally {
+      if (scratch.$client.open) scratch.$client.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+}
+const oldDelivered = (scratch: typeof db) =>
+  scratch.$client
+    .prepare(
+      `insert into webhook_delivery (id, subscription_id, event_id, seq, type, status, next_attempt_at, created_at, delivered_at)
+       values ('d1', 's1', 'e1', 1, 'issue.created', 'delivered', @t, @t, @t)`,
+    )
+    .run({ t: clock - 60 * DAY });
+
+test(
+  "a purge over a closed database resolves and logs, and the worker starts and stops",
+  withScratchDb(async (scratch) => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const w = createWebhookWorker({
+        db: scratch,
+        bus,
+        settings,
+        purgeMs: 10,
+      });
+      scratch.$client.close();
+      await expect(w.purge()).resolves.toBeUndefined();
+      expect(error).toHaveBeenCalledWith(
+        "webhook purge failed",
+        expect.any(Error),
+      );
+
+      error.mockClear();
+      w.start();
+      // the timer's passes fail the same way, unobserved: nothing rejects the process
+      for (let i = 0; i < 100 && error.mock.calls.length < 3; i++) {
+        await sleep(10);
+      }
+      await expect(w.stop()).resolves.toBeUndefined();
+      expect(error.mock.calls.length).toBeGreaterThanOrEqual(3);
+    } finally {
+      error.mockRestore();
+    }
+  }),
+);
+
+test(
+  "a purge that failed on a statement is tried again by the next pass",
+  withScratchDb(async (scratch) => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      oldDelivered(scratch);
+      const count = () =>
+        (
+          scratch.$client
+            .prepare("select count(*) as n from webhook_delivery")
+            .get() as { n: number }
+        ).n;
+      const w = createWebhookWorker({
+        db: scratch,
+        bus,
+        settings,
+        deliveredKeepMs: 7 * DAY,
+      });
+      scratch.$client.exec(
+        "alter table webhook_delivery rename to webhook_delivery_away",
+      );
+      await expect(w.purge()).resolves.toBeUndefined();
+      expect(error).toHaveBeenCalledWith(
+        "webhook purge failed",
+        expect.any(Error),
+      );
+
+      scratch.$client.exec(
+        "alter table webhook_delivery_away rename to webhook_delivery",
+      );
+      expect(count()).toBe(1);
+      await w.purge();
+      expect(count()).toBe(0);
+    } finally {
+      error.mockRestore();
+    }
+  }),
+);

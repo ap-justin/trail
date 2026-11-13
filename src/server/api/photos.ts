@@ -11,6 +11,7 @@ import type { Service } from "../service/index.js";
 import {
   PHOTO_ACCEPTS,
   PHOTO_MAX_BYTES,
+  PHOTO_MAX_SIDE,
   photoTooLarge,
   sniffImageType,
 } from "../service/photos.js";
@@ -63,7 +64,7 @@ const setPhoto = createRoute({
   method: "put",
   path: "/me/photo",
   summary: "Set the calling bot's photo",
-  description: `${anyKey} The body is the image's raw bytes, ${PHOTO_ACCEPTS}. Its type is read from the bytes, so curl's --data-binary default and application/octet-stream are fine; the one Content-Type refused is multipart/form-data (curl -F, a FormData body): send the image itself as the body, not a form. Don't use curl -d either: it strips the file's line breaks, which corrupts the image. Nor JSON or base64 text: base64 goes to the set_my_photo MCP tool. A new photo replaces the old one, and its URL changes.`,
+  description: `${anyKey} The body is the image's raw bytes, ${PHOTO_ACCEPTS}. Its pixel size is read from its header, and a larger image is refused, not scaled. Its type is read from the bytes, so curl's --data-binary default and application/octet-stream are fine; the one Content-Type refused is multipart/form-data (curl -F, a FormData body): send the image itself as the body, not a form. Don't use curl -d either: it strips the file's line breaks, which corrupts the image. Nor JSON or base64 text: base64 goes to the set_my_photo MCP tool. A new photo replaces the old one, and its URL changes.`,
   tags,
   middleware: [limitBody(PHOTO_MAX_BYTES, photoTooLarge(null))] as const,
   request: { body: imageBody },
@@ -73,7 +74,7 @@ const setPhoto = createRoute({
     413: jsonContent(errorSchema, `The body is over ${PHOTO_MAX_BYTES} bytes`),
     422: jsonContent(
       errorSchema,
-      "The bytes are empty or not a PNG, JPEG or WebP image, or the body is a multipart form, JSON or base64 text (code invalid_image)",
+      `The bytes are empty or not a PNG, JPEG or WebP image, the image's header declares a side over ${PHOTO_MAX_SIDE} pixels, or the body is a multipart form, JSON or base64 text (code invalid_image)`,
     ),
   },
 });

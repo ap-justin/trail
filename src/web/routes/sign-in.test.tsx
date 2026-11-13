@@ -5,11 +5,9 @@ import { HttpResponse, http } from "msw";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { browser } from "@/lib/browser";
 import { meView, renderApp, serveFeed, signedInAs } from "@/test/app";
-import { installFakeEventSource } from "@/test/event-source";
 import { issue } from "@/test/fixtures";
 import { server } from "@/test/server";
 
-installFakeEventSource();
 afterEach(() => {
   vi.restoreAllMocks();
 });

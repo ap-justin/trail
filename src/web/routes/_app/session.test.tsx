@@ -6,10 +6,7 @@ import { describe, expect, test } from "vitest";
 import type { MeView } from "@/lib/api-types";
 import { keys } from "@/lib/queries";
 import { meView, renderApp, serveFeed, signedInAs } from "@/test/app";
-import { installFakeEventSource } from "@/test/event-source";
 import { server } from "@/test/server";
-
-installFakeEventSource();
 
 async function onFeed() {
   signedInAs("member");

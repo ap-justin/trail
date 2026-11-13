@@ -3,9 +3,19 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { createBot } from "../service/keys.js";
 import { setupTestApp } from "../test-app.js";
-import { JPEG, OTHER_PNG, PNG, pngOfSize, SVG, TEXT } from "../test-images.js";
+import {
+  JPEG,
+  jpegClaiming,
+  OTHER_PNG,
+  PNG,
+  pngClaiming,
+  pngOfSize,
+  SVG,
+  TEXT,
+  webpClaiming,
+} from "../test-images.js";
 
-const { app, db, bot, request, addBot, addProject } = setupTestApp();
+const { app, db, bot, bus, request, addBot, addProject } = setupTestApp();
 
 // biome-ignore lint/suspicious/noExplicitAny: loose tool results for field reads
 type Body = Record<string, any>;
@@ -64,6 +74,21 @@ test("a bot sets, replaces and clears its photo, and whoami follows", async () =
   expect(await call(wide, "clear_my_photo")).toEqual({ photoUrl: null });
   expect((await call(wide, "whoami")).photoUrl).toBeNull();
   expect(await call(wide, "clear_my_photo")).toEqual({ photoUrl: null });
+});
+
+test("set_my_photo answers only photoUrl and publishes a change, not an identical re-upload", async () => {
+  const live = await connect(addBot("live").key);
+  const updates: { photoUrl: string | null }[] = [];
+  const unsubscribe = bus.subscribeActors((update) => updates.push(update));
+  try {
+    const set = await call(live, "set_my_photo", { data: b64(PNG) });
+    expect(Object.keys(set)).toEqual(["photoUrl"]);
+    await call(live, "set_my_photo", { data: b64(PNG) });
+    await call(live, "clear_my_photo");
+    expect(updates.map((u) => u.photoUrl)).toEqual([set.photoUrl, null]);
+  } finally {
+    unsubscribe();
+  }
 });
 
 test("a bot's photo tools leave another bot's photo as it was", async () => {
@@ -257,4 +282,40 @@ test("exactly 256 KB fits through /mcp as base64", async () => {
     data: b64(pngOfSize(262144)),
   });
   expect(photoUrl).toMatch(/^\/api\/photos\//);
+});
+
+test("set_my_photo refuses a header claiming more than 1024 pixels a side, naming its size, and stores 1024 x 1024", async () => {
+  const pixels = await connect(addBot("pixels").key);
+  const stored = await call(pixels, "set_my_photo", {
+    data: b64(jpegClaiming(1024, 1024)),
+  });
+  for (const [bytes, width, height] of [
+    [jpegClaiming(1025, 1024), 1025, 1024],
+    [webpClaiming("VP8", 1024, 1025), 1024, 1025],
+    [pngClaiming(65535, 65535), 65535, 65535],
+  ] as const) {
+    expect(
+      await refusal(pixels, "set_my_photo", {
+        data: `data:image/png;base64,${b64(bytes)}`,
+      }),
+    ).toBe(
+      `invalid_image: the photo is ${width} x ${height} pixels (${bytes.length} bytes, within the 256 KB limit, but each side must be at most 1024): resize it to 1024 x 1024 or smaller and send it again`,
+    );
+  }
+  expect((await call(pixels, "whoami")).photoUrl).toBe(stored.photoUrl);
+});
+
+test("set_my_photo refuses a body over 256 KB by its bytes even when its header claims too many pixels", async () => {
+  const big = pngOfSize(262145);
+  big.set(pngClaiming(4000, 3000));
+  expect(await refusal(wide, "set_my_photo", { data: b64(big) })).toMatch(
+    /^payload_too_large: /,
+  );
+});
+
+test("set_my_photo's description states the pixel limit beside the byte limit", async () => {
+  const { tools } = await wide.listTools();
+  expect(tools.find((t) => t.name === "set_my_photo")?.description).toContain(
+    "262144 bytes (256 KB) and 1024 x 1024 pixels",
+  );
 });

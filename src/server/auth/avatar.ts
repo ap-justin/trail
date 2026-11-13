@@ -1,26 +1,86 @@
+import { eq } from "drizzle-orm";
 import type { Db } from "../db/client.js";
-import { PHOTO_MAX_BYTES, setActorPhoto } from "../service/photos.js";
+import { actorPhoto } from "../db/schema.js";
+import type { EventBus } from "../events/bus.js";
+import {
+  PHOTO_MAX_BYTES,
+  setActorPhoto,
+  touchActorPhoto,
+} from "../service/photos.js";
 import type { GitHubHuman } from "./identity.js";
 
 // sign-in doesn't wait on the fetch; this bounds how long the background fetch can run
 const AVATAR_TIMEOUT_MS = 3_000;
 
+// a photo checked this long ago is fetched again when its person loads the app
+const REFRESH_AFTER_MS = 24 * 60 * 60_000;
+// at most one check per person in this long, whatever the last one found; well over AVATAR_TIMEOUT_MS, so a fetch in flight is never doubled
+const CHECK_EVERY_MS = 60 * 60_000;
+
 /**
- * Stores the person's current GitHub photo as their actor's photo. Never
- * throws: on any failure the photo they had, or none, stays, and a warning is
- * logged, so sign-in goes on without it.
+ * Keeps people's GitHub photos current without a new sign-in. Fetches run in
+ * the background and never reject, so no caller waits on GitHub.
  */
-export async function storeGitHubPhoto(
+export function githubPhotos({
+  db,
+  avatarFetch,
+  bus,
+  now,
+}: {
+  db: Db;
+  avatarFetch: typeof fetch;
+  bus?: EventBus;
+  now: () => number;
+}) {
+  // per human actor, when its photo was last fetched or found fresh
+  const lastChecked = new Map<string, number>();
+
+  function fetchNow(person: GitHubHuman, at: number) {
+    lastChecked.set(person.id, at);
+    void storeGitHubPhoto(db, person, avatarFetch, bus);
+  }
+
+  return {
+    /** A sign-in always fetches. */
+    signedIn(person: GitHubHuman) {
+      fetchNow(person, now());
+    },
+    /** A page load fetches when the photo is missing or over a day old, at most hourly. */
+    seen(person: GitHubHuman) {
+      const at = now();
+      const last = lastChecked.get(person.id);
+      if (last !== undefined && at - last < CHECK_EVERY_MS) return;
+      const checkedAt = db
+        .select({ updatedAt: actorPhoto.updatedAt })
+        .from(actorPhoto)
+        .where(eq(actorPhoto.actorId, person.id))
+        .get()?.updatedAt;
+      if (checkedAt && at - checkedAt.getTime() < REFRESH_AFTER_MS) {
+        lastChecked.set(person.id, at);
+        return;
+      }
+      fetchNow(person, at);
+    },
+  };
+}
+
+/**
+ * Stores the person's current GitHub photo as their actor's photo, and
+ * publishes it on `bus` when it changed; the same bytes again only mark the
+ * photo checked. Never throws: on any failure the photo they had, or none,
+ * stays, and a warning is logged, so sign-in goes on without it.
+ */
+async function storeGitHubPhoto(
   db: Db,
   person: GitHubHuman,
   avatarFetch: typeof fetch,
+  bus?: EventBus,
 ): Promise<void> {
   try {
-    setActorPhoto(
-      db,
-      person.id,
-      await fetchAvatar(person.githubId, avatarFetch),
-    );
+    const bytes = await fetchAvatar(person.githubId, avatarFetch);
+    const { photoUrl, changed } = setActorPhoto(db, person.id, bytes);
+    if (changed) bus?.publishActor({ actorId: person.id, photoUrl });
+    else touchActorPhoto(db, person.id);
   } catch (e) {
     const reason = e instanceof Error ? e.message : String(e);
     console.warn(

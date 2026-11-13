@@ -13,6 +13,7 @@ import type { MeView, WebProjectRefView } from "@/lib/api-types";
 import { statusOf } from "@/lib/loadable";
 import { isMember, keys } from "@/lib/queries";
 import { useAction } from "@/lib/use-action";
+import { useActorStream } from "@/lib/use-actor-stream";
 
 export type Session = {
   viewer: ShellViewer;
@@ -62,6 +63,7 @@ export function AppChrome({
   const queryClient = useQueryClient();
   const router = useRouter();
   const navigate = useNavigate();
+  useActorStream();
   const [dialog, setDialog] = useState<{ projectKey: string | null } | null>(
     null,
   );

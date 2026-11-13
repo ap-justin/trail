@@ -931,7 +931,20 @@ const feedFilterQuery = {
 };
 
 export const feedQuerySchema = pageQuerySchema.extend(feedFilterQuery);
-export const eventsQuerySchema = z.object(feedFilterQuery);
+export const eventsQuerySchema = z
+  .object({
+    ...feedFilterQuery,
+    only: z.enum(["actors"]).optional().meta({
+      description:
+        "`actors`: only `actor` events and heartbeats, no feed entries; its own, larger per-person cap. Takes no other filter.",
+    }),
+  })
+  .refine(
+    (q) =>
+      q.only === undefined ||
+      (q.actor === undefined && q.project === undefined),
+    { message: "only=actors takes no actor or project filter", path: ["only"] },
+  );
 export const searchQuerySchema = z.object({
   q: z.string().trim().min(1).max(200),
 });

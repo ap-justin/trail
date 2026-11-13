@@ -1789,14 +1789,22 @@ export function createService({
       return { ...found, items: found.items.map(withPhotoUrl) };
     },
 
-    /** Stores the calling actor's photo; see `setActorPhoto` for what it refuses. Any key may. */
+    /**
+     * Stores the calling actor's photo and, when the stored photo changed,
+     * publishes it to live actor subscribers; see `setActorPhoto` for what it
+     * refuses. Any key may.
+     */
     setMyPhoto(actor: ActingActor, bytes: Uint8Array): { photoUrl: string } {
-      return setActorPhoto(db, actor.id, bytes);
+      const { photoUrl, changed } = setActorPhoto(db, actor.id, bytes);
+      if (changed) bus.publishActor({ actorId: actor.id, photoUrl });
+      return { photoUrl };
     },
 
-    /** Removes the calling actor's photo, if it has one. Any key may. */
+    /** Removes the calling actor's photo, if it has one, and publishes the removal. Any key may. */
     clearMyPhoto(actor: ActingActor): { photoUrl: null } {
-      clearActorPhoto(db, actor.id);
+      if (clearActorPhoto(db, actor.id)) {
+        bus.publishActor({ actorId: actor.id, photoUrl: null });
+      }
       return { photoUrl: null };
     },
 

@@ -25,7 +25,6 @@ if ("missing" in config.email) {
     `Email sign-in is off until ${config.email.missing.join(" and ")} is set; GitHub sign-in is unaffected`,
   );
 }
-const auth = createAuth({ db, config });
 // vite builds the SPA to dist/web, beside this module once bundled to dist/index.js;
 // under tsx this is src/server/index.ts, and `./web` there is the API's source
 const webDir = fileURLToPath(
@@ -36,6 +35,7 @@ const webDir = fileURLToPath(
 );
 const streams = new LiveStreams();
 const bus = createEventBus();
+const auth = createAuth({ db, config, bus });
 // aborts at the start of a drain, so a test call to a slow receiver doesn't hold the shutdown
 const draining = new AbortController();
 const webhooks = webhookSettings(deriveSecretKey(config.BETTER_AUTH_SECRET), {
