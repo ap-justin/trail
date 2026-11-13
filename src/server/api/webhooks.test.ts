@@ -728,3 +728,27 @@ test("at the limit, a key that can't manage every webhook gets a message with no
   expect(full.body.error.code).toBe("conflict");
   expect(full.body.error.message).toContain("20 webhooks");
 });
+
+test("a key limited to the webhook's projects is told which webhook already has the URL", async () => {
+  const bigBot = createBot(db, "scoped-twin-bot");
+  const narrow = createKey(db, bigBot.actor.id, { projects: [a.key] }).key;
+  const url = "https://bot.example.com/scoped-twin";
+  const twin = await create({ url, projects: [a.key] }, narrow);
+  expect(twin.status).toBe(201);
+  const again = await create({ url, projects: [a.key] }, narrow);
+  expect(again.status).toBe(409);
+  expect(again.body.error.code).toBe("conflict");
+  expect(again.body.error.message).toContain(twin.body.id);
+  expect(again.body.error.message).not.toContain("can't manage");
+
+  const other = await create(
+    { url: "https://bot.example.com/scoped-twin-2", projects: [a.key] },
+    narrow,
+  );
+  const moved = await call("PATCH", `/webhooks/${other.body.id}`, {
+    json: { url },
+    key: narrow,
+  });
+  expect(moved.status).toBe(409);
+  expect(moved.body.error.message).toContain(twin.body.id);
+});

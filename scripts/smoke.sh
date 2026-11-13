@@ -83,6 +83,12 @@ code=$(curl -s -o "$dir/hook.json" -w '%{http_code}' -X POST "$base/api/v1/webho
 [ "$code" = 422 ] && grep -q 'internal address' "$dir/hook.json" || {
   echo "POST /api/v1/webhooks to 127.0.0.1 gave $code, want 422 for an internal address: $(cat "$dir/hook.json")" >&2; exit 1;
 }
+# a write sent as a form (curl -d's default type) is a 415, and a bodiless POST is not one
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$base/api/v1/projects" \
+  -H "Authorization: Bearer $key" -d 'key=FRM&name=Form')
+[ "$code" = 415 ] || { echo "a form POST to /api/v1/projects gave $code, want 415" >&2; exit 1; }
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$base/api/v1/webhooks/none/ping" -H "Authorization: Bearer $key")
+[ "$code" = 404 ] || { echo "a bodiless POST to /api/v1/webhooks/none/ping gave $code, want 404 not 415" >&2; exit 1; }
 curl -fsS -H "Authorization: Bearer $key" "$base/api/v1/webhooks" | grep -q '"items":\[\]' || { echo "GET /api/v1/webhooks did not list none" >&2; exit 1; }
 
 # /mcp loads the MCP SDK from node_modules at runtime, outside the bundle

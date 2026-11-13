@@ -11,6 +11,7 @@ import {
   InvalidImageError,
   NotFoundError,
   PayloadTooLargeError,
+  RateLimitedError,
   ServiceError,
   ValidationError,
 } from "../service/errors.js";
@@ -48,6 +49,10 @@ const httpCodes: Partial<Record<number, string>> = {
 };
 
 export const handleError: ErrorHandler = (err, c) => {
+  if (err instanceof RateLimitedError) {
+    c.header("retry-after", String(err.retryAfter));
+    return errorResponse(c, 429, err.code, err.message);
+  }
   if (err instanceof ServiceError) {
     return errorResponse(c, statusOf(err), err.code, err.message);
   }

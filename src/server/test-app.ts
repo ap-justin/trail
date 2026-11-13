@@ -20,7 +20,10 @@ export const TEST_OWNER_ID = 1;
 /** Webhook settings for a test: every name resolves to a public address but internal.example.test, and nothing is sent. */
 export const testWebhookSettings = (
   overrides: Partial<
-    Pick<WebhookSettings, "resolve" | "transport" | "now" | "publicUrl">
+    Pick<
+      WebhookSettings,
+      "resolve" | "transport" | "now" | "publicUrl" | "signal"
+    >
   > = {},
 ) =>
   webhookSettings(
@@ -142,7 +145,9 @@ export function setupTestApp({
 }: {
   auth?: Partial<AuthConfig>;
   /** replaces how webhooks resolve hosts and send; by default every name resolves to a public address and nothing is sent */
-  webhooks?: Partial<Pick<WebhookSettings, "resolve" | "transport" | "now">>;
+  webhooks?: Partial<
+    Pick<WebhookSettings, "resolve" | "transport" | "now" | "signal">
+  >;
   /** answers sign-in's GitHub photo fetch; by default never, so no photo and no warning */
   avatarFetch?: typeof fetch;
   /** the built SPA directory `createApp` serves; none by default */

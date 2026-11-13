@@ -720,6 +720,17 @@ export const webhookDelivery = sqliteTable(
     index("webhook_delivery_pending_idx")
       .on(t.subscriptionId, t.seq)
       .where(sql`${c(t.status)} = 'pending'`),
+    // expiry reads a subscription's pending deliveries by age: only the expired ones, never the whole backlog
+    index("webhook_delivery_pending_age_idx")
+      .on(t.subscriptionId, t.createdAt)
+      .where(sql`${c(t.status)} = 'pending'`),
+    // retention reads finished deliveries past their keep time
+    index("webhook_delivery_delivered_idx")
+      .on(t.deliveredAt)
+      .where(sql`${c(t.status)} = 'delivered'`),
+    index("webhook_delivery_failed_idx")
+      .on(t.createdAt)
+      .where(sql`${c(t.status)} = 'failed'`),
   ],
 );
 

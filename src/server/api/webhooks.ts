@@ -10,7 +10,11 @@ import {
   webhookUpdateSchema,
 } from "../../shared/schemas.js";
 import type { Service } from "../service/index.js";
-import { WEBHOOKS_PER_BOT_MAX } from "../service/webhooks.js";
+import {
+  PING_LIMIT,
+  PING_WINDOW_MS,
+  WEBHOOKS_PER_BOT_MAX,
+} from "../service/webhooks.js";
 import { WEBHOOK_DELIVERY, WEBHOOK_SETUP } from "../webhooks/docs.js";
 import { createRouter } from "./env.js";
 import {
@@ -137,12 +141,16 @@ const pingWebhook = createRoute({
   method: "post",
   path: "/webhooks/{id}/ping",
   summary: "Send a signed trail.ping to a webhook",
-  description: `Needs the read action. ${own} Sends one signed trail.ping now, outside the queue, and returns what the receiver answered, so you can check your routine before real events flow. A failed ping is a 200 with delivered false and the reason in error.`,
+  description: `Needs the read action. ${own} Sends one signed trail.ping now, outside the queue, and returns what the receiver answered, so you can check your routine before real events flow. A failed ping is a 200 with delivered false and the reason in error. A webhook takes ${PING_LIMIT} pings per ${PING_WINDOW_MS / 1000} seconds; past that the answer is a 429 with a Retry-After header.`,
   tags,
   request: { params: webhookParam },
   responses: {
     200: jsonContent(webhookTestResultSchema, "What the receiver answered"),
     ...forbiddenError("read"),
+    429: jsonContent(
+      errorSchema,
+      "The webhook was pinged too often; wait the seconds in the Retry-After header (code rate_limited)",
+    ),
     ...readErrors,
     ...notFoundError,
   },

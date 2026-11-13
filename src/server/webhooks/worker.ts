@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lt, type SQL, sql } from "drizzle-orm";
 import { WEBHOOK_PAUSE_AFTER } from "../../shared/schemas.js";
 import type { Db } from "../db/client.js";
 import {
@@ -29,6 +29,11 @@ export const BACKOFF_MS = [
 /** A delivery still failing this long after it was queued, time paused not counted, is marked failed. */
 export const GIVE_UP_MS = 24 * HOUR;
 export const POLL_MS = 5_000;
+/** Delivered rows are kept this long after delivery, failed ones this long after they were queued: a bot's history to debug from. */
+export const DELIVERED_KEEP_MS = 7 * 24 * HOUR;
+export const FAILED_KEEP_MS = 30 * 24 * HOUR;
+export const PURGE_MS = 10 * MINUTE;
+export const PURGE_BATCH = 500;
 
 export type WebhookWorkerOptions = {
   db: Db;
@@ -38,9 +43,16 @@ export type WebhookWorkerOptions = {
   giveUpMs?: number;
   pauseAfter?: number;
   pollMs?: number;
+  deliveredKeepMs?: number;
+  failedKeepMs?: number;
+  purgeMs?: number;
+  purgeBatch?: number;
 };
 
 type Delivery = typeof webhookDelivery.$inferSelect;
+
+/** updated_at is the bot's own changes; a delivery attempt writes the subscription but isn't one, and the column's on-update default would stamp it. */
+const keepUpdatedAt = sql`${webhookSubscription.updatedAt}`;
 
 /**
  * Each unpaused subscription's oldest pending delivery, due or not, in seq order.
@@ -65,6 +77,51 @@ export function expireQuery(db: Db, cutoff: number, subscriptionId?: string) {
         sql`${webhookDelivery.subscriptionId} in (select id from webhook_subscription where paused_at is null)`,
       ),
     );
+}
+
+/** The deletes of up to `limit` finished deliveries past their keep time: delivered ones, then failed ones. */
+export function purgeQueries(
+  db: Db,
+  now: number,
+  keep: { deliveredMs: number; failedMs: number },
+  limit: number,
+) {
+  // the status as a literal, so the planner matches the partial indexes
+  const ids = (where: SQL | undefined) =>
+    db
+      .select({ id: webhookDelivery.id })
+      .from(webhookDelivery)
+      .where(where)
+      .limit(limit);
+  return [
+    ids(
+      and(
+        sql`${webhookDelivery.status} = 'delivered'`,
+        lt(webhookDelivery.deliveredAt, new Date(now - keep.deliveredMs)),
+      ),
+    ),
+    ids(
+      and(
+        sql`${webhookDelivery.status} = 'failed'`,
+        lt(webhookDelivery.createdAt, new Date(now - keep.failedMs)),
+      ),
+    ),
+  ].map((rows) =>
+    db.delete(webhookDelivery).where(inArray(webhookDelivery.id, rows)),
+  );
+}
+
+/** Deletes up to `limit` finished deliveries of each kind past their keep time; returns how many went. */
+export function purgeBatch(
+  db: Db,
+  now: number,
+  keep: { deliveredMs: number; failedMs: number },
+  limit: number,
+): number {
+  return purgeQueries(db, now, keep, limit).reduce(
+    (removed, query) => removed + query.run().changes,
+    0,
+  );
 }
 
 export function headsQuery(db: Db, subscriptionId?: string) {
@@ -104,6 +161,12 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
   const giveUpMs = options.giveUpMs ?? GIVE_UP_MS;
   const pauseAfter = options.pauseAfter ?? WEBHOOK_PAUSE_AFTER;
   const pollMs = options.pollMs ?? POLL_MS;
+  const keep = {
+    deliveredMs: options.deliveredKeepMs ?? DELIVERED_KEEP_MS,
+    failedMs: options.failedKeepMs ?? FAILED_KEEP_MS,
+  };
+  const purgeMs = options.purgeMs ?? PURGE_MS;
+  const batch = options.purgeBatch ?? PURGE_BATCH;
 
   /** each subscription with a run in flight; a subscription never has two, so its order holds */
   const runs = new Map<string, Promise<void>>();
@@ -111,6 +174,8 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
   let stopped = true;
   let unsubscribe: (() => void) | null = null;
   let timer: NodeJS.Timeout | null = null;
+  let purgeTimer: NodeJS.Timeout | null = null;
+  let purging: Promise<void> | null = null;
   const abort = new AbortController();
   /** deliveries whose crash couldn't be recorded, by id: not tried again before `until` */
   const held = new Map<string, { crashes: number; until: number }>();
@@ -152,6 +217,8 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
           tx.update(webhookDelivery)
             .set({
               status: "delivered",
+              // delivered: nothing sends it again, so its bytes go
+              body: null,
               attempts,
               lastStatus: result.status,
               lastError: null,
@@ -160,7 +227,11 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
             .where(eq(webhookDelivery.id, delivery.id))
             .run();
           tx.update(webhookSubscription)
-            .set({ lastSuccessAt: new Date(now), consecutiveFailures: 0 })
+            .set({
+              lastSuccessAt: new Date(now),
+              consecutiveFailures: 0,
+              updatedAt: keepUpdatedAt,
+            })
             .where(eq(webhookSubscription.id, delivery.subscriptionId))
             .run();
           return;
@@ -185,6 +256,7 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
             consecutiveFailures: sql`${webhookSubscription.consecutiveFailures} + 1`,
             lastError: result.error,
             lastErrorAt: new Date(now),
+            updatedAt: keepUpdatedAt,
             pausedAt: sql`case when ${webhookSubscription.pausedAt} is null and ${webhookSubscription.consecutiveFailures} + 1 >= ${pauseAfter} then ${now} else ${webhookSubscription.pausedAt} end`,
           })
           .where(eq(webhookSubscription.id, delivery.subscriptionId))
@@ -316,8 +388,30 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
     });
   }
 
+  /**
+   * Deletes finished deliveries past their keep time, a small batch at a time
+   * with a macrotask turn between, so a large backlog of them never holds the
+   * database or the event loop. Never rejects.
+   */
+  function purge(): Promise<void> {
+    purging ??= (async () => {
+      try {
+        while (!abort.signal.aborted) {
+          if (purgeBatch(db, settings.now(), keep, batch) < batch) break;
+          await new Promise((done) => setImmediate(done));
+        }
+      } catch (error) {
+        console.error("webhook purge failed", error);
+      } finally {
+        purging = null;
+      }
+    })();
+    return purging;
+  }
+
   return {
     tick,
+    purge,
     /** Starts listening to the bus and polling; the first pass sends whatever an earlier run left. */
     start() {
       if (!stopped) return;
@@ -325,15 +419,19 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
       unsubscribe = bus.subscribe((_: ActivityEvent) => wake());
       timer = setInterval(() => void tick(), pollMs);
       timer.unref();
+      purgeTimer = setInterval(() => void purge(), purgeMs);
+      purgeTimer.unref();
       void tick();
+      void purge();
     },
     /** Stops sending, cuts requests in flight (their deliveries stay pending) and waits for every run to end. */
     async stop() {
       stopped = true;
       unsubscribe?.();
       if (timer) clearInterval(timer);
+      if (purgeTimer) clearInterval(purgeTimer);
       abort.abort();
-      await Promise.all(runs.values());
+      await Promise.all([...runs.values(), purging]);
     },
   };
 }

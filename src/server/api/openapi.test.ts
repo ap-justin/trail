@@ -111,7 +111,10 @@ test("the spec lists the error statuses each operation can return", async () => 
     ),
     "DELETE /webhooks/{id}": withForbidden(withNotFound(list)),
     "PUT /webhooks/{id}/secret": withForbidden(withNotFound(write("200"))),
-    "POST /webhooks/{id}/ping": withForbidden(withNotFound(list)),
+    "POST /webhooks/{id}/ping": [
+      ...withForbidden(withNotFound(list)),
+      "429",
+    ].sort(),
   });
 });
 

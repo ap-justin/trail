@@ -11,7 +11,7 @@ import { issueRoutes } from "./issues.js";
 import { labelRoutes } from "./labels.js";
 import { photoRoutes } from "./photos.js";
 import { projectRoutes } from "./projects.js";
-import { limitBody, MAX_BODY_BYTES } from "./routes.js";
+import { jsonBodiesOnly, limitBody, MAX_BODY_BYTES } from "./routes.js";
 import { statusUpdateRoutes } from "./status-updates.js";
 import { webhookRoutes } from "./webhooks.js";
 
@@ -32,6 +32,7 @@ export function createApi({ db, service }: { db: Db; service: Service }) {
     security: [{ bearer: [] }],
   });
   api.use(bearerKey(db));
+  api.use(jsonBodiesOnly);
   // Body limits sit behind the key check, so an unauthenticated caller can't make
   // them buffer a body. The import and the photo upload set their own and are
   // registered above the general limit, which never runs for them (the photo

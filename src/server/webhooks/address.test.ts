@@ -147,3 +147,25 @@ test.each([
 ])("%s is internal", (address) => {
   expect(isInternalAddress(address)).toBe(true);
 });
+
+test("a name that resolves in both IP families offers the first address of the other family as a fallback", async () => {
+  const v4 = "93.184.216.34";
+  const v6 = "2606:2800:220:1:248:1893:25c8:1946";
+  const check = (addresses: string[]) =>
+    checkWebhookUrl("https://bot.example.com/hook", async () => addresses);
+  expect(await check([v6, v4, "93.184.216.35"])).toMatchObject({
+    address: v6,
+    fallback: v4,
+  });
+  expect(await check([v4, "93.184.216.35", v6])).toMatchObject({
+    address: v4,
+    fallback: v6,
+  });
+  expect(await check([v4, "93.184.216.35"])).not.toHaveProperty("fallback");
+  expect(
+    await checkWebhookUrl(`https://[${v6}]/hook`, async () => []),
+  ).not.toHaveProperty("fallback");
+  await expect(check([v4, "fd00:ec2::254"])).rejects.toThrow(
+    /internal address/,
+  );
+});

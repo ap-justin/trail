@@ -1,5 +1,6 @@
 import { z } from "@hono/zod-openapi";
 import { bodyLimit } from "hono/body-limit";
+import { createMiddleware } from "hono/factory";
 import { errorSchema } from "../../shared/schemas.js";
 import type { ApiKeyAction } from "../db/schema.js";
 import { errorResponse } from "./errors.js";
@@ -22,6 +23,37 @@ export const limitBody = (
     maxSize,
     onError: (c) => errorResponse(c, 413, "payload_too_large", message),
   });
+
+const jsonType = /^\s*application\/json\s*(;|$)/i;
+
+/**
+ * Refuses a write whose body isn't declared application/json with a 415: a
+ * form or text body would otherwise read as an empty one and a write could
+ * succeed having changed nothing. A write with no body and no Content-Type
+ * (a ping, a delete) passes. The photo upload takes raw bytes and is exempt.
+ */
+export const jsonBodiesOnly = createMiddleware(async (c, next) => {
+  const method = c.req.method;
+  if (
+    (method !== "POST" && method !== "PUT" && method !== "PATCH") ||
+    (method === "PUT" && /\/me\/photo\/?$/.test(c.req.path))
+  ) {
+    return next();
+  }
+  const type = c.req.header("content-type");
+  const hasBody =
+    c.req.header("transfer-encoding") !== undefined ||
+    !["", "0"].includes(c.req.header("content-length") ?? "");
+  if (type === undefined ? hasBody : !jsonType.test(type)) {
+    return errorResponse(
+      c,
+      415,
+      "unsupported_media_type",
+      `send the body as JSON with the header Content-Type: application/json (curl -H 'Content-Type: application/json' -d '{...}'); this request's body is ${type === undefined ? "sent with no Content-Type" : `${type.split(";")[0]?.trim() || "an empty type"}`}`,
+    );
+  }
+  return next();
+});
 
 /** The error responses every authenticated read documents beside its own. */
 export const readErrors = {
