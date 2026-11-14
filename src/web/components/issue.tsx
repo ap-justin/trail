@@ -346,7 +346,7 @@ function changePhrase(entry: EntryView): ReactNode {
     case "project_imported":
       return null;
     default:
-      // typechecks only while every known kind has a case; at runtime, a kind the server added later
+      // typechecks only while every known kind has a case; at runtime, a kind the server added later lands here
       entry satisfies never;
       return null;
   }
