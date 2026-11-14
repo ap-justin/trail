@@ -18,13 +18,16 @@ function FeedPage() {
   const feed = useLiveFeed(filter, {
     onProjectGone: () => setFilter((f) => ({ ...f, project: null })),
   });
+  const noProjects = !session.viewer.isOwner && session.projects.length === 0;
   return (
     <AppPage
       section="feed"
       heading="Feed"
-      // nothing until the stream first opens: neither Live nor Reconnecting is true yet
+      // nothing until the stream first opens: neither Live nor Reconnecting is true yet;
+      // never for a member with no projects, who has nothing to receive
       headingAccessory={
-        feed.connection === "open" && <LiveIndicator connection="open" />
+        feed.connection === "open" &&
+        !noProjects && <LiveIndicator connection="open" />
       }
     >
       <FeedView
@@ -45,7 +48,7 @@ function FeedPage() {
           setFilter((f) => ({ ...f, project }))
         }
         onRetry={feed.retry}
-        noProjects={!session.viewer.isOwner && session.projects.length === 0}
+        noProjects={noProjects}
       />
     </AppPage>
   );

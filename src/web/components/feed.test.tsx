@@ -3,8 +3,13 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, test, vi } from "vitest";
 import { FeedView, type FeedViewProps, LiveIndicator } from "@/components/feed";
-import type { EntryView } from "@/lib/api-types";
-import { commentEntry, kai, kaiWithPhoto, statusEntry } from "@/test/fixtures";
+import {
+  commentEntry,
+  kai,
+  kaiWithPhoto,
+  projectImportedEntry,
+  statusEntry,
+} from "@/test/fixtures";
 
 const now = new Date(2026, 10, 11, 12, 0);
 const minutesAgo = (m: number) =>
@@ -44,6 +49,9 @@ const rowFor = (id: string) => {
   if (!row) throw new Error(`no feed row ${id}`);
   return row;
 };
+
+const filterControls = () =>
+  screen.queryAllByRole("combobox", { name: /^Filter by (bot|project)$/ });
 
 describe("actor photos", () => {
   test("an entry by an actor with a photo shows the photo; one without shows initials", () => {
@@ -197,20 +205,67 @@ describe("feed states", () => {
     expect(screen.queryByText("No activity yet")).not.toBeInTheDocument();
   });
 
-  test("an import reads as one row naming the project and the counts", () => {
-    renderFeed({
-      entries: [
-        {
-          ...statusEntry("imp", minutesAgo(2)),
-          kind: "project_imported",
-          issue: null,
-          imported: { issues: 12, comments: 1 },
-        } as EntryView,
-      ],
+  test("an empty feed for a member with no project shows no filters", () => {
+    renderFeed({ entries: [], noProjects: true });
+    expect(filterControls()).toHaveLength(0);
+    expect(
+      screen.getByRole("heading", { name: "No projects yet" }),
+    ).toBeInTheDocument();
+  });
+
+  test("noProjects is ignored once there are entries: rows and filters show", () => {
+    renderFeed({ noProjects: true });
+    expect(rowFor("e1")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "No projects yet" }),
+    ).not.toBeInTheDocument();
+    expect(filterControls()).toHaveLength(2);
+  });
+
+  describe("an import row", () => {
+    const importRow = (imported: { issues: number; comments: number }) => {
+      renderFeed({
+        entries: [projectImportedEntry("imp", minutesAgo(2), imported)],
+      });
+      return rowFor("imp");
+    };
+    // the muted connector is its own element, so the counts are the last span
+    const tailOf = (row: HTMLElement) => within(row).queryByText(/^\d+ /);
+
+    test("names the project as a link and reads counts after a muted 'with'", () => {
+      const row = importRow({ issues: 12, comments: 1 });
+      expect(within(row).getByRole("link", { name: "trail" })).toBeVisible();
+      expect(within(row).getByText("imported")).toBeInTheDocument();
+      expect(within(row).getByText("with")).toBeInTheDocument();
     });
-    const row = rowFor("imp");
-    expect(row).toHaveTextContent("imported");
-    expect(row).toHaveTextContent("12 issues, 1 comment");
+
+    test("unequal counts: each noun takes its own count and plural", () => {
+      const tail = tailOf(importRow({ issues: 12, comments: 1 }));
+      expect(tail?.textContent).toBe("12 issues, 1 comment");
+    });
+
+    test("one issue is singular", () => {
+      const tail = tailOf(importRow({ issues: 1, comments: 3 }));
+      expect(tail?.textContent).toBe("1 issue, 3 comments");
+    });
+
+    test("zero comments hides the comment count", () => {
+      const tail = tailOf(importRow({ issues: 5, comments: 0 }));
+      expect(tail?.textContent).toBe("5 issues");
+    });
+
+    test("zero issues hides the issue count", () => {
+      const tail = tailOf(importRow({ issues: 0, comments: 4 }));
+      expect(tail?.textContent).toBe("4 comments");
+    });
+
+    test("both zero shows no tail and no 'with'", () => {
+      const row = importRow({ issues: 0, comments: 0 });
+      expect(within(row).getByText("imported")).toBeInTheDocument();
+      expect(within(row).queryByText("with")).not.toBeInTheDocument();
+      expect(tailOf(row)).toBeNull();
+      expect(row).not.toHaveTextContent(/\d+ (issue|comment)/);
+    });
   });
 
   test("error copy, and Try again retries", async () => {

@@ -1,11 +1,12 @@
 import { focusManager } from "@tanstack/react-query";
-import { act, screen } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, test } from "vitest";
 import type { MeView } from "@/lib/api-types";
 import { keys } from "@/lib/queries";
 import { meView, renderApp, serveFeed, signedInAs } from "@/test/app";
+import { FakeEventSource } from "@/test/event-source";
 import { server } from "@/test/server";
 
 async function onFeed() {
@@ -16,6 +17,19 @@ async function onFeed() {
   return app;
 }
 
+/** The feed a member with no project is served: nothing, and nothing to filter by. */
+function serveNoProjectsFeed() {
+  server.use(
+    http.get("/api/web/feed", () =>
+      HttpResponse.json({
+        items: [],
+        nextCursor: null,
+        filters: { actors: [], projects: [] },
+      }),
+    ),
+  );
+}
+
 describe("session", () => {
   test("a member with no project is told so, not that nothing happened", async () => {
     server.use(
@@ -23,12 +37,49 @@ describe("session", () => {
         HttpResponse.json({ ...meView("member"), projects: [] }),
       ),
     );
-    serveFeed();
+    serveNoProjectsFeed();
     renderApp("/");
     expect(await screen.findByText("No projects yet")).toBeInTheDocument();
     expect(
       screen.getByText("Ask the owner to add you to a project."),
     ).toBeInTheDocument();
+    expect(screen.queryByText("No activity yet")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("combobox", { name: /^Filter by/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  test("a member with no project has no Live indicator, though the stream is open", async () => {
+    server.use(
+      http.get("/api/web/me", () =>
+        HttpResponse.json({ ...meView("member"), projects: [] }),
+      ),
+    );
+    serveNoProjectsFeed();
+    renderApp("/");
+    expect(await screen.findByText("No projects yet")).toBeInTheDocument();
+    await waitFor(() => expect(FakeEventSource.opened).not.toHaveLength(0));
+    FakeEventSource.current.open();
+    expect(screen.queryByText("Live")).not.toBeInTheDocument();
+  });
+
+  test("a member with projects sees Live once the stream opens", async () => {
+    await onFeed();
+    await waitFor(() => expect(FakeEventSource.opened).not.toHaveLength(0));
+    FakeEventSource.current.open();
+    expect((await screen.findAllByText("Live")).length).toBeGreaterThan(0);
+  });
+
+  test("an owner with no projects is told it is quiet, not that they lack access", async () => {
+    server.use(
+      http.get("/api/web/me", () =>
+        HttpResponse.json({ ...meView("owner"), projects: [] }),
+      ),
+    );
+    serveNoProjectsFeed();
+    renderApp("/");
+    expect(await screen.findByText("No activity yet")).toBeInTheDocument();
+    expect(screen.queryByText("No projects yet")).not.toBeInTheDocument();
   });
 
   test("Sign out calls the endpoint and lands on sign-in", async () => {

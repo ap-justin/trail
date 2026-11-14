@@ -60,43 +60,89 @@ describe("a member's feed with no filter", () => {
   }
 });
 
-test("a member of an imported project sees the import in the feed", async () => {
-  const res = await request("POST", "/api/v1/import", {
-    json: {
-      externalRef: "LIN-1",
-      key: "IMPF",
-      name: "Imported",
-      issues: [
-        {
-          externalRef: "lin-1",
-          title: "carried over",
-          status: "Todo",
-          createdAt: "2026-01-02T03:04:05.000Z",
-          comments: [
-            {
-              externalRef: "lin-c1",
-              body: "noted",
-              createdAt: "2026-01-03T00:00:00.000Z",
-            },
-          ],
-        },
-      ],
-    },
+describe("a member's feed of an import", () => {
+  // the temp DB lives for the whole file, so each test imports its own project
+  const importPayload = (
+    tag: string,
+    title: string,
+    comments: { externalRef: string; body: string }[],
+  ) => ({
+    externalRef: `LIN-${tag}`,
+    key: `IMP${tag.toUpperCase()}`,
+    name: `Imported ${tag}`,
+    issues: [
+      {
+        externalRef: "lin-1",
+        title,
+        status: "Todo",
+        createdAt: "2026-01-02T03:04:05.000Z",
+        comments: comments.map((c) => ({
+          ...c,
+          createdAt: "2026-01-03T00:00:00.000Z",
+        })),
+      },
+      {
+        externalRef: "lin-2",
+        title: "second",
+        status: "Todo",
+        createdAt: "2026-01-02T03:04:06.000Z",
+        comments: [],
+      },
+    ],
   });
-  expect(res.status).toBe(200);
-  const { project } = (await res.json()) as { project: { id: string } };
-  inviteEmail("imp@example.com", [project.id]);
-  const feed = await get<FeedView>(
-    "/feed",
-    await signInWithEmail("imp@example.com"),
-  );
-  expect(feed.items).toMatchObject([
-    {
-      kind: "project_imported",
-      project: { key: "IMPF" },
-      imported: { issues: 1, comments: 1 },
-    },
-  ]);
+  const noted = { externalRef: "lin-c1", body: "noted" };
+  const later = { externalRef: "lin-c2", body: "added on re-import" };
+
+  async function importProject(json: ReturnType<typeof importPayload>) {
+    const res = await request("POST", "/api/v1/import", { json });
+    expect(res.status).toBe(200);
+    return ((await res.json()) as { project: { id: string } }).project.id;
+  }
+
+  async function memberFeed(tag: string, projectId: string) {
+    const email = `imp-${tag}@example.com`;
+    inviteEmail(email, [projectId]);
+    return get<FeedView>("/feed", await signInWithEmail(email));
+  }
+
+  test("a member of an imported project sees one row with each count in its own field", async () => {
+    const id = await importProject(importPayload("a", "carried over", [noted]));
+    const feed = await memberFeed("a", id);
+    expect(feed.items).toMatchObject([
+      {
+        kind: "project_imported",
+        project: { key: "IMPA" },
+        imported: { issues: 2, comments: 1 },
+      },
+    ]);
+  });
+
+  test("a re-import that retitles an issue and adds a comment shows the summed counts", async () => {
+    const id = await importProject(importPayload("b", "carried over", [noted]));
+    await importProject(
+      importPayload("b", "carried over, renamed", [noted, later]),
+    );
+    const feed = await memberFeed("b", id);
+    const rows = feed.items.filter((e) => e.kind === "project_imported");
+    // first import: 2 issues + 1 comment; re-import: 1 issue updated + 1 comment created
+    expect(rows.map((r) => r.imported)).toEqual(
+      expect.arrayContaining([
+        { issues: 2, comments: 1 },
+        { issues: 1, comments: 1 },
+      ]),
+    );
+    expect(rows).toHaveLength(2);
+  });
+
+  test("a re-import that changes nothing adds no second row", async () => {
+    const payload = importPayload("c", "carried over", [noted]);
+    const id = await importProject(payload);
+    await importProject(payload);
+    const feed = await memberFeed("c", id);
+    expect(
+      feed.items.filter((e) => e.kind === "project_imported"),
+    ).toHaveLength(1);
+  });
 });
 
 test("a member with no project gets an empty feed and no project filters", async () => {

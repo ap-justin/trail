@@ -122,7 +122,10 @@ export function FeedView(props: FeedViewProps) {
     <div className="isolate w-full lg:px-6 lg:py-4">
       <div className="mx-auto flex max-w-220 flex-col">
         <div ref={topRef} />
-        <FeedFilters {...props} />
+        {/* a member with no project has nothing to filter */}
+        {!(props.noProjects && props.entries.length === 0) && (
+          <FeedFilters {...props} />
+        )}
         {props.pendingCount > 0 && (
           // zero height so the pill floats over the rows instead of pushing them down
           <div className="sticky top-15 z-10 flex h-0 justify-center">
@@ -471,18 +474,24 @@ function sentenceFor(entry: EntryView): Sentence {
         verb: muted("created"),
         subject: projectSubject(entry.project),
       };
-    case "project_imported":
+    case "project_imported": {
+      // an import that only touched labels, status updates or the project row counts 0 of both
+      const counts = [
+        entry.imported.issues > 0 && countOf(entry.imported.issues, "issue"),
+        entry.imported.comments > 0 &&
+          countOf(entry.imported.comments, "comment"),
+      ].filter(Boolean);
       return {
         verb: muted("imported"),
         subject: projectSubject(entry.project),
-        tail: (
-          <span>
-            {countOf(entry.imported.issues, "issue")}
-            {entry.imported.comments > 0 &&
-              `, ${countOf(entry.imported.comments, "comment")}`}
-          </span>
+        tail: counts.length > 0 && (
+          <>
+            {muted("with")}
+            <span>{counts.join(", ")}</span>
+          </>
         ),
       };
+    }
   }
 }
 
