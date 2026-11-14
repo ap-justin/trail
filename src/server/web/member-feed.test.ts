@@ -2,11 +2,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
 import type { FeedView, MeView } from "../../shared/schemas.js";
 import { activityEvent } from "../db/schema.js";
-import {
-  atFakeTimeAsync,
-  readEventStream,
-  setupTestApp,
-} from "../test-app.js";
+import { atFakeTimeAsync, readEventStream, setupTestApp } from "../test-app.js";
 
 const {
   app,
