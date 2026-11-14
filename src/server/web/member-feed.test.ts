@@ -1,10 +1,15 @@
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
 import type { FeedView, MeView } from "../../shared/schemas.js";
 import { activityEvent } from "../db/schema.js";
-import { atFakeTimeAsync, setupTestApp } from "../test-app.js";
+import {
+  atFakeTimeAsync,
+  readEventStream,
+  setupTestApp,
+} from "../test-app.js";
 
 const {
+  app,
   db,
   request,
   addProject,
@@ -176,19 +181,84 @@ describe("a member's feed of an import", () => {
     expect(importRows(outsider)).toEqual([]);
   });
 
-  test("an import event whose payload is malformed shows no row and fails nothing", async () => {
+  test("one malformed import event shows no row and the project's valid import still shows", async () => {
     const id = await importProject(importPayload("d", "carried over", [noted]));
-    db.update(activityEvent)
-      .set({ payload: { created: { issues: 2 } } })
+    await importProject(importPayload("d", "carried over, renamed", [noted]));
+    const [oldest, newest] = db
+      .select({ id: activityEvent.id })
+      .from(activityEvent)
       .where(
         and(
           eq(activityEvent.projectId, id),
           eq(activityEvent.action, "project.imported"),
         ),
       )
+      .orderBy(asc(activityEvent.seq))
+      .all();
+    expect(newest).toBeDefined();
+    db.update(activityEvent)
+      .set({ payload: { created: { issues: 2 } } })
+      .where(eq(activityEvent.id, oldest?.id ?? ""))
       .run();
     const feed = await memberFeed("d", id);
-    expect(feed.items).toEqual([]);
+    // the re-import's retitle: 1 issue updated, nothing else
+    expect(feed.items).toMatchObject([
+      { kind: "project_imported", imported: { issues: 1, comments: 0 } },
+    ]);
+  });
+
+  describe("on the live stream", () => {
+    async function openStream(cookie: string) {
+      const res = await app.request("/api/web/events", { headers: { cookie } });
+      expect(res.status).toBe(200);
+      const stream = readEventStream(res);
+      expect(await stream.next()).toEqual({ comment: "connected" });
+      return stream;
+    }
+
+    // the project must exist before its member's stream opens, so the first import creates it
+    // and the one sent while the stream is open is a retitle: 1 issue updated
+    const retitle = (tag: string) =>
+      importProject(importPayload(tag, "carried over, renamed", [noted]));
+
+    test("a member of an imported project is sent the import as a project_imported entry", async () => {
+      const id = await importProject(
+        importPayload("g", "carried over", [noted]),
+      );
+      const email = "imp-g@example.com";
+      inviteEmail(email, [id]);
+      const stream = await openStream(await signInWithEmail(email));
+
+      await retitle("g");
+
+      expect(await stream.nextEntry()).toMatchObject({
+        kind: "project_imported",
+        project: { key: "IMPG" },
+        imported: { issues: 1, comments: 0 },
+      });
+      await stream.cancel();
+    });
+
+    test("a member of another project is not sent it, though their own project's next entry arrives", async () => {
+      await importProject(importPayload("h", "carried over", [noted]));
+      const elsewhere = addProject("Elsewhere live");
+      const email = "imp-h@example.com";
+      inviteEmail(email, [elsewhere.id]);
+      const stream = await openStream(await signInWithEmail(email));
+
+      await retitle("h");
+      // events are delivered in order, so a leaked import would arrive first
+      const filed = await request("POST", "/api/v1/issues", {
+        json: { projectId: elsewhere.id, title: "after the import" },
+      });
+      expect(filed.status).toBe(201);
+
+      expect(await stream.nextEntry()).toMatchObject({
+        kind: "issue_created",
+        issue: { title: "after the import" },
+      });
+      await stream.cancel();
+    });
   });
 
   test("a re-import that changes nothing adds no second row", async () => {

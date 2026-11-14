@@ -11,6 +11,14 @@ const minutesAgo = (m: number) =>
 const rowFor = (id: string) =>
   document.querySelector<HTMLElement>(`[data-entry-id="${id}"]`);
 
+/** The bug showed the filters over "No activity yet", so rows and filters are asserted together. */
+const expectFiltersShown = () =>
+  waitFor(() =>
+    expect(
+      screen.getAllByRole("combobox", { name: /^Filter by (bot|project)$/ }),
+    ).toHaveLength(2),
+  );
+
 test("coming back to a feed Query still holds shows its rows, even when the refetch brings the same data", async () => {
   signedInAs("member");
   server.use(
@@ -32,6 +40,7 @@ test("coming back to a feed Query still holds shows its rows, even when the refe
   await waitFor(() => expect(rowFor("e1")).not.toBeNull());
   expect(rowFor("e2")).not.toBeNull();
   expect(screen.queryByText("No activity yet")).not.toBeInTheDocument();
+  await expectFiltersShown();
 });
 
 test("coming back to a cached feed shows its rows while the refresh is still in flight", async () => {
@@ -70,6 +79,7 @@ test("coming back to a cached feed shows its rows while the refresh is still in 
   await waitFor(() => expect(rowFor("e1")).not.toBeNull());
   expect(rowFor("e2")).not.toBeNull();
   expect(screen.queryByText("No activity yet")).not.toBeInTheDocument();
+  await expectFiltersShown();
   await waitFor(() => expect(refreshes).toBe(1));
   release();
 });
