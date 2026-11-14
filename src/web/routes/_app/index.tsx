@@ -24,10 +24,13 @@ function FeedPage() {
       section="feed"
       heading="Feed"
       // nothing until the stream first opens: neither Live nor Reconnecting is true yet;
-      // never for a member with no projects, who has nothing to receive
+      // nor while a member with no projects has no rows, which hides the filters too —
+      // the stream checks access per event, so a project granted mid-view starts delivering
       headingAccessory={
         feed.connection === "open" &&
-        !noProjects && <LiveIndicator connection="open" />
+        !(noProjects && feed.entries.length === 0) && (
+          <LiveIndicator connection="open" />
+        )
       }
     >
       <FeedView

@@ -49,9 +49,29 @@ export function createQueryClient(config: QueryClientConfig = {}) {
       void client.invalidateQueries({ queryKey: keys.me });
     }
   };
+  // the feed never refetches on focus, so a `/me` that grants or takes away a project
+  // re-reads it here: its rows and its filter options both come from `/feed`
+  let projectsSeen: string | undefined;
+  const followProjects = () => {
+    const me = client.getQueryData(meQuery.queryKey);
+    if (!me || !isMember(me)) return;
+    const projects = me.projects
+      .map((p) => p.key)
+      .toSorted()
+      .join("\u0000");
+    if (projectsSeen !== undefined && projects !== projectsSeen) {
+      void client.invalidateQueries({ queryKey: ["feed"] });
+    }
+    projectsSeen = projects;
+  };
   const client = new QueryClient({
     ...config,
-    queryCache: new QueryCache({ onError: recheckSession }),
+    queryCache: new QueryCache({
+      onError: recheckSession,
+      onSuccess: (_data, query) => {
+        if (query.queryKey[0] === keys.me[0]) followProjects();
+      },
+    }),
     mutationCache: new MutationCache({ onError: recheckSession }),
     defaultOptions: {
       ...config.defaultOptions,

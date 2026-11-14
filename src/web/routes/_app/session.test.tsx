@@ -7,6 +7,7 @@ import type { MeView } from "@/lib/api-types";
 import { keys } from "@/lib/queries";
 import { meView, renderApp, serveFeed, signedInAs } from "@/test/app";
 import { FakeEventSource } from "@/test/event-source";
+import { commentEntry } from "@/test/fixtures";
 import { server } from "@/test/server";
 
 async function onFeed() {
@@ -61,6 +62,57 @@ describe("session", () => {
     await waitFor(() => expect(FakeEventSource.opened).not.toHaveLength(0));
     FakeEventSource.current.open();
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
+  });
+
+  test("a member added to a project while the Feed is open sees its history and filters on the next focus", async () => {
+    server.use(
+      http.get("/api/web/me", () =>
+        HttpResponse.json({ ...meView("member"), projects: [] }),
+      ),
+    );
+    serveNoProjectsFeed();
+    renderApp("/");
+    expect(await screen.findByText("No projects yet")).toBeInTheDocument();
+
+    // the owner adds them: /me now lists the project, and /feed holds its history
+    signedInAs("member");
+    serveFeed([commentEntry("e1", new Date().toISOString())]);
+    act(() => {
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+    });
+
+    await waitFor(() =>
+      expect(document.querySelector('[data-entry-id="e1"]')).not.toBeNull(),
+    );
+    expect(screen.queryByText("No activity yet")).not.toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole("combobox", { name: "Filter by project" }),
+    );
+    expect(
+      await screen.findByRole("option", { name: "trail" }),
+    ).toBeInTheDocument();
+  });
+
+  test("a member with no project sees Live once the stream brings rows", async () => {
+    server.use(
+      http.get("/api/web/me", () =>
+        HttpResponse.json({ ...meView("member"), projects: [] }),
+      ),
+    );
+    serveNoProjectsFeed();
+    renderApp("/");
+    expect(await screen.findByText("No projects yet")).toBeInTheDocument();
+    await waitFor(() => expect(FakeEventSource.opened).not.toHaveLength(0));
+    FakeEventSource.current.open();
+    expect(screen.queryByText("Live")).not.toBeInTheDocument();
+
+    // added to a project in another tab: the stream checks access per event
+    FakeEventSource.current.send(commentEntry("e1", new Date().toISOString()));
+    await waitFor(() =>
+      expect(document.querySelector('[data-entry-id="e1"]')).not.toBeNull(),
+    );
+    expect((await screen.findAllByText("Live")).length).toBeGreaterThan(0);
   });
 
   test("a member with projects and an empty feed is told nothing happened yet, with the filters to hand", async () => {
