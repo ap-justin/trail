@@ -12,6 +12,7 @@ import {
   issueListQuerySchema,
   issueUpdateSchema,
   labelCreateSchema,
+  myTitleUpdateSchema,
   projectCreateSchema,
   projectUpdateSchema,
   statusUpdateCreateSchema,
@@ -45,6 +46,7 @@ import {
   PHOTO_MAX_BYTES,
   photoTooLarge,
 } from "../service/photos.js";
+import { BOT_TITLE_MAX } from "../service/validate.js";
 import { PING_LIMIT, PING_WINDOW_MS } from "../service/webhooks.js";
 import { WEBHOOK_DELIVERY, WEBHOOK_SETUP } from "../webhooks/docs.js";
 
@@ -444,7 +446,7 @@ export function registerTools(
     "whoami",
     {
       description:
-        "Get the bot this key acts as: its id (the createdBy, authorId and actorId your writes carry), name, label and photoUrl (null until set_my_photo sets one), and the key's scope: the keys of the only projects it reaches and the actions it may take (read, issues, comments, status_updates, admin), each null when unrestricted.",
+        "Get the bot this key acts as: its id (the createdBy, authorId and actorId your writes carry), name, label, photoUrl (null until set_my_photo sets one), title (null until set_my_title sets one), and the key's scope: the keys of the only projects it reaches and the actions it may take (read, issues, comments, status_updates, admin), each null when unrestricted.",
       inputSchema: z.strictObject({}),
       annotations: read,
     },
@@ -455,7 +457,7 @@ export function registerTools(
     "list_bots",
     {
       description:
-        "List every bot, oldest first, with its id, name, label and photoUrl, a page at a time: pass nextCursor back as cursor until it is null. A createdBy, authorId or actorId that matches a bot's id was written by that bot; an id that matches no bot is a human's (humans file issues and comment).",
+        "List every bot, oldest first, with its id, name, label, photoUrl and title, a page at a time: pass nextCursor back as cursor until it is null. A createdBy, authorId or actorId that matches a bot's id was written by that bot; an id that matches no bot is a human's (humans file issues and comment).",
       inputSchema: z.strictObject(page),
       annotations: read,
     },
@@ -486,6 +488,28 @@ export function registerTools(
       annotations: { ...update, destructiveHint: true },
     },
     () => run("clear_my_photo", () => service.clearMyPhoto(actor)),
+  );
+
+  server.registerTool(
+    "set_my_title",
+    {
+      description: `Set your own title: a short plain-text role, like "Release manager", that people see beside your name in trail. It is trimmed, then must be 1 to ${BOT_TITLE_MAX} characters. Setting the title you already have changes nothing. Every key may call this, whatever its scope.`,
+      inputSchema: myTitleUpdateSchema,
+      // the title it replaces is gone for good
+      annotations: { ...update, destructiveHint: true },
+    },
+    ({ title }) => run("set_my_title", () => service.setMyTitle(actor, title)),
+  );
+
+  server.registerTool(
+    "clear_my_title",
+    {
+      description:
+        "Remove your own title; succeeds when you have none too. Every key may call this, whatever its scope.",
+      inputSchema: z.strictObject({}),
+      annotations: { ...update, destructiveHint: true },
+    },
+    () => run("clear_my_title", () => service.clearMyTitle(actor)),
   );
 
   const webhookId = z

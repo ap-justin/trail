@@ -56,6 +56,7 @@ test("a member gets its actor and exactly its projects; the owner's display name
         name: "Ada Lovelace",
         kind: "human",
         photoUrl: null,
+        title: null,
       },
       projects: [{ key: mine.key, name: "Mine" }],
       ownerName: "Olive Owner",

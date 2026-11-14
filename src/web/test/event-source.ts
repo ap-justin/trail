@@ -59,7 +59,7 @@ export class FakeEventSource extends EventTarget {
     );
   }
 
-  /** The server's global `actor` event: a photo changed. It carries no id of its own. */
+  /** The server's global `actor` event: a photo or title changed. It carries no id of its own. */
   actor(update: ActorUpdate) {
     this.deliver(
       new MessageEvent("actor", {

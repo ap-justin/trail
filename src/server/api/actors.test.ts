@@ -7,7 +7,7 @@ const { db, bot, request } = setupTestApp();
 // biome-ignore lint/suspicious/noExplicitAny: loose response bodies for field reads
 type Body = Record<string, any>;
 
-test("GET /whoami answers the key's bot: id, kind, name, label and photoUrl", async () => {
+test("GET /whoami answers the key's bot: id, kind, name, label, photoUrl and title", async () => {
   const labelled = createBot(db, "rest whoami", { label: "agent-7" });
   const res = await request("GET", "/api/v1/whoami", { key: labelled.key });
   expect(res.status).toBe(200);
@@ -18,10 +18,11 @@ test("GET /whoami answers the key's bot: id, kind, name, label and photoUrl", as
     label: "agent-7",
     scope: { projects: null, actions: null },
     photoUrl: null,
+    title: null,
   });
 });
 
-test("GET /bots pages every bot oldest first with id, name, label and photoUrl only", async () => {
+test("GET /bots pages every bot oldest first with id, name, label photoUrl and title only", async () => {
   const [first, labelled] = atFakeTime([
     () => createBot(db, "rest listed first"),
     () => createBot(db, "rest listed", { label: "agent-8" }),
@@ -46,6 +47,7 @@ test("GET /bots pages every bot oldest first with id, name, label and photoUrl o
     name: "rest listed",
     label: "agent-8",
     photoUrl: null,
+    title: null,
   });
   expect(ids).toContain(bot.actor.id);
   for (const item of items) {
@@ -54,6 +56,7 @@ test("GET /bots pages every bot oldest first with id, name, label and photoUrl o
       "label",
       "name",
       "photoUrl",
+      "title",
     ]);
   }
 });

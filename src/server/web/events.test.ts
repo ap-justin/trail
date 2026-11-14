@@ -610,9 +610,13 @@ const clearPhoto = (key: string) =>
     headers: { authorization: `Bearer ${key}` },
   });
 
-const actorMessage = (actorId: string, photoUrl: string | null) => ({
+const actorMessage = (
+  actorId: string,
+  photoUrl: string | null,
+  title: string | null = null,
+) => ({
   event: "actor",
-  data: JSON.stringify({ actorId, photoUrl }),
+  data: JSON.stringify({ actorId, photoUrl, title }),
 });
 
 test("a bot's new photo, and its removal, arrive as an actor event with no id", async () => {
@@ -651,7 +655,7 @@ test("an owner's filtered stream still gets every actor event, and a member with
   );
   // a member's own update closes the batch: the one before it was held back
   const own = actorIdOf("no-projects");
-  bus.publishActor({ actorId: own, photoUrl: "/mine" });
+  bus.publishActor({ actorId: own, photoUrl: "/mine", title: null });
   for (const stream of [bare, bareActors]) {
     expect(await stream.next()).toStrictEqual(actorMessage(own, "/mine"));
     await stream.cancel();
@@ -680,7 +684,8 @@ test("a member hears of a bot acting in their projects and of people they share 
     ownerId,
     own,
   ];
-  for (const actorId of updates) bus.publishActor({ actorId, photoUrl: "/x" });
+  for (const actorId of updates)
+    bus.publishActor({ actorId, photoUrl: "/x", title: null });
   for (const actorId of [seen.actor.id, actorIdOf("co-member"), ownerId, own]) {
     expect(await stream.next()).toStrictEqual(actorMessage(actorId, "/x"));
   }
@@ -694,8 +699,12 @@ test("an identical re-upload sends no actor event, and updates to one actor queu
   const stream = await openStream(ownerCookie);
   expect((await putPhoto(same.key, PNG)).status).toBe(200);
   // published in one turn, so none is written before the next replaces it
-  bus.publishActor({ actorId: later.actor.id, photoUrl: "/first" });
-  bus.publishActor({ actorId: later.actor.id, photoUrl: "/last" });
+  bus.publishActor({
+    actorId: later.actor.id,
+    photoUrl: "/first",
+    title: null,
+  });
+  bus.publishActor({ actorId: later.actor.id, photoUrl: "/last", title: null });
   expect(await stream.next()).toStrictEqual(
     actorMessage(later.actor.id, "/last"),
   );

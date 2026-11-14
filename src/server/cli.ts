@@ -14,7 +14,9 @@ import {
   listKeys,
   renameBot,
   revokeKey,
+  setBotTitle,
 } from "./service/keys.js";
+import { BOT_TITLE_MAX } from "./service/validate.js";
 
 interface Output {
   write(chunk: string): unknown;
@@ -31,6 +33,10 @@ const usage = `Usage:
                                    create a bot and print its key once
   trail bot rename <bot-id-label-or-name> <new name>
                                    change a bot's display name; its keys stay
+  trail bot title <bot-id-label-or-name> <title>
+  trail bot title <bot-id-label-or-name> --clear
+                                   set a bot's title, 1 to ${BOT_TITLE_MAX} characters, shown
+                                   beside its name; or remove it
   trail key create <bot-id-or-label> [<scope>] [--key-only]
                                    mint another key for an existing bot
   trail key list                   list every key's prefix, bot, times and scope
@@ -41,6 +47,7 @@ const usage = `Usage:
   --actions <actions> scope: limit the key to these of read, issues, comments,
                       status_updates and admin, like read,issues,comments
   --key-only          print only the key on stdout; the rest goes to stderr
+  --clear             bot title: remove the title instead of setting one
 
   <scope> is --projects, --actions or both. A key without --projects reaches
   every project; without --actions it has every action.
@@ -52,6 +59,7 @@ const options = {
   projects: { type: "string" },
   actions: { type: "string" },
   "key-only": { type: "boolean" },
+  clear: { type: "boolean" },
 } as const;
 
 type Flags = {
@@ -59,6 +67,7 @@ type Flags = {
   projects?: string;
   actions?: string;
   "key-only"?: boolean;
+  clear?: boolean;
 };
 
 class UsageError extends Error {}
@@ -331,10 +340,37 @@ const botRename: Command<{ bot: string; name: string }> = {
   },
 };
 
+const botTitle: Command<{ bot: string; title: string | null }> = {
+  flags: ["clear"],
+  parse(args, flags) {
+    if (args.length === 0)
+      throw new UsageError("missing <bot-id-label-or-name>");
+    const [bot, ...words] = args as [string, ...string[]];
+    if (flags.clear) {
+      if (words.length > 0) {
+        throw new UsageError("'bot title --clear' takes no <title>");
+      }
+      return { bot, title: null };
+    }
+    if (words.length === 0) {
+      throw new UsageError("missing <title>, or --clear to remove it");
+    }
+    // an unquoted multi-word title arrives as several arguments
+    return { bot, title: words.join(" ") };
+  },
+  run(db, { bot, title }, io) {
+    const set = setBotTitle(db, bot, title);
+    io.stdout.write(
+      `actor  ${set.id}\nfrom   ${set.oldTitle ?? "-"}\nto     ${set.newTitle ?? "-"}\n`,
+    );
+  },
+};
+
 // method syntax in Command keeps run() bivariant, so each command keeps its own input type
 const commands: Record<string, Command<unknown> | undefined> = {
   "bot create": botCreate,
   "bot rename": botRename,
+  "bot title": botTitle,
   "key create": keyCreate,
   "key list": keyList,
   "key revoke": keyRevoke,

@@ -40,10 +40,16 @@ test("an actor subscriber receives each actor update until it unsubscribes, and 
   const events: string[] = [];
   bus.subscribe((e) => events.push(e.id));
   const unsubscribe = bus.subscribeActors((u) => actors.push(u));
-  bus.publishActor({ actorId: "a1", photoUrl: "/api/photos/a1/h" });
+  bus.publishActor({
+    actorId: "a1",
+    photoUrl: "/api/photos/a1/h",
+    title: null,
+  });
   unsubscribe();
-  bus.publishActor({ actorId: "a1", photoUrl: null });
-  expect(actors).toEqual([{ actorId: "a1", photoUrl: "/api/photos/a1/h" }]);
+  bus.publishActor({ actorId: "a1", photoUrl: null, title: null });
+  expect(actors).toEqual([
+    { actorId: "a1", photoUrl: "/api/photos/a1/h", title: null },
+  ]);
   expect(events).toEqual([]);
 });
 
@@ -55,7 +61,7 @@ test("a throwing actor subscriber does not stop publishActor or the others", () 
   });
   bus.subscribeActors((u) => seen.push(u.photoUrl));
   expect(() =>
-    bus.publishActor({ actorId: "a1", photoUrl: null }),
+    bus.publishActor({ actorId: "a1", photoUrl: null, title: null }),
   ).not.toThrow();
   expect(seen).toEqual([null]);
 });

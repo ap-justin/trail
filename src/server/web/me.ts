@@ -59,6 +59,7 @@ function meOf(
       name: viewer.actor.displayName,
       kind: "human",
       photoUrl: photoUrlOf(db, viewer.actor.id),
+      title: null,
     },
     projects: viewer.projects.map(({ key, name }) => ({ key, name })),
     ...shared,

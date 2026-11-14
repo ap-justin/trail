@@ -8,7 +8,7 @@ import type { TrailAuth } from "../auth/auth.js";
 import { inviteOf } from "../auth/identity.js";
 import type { Db } from "../db/client.js";
 import { activityEvent, actor, invite, projectMember } from "../db/schema.js";
-import type { ActivityEvent, EventBus } from "../events/bus.js";
+import type { ActivityEvent, ActorUpdate, EventBus } from "../events/bus.js";
 import type { FeedFilters } from "../service/paging.js";
 import { entriesByEvent } from "./entries.js";
 import { createWebRouter, type Member } from "./env.js";
@@ -88,7 +88,7 @@ const streamEvents = createRoute({
     200: {
       content: { "text/event-stream": { schema: z.string() } },
       description:
-        "Feed entries as they happen, each event's seq its id; Last-Event-ID resumes after that seq. A `reset` event means the client is too far behind: refetch /feed. An `actor` event, `{actorId, photoUrl}` with no id, says an actor's photo was set, replaced or removed (photoUrl null): sent whatever the stream's filters, but only to a viewer who can see that actor (the owner sees all; a member sees themselves, bots acting in their projects and people who share a project with them), and it is not a feed entry, so Last-Event-ID never replays it. With only=actors the stream carries `actor` events and heartbeats alone.",
+        "Feed entries as they happen, each event's seq its id; Last-Event-ID resumes after that seq. A `reset` event means the client is too far behind: refetch /feed. An `actor` event, `{actorId, photoUrl, title}` with no id, says an actor's photo or a bot's title was set, replaced or removed, and carries both as they are now (each null when unset; title always null on a person), so the latest event for an actor is its whole state: sent whatever the stream's filters, but only to a viewer who can see that actor (the owner sees all; a member sees themselves, bots acting in their projects and people who share a project with them), and it is not a feed entry, so Last-Event-ID never replays it. With only=actors the stream carries `actor` events and heartbeats alone.",
     },
     404: jsonContent(errorSchema, "No such project to filter by"),
     429: jsonContent(
@@ -120,7 +120,7 @@ function projectsNow(db: Db, member: Member): Set<string> | "all" {
 }
 
 /**
- * Whether the member may hear of this actor's photo changing: the owner hears of
+ * Whether the member may hear of this actor's photo or title changing: the owner hears of
  * everyone; a member of themselves, of a bot acting in one of their projects
  * (`botsActingIn`'s rule in feed.ts) and of a person who shares a project with
  * them, the owner being in every project. Read at each delivery, so a project
@@ -220,9 +220,9 @@ export function eventRoutes(
       const unsubscribe = kind === "feed" ? bus.subscribe(onEvent) : () => {};
       // keyed by actor and last-wins, so it stays one entry per actor however
       // far the client falls behind
-      const actorUpdates = new Map<string, string | null>();
-      const unsubscribeActors = bus.subscribeActors(({ actorId, photoUrl }) => {
-        actorUpdates.set(actorId, photoUrl);
+      const actorUpdates = new Map<string, ActorUpdate>();
+      const unsubscribeActors = bus.subscribeActors((update) => {
+        actorUpdates.set(update.actorId, update);
         wake();
       });
       let ended = false;
@@ -305,14 +305,14 @@ export function eventRoutes(
             continue;
           }
           if (actorUpdates.size > 0) {
-            const updates = [...actorUpdates];
+            const updates = [...actorUpdates.values()];
             actorUpdates.clear();
             // without an id: not a feed entry, so Last-Event-ID stays the entries'
-            for (const [actorId, photoUrl] of updates) {
+            for (const { actorId, photoUrl, title } of updates) {
               if (!mayHearOf(db, member, actorId)) continue;
               await stream.writeSSE({
                 event: "actor",
-                data: JSON.stringify({ actorId, photoUrl }),
+                data: JSON.stringify({ actorId, photoUrl, title }),
               });
             }
             continue;

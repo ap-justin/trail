@@ -124,7 +124,12 @@ export function toActor(row: Actor): ActorView {
 }
 
 export function toWhoami(row: ActorWithPhoto, scope: KeyScope): WhoamiView {
-  return { ...toActor(row), scope: scopeView(scope), photoUrl: row.photoUrl };
+  return {
+    ...toActor(row),
+    scope: scopeView(scope),
+    photoUrl: row.photoUrl,
+    title: row.title,
+  };
 }
 
 export function toBot(row: ActorWithPhoto): BotView {
@@ -133,6 +138,7 @@ export function toBot(row: ActorWithPhoto): BotView {
     name: row.displayName,
     label: row.label,
     photoUrl: row.photoUrl,
+    title: row.title,
   };
 }
 

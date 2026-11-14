@@ -18,6 +18,7 @@ export const kai: WebActorView = {
   name: "Kai",
   kind: "bot",
   photoUrl: null,
+  title: null,
 };
 /** Kai with a photo on file. */
 export const kaiWithPhoto: WebActorView = {
@@ -29,6 +30,7 @@ export const maya: WebActorView = {
   name: "Maya Chen",
   kind: "human",
   photoUrl: null,
+  title: null,
 };
 
 export const trail = { key: "TRL", name: "trail" };
@@ -72,6 +74,7 @@ export const tara: WebActorView = {
   name: "Tara",
   kind: "bot",
   photoUrl: null,
+  title: null,
 };
 
 export function statusUpdate(

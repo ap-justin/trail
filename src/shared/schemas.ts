@@ -12,6 +12,8 @@ import {
   sourceStateTypes,
 } from "../server/service/import.js";
 import {
+  BOT_TITLE_MAX,
+  botTitleCharacterProblem,
   ISSUE_LABELS_MAX,
   ISSUE_LINKS_MAX,
 } from "../server/service/validate.js";
@@ -168,6 +170,16 @@ const photoUrl = z.string().nullable().meta({
     "Where the actor's photo is served, a path under /api/photos that changes whenever the photo does; null without one. It starts with /api, not /api/v1: resolve it against the API's origin and fetch it with a bot key or a signed-in session (operation GET /photos/{actorId}/{hash}, under the /api server). A 404 on an earlier URL means the photo changed or was removed: read photoUrl again.",
 });
 
+const titleAbout = `A bot's title: a short plain-text role, like "Release manager", that people see beside its name in trail; 1 to ${BOT_TITLE_MAX} characters once trimmed.`;
+
+const actorTitle = z
+  .string()
+  .nullable()
+  .meta({
+    description: `${titleAbout} Null until the bot sets one, and always null on a person.`,
+    example: "Release manager",
+  });
+
 export const actorSchema = z
   .object({
     id,
@@ -200,12 +212,45 @@ export const whoamiSchema = actorSchema
       })
       .meta({ description: "What the calling key reaches." }),
     photoUrl,
+    title: actorTitle,
   })
   .openapi("Whoami");
 
 export const botSchema = z
-  .object({ id, name: actorName, label: actorLabel, photoUrl })
+  .object({
+    id,
+    name: actorName,
+    label: actorLabel,
+    photoUrl,
+    title: actorTitle,
+  })
   .openapi("Bot");
+
+export const myTitleUpdateSchema = z
+  .strictObject({
+    // trimmed before the length checks, which zod runs in order
+    title: z
+      .string()
+      .trim()
+      .min(1)
+      .max(BOT_TITLE_MAX)
+      .superRefine((title, ctx) => {
+        const problem = botTitleCharacterProblem(title);
+        if (problem) ctx.addIssue({ code: "custom", message: problem });
+      })
+      .meta({ description: titleAbout, example: "Release manager" }),
+  })
+  .openapi("MyTitleUpdate");
+
+export const myTitleSchema = z
+  .object({ title: z.string().meta({ description: "The title, trimmed." }) })
+  .openapi("MyTitle");
+
+export const myTitleRemovedSchema = z
+  .object({
+    title: z.null().meta({ description: "The bot has no title now." }),
+  })
+  .openapi("MyTitleRemoved");
 
 export const myPhotoSchema = z
   .object({ photoUrl: servedPhotoUrl })
@@ -659,6 +704,7 @@ const webActorSchema = z.object({
   name: z.string(),
   kind: z.enum(actorKinds),
   photoUrl,
+  title: actorTitle,
 });
 const webProjectRefSchema = z.object({ key: z.string(), name: z.string() });
 const webIssueRefSchema = z.object({ key: z.string(), title: z.string() });

@@ -35,6 +35,78 @@ export function ActorBadge({
   );
 }
 
+/**
+ * A bot's title as a pill; `ActorName` places it between the name and the Bot badge.
+ * Nothing for a person or a bot without one. Capped in width, it ellipsizes and keeps the
+ * whole title in its tooltip.
+ * `surface="card"` sits it on the background inside a muted comment header.
+ */
+export function BotTitle({
+  actor,
+  surface = "muted",
+  className,
+}: {
+  actor: Pick<WebActorView, "kind" | "title">;
+  surface?: "muted" | "card";
+  className?: string;
+}) {
+  if (actor.kind !== "bot" || !actor.title) return null;
+  return (
+    <span
+      title={actor.title}
+      className={cn(
+        "inline-flex h-4.5 max-w-36 min-w-0 shrink-4 items-center rounded-4xl border border-border px-2 text-2xs leading-none font-normal text-secondary-foreground lg:max-w-48",
+        surface === "card" ? "bg-background" : "bg-muted",
+        className,
+      )}
+    >
+      <span className="truncate">{actor.title}</span>
+    </span>
+  );
+}
+
+/**
+ * Holds an actor's name, `BotTitle` and badge. One line while they fit; past that the
+ * pill and badge wrap under the name, and a name too long for a line of its own
+ * truncates (give it `min-w-0 truncate`), so the page never overflows and the pill is
+ * never squeezed past its label.
+ */
+export const actorNameGroup =
+  "inline-flex max-w-full min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5";
+
+/**
+ * An actor's name, `BotTitle` and badge in that order, in an `actorNameGroup` with the
+ * name truncating. The spaces keep the parts apart in copied text and textContent; a
+ * flex row draws none of them.
+ */
+export function ActorName({
+  actor,
+  className,
+  nameClassName,
+  titleSurface,
+  titleClassName,
+}: {
+  actor: Pick<WebActorView, "name" | "kind" | "title">;
+  className?: string;
+  nameClassName?: string;
+  titleSurface?: "muted" | "card";
+  titleClassName?: string;
+}) {
+  return (
+    <span className={cn(actorNameGroup, className)}>
+      <span className={cn("min-w-0 truncate", nameClassName)}>
+        {actor.name}
+      </span>{" "}
+      <BotTitle
+        actor={actor}
+        surface={titleSurface}
+        className={titleClassName}
+      />{" "}
+      <ActorBadge kind={actor.kind} />
+    </span>
+  );
+}
+
 export const avatarSizes = {
   xs: "size-4.5 text-2xs",
   sm: "size-6 text-2xs",

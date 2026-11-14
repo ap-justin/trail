@@ -83,6 +83,7 @@ test("a project's health and latest status update are its newest update's, with 
         name: "reporter",
         kind: "bot",
         photoUrl: null,
+        title: null,
       },
       sourceAuthor: null,
     },
@@ -167,6 +168,7 @@ describe("GET /projects/:key/issues", () => {
         name: "assignee",
         kind: "bot",
         photoUrl: null,
+        title: null,
       },
       updatedAt: expect.any(String),
     });

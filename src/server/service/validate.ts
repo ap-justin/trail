@@ -34,6 +34,45 @@ export function nonBlank(value: string, field: string): string {
   return trimmed;
 }
 
+/** In UTF-16 code units, as zod's `.max` counts, so the API schema and the service agree. */
+export const BOT_TITLE_MAX = 40;
+
+// controls (NUL included: SQLite's length() stops at it), line and paragraph separators, bidi embeddings, overrides and isolates
+const titleHiddenFormatting = /[\p{Cc}\u2028\u2029\u202A-\u202E\u2066-\u2069]/u;
+// what draws nothing: default-ignorable (soft hyphen, zero-width, marks, variation selectors,
+// tags), format, control and separator code points, and the blank Hangul and braille fillers;
+// a title needs one other character, and zero-width joiners stay legal beside it for emoji
+const titleNoVisibleCharacter =
+  /^[\p{Default_Ignorable_Code_Point}\p{Cf}\p{Cc}\p{Z}\u2800\u3164\u115F\u1160\uFFA0]*$/u;
+
+/**
+ * Why an already-trimmed title can't be shown as a one-line plain-text role, or
+ * undefined when it can. Shared by the API schema and `validBotTitle`.
+ */
+export function botTitleCharacterProblem(title: string): string | undefined {
+  if (titleHiddenFormatting.test(title)) {
+    return "title must be plain text on one line: no control, line-break or bidi characters";
+  }
+  if (titleNoVisibleCharacter.test(title)) {
+    return "title must have a visible character";
+  }
+  return undefined;
+}
+
+/** A bot's title, trimmed of whitespace of every kind at both ends (the database's trim strips spaces alone). */
+export function validBotTitle(raw: string): string {
+  const title = raw.trim();
+  if (title === "") throw new ValidationError("title must not be blank");
+  if (title.length > BOT_TITLE_MAX) {
+    throw new ValidationError(
+      `title must be at most ${BOT_TITLE_MAX} characters; got ${title.length}`,
+    );
+  }
+  const problem = botTitleCharacterProblem(title);
+  if (problem) throw new ValidationError(problem);
+  return title;
+}
+
 export function validStatus(status: string): IssueStatus {
   if (!(issueStatuses as readonly string[]).includes(status)) {
     throw new ValidationError(

@@ -23,6 +23,7 @@ const tester = {
   name: "tester",
   kind: "bot",
   photoUrl: null,
+  title: null,
 };
 
 test("an issue reads with its fields, its people as actors, and a timeline oldest first with one entry per changed field", async () => {
@@ -90,6 +91,7 @@ test("an issue reads with its fields, its people as actors, and a timeline oldes
     name: "worker",
     kind: "bot",
     photoUrl: null,
+    title: null,
   };
   const issue = { key: `${p.key}-1`, title: "Fix it now" };
   const project = { key: p.key, name: "Detail" };
@@ -209,6 +211,7 @@ test("an imported issue is found by its source key and credits the importing bot
     name: "importer",
     kind: "bot",
     photoUrl: null,
+    title: null,
   };
   expect(body).toMatchObject({
     key: "ALIAS-1",

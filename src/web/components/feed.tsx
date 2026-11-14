@@ -6,7 +6,7 @@ import {
   useEffectEvent,
   useRef,
 } from "react";
-import { ActorAvatar, ActorBadge } from "@/components/actor";
+import { ActorAvatar, ActorName, BotTitle } from "@/components/actor";
 import { RowLink } from "@/components/app-link";
 import { MarkdownText } from "@/components/markdown-text";
 import {
@@ -213,11 +213,15 @@ function FilterSelect<T extends string>({
   label: string;
   allLabel: string;
   icon: LucideIcon;
-  options: { value: T; label: string }[];
+  /** `after` follows the label in the menu only; the trigger shows the label alone. */
+  options: { value: T; label: string; after?: ReactNode }[];
   value: T | null;
   onChange: (value: T | null) => void;
 }) {
-  const items = [{ value: null, label: allLabel }, ...options];
+  const items: { value: T | null; label: string; after?: ReactNode }[] = [
+    { value: null, label: allLabel },
+    ...options,
+  ];
   return (
     <Select items={items} value={value} onValueChange={onChange}>
       <SelectTrigger
@@ -229,11 +233,24 @@ function FilterSelect<T extends string>({
         <Icon aria-hidden="true" className="size-3.5" />
         <SelectValue />
       </SelectTrigger>
-      <SelectContent alignItemWithTrigger={false} align="start">
+      {/* as wide as its widest item, title pills included, inside the viewport */}
+      <SelectContent
+        alignItemWithTrigger={false}
+        align="start"
+        className="w-auto min-w-(--anchor-width) max-w-(--available-width)"
+      >
         <SelectGroup>
           {items.map((item) => (
-            <SelectItem key={item.value ?? ""} value={item.value}>
-              {item.label}
+            <SelectItem
+              key={item.value ?? ""}
+              value={item.value}
+              label={item.label}
+              // the item's text part is shrink-0 in components/ui: let it give way, so a
+              // long name truncates instead of running out of a viewport-wide menu
+              className="*:first:min-w-0 *:first:shrink!"
+            >
+              <span className="min-w-0 truncate">{item.label}</span>
+              {item.after}
             </SelectItem>
           ))}
         </SelectGroup>
@@ -255,7 +272,12 @@ function FeedFilters({
         label="Filter by bot"
         allLabel="All bots"
         icon={BotIcon}
-        options={filters.actors.map((a) => ({ value: a.id, label: a.name }))}
+        options={filters.actors.map((a) => ({
+          value: a.id,
+          label: a.name,
+          // on the background: the highlighted row's bg-accent is bg-muted's fill in light theme
+          after: <BotTitle actor={a} surface="card" className="shrink-0" />,
+        }))}
         value={actorFilter}
         onChange={onActorFilterChange}
       />
@@ -481,14 +503,13 @@ function FeedRow({
       <ActorAvatar actor={entry.actor} className="mt-px" />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5 lg:flex-row lg:flex-wrap lg:items-center lg:gap-x-1.5">
         <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 lg:contents">
-          <span className="font-medium">{entry.actor.name}</span>
-          <ActorBadge kind={entry.actor.kind} />
+          <ActorName actor={entry.actor} nameClassName="font-medium" />
           {sentence.sourceAuthor && (
             <span className="text-2xs text-muted-foreground">
               originally by {sentence.sourceAuthor}
             </span>
           )}
-          <span className="ml-auto text-xs whitespace-nowrap text-muted-foreground lg:hidden">
+          <span className="ml-auto shrink-0 text-xs whitespace-nowrap text-muted-foreground lg:hidden">
             <RowTime iso={entry.createdAt} now={now} />
           </span>
         </div>

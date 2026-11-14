@@ -97,9 +97,9 @@ test("set, replace and clear answer only photoUrl and publish each change live, 
     await request("DELETE", "/api/v1/me/photo", { key: live.key });
 
     expect(updates).toEqual([
-      { actorId: live.actor.id, photoUrl: set.photoUrl },
-      { actorId: live.actor.id, photoUrl: replaced.photoUrl },
-      { actorId: live.actor.id, photoUrl: null },
+      { actorId: live.actor.id, photoUrl: set.photoUrl, title: null },
+      { actorId: live.actor.id, photoUrl: replaced.photoUrl, title: null },
+      { actorId: live.actor.id, photoUrl: null, title: null },
     ]);
     expect(published.length).toBe(activityBefore);
   } finally {

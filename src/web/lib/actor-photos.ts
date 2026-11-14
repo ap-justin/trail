@@ -1,23 +1,27 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { keys } from "@/lib/queries";
 
-/** The `/events` stream's `actor` event: an actor's photo changed or was removed. */
-export type ActorUpdate = { actorId: string; photoUrl: string | null };
+/**
+ * The `/events` stream's `actor` event: an actor's photo or a bot's title changed. It
+ * carries both as they are now, so the latest one is the actor's whole state.
+ */
+export type ActorUpdate = {
+  actorId: string;
+  photoUrl: string | null;
+  title: string | null;
+};
 
 /**
- * `value` with every object whose `id` is `actorId` and which has a `photoUrl` of its own
- * carrying `photoUrl` instead. What nothing changed under comes back as the same reference,
- * so react-query and React skip it.
+ * `value` with every actor view whose `id` is `update.actorId` carrying the update's
+ * `photoUrl` and `title`. An actor view is an object with a `photoUrl` of its own: an
+ * issue has an `id` and a `title` too, and must keep its title. What nothing changed
+ * under comes back as the same reference, so react-query and React skip it.
  */
-export function withActorPhoto<T>(
-  value: T,
-  actorId: string,
-  photoUrl: string | null,
-): T {
+export function withActorUpdate<T>(value: T, update: ActorUpdate): T {
   if (Array.isArray(value)) {
     let next: unknown[] | null = null;
     value.forEach((item, i) => {
-      const updated = withActorPhoto(item, actorId, photoUrl);
+      const updated = withActorUpdate(item, update);
       if (updated !== item) {
         next ??= [...value];
         next[i] = updated;
@@ -28,15 +32,16 @@ export function withActorPhoto<T>(
   if (typeof value !== "object" || value === null) return value;
   const record = value as Record<string, unknown>;
   let next: Record<string, unknown> | null = null;
-  if (
-    record.id === actorId &&
-    Object.hasOwn(record, "photoUrl") &&
-    record.photoUrl !== photoUrl
-  ) {
-    next = { ...record, photoUrl };
+  if (record.id === update.actorId && Object.hasOwn(record, "photoUrl")) {
+    if (record.photoUrl !== update.photoUrl) {
+      next = { ...record, photoUrl: update.photoUrl };
+    }
+    if (Object.hasOwn(record, "title") && record.title !== update.title) {
+      next = { ...(next ?? record), title: update.title };
+    }
   }
   for (const [key, item] of Object.entries(record)) {
-    const updated = withActorPhoto(item, actorId, photoUrl);
+    const updated = withActorUpdate(item, update);
     if (updated !== item) {
       next ??= { ...record };
       next[key] = updated;
@@ -46,18 +51,34 @@ export function withActorPhoto<T>(
 }
 
 /**
- * Puts the new photo into every cached read that names the actor. People rows carry no
- * actor id, so the people list is read again instead.
+ * Puts the new photo and title into every cached read that names the actor. People rows
+ * carry no actor id, so the people list is read again instead. A patched read that was
+ * mid-fetch is fetched again: its response may predate the update and would overwrite it.
  */
 export function applyActorUpdate(
   queryClient: QueryClient,
-  { actorId, photoUrl }: ActorUpdate,
+  update: ActorUpdate,
 ) {
+  const inFlight = queryClient
+    .getQueryCache()
+    .findAll({ fetchStatus: "fetching" })
+    .map((query) => ({ query, before: query.state.data }));
   // annotated: an updater over `unknown` data collapses into `unknown` and loses its context
   queryClient.setQueriesData<unknown>({}, (data: unknown) => {
-    const next = withActorPhoto(data, actorId, photoUrl);
+    const next = withActorUpdate(data, update);
     // undefined skips the query: setting the same data would still mark it fresh
     return next === data ? undefined : next;
   });
+  const overtaken = new Set(
+    inFlight
+      .filter(({ query, before }) => query.state.data !== before)
+      .map(({ query }) => query),
+  );
+  if (overtaken.size > 0) {
+    // cancelRefetch (the default) drops the running fetch's response; its callers get the new one
+    void queryClient.refetchQueries({
+      predicate: (query) => overtaken.has(query),
+    });
+  }
   void queryClient.invalidateQueries({ queryKey: keys.people });
 }
