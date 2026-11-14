@@ -343,6 +343,7 @@ function changePhrase(entry: EntryView): ReactNode {
     case "comment":
     case "status_update":
     case "project_created":
+    case "project_imported":
       return null;
   }
 }

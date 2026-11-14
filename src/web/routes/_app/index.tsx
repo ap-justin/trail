@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { AppPage } from "@/app/chrome";
+import { AppPage, useChrome } from "@/app/chrome";
 import { FeedView, LiveIndicator } from "@/components/feed";
 import type { FeedFilter } from "@/lib/api";
 import { useLiveFeed } from "@/lib/use-live-feed";
@@ -14,6 +14,7 @@ function FeedPage() {
     actor: null,
     project: null,
   });
+  const { session } = useChrome();
   const feed = useLiveFeed(filter, {
     onProjectGone: () => setFilter((f) => ({ ...f, project: null })),
   });
@@ -44,6 +45,7 @@ function FeedPage() {
           setFilter((f) => ({ ...f, project }))
         }
         onRetry={feed.retry}
+        noProjects={!session.viewer.isOwner && session.projects.length === 0}
       />
     </AppPage>
   );

@@ -12,6 +12,7 @@ import { MarkdownText } from "@/components/markdown-text";
 import {
   FeedEmpty,
   FeedError,
+  FeedNoProjects,
   LoadingRegion,
   SkeletonBlock,
 } from "@/components/states";
@@ -66,6 +67,8 @@ export type FeedViewProps = {
   onActorFilterChange: (actorId: string | null) => void;
   onProjectFilterChange: (projectKey: string | null) => void;
   onRetry: () => void;
+  /** The viewer is a member with no project, so an empty feed is about access, not quiet. */
+  noProjects?: boolean;
   /** The clock relative times are read against; ticks each minute when omitted. */
   now?: Date;
 };
@@ -159,12 +162,15 @@ function FeedBody({
   freshIds,
   connection,
   onRetry,
+  noProjects,
   now,
   firstDayRef,
 }: FeedViewProps & { now: Date; firstDayRef: Ref<HTMLHeadingElement> }) {
   if (status === "loading") return <FeedSkeleton />;
   if (status === "error") return <FeedError onRetry={onRetry} />;
-  if (entries.length === 0) return <FeedEmpty />;
+  if (entries.length === 0) {
+    return noProjects ? <FeedNoProjects /> : <FeedEmpty />;
+  }
   return (
     <div className={cn(connection === "reconnecting" && "opacity-60")}>
       {groupByDay(entries).map((day, index) => (
@@ -465,8 +471,23 @@ function sentenceFor(entry: EntryView): Sentence {
         verb: muted("created"),
         subject: projectSubject(entry.project),
       };
+    case "project_imported":
+      return {
+        verb: muted("imported"),
+        subject: projectSubject(entry.project),
+        tail: (
+          <span>
+            {countOf(entry.imported.issues, "issue")}
+            {entry.imported.comments > 0 &&
+              `, ${countOf(entry.imported.comments, "comment")}`}
+          </span>
+        ),
+      };
   }
 }
+
+const countOf = (n: number, noun: string) =>
+  `${n} ${noun}${n === 1 ? "" : "s"}`;
 
 function RowTime({ iso, now }: { iso: string; now: Date }) {
   return (

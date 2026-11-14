@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, test, vi } from "vitest";
 import { FeedView, type FeedViewProps, LiveIndicator } from "@/components/feed";
+import type { EntryView } from "@/lib/api-types";
 import { commentEntry, kai, kaiWithPhoto, statusEntry } from "@/test/fixtures";
 
 const now = new Date(2026, 10, 11, 12, 0);
@@ -183,6 +184,33 @@ describe("feed states", () => {
         "When bots create issues, comment or post status updates, it shows up here as it happens.",
       ),
     ).toBeInTheDocument();
+  });
+
+  test("empty for a member with no project says so", () => {
+    renderFeed({ entries: [], noProjects: true });
+    expect(
+      screen.getByRole("heading", { name: "No projects yet" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Ask the owner to add you to a project."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("No activity yet")).not.toBeInTheDocument();
+  });
+
+  test("an import reads as one row naming the project and the counts", () => {
+    renderFeed({
+      entries: [
+        {
+          ...statusEntry("imp", minutesAgo(2)),
+          kind: "project_imported",
+          issue: null,
+          imported: { issues: 12, comments: 1 },
+        } as EntryView,
+      ],
+    });
+    const row = rowFor("imp");
+    expect(row).toHaveTextContent("imported");
+    expect(row).toHaveTextContent("12 issues, 1 comment");
   });
 
   test("error copy, and Try again retries", async () => {

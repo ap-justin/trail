@@ -141,6 +141,17 @@ export function FeedEmpty() {
   );
 }
 
+/** A member the owner has not added to any project: nothing can appear until they do. */
+export function FeedNoProjects() {
+  return (
+    <EmptyState
+      icon={FolderIcon}
+      title="No projects yet"
+      description="Ask the owner to add you to a project."
+    />
+  );
+}
+
 export function FeedError({ onRetry }: { onRetry: () => void }) {
   return (
     <ErrorState

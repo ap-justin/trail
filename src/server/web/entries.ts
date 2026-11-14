@@ -29,8 +29,15 @@ type IssueChanges = {
   estimate?: Change<number | null>;
 };
 
+/** The counts a `project.imported` payload carries, per kind of row. */
+type ImportedPayload = Record<
+  "created" | "updated",
+  { issues: number; comments: number }
+>;
+
 const shownActions = [
   "project.created",
+  "project.imported",
   "issue.created",
   "comment.created",
   "status_update.created",
@@ -208,6 +215,19 @@ export function entriesByEvent(db: Db, events: ActivityEvent[]): EntryView[][] {
       switch (e.action) {
         case "project.created":
           return [{ kind: "project_created" as const, issue: null }];
+        case "project.imported": {
+          const { created, updated } = e.payload as ImportedPayload;
+          return [
+            {
+              kind: "project_imported" as const,
+              issue: null,
+              imported: {
+                issues: created.issues + updated.issues,
+                comments: created.comments + updated.comments,
+              },
+            },
+          ];
+        }
         case "issue.created": {
           const target = ref(e.subjectId);
           if (!target) return [];

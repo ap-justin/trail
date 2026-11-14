@@ -861,6 +861,13 @@ export const entrySchema = z.discriminatedUnion("kind", [
     }),
   }),
   z.object({ ...onProject, kind: z.literal("project_created") }),
+  z.object({
+    ...onProject,
+    kind: z.literal("project_imported"),
+    imported: z
+      .object({ issues: z.int(), comments: z.int() })
+      .meta({ description: "Rows the import created or changed." }),
+  }),
 ]);
 
 export const webIssueSchema = z.object({

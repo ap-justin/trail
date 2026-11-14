@@ -17,6 +17,20 @@ async function onFeed() {
 }
 
 describe("session", () => {
+  test("a member with no project is told so, not that nothing happened", async () => {
+    server.use(
+      http.get("/api/web/me", () =>
+        HttpResponse.json({ ...meView("member"), projects: [] }),
+      ),
+    );
+    serveFeed();
+    renderApp("/");
+    expect(await screen.findByText("No projects yet")).toBeInTheDocument();
+    expect(
+      screen.getByText("Ask the owner to add you to a project."),
+    ).toBeInTheDocument();
+  });
+
   test("Sign out calls the endpoint and lands on sign-in", async () => {
     const { router } = await onFeed();
     let signedOut = false;
