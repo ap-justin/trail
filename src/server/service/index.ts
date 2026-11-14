@@ -11,6 +11,7 @@ import {
   type SQL,
   sql,
 } from "drizzle-orm";
+import type { z } from "zod";
 import type { Db } from "../db/client.js";
 import { newId } from "../db/id.js";
 import type { ApiKeyAction } from "../db/schema.js";
@@ -51,6 +52,7 @@ import {
 import {
   type ImportCounts,
   type ImportPayload,
+  type importedEventPayload,
   type NormalComment,
   type NormalImport,
   type NormalIssue,
@@ -116,6 +118,7 @@ export type {
   ImportPayload,
   ImportStatusUpdate,
 } from "./import.js";
+export { importedEventPayload } from "./import.js";
 export type { Actor } from "./keys.js";
 export type { Page, PageQuery } from "./paging.js";
 export type { Link, LinkInput } from "./validate.js";
@@ -1630,6 +1633,12 @@ export function createService({
           Object.values(counts).some((n) => n > 0),
         );
         if (!wrote) return { result, event: null };
+        const payload = {
+          externalRef: target.externalRef,
+          ...tally,
+          renumbered,
+        };
+        payload satisfies z.input<typeof importedEventPayload>;
         return {
           result,
           event: {
@@ -1638,7 +1647,7 @@ export function createService({
             subjectId: target.id,
             projectId: target.id,
             action: "project.imported",
-            payload: { externalRef: target.externalRef, ...tally, renumbered },
+            payload,
           },
         };
       });

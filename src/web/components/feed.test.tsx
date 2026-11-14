@@ -333,6 +333,17 @@ describe("feed rows", () => {
   });
 });
 
+test("a row of a kind this bundle doesn't know is skipped; the rest render", () => {
+  // a kind the server added after this bundle shipped
+  const unknown = {
+    ...statusEntry("e2", minutesAgo(5)),
+    kind: "project_archived",
+  } as unknown as FeedViewProps["entries"][number];
+  renderFeed({ entries: [commentEntry("e1", minutesAgo(1)), unknown] });
+  expect(rowFor("e1")).toBeInTheDocument();
+  expect(document.querySelector('[data-entry-id="e2"]')).toBeNull();
+});
+
 test("a comment's quote shows its words, not its Markdown", () => {
   renderFeed({
     entries: [

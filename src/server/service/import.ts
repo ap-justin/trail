@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { IssueStatus, ProjectHealth } from "../db/schema.js";
 import { ValidationError } from "./errors.js";
 import {
@@ -81,6 +82,17 @@ export type ImportCounts = {
   links: number;
   statusUpdates: number;
 };
+
+const shownCounts = z.object({ issues: z.int(), comments: z.int() });
+
+/**
+ * The part of a `project.imported` payload the feed reads back. importProject's
+ * payload satisfies it, so a change to the counts it writes fails typecheck.
+ */
+export const importedEventPayload = z.object({
+  created: shownCounts,
+  updated: shownCounts,
+});
 
 // Linear's default workflow states, matched in any case, then trail's own statuses
 const sourceStatuses: Record<string, IssueStatus> = {

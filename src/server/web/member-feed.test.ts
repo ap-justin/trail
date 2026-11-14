@@ -1,9 +1,18 @@
+import { and, eq } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
 import type { FeedView, MeView } from "../../shared/schemas.js";
+import { activityEvent } from "../db/schema.js";
 import { atFakeTimeAsync, setupTestApp } from "../test-app.js";
 
-const { request, addProject, addBot, addMember, inviteEmail, signInWithEmail } =
-  setupTestApp();
+const {
+  db,
+  request,
+  addProject,
+  addBot,
+  addMember,
+  inviteEmail,
+  signInWithEmail,
+} = setupTestApp();
 
 const get = async <T>(path: string, cookie: string) => {
   const res = await request("GET", `/api/web${path}`, { key: null, cookie });
@@ -132,6 +141,54 @@ describe("a member's feed of an import", () => {
       ]),
     );
     expect(rows).toHaveLength(2);
+  });
+
+  test("a re-import that edits an existing comment moves the comments total", async () => {
+    const id = await importProject(importPayload("e", "carried over", [noted]));
+    await importProject(
+      importPayload("e", "carried over", [{ ...noted, body: "noted, edited" }]),
+    );
+    const feed = await memberFeed("e", id);
+    const rows = feed.items.filter((e) => e.kind === "project_imported");
+    // nothing else changed, so the second row's comment count is `updated` alone
+    expect(rows.map((r) => r.imported)).toEqual(
+      expect.arrayContaining([
+        { issues: 2, comments: 1 },
+        { issues: 0, comments: 1 },
+      ]),
+    );
+    expect(rows).toHaveLength(2);
+  });
+
+  test("an import row shows for a member of the project and not for a member of another", async () => {
+    const id = await importProject(importPayload("f", "carried over", [noted]));
+    const elsewhere = addProject("Elsewhere");
+    const insider = await memberFeed("f", id);
+    const outsiderEmail = "imp-outsider@example.com";
+    inviteEmail(outsiderEmail, [elsewhere.id]);
+    const outsider = await get<FeedView>(
+      "/feed",
+      await signInWithEmail(outsiderEmail),
+    );
+    const importRows = (f: FeedView) =>
+      f.items.filter((e) => e.kind === "project_imported");
+    expect(importRows(insider)).toHaveLength(1);
+    expect(importRows(outsider)).toEqual([]);
+  });
+
+  test("an import event whose payload is malformed shows no row and fails nothing", async () => {
+    const id = await importProject(importPayload("d", "carried over", [noted]));
+    db.update(activityEvent)
+      .set({ payload: { created: { issues: 2 } } })
+      .where(
+        and(
+          eq(activityEvent.projectId, id),
+          eq(activityEvent.action, "project.imported"),
+        ),
+      )
+      .run();
+    const feed = await memberFeed("d", id);
+    expect(feed.items).toEqual([]);
   });
 
   test("a re-import that changes nothing adds no second row", async () => {

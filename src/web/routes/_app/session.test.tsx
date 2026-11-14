@@ -63,6 +63,14 @@ describe("session", () => {
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
   });
 
+  test("a member with projects and an empty feed is told nothing happened yet, with the filters to hand", async () => {
+    await onFeed();
+    expect(screen.queryByText("No projects yet")).not.toBeInTheDocument();
+    expect(
+      screen.getAllByRole("combobox", { name: /^Filter by/ }),
+    ).toHaveLength(2);
+  });
+
   test("a member with projects sees Live once the stream opens", async () => {
     await onFeed();
     await waitFor(() => expect(FakeEventSource.opened).not.toHaveLength(0));

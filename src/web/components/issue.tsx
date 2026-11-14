@@ -345,6 +345,10 @@ function changePhrase(entry: EntryView): ReactNode {
     case "project_created":
     case "project_imported":
       return null;
+    default:
+      // typechecks only while every known kind has a case; at runtime, a kind the server added later
+      entry satisfies never;
+      return null;
   }
 }
 
@@ -390,6 +394,8 @@ function CommentCard({
 }
 
 function ChangeLine({ entry }: { entry: EntryView }) {
+  const phrase = changePhrase(entry);
+  if (phrase === null) return null;
   return (
     <li
       data-entry-id={entry.id}
@@ -399,7 +405,7 @@ function ChangeLine({ entry }: { entry: EntryView }) {
       )}
     >
       <Actor actor={entry.actor} />
-      {changePhrase(entry)}
+      {phrase}
       <EntryTime
         iso={entry.createdAt}
         className="max-lg:basis-full lg:ml-auto"

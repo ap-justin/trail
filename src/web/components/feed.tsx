@@ -176,7 +176,7 @@ function FeedBody({
   }
   return (
     <div className={cn(connection === "reconnecting" && "opacity-60")}>
-      {groupByDay(entries).map((day, index) => (
+      {groupByDay(shownRows(entries)).map((day, index) => (
         <section key={day.key}>
           <h2
             {...(index === 0 && { ref: firstDayRef, tabIndex: -1 })}
@@ -185,10 +185,11 @@ function FeedBody({
             {formatDayHeader(day.iso, now)}
           </h2>
           <ul>
-            {day.entries.map((entry) => (
+            {day.rows.map(({ entry, sentence }) => (
               <FeedRow
                 key={entry.id}
                 entry={entry}
+                sentence={sentence}
                 fresh={freshIds.has(entry.id)}
                 now={now}
               />
@@ -200,13 +201,23 @@ function FeedBody({
   );
 }
 
-function groupByDay(entries: EntryView[]) {
-  const days: { key: string; iso: string; entries: EntryView[] }[] = [];
-  for (const entry of entries) {
-    const key = dayKey(entry.createdAt);
+type Row = { entry: EntryView; sentence: Sentence };
+
+/** Drops entries of a kind this bundle predates, so a new server kind can't break an open tab. */
+function shownRows(entries: EntryView[]): Row[] {
+  return entries.flatMap((entry) => {
+    const sentence = sentenceFor(entry);
+    return sentence ? [{ entry, sentence }] : [];
+  });
+}
+
+function groupByDay(rows: Row[]) {
+  const days: { key: string; iso: string; rows: Row[] }[] = [];
+  for (const row of rows) {
+    const key = dayKey(row.entry.createdAt);
     const last = days.at(-1);
-    if (last?.key === key) last.entries.push(entry);
-    else days.push({ key, iso: entry.createdAt, entries: [entry] });
+    if (last?.key === key) last.rows.push(row);
+    else days.push({ key, iso: row.entry.createdAt, rows: [row] });
   }
   return days;
 }
@@ -356,7 +367,7 @@ const muted = (text: string) => (
   <span className="text-muted-foreground">{text}</span>
 );
 
-function sentenceFor(entry: EntryView): Sentence {
+function sentenceFor(entry: EntryView): Sentence | null {
   switch (entry.kind) {
     case "issue_created":
       return {
@@ -492,6 +503,10 @@ function sentenceFor(entry: EntryView): Sentence {
         ),
       };
     }
+    default:
+      // typechecks only while every known kind has a case; at runtime, a kind the server added later
+      entry satisfies never;
+      return null;
   }
 }
 
@@ -514,14 +529,13 @@ function RowTime({ iso, now }: { iso: string; now: Date }) {
  */
 function FeedRow({
   entry,
+  sentence,
   fresh,
   now,
-}: {
-  entry: EntryView;
+}: Row & {
   fresh: boolean;
   now: Date;
 }) {
-  const sentence = sentenceFor(entry);
   return (
     <li
       data-entry-id={entry.id}

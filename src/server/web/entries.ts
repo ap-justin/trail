@@ -14,7 +14,7 @@ import {
   projectStatusUpdate,
 } from "../db/schema.js";
 import type { ActivityEvent } from "../events/bus.js";
-import type { Link } from "../service/index.js";
+import { importedEventPayload, type Link } from "../service/index.js";
 import { actorsById } from "./visible.js";
 
 type Change<T> = { from: T; to: T };
@@ -28,12 +28,6 @@ type IssueChanges = {
   assigneeId?: Change<string | null>;
   estimate?: Change<number | null>;
 };
-
-/** The counts a `project.imported` payload carries, per kind of row. */
-type ImportedPayload = Record<
-  "created" | "updated",
-  { issues: number; comments: number }
->;
 
 const shownActions = [
   "project.created",
@@ -216,7 +210,9 @@ export function entriesByEvent(db: Db, events: ActivityEvent[]): EntryView[][] {
         case "project.created":
           return [{ kind: "project_created" as const, issue: null }];
         case "project.imported": {
-          const { created, updated } = e.payload as ImportedPayload;
+          const counts = importedEventPayload.safeParse(e.payload);
+          if (!counts.success) return [];
+          const { created, updated } = counts.data;
           return [
             {
               kind: "project_imported" as const,
