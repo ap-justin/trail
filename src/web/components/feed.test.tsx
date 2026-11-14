@@ -179,6 +179,22 @@ describe("live connection", () => {
     expect(rowFor("e1")).toBeInTheDocument();
     expect(rowFor("e2")).toBeInTheDocument();
   });
+
+  test("reconnecting with no projects and no entries: no banner, since nothing can arrive", () => {
+    renderFeed({ entries: [], noProjects: true, connection: "reconnecting" });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "No projects yet" }),
+    ).toBeInTheDocument();
+  });
+
+  test("reconnecting with noProjects but entries: the banner still shows", () => {
+    renderFeed({ noProjects: true, connection: "reconnecting" });
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Reconnecting… new activity will appear when it's back.",
+    );
+    expect(rowFor("e1")).toBeInTheDocument();
+  });
 });
 
 describe("feed states", () => {

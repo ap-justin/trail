@@ -116,16 +116,16 @@ export function FeedView(props: FeedViewProps) {
     props.onShowPending();
   };
 
+  // a member with no project has nothing to filter and nothing to wait for
+  const nothingToFollow = props.noProjects && props.entries.length === 0;
+
   return (
     // the 880px column sits inside the page padding, so the padding never narrows it;
     // isolate keeps the pill's z-10 inside the feed, under the shell's sticky z-10 top bar and its search
     <div className="isolate w-full lg:px-6 lg:py-4">
       <div className="mx-auto flex max-w-220 flex-col">
         <div ref={topRef} />
-        {/* a member with no project has nothing to filter */}
-        {!(props.noProjects && props.entries.length === 0) && (
-          <FeedFilters {...props} />
-        )}
+        {!nothingToFollow && <FeedFilters {...props} />}
         {props.pendingCount > 0 && (
           // zero height so the pill floats over the rows instead of pushing them down
           <div className="sticky top-15 z-10 flex h-0 justify-center">
@@ -138,7 +138,7 @@ export function FeedView(props: FeedViewProps) {
             </Button>
           </div>
         )}
-        {props.connection === "reconnecting" && (
+        {props.connection === "reconnecting" && !nothingToFollow && (
           <Alert className="mx-4 mt-3 w-auto border-0 bg-warning-muted py-1.5 text-xs font-medium text-warning lg:mx-0">
             <AlertDescription className="text-xs text-current">
               Reconnecting… new activity will appear when it's back.
