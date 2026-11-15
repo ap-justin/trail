@@ -248,7 +248,7 @@ describe("feed states", () => {
     // the muted connector is its own element, so the counts are the last span
     const tailOf = (row: HTMLElement) => within(row).queryByText(/^\d+ /);
 
-    test("names the project as a link and reads counts after a muted 'with'", () => {
+    test("names the project as a link, then imported and with", () => {
       const row = importRow({ issues: 12, comments: 1 });
       expect(within(row).getByRole("link", { name: "trail" })).toBeVisible();
       expect(within(row).getByText("imported")).toBeInTheDocument();

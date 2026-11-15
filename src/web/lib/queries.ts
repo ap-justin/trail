@@ -49,8 +49,8 @@ export function createQueryClient(config: QueryClientConfig = {}) {
       void client.invalidateQueries({ queryKey: keys.me });
     }
   };
-  // the feed never refetches on focus, so a `/me` that grants or takes away a project
-  // re-reads it here: its rows and its filter options both come from `/feed`
+  // the feed never refetches on focus, so when `/me` grants or takes away a project, this
+  // re-reads the feed: its rows and its filter options both come from `/feed`
   let projectsSeen: string | undefined;
   const followProjects = () => {
     const me = client.getQueryData(meQuery.queryKey);

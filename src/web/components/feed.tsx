@@ -116,7 +116,7 @@ export function FeedView(props: FeedViewProps) {
     props.onShowPending();
   };
 
-  // a member with no project has nothing to filter and nothing to wait for
+  // a member with no project has nothing to filter yet
   const nothingToFollow = props.noProjects && props.entries.length === 0;
 
   return (
