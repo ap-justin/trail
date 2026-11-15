@@ -12,6 +12,7 @@ import { MarkdownText } from "@/components/markdown-text";
 import {
   FeedEmpty,
   FeedError,
+  FeedNoProjects,
   LoadingRegion,
   SkeletonBlock,
 } from "@/components/states";
@@ -66,6 +67,8 @@ export type FeedViewProps = {
   onActorFilterChange: (actorId: string | null) => void;
   onProjectFilterChange: (projectKey: string | null) => void;
   onRetry: () => void;
+  /** The viewer is a member with no project, so an empty feed is about access, not quiet. */
+  noProjects?: boolean;
   /** The clock relative times are read against; ticks each minute when omitted. */
   now?: Date;
 };
@@ -113,13 +116,16 @@ export function FeedView(props: FeedViewProps) {
     props.onShowPending();
   };
 
+  // a member with no project has nothing to filter or wait for yet
+  const nothingToFollow = props.noProjects && props.entries.length === 0;
+
   return (
     // the 880px column sits inside the page padding, so the padding never narrows it;
     // isolate keeps the pill's z-10 inside the feed, under the shell's sticky z-10 top bar and its search
     <div className="isolate w-full lg:px-6 lg:py-4">
       <div className="mx-auto flex max-w-220 flex-col">
         <div ref={topRef} />
-        <FeedFilters {...props} />
+        {!nothingToFollow && <FeedFilters {...props} />}
         {props.pendingCount > 0 && (
           // zero height so the pill floats over the rows instead of pushing them down
           <div className="sticky top-15 z-10 flex h-0 justify-center">
@@ -132,7 +138,7 @@ export function FeedView(props: FeedViewProps) {
             </Button>
           </div>
         )}
-        {props.connection === "reconnecting" && (
+        {props.connection === "reconnecting" && !nothingToFollow && (
           <Alert className="mx-4 mt-3 w-auto border-0 bg-warning-muted py-1.5 text-xs font-medium text-warning lg:mx-0">
             <AlertDescription className="text-xs text-current">
               Reconnecting… new activity will appear when it's back.
@@ -159,15 +165,18 @@ function FeedBody({
   freshIds,
   connection,
   onRetry,
+  noProjects,
   now,
   firstDayRef,
 }: FeedViewProps & { now: Date; firstDayRef: Ref<HTMLHeadingElement> }) {
   if (status === "loading") return <FeedSkeleton />;
   if (status === "error") return <FeedError onRetry={onRetry} />;
-  if (entries.length === 0) return <FeedEmpty />;
+  if (entries.length === 0) {
+    return noProjects ? <FeedNoProjects /> : <FeedEmpty />;
+  }
   return (
     <div className={cn(connection === "reconnecting" && "opacity-60")}>
-      {groupByDay(entries).map((day, index) => (
+      {groupByDay(shownRows(entries)).map((day, index) => (
         <section key={day.key}>
           <h2
             {...(index === 0 && { ref: firstDayRef, tabIndex: -1 })}
@@ -176,10 +185,11 @@ function FeedBody({
             {formatDayHeader(day.iso, now)}
           </h2>
           <ul>
-            {day.entries.map((entry) => (
+            {day.rows.map(({ entry, sentence }) => (
               <FeedRow
                 key={entry.id}
                 entry={entry}
+                sentence={sentence}
                 fresh={freshIds.has(entry.id)}
                 now={now}
               />
@@ -191,13 +201,23 @@ function FeedBody({
   );
 }
 
-function groupByDay(entries: EntryView[]) {
-  const days: { key: string; iso: string; entries: EntryView[] }[] = [];
-  for (const entry of entries) {
-    const key = dayKey(entry.createdAt);
+type Row = { entry: EntryView; sentence: Sentence };
+
+/** Drops entries of a kind this bundle predates, so a new server kind can't break an open tab. */
+function shownRows(entries: EntryView[]): Row[] {
+  return entries.flatMap((entry) => {
+    const sentence = sentenceFor(entry);
+    return sentence ? [{ entry, sentence }] : [];
+  });
+}
+
+function groupByDay(rows: Row[]) {
+  const days: { key: string; iso: string; rows: Row[] }[] = [];
+  for (const row of rows) {
+    const key = dayKey(row.entry.createdAt);
     const last = days.at(-1);
-    if (last?.key === key) last.entries.push(entry);
-    else days.push({ key, iso: entry.createdAt, entries: [entry] });
+    if (last?.key === key) last.rows.push(row);
+    else days.push({ key, iso: row.entry.createdAt, rows: [row] });
   }
   return days;
 }
@@ -347,7 +367,7 @@ const muted = (text: string) => (
   <span className="text-muted-foreground">{text}</span>
 );
 
-function sentenceFor(entry: EntryView): Sentence {
+function sentenceFor(entry: EntryView): Sentence | null {
   switch (entry.kind) {
     case "issue_created":
       return {
@@ -465,8 +485,33 @@ function sentenceFor(entry: EntryView): Sentence {
         verb: muted("created"),
         subject: projectSubject(entry.project),
       };
+    case "project_imported": {
+      // an import that only touched labels, status updates or the project row counts 0 of both
+      const counts = [
+        entry.imported.issues > 0 && countOf(entry.imported.issues, "issue"),
+        entry.imported.comments > 0 &&
+          countOf(entry.imported.comments, "comment"),
+      ].filter(Boolean);
+      return {
+        verb: muted("imported"),
+        subject: projectSubject(entry.project),
+        tail: counts.length > 0 && (
+          <>
+            {muted("with")}
+            <span>{counts.join(", ")}</span>
+          </>
+        ),
+      };
+    }
+    default:
+      // typechecks only while every known kind has a case; at runtime, a kind the server added later lands here
+      entry satisfies never;
+      return null;
   }
 }
+
+const countOf = (n: number, noun: string) =>
+  `${n} ${noun}${n === 1 ? "" : "s"}`;
 
 function RowTime({ iso, now }: { iso: string; now: Date }) {
   return (
@@ -484,14 +529,13 @@ function RowTime({ iso, now }: { iso: string; now: Date }) {
  */
 function FeedRow({
   entry,
+  sentence,
   fresh,
   now,
-}: {
-  entry: EntryView;
+}: Row & {
   fresh: boolean;
   now: Date;
 }) {
-  const sentence = sentenceFor(entry);
   return (
     <li
       data-entry-id={entry.id}

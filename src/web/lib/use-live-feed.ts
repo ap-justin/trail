@@ -132,7 +132,8 @@ export function useLiveFeed(
   const loading = feed.isPending || feed.isPlaceholderData;
   const read = loading ? null : (feed.data?.items ?? null);
   const [readSeen, setReadSeen] = useState(read);
-  if (read && (filterChanged || read !== readSeen)) {
+  // no page yet but a read already: Query had this feed cached, so `readSeen` started equal to it
+  if (read && (filterChanged || read !== readSeen || state.page === null)) {
     setReadSeen(read);
     dispatch({ type: "read", items: read, hold });
   }

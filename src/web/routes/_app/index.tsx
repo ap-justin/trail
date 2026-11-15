@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { AppPage } from "@/app/chrome";
+import { AppPage, useChrome } from "@/app/chrome";
 import { FeedView, LiveIndicator } from "@/components/feed";
 import type { FeedFilter } from "@/lib/api";
 import { useLiveFeed } from "@/lib/use-live-feed";
@@ -14,16 +14,23 @@ function FeedPage() {
     actor: null,
     project: null,
   });
+  const { session } = useChrome();
   const feed = useLiveFeed(filter, {
     onProjectGone: () => setFilter((f) => ({ ...f, project: null })),
   });
+  const noProjects = !session.viewer.isOwner && session.projects.length === 0;
   return (
     <AppPage
       section="feed"
       heading="Feed"
-      // nothing until the stream first opens: neither Live nor Reconnecting is true yet
+      // nothing until the stream first opens: neither Live nor Reconnecting is true yet;
+      // nor while a member with no projects has no rows, which hides the filters too —
+      // the stream checks access per event, so a project granted mid-view starts delivering
       headingAccessory={
-        feed.connection === "open" && <LiveIndicator connection="open" />
+        feed.connection === "open" &&
+        !(noProjects && feed.entries.length === 0) && (
+          <LiveIndicator connection="open" />
+        )
       }
     >
       <FeedView
@@ -44,6 +51,7 @@ function FeedPage() {
           setFilter((f) => ({ ...f, project }))
         }
         onRetry={feed.retry}
+        noProjects={noProjects}
       />
     </AppPage>
   );

@@ -807,61 +807,75 @@ const entryBase = {
 const onIssue = { ...entryBase, issue: webIssueRefSchema };
 const onProject = { ...entryBase, issue: z.null() };
 
-// A feed row or issue timeline entry; switch on `kind`.
-export const entrySchema = z.discriminatedUnion("kind", [
-  z.object({
-    ...onIssue,
-    kind: z.literal("issue_created"),
-    sourceAuthor,
-  }),
-  z.object({
-    ...onIssue,
-    kind: z.literal("status_changed"),
-    from: issueStatusSchema,
-    to: issueStatusSchema,
-  }),
-  z.object({
-    ...onIssue,
-    kind: z.literal("priority_changed"),
-    from: z.int(),
-    to: z.int(),
-  }),
-  z.object({
-    ...onIssue,
-    kind: z.literal("labels_changed"),
-    added: z.array(z.string()),
-    removed: z.array(z.string()),
-  }),
-  z.object({ ...onIssue, kind: z.literal("link_added"), link: linkSchema }),
-  z.object({
-    ...onIssue,
-    kind: z.literal("assignee_changed"),
-    from: webActorSchema.nullable().meta({ description: "Null: unassigned." }),
-    to: webActorSchema.nullable().meta({ description: "Null: unassigned." }),
-  }),
-  z.object({
-    ...onIssue,
-    kind: z.literal("estimate_changed"),
-    from: estimate.nullable(),
-    to: estimate.nullable(),
-  }),
-  z.object({
-    ...onIssue,
-    kind: z.literal("comment"),
-    comment: z.object({ id, body: z.string(), sourceAuthor }),
-  }),
-  z.object({
-    ...onProject,
-    kind: z.literal("status_update"),
-    statusUpdate: z.object({
-      id,
-      body: z.string(),
-      health: healthSchema,
+export const entrySchema = z
+  .discriminatedUnion("kind", [
+    z.object({
+      ...onIssue,
+      kind: z.literal("issue_created"),
       sourceAuthor,
     }),
-  }),
-  z.object({ ...onProject, kind: z.literal("project_created") }),
-]);
+    z.object({
+      ...onIssue,
+      kind: z.literal("status_changed"),
+      from: issueStatusSchema,
+      to: issueStatusSchema,
+    }),
+    z.object({
+      ...onIssue,
+      kind: z.literal("priority_changed"),
+      from: z.int(),
+      to: z.int(),
+    }),
+    z.object({
+      ...onIssue,
+      kind: z.literal("labels_changed"),
+      added: z.array(z.string()),
+      removed: z.array(z.string()),
+    }),
+    z.object({ ...onIssue, kind: z.literal("link_added"), link: linkSchema }),
+    z.object({
+      ...onIssue,
+      kind: z.literal("assignee_changed"),
+      from: webActorSchema
+        .nullable()
+        .meta({ description: "Null: unassigned." }),
+      to: webActorSchema.nullable().meta({ description: "Null: unassigned." }),
+    }),
+    z.object({
+      ...onIssue,
+      kind: z.literal("estimate_changed"),
+      from: estimate.nullable(),
+      to: estimate.nullable(),
+    }),
+    z.object({
+      ...onIssue,
+      kind: z.literal("comment"),
+      comment: z.object({ id, body: z.string(), sourceAuthor }),
+    }),
+    z.object({
+      ...onProject,
+      kind: z.literal("status_update"),
+      statusUpdate: z.object({
+        id,
+        body: z.string(),
+        health: healthSchema,
+        sourceAuthor,
+      }),
+    }),
+    z.object({ ...onProject, kind: z.literal("project_created") }),
+    z.object({
+      ...onProject,
+      kind: z.literal("project_imported"),
+      imported: z.object({ issues: z.int(), comments: z.int() }).meta({
+        description:
+          "Issues and comments the import created or changed; an import that touched only the project, its labels or its status updates counts 0 of both.",
+      }),
+    }),
+  ])
+  .meta({
+    description:
+      "A feed row or issue timeline entry; switch on kind, and skip an entry whose kind you don't know: trail adds kinds over time.",
+  });
 
 export const webIssueSchema = z.object({
   key: z.string(),

@@ -3,7 +3,13 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, test, vi } from "vitest";
 import { FeedView, type FeedViewProps, LiveIndicator } from "@/components/feed";
-import { commentEntry, kai, kaiWithPhoto, statusEntry } from "@/test/fixtures";
+import {
+  commentEntry,
+  kai,
+  kaiWithPhoto,
+  projectImportedEntry,
+  statusEntry,
+} from "@/test/fixtures";
 
 const now = new Date(2026, 10, 11, 12, 0);
 const minutesAgo = (m: number) =>
@@ -43,6 +49,9 @@ const rowFor = (id: string) => {
   if (!row) throw new Error(`no feed row ${id}`);
   return row;
 };
+
+const filterControls = () =>
+  screen.queryAllByRole("combobox", { name: /^Filter by (bot|project)$/ });
 
 describe("actor photos", () => {
   test("an entry by an actor with a photo shows the photo; one without shows initials", () => {
@@ -170,6 +179,22 @@ describe("live connection", () => {
     expect(rowFor("e1")).toBeInTheDocument();
     expect(rowFor("e2")).toBeInTheDocument();
   });
+
+  test("reconnecting with no projects and no entries: no banner, since nothing can arrive", () => {
+    renderFeed({ entries: [], noProjects: true, connection: "reconnecting" });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "No projects yet" }),
+    ).toBeInTheDocument();
+  });
+
+  test("reconnecting with noProjects but entries: the banner still shows", () => {
+    renderFeed({ noProjects: true, connection: "reconnecting" });
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Reconnecting… new activity will appear when it's back.",
+    );
+    expect(rowFor("e1")).toBeInTheDocument();
+  });
 });
 
 describe("feed states", () => {
@@ -183,6 +208,80 @@ describe("feed states", () => {
         "When bots create issues, comment or post status updates, it shows up here as it happens.",
       ),
     ).toBeInTheDocument();
+  });
+
+  test("empty for a member with no project says so", () => {
+    renderFeed({ entries: [], noProjects: true });
+    expect(
+      screen.getByRole("heading", { name: "No projects yet" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Ask the owner to add you to a project."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("No activity yet")).not.toBeInTheDocument();
+  });
+
+  test("an empty feed for a member with no project shows no filters", () => {
+    renderFeed({ entries: [], noProjects: true });
+    expect(filterControls()).toHaveLength(0);
+    expect(
+      screen.getByRole("heading", { name: "No projects yet" }),
+    ).toBeInTheDocument();
+  });
+
+  test("noProjects is ignored once there are entries: rows and filters show", () => {
+    renderFeed({ noProjects: true });
+    expect(rowFor("e1")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "No projects yet" }),
+    ).not.toBeInTheDocument();
+    expect(filterControls()).toHaveLength(2);
+  });
+
+  describe("an import row", () => {
+    const importRow = (imported: { issues: number; comments: number }) => {
+      renderFeed({
+        entries: [projectImportedEntry("imp", minutesAgo(2), imported)],
+      });
+      return rowFor("imp");
+    };
+    // the muted connector is its own element, so the counts are the last span
+    const tailOf = (row: HTMLElement) => within(row).queryByText(/^\d+ /);
+
+    test("names the project as a link alongside imported and with", () => {
+      const row = importRow({ issues: 12, comments: 1 });
+      expect(within(row).getByRole("link", { name: "trail" })).toBeVisible();
+      expect(within(row).getByText("imported")).toBeInTheDocument();
+      expect(within(row).getByText("with")).toBeInTheDocument();
+    });
+
+    test("unequal counts: each noun takes its own count and plural", () => {
+      const tail = tailOf(importRow({ issues: 12, comments: 1 }));
+      expect(tail?.textContent).toBe("12 issues, 1 comment");
+    });
+
+    test("one issue is singular", () => {
+      const tail = tailOf(importRow({ issues: 1, comments: 3 }));
+      expect(tail?.textContent).toBe("1 issue, 3 comments");
+    });
+
+    test("zero comments hides the comment count", () => {
+      const tail = tailOf(importRow({ issues: 5, comments: 0 }));
+      expect(tail?.textContent).toBe("5 issues");
+    });
+
+    test("zero issues hides the issue count", () => {
+      const tail = tailOf(importRow({ issues: 0, comments: 4 }));
+      expect(tail?.textContent).toBe("4 comments");
+    });
+
+    test("both zero shows no tail and no 'with'", () => {
+      const row = importRow({ issues: 0, comments: 0 });
+      expect(within(row).getByText("imported")).toBeInTheDocument();
+      expect(within(row).queryByText("with")).not.toBeInTheDocument();
+      expect(tailOf(row)).toBeNull();
+      expect(row).not.toHaveTextContent(/\d+ (issue|comment)/);
+    });
   });
 
   test("error copy, and Try again retries", async () => {
@@ -248,6 +347,17 @@ describe("feed rows", () => {
       within(row).getByText("originally by Justin Salas"),
     ).toBeInTheDocument();
   });
+});
+
+test("a row of a kind this bundle doesn't know is skipped; the rest render", () => {
+  // a kind the server added after this bundle shipped
+  const unknown = {
+    ...statusEntry("e2", minutesAgo(5)),
+    kind: "project_archived",
+  } as unknown as FeedViewProps["entries"][number];
+  renderFeed({ entries: [commentEntry("e1", minutesAgo(1)), unknown] });
+  expect(rowFor("e1")).toBeInTheDocument();
+  expect(document.querySelector('[data-entry-id="e2"]')).toBeNull();
 });
 
 test("a comment's quote shows its words, not its Markdown", () => {

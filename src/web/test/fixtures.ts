@@ -69,6 +69,22 @@ export function statusEntry(id: string, createdAt: string): EntryView {
   };
 }
 
+export function projectImportedEntry(
+  id: string,
+  createdAt: string,
+  imported: { issues: number; comments: number },
+): EntryView {
+  return {
+    kind: "project_imported",
+    id,
+    createdAt,
+    actor: kai,
+    project: trail,
+    issue: null,
+    imported,
+  };
+}
+
 export const tara: WebActorView = {
   id: "a-tara",
   name: "Tara",
