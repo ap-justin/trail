@@ -26,15 +26,23 @@ export const validateItemSearch = (
   type: isType(search.type) ? search.type : undefined,
 });
 
-const nonEmpty = (value: unknown) =>
-  typeof value === "string" && value !== "" ? value : undefined;
+/**
+ * A search value as the text typed in the URL; an empty one is absent. The router's
+ * parseSearch reads `2026` and `1E5` as numbers before a validator sees them, so a number
+ * comes back as its digits (`1E5` as `100000`: the original spelling is gone by then).
+ */
+export const searchText = (value: unknown): string | undefined => {
+  const text =
+    typeof value === "number" && Number.isFinite(value) ? String(value) : value;
+  return typeof text === "string" && text !== "" ? text : undefined;
+};
 
 /** The feed's `?actor=`, `?product=`, `?project=` and `?type=`; absent is All. */
 export type FeedSearch = {
   actor?: string;
   /** Uppercase, as product keys are. */
   product?: string;
-  /** A project slug. */
+  /** A project slug: lowercase, as slugs are. */
   project?: string;
   type?: ItemType;
 };
@@ -43,9 +51,9 @@ export type FeedSearch = {
 export const validateFeedSearch = (
   search: Record<string, unknown>,
 ): FeedSearch => ({
-  actor: nonEmpty(search.actor),
-  product: nonEmpty(search.product)?.toUpperCase(),
-  project: nonEmpty(search.project),
+  actor: searchText(search.actor),
+  product: searchText(search.product)?.toUpperCase(),
+  project: searchText(search.project)?.toLowerCase(),
   type: isType(search.type) ? search.type : undefined,
 });
 

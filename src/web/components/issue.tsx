@@ -112,7 +112,11 @@ function Header({ issue }: { issue: WebItemView }) {
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground">
         <TypeBadge type={issue.type} />
         <KeyText>{issue.key}</KeyText>
-        <span>{issue.type === "todo" ? "planned by" : "filed by"}</span>
+        <span>
+          {issue.creator.kind === "bot" && issue.type === "todo"
+            ? "planned by"
+            : "filed by"}
+        </span>
         <Actor actor={issue.creator} withTitle={false} />
         <time dateTime={issue.createdAt}>
           <span className="max-lg:hidden">on </span>
@@ -351,8 +355,9 @@ const typeLabels: Record<WebItemType, string> = {
 /** The words after the actor in a one-line timeline entry. */
 function changePhrase(entry: EntryView): ReactNode {
   switch (entry.kind) {
+    // the item's type is its current one; people only file issues, so a person's todo was converted
     case "item_created":
-      return entry.item.type === "todo"
+      return entry.actor.kind === "bot" && entry.item.type === "todo"
         ? "planned this todo"
         : "filed this issue";
     case "status_changed":

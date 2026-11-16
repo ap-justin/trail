@@ -11,7 +11,7 @@ import {
   signedInAs,
 } from "@/test/app";
 import { FakeEventSource } from "@/test/event-source";
-import { commentEntry, humanUi, statusEntry } from "@/test/fixtures";
+import { commentEntry, humanUi, issue, statusEntry } from "@/test/fixtures";
 import { server } from "@/test/server";
 
 afterEach(() => {
@@ -541,6 +541,35 @@ describe("filters in the URL", () => {
     );
   });
 
+  test("an all-digit ?project= and ?product= read and stream the feed as text", async () => {
+    signedInAs("member");
+    const asked = serveNeutralFeed();
+    renderApp("/?project=2026&product=42");
+    await waitFor(() => expect(rowFor("e2")).not.toBeNull());
+    expect(asked[0]?.get("project")).toBe("2026");
+    expect(asked[0]?.get("product")).toBe("42");
+    expect(FakeEventSource.current.url).toBe(
+      "/api/web/events?product=42&project=2026",
+    );
+  });
+
+  test("a ?project= in capitals is the lowercase slug", async () => {
+    signedInAs("member");
+    const asked = serveNeutralFeed();
+    renderApp("/?project=Alpha-Launch");
+    await waitFor(() => expect(rowFor("e2")).not.toBeNull());
+    expect(asked[0]?.get("project")).toBe("alpha-launch");
+  });
+
+  // the router's default parseSearch reads 1E5 as JSON before any validator sees it
+  test("a ?product= in exponent form reads as the number the router made of it", async () => {
+    signedInAs("member");
+    const asked = serveNeutralFeed();
+    renderApp("/?product=1E5");
+    await waitFor(() => expect(rowFor("e2")).not.toBeNull());
+    expect(asked[0]?.get("product")).toBe("100000");
+  });
+
   test("a filter picked survives going to another page and back", async () => {
     signedInAs("member");
     const asked = serveNeutralFeed();
@@ -664,6 +693,54 @@ describe("filters in the URL", () => {
     expect(router.history.location.search).toBe("?product=BTL");
     expect(router.state.location.search).toEqual({ product: "BTL" });
     expect(FakeEventSource.current.url).toBe("/api/web/events?product=BTL");
+  });
+
+  test("a product found gone after the viewer opened an item leaves them on the item", async () => {
+    signedInAs("member");
+    const page = feedPage([statusEntry("e2", minutesAgo(30))]);
+    const withProducts = {
+      ...page,
+      filters: { ...page.filters, products: [atlas, bastion] },
+    };
+    // ATL's 404 waits until the viewer is on the item
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let atlAsked = 0;
+    server.use(
+      http.get("/api/web/feed", async () => {
+        atlAsked += 1;
+        if (atlAsked === 1) return HttpResponse.json(withProducts);
+        await held;
+        return notFound();
+      }),
+      http.get("/api/web/items/ATL-1", () =>
+        HttpResponse.json(issue({ key: "ATL-1" })),
+      ),
+    );
+    const { router, queryClient } = renderApp("/?product=ATL");
+    await waitFor(() => expect(rowFor("e2")).not.toBeNull());
+    FakeEventSource.current.fail({ closed: true });
+    await waitFor(() => expect(atlAsked).toBe(2));
+    await router.navigate({
+      to: "/products/$key/$n",
+      params: { key: "ATL", n: "1" },
+    });
+    release();
+
+    const atlRead = keys.feed({
+      actor: null,
+      product: "ATL",
+      project: null,
+      type: null,
+    });
+    await waitFor(() =>
+      expect(queryClient.getQueryState(atlRead)?.status).toBe("error"),
+    );
+    await act(() => Promise.resolve());
+    expect(router.state.location.pathname).toBe("/products/ATL/1");
+    expect(router.history.location.pathname).toBe("/products/ATL/1");
   });
 
   test("a bot the feed no longer offers leaves the URL; one it offers stays", async () => {

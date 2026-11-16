@@ -200,15 +200,17 @@ export function useLiveFeed(
   });
   // the server closes a stream on a 4xx: a 404 is a filtered product or project this person lost,
   // which only /feed can say, since EventSource never exposes the status
-  const readAfterClose = useEffectEvent(async () => {
-    if (!(await feedGone(current))) return;
+  // `live` turns false once the stream is torn down: a check answering after the viewer left
+  // the feed, or moved its filter, must not pull them back
+  const readAfterClose = useEffectEvent(async (live: () => boolean) => {
+    if (!(await feedGone(current)) || !live()) return;
     // with both set, the 404 doesn't say which: each alone answers for itself
     if (product !== null && project !== null) {
       const [productGone, projectGone] = await Promise.all([
         feedGone({ actor, product, project: null, type }),
         feedGone({ actor, product: null, project, type }),
       ]);
-      if (productGone || projectGone) {
+      if ((productGone || projectGone) && live()) {
         onFilterGone({
           ...(productGone && { product }),
           ...(projectGone && { project }),
@@ -227,6 +229,7 @@ export function useLiveFeed(
       api.eventsUrl({ actor, product, project, type }),
     );
     let retry: ReturnType<typeof setTimeout> | undefined;
+    let live = true;
     source.addEventListener("open", () => {
       setConnection("open");
       // a new stream starts from now: read what the gap missed, photos and titles included,
@@ -240,7 +243,7 @@ export function useLiveFeed(
       // a stream that ends can mean the session did, or this person was removed
       recheckSession();
       if (source.readyState === EventSource.CLOSED) {
-        void readAfterClose();
+        void readAfterClose(() => live);
         retry = setTimeout(() => setAttempt((n) => n + 1), RECONNECT_MS);
       }
     });
@@ -256,6 +259,7 @@ export function useLiveFeed(
       recheckSession();
     });
     return () => {
+      live = false;
       source.close();
       clearTimeout(retry);
     };

@@ -13,6 +13,7 @@ import { api, isNotFound } from "@/lib/api";
 import {
   type ItemSearch,
   itemSearchOf,
+  searchText,
   validateItemSearch,
 } from "@/lib/item-search";
 import { loadableAfter, loadableOf } from "@/lib/loadable";
@@ -28,10 +29,7 @@ export const Route = createFileRoute("/_app/projects/$slug")({
   validateSearch: (search: Record<string, unknown>): ProjectSearch => ({
     ...validateItemSearch(search),
     // product keys are uppercase; the server reads ?product= in any case
-    product:
-      typeof search.product === "string"
-        ? search.product.toUpperCase()
-        : undefined,
+    product: searchText(search.product)?.toUpperCase(),
   }),
   beforeLoad: ({ params, search }) => {
     if (productKey.test(params.slug)) {

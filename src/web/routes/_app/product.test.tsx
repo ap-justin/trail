@@ -148,6 +148,33 @@ describe("while the next filter loads", () => {
     release();
   });
 
+  test("a last list with no row under the new tab reads as loading, never as no matches", async () => {
+    signedInAs("member");
+    const { release, held } = serveHeld();
+    const open = issueRow({ key: "TRL-17", title: "Open one" });
+    const done = issueRow({ key: "TRL-18", title: "Done one", status: "done" });
+    server.use(
+      http.get("/api/web/products/TRL/items", async ({ request }) => {
+        const status = new URL(request.url).searchParams.get("status");
+        if (status === "done") return HttpResponse.json(issueList([done]));
+        await held;
+        return HttpResponse.json(issueList([open]));
+      }),
+    );
+    const { router } = renderApp("/products/TRL?status=done");
+    expect(await screen.findAllByText("Done one")).not.toHaveLength(0);
+    await userEvent.click(screen.getByRole("tab", { name: /^Open/ }));
+    expect(selectedTab()).toMatch(/^Open/);
+    expect(screen.getByText("Loading")).toBeInTheDocument();
+    expect(screen.queryByText(/^No .* are open$/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Show all" }),
+    ).not.toBeInTheDocument();
+    release();
+    expect(await screen.findAllByText("Open one")).not.toHaveLength(0);
+    expect(router.state.location.search).toEqual({ status: "open" });
+  });
+
   test("another product's list is never shown while this one loads", async () => {
     signedInAs("member");
     const { release, held } = serveHeld();

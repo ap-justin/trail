@@ -475,6 +475,20 @@ describe("item events", () => {
     expect(within(rowFor("person")).getByText("filed")).toBeVisible();
   });
 
+  test("a person's issue a bot later made a todo still reads filed", () => {
+    renderFeed({
+      entries: [
+        itemCreatedEntry("person-todo", minutesAgo(1), {
+          actor: maya,
+          item: { key: "TRL-15", title: "Back up the volume", type: "todo" },
+        }),
+      ],
+    });
+    const row = rowFor("person-todo");
+    expect(within(row).getByText("filed")).toBeVisible();
+    expect(within(row).queryByText("planned")).toBeNull();
+  });
+
   test("a type change names the new type", () => {
     renderFeed({ entries: [typeChangedEntry("e1", minutesAgo(1))] });
     const row = rowFor("e1");

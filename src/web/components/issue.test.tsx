@@ -304,6 +304,14 @@ describe("item type", () => {
     expect(within(line).getByText("Human")).toBeInTheDocument();
   });
 
+  test("a person's issue a bot later made a todo is still filed by them", () => {
+    renderIssue({
+      issueKey: "TRL-15",
+      issue: { status: "ready", data: todo({ creator: maya }) },
+    });
+    expect(byline()).toHaveTextContent(/Todo\s*TRL-15\s*filed by.*Maya Chen/);
+  });
+
   test("an unassigned issue says Unassigned", () => {
     renderIssue({
       issue: { status: "ready", data: issue({ assignee: null }) },
@@ -431,6 +439,47 @@ describe("project and type events", () => {
       "removed this from project Human UI launch",
     );
     expect(typed).toHaveTextContent("changed type from Issue to Todo");
+  });
+
+  test("a person's issue a bot later made a todo still opens with filed this issue", () => {
+    const base = todo();
+    renderIssue({
+      issueKey: "TRL-15",
+      issue: {
+        status: "ready",
+        data: todo({
+          creator: maya,
+          timeline: [
+            {
+              product: base.product,
+              item: { key: "TRL-15", title: base.title, type: "todo" },
+              project: null,
+              kind: "item_created",
+              id: "a",
+              createdAt: "2026-11-09T14:02:00.000Z",
+              actor: maya,
+              sourceAuthor: null,
+            },
+            {
+              product: base.product,
+              item: { key: "TRL-15", title: base.title, type: "todo" },
+              project: null,
+              kind: "type_changed",
+              id: "b",
+              createdAt: "2026-11-09T14:04:00.000Z",
+              actor: base.creator,
+              from: "issue",
+              to: "todo",
+            },
+          ],
+        }),
+      },
+    });
+    const [created] = [
+      ...document.querySelectorAll<HTMLElement>("[data-entry-id]"),
+    ];
+    expect(created).toHaveTextContent("filed this issue");
+    expect(created).not.toHaveTextContent("planned");
   });
 });
 

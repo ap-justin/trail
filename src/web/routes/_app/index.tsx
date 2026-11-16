@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { AppPage, useChrome } from "@/app/chrome";
 import { FeedView, LiveIndicator } from "@/components/feed";
 import type { FeedFilter } from "@/lib/api";
@@ -22,15 +22,19 @@ function FeedPage() {
   // replace: a filter is a view of this page, so Back leaves the feed rather than stepping through them
   const setSearch = (change: (prev: FeedSearch) => FeedSearch) =>
     void navigate({ search: change, replace: true });
+  const router = useRouter();
   const { session } = useChrome();
   const feed = useLiveFeed(filter, {
-    onFilterGone: (gone) =>
+    onFilterGone: (gone) => {
+      // a check that answers once the viewer has moved on would replace their new page with the feed
+      if (router.latestLocation.pathname !== Route.fullPath) return;
       setSearch((prev) => ({
         ...prev,
         actor: prev.actor === gone.actor ? undefined : prev.actor,
         product: prev.product === gone.product ? undefined : prev.product,
         project: prev.project === gone.project ? undefined : prev.project,
-      })),
+      }));
+    },
   });
   const noProducts = !session.viewer.isOwner && session.products.length === 0;
   return (

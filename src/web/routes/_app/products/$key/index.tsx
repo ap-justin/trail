@@ -3,6 +3,7 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 import { AppPage, useChrome } from "@/app/chrome";
 import { NotFoundPage } from "@/app/not-found-page";
 import { RowsMissing } from "@/app/rows-missing";
+import { matchesFilters } from "@/components/item-list";
 import {
   ProductHeading,
   ProductHealth,
@@ -41,6 +42,13 @@ function ProductPage() {
     queryFn: () => api.product(key),
   });
   const items = useQuery(productItemsQuery(key, filters));
+  // the last filter's list stands in only while it has rows under this one: with none, the
+  // view would say no matches, and its Show all would clear the filter just picked
+  const shownItems =
+    items.isPlaceholderData &&
+    !items.data.items.some((item) => matchesFilters(item, filters))
+      ? { data: undefined, isError: false }
+      : items;
   const updates = useQuery({
     queryKey: keys.productStatusUpdates(key),
     queryFn: () => api.productStatusUpdates(key),
@@ -63,7 +71,7 @@ function ProductPage() {
       <ProductView
         product={ref}
         detail={product.data ?? null}
-        items={loadableOf(items)}
+        items={loadableOf(shownItems)}
         statusUpdates={loadableOf(updates)}
         filters={filters}
         onFiltersChange={(next) =>

@@ -88,6 +88,42 @@ describe("project page", () => {
     );
   });
 
+  test("an all-digit ?product= is that product, in the request and the filter", async () => {
+    signedInAs("member");
+    const asked = serveProject(
+      projectDetail({ products: [{ key: "42", name: "Beta" }] }),
+    );
+    renderApp("/projects/human-ui?product=42");
+    await waitFor(() =>
+      expect(asked).toEqual(["product=42 type=null status=null"]),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getAllByRole("combobox", { name: "Filter by product" })[0],
+      ).toHaveTextContent("Beta"),
+    );
+  });
+
+  test("an empty ?product= is All, and the items don't wait on the project", async () => {
+    signedInAs("member");
+    const asked = serveProject();
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.get("/api/web/projects/human-ui", async () => {
+        await held;
+        return HttpResponse.json(projectDetail());
+      }),
+    );
+    renderApp("/projects/human-ui?product=");
+    await waitFor(() =>
+      expect(asked).toEqual(["product=null type=null status=null"]),
+    );
+    release();
+  });
+
   test("a product the project doesn't draw from, or an unknown type or status, is All", async () => {
     signedInAs("member");
     const asked = serveProject();
