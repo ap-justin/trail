@@ -3,14 +3,15 @@ import { describe, expect, test } from "vitest";
 import { SearchResults } from "@/components/search-results";
 
 const results = {
-  projects: [{ key: "TRL", name: "trail" }],
-  issues: [
+  products: [{ key: "TRL", name: "trail" }],
+  items: [
     {
       key: "TRL-14",
       sourceKey: "JUS-187",
       title: "Team access: invite people",
+      type: "issue" as const,
       status: "in_progress" as const,
-      project: { key: "TRL", name: "trail" },
+      product: { key: "TRL", name: "trail" },
     },
   ],
 };
@@ -41,7 +42,7 @@ describe("SearchResults", () => {
       <SearchResults
         query="team"
         answeredQuery="team"
-        results={{ projects: [], issues: [] }}
+        results={{ products: [], items: [] }}
         status="ready"
       />,
     );
@@ -119,7 +120,7 @@ describe("SearchResults", () => {
     rerender(
       <SearchResults
         {...props}
-        results={{ projects: [], issues: [] }}
+        results={{ products: [], items: [] }}
         status="ready"
       />,
     );
@@ -134,7 +135,7 @@ describe("SearchResults", () => {
       <SearchResults
         query="team"
         answeredQuery="team"
-        results={{ projects: [], issues: results.issues }}
+        results={{ products: [], items: results.items }}
         status="ready"
       />,
     );

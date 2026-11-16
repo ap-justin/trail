@@ -118,7 +118,7 @@ test("the shell's viewer carries the photo URL `/me` gives the signed-in actor",
       photoUrl: photoUrlFor("a-maya", "77"),
       title: null,
     },
-    projects: [],
+    products: [],
     ownerName: "Justin Salas",
     emailSignIn: true,
   };
@@ -142,7 +142,7 @@ test("a person who signs in by email is let into the shell, shown by their addre
       photoUrl: null,
       title: null,
     },
-    projects: [],
+    products: [],
     ownerName: "Justin Salas",
     emailSignIn: true,
   };
@@ -202,14 +202,15 @@ function SearchingShell({ onSearch }: { onSearch: (q: string) => void }) {
               answeredQuery={query}
               status="ready"
               results={{
-                projects: [],
-                issues: [
+                products: [],
+                items: [
                   {
                     key: "TRL-14",
                     sourceKey: null,
                     title: "Team access",
+                    type: "issue",
                     status: "open",
-                    project: { key: "TRL", name: "trail" },
+                    product: { key: "TRL", name: "trail" },
                   },
                 ],
               }}

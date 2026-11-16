@@ -16,12 +16,12 @@ import { server } from "@/test/server";
 function serveProject() {
   const statuses: (string | null)[] = [];
   server.use(
-    http.get("/api/web/projects/TRL", () => HttpResponse.json(project())),
-    http.get("/api/web/projects/TRL/issues", ({ request }) => {
+    http.get("/api/web/products/TRL", () => HttpResponse.json(project())),
+    http.get("/api/web/products/TRL/items", ({ request }) => {
       statuses.push(new URL(request.url).searchParams.get("status"));
       return HttpResponse.json(issueList([issueRow()]));
     }),
-    http.get("/api/web/projects/TRL/status-updates", () =>
+    http.get("/api/web/products/TRL/status-updates", () =>
       HttpResponse.json({ items: [statusUpdate()], nextCursor: null }),
     ),
   );
@@ -87,7 +87,7 @@ describe("links", () => {
     serveProject();
     server.use(
       http.get("/api/web/search", () =>
-        HttpResponse.json({ issues: [], projects: [trail] }),
+        HttpResponse.json({ items: [], products: [trail], projects: [] }),
       ),
     );
     renderApp("/projects/TRL");
@@ -106,10 +106,10 @@ describe("not found", () => {
   async function notFoundMarkup(path: string) {
     signedInAs("member");
     server.use(
-      http.get("/api/web/projects/:key", notFound),
-      http.get("/api/web/projects/:key/issues", notFound),
-      http.get("/api/web/projects/:key/status-updates", notFound),
-      http.get("/api/web/issues/:key", notFound),
+      http.get("/api/web/products/:key", notFound),
+      http.get("/api/web/products/:key/items", notFound),
+      http.get("/api/web/products/:key/status-updates", notFound),
+      http.get("/api/web/items/:key", notFound),
     );
     renderApp(path);
     await screen.findByRole("heading", { name: "Page not found", level: 1 });

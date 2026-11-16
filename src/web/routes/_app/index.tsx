@@ -12,11 +12,11 @@ export const Route = createFileRoute("/_app/")({
 function FeedPage() {
   const [filter, setFilter] = useState<FeedFilter>({
     actor: null,
-    project: null,
+    product: null,
   });
   const { session } = useChrome();
   const feed = useLiveFeed(filter, {
-    onProjectGone: () => setFilter((f) => ({ ...f, project: null })),
+    onProjectGone: () => setFilter((f) => ({ ...f, product: null })),
   });
   const noProjects = !session.viewer.isOwner && session.projects.length === 0;
   return (
@@ -45,10 +45,10 @@ function FeedPage() {
         onAtTopChange={feed.setAtTop}
         filters={feed.filters}
         actorFilter={filter.actor}
-        projectFilter={filter.project}
+        projectFilter={filter.product}
         onActorFilterChange={(actor) => setFilter((f) => ({ ...f, actor }))}
         onProjectFilterChange={(project) =>
-          setFilter((f) => ({ ...f, project }))
+          setFilter((f) => ({ ...f, product: project }))
         }
         onRetry={feed.retry}
         noProjects={noProjects}

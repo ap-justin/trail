@@ -36,7 +36,7 @@ function meOf(
       login: null,
       email: null,
       actor: null,
-      projects: [],
+      products: [],
       ...shared,
     };
   }
@@ -46,7 +46,7 @@ function meOf(
       login: viewer.login,
       email: "email" in viewer ? viewer.email : null,
       actor: null,
-      projects: [],
+      products: [],
       ...shared,
     };
   }
@@ -61,7 +61,7 @@ function meOf(
       photoUrl: photoUrlOf(db, viewer.actor.id),
       title: null,
     },
-    projects: viewer.projects.map(({ key, name }) => ({ key, name })),
+    products: viewer.products.map(({ key, name }) => ({ key, name })),
     ...shared,
   };
 }

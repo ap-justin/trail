@@ -21,7 +21,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import type { PersonView, WebProjectRefView } from "@/lib/api-types";
+import type { PersonView, WebProductRefView } from "@/lib/api-types";
 import { cn } from "@/lib/utils";
 import { INVITEE_HINT, parseInvitee } from "../../shared/invitee";
 
@@ -46,7 +46,7 @@ export type PeopleViewProps = {
   /** The owner's row first, then everyone invited. */
   people: PersonView[];
   /** Every project the owner can give access to. */
-  projects: WebProjectRefView[];
+  projects: WebProductRefView[];
   onRetry: () => void;
   /** The entry arrives trimmed and lowercased, without a leading @; an empty project list is allowed. */
   onInvite: (invite: Invite) => void;
@@ -119,7 +119,7 @@ function ProjectChip({
   project,
   keyOnly = false,
 }: {
-  project: WebProjectRefView;
+  project: WebProductRefView;
   keyOnly?: boolean;
 }) {
   return (
@@ -141,7 +141,7 @@ function ProjectChecklist({
   firstRef,
   className,
 }: {
-  projects: WebProjectRefView[];
+  projects: WebProductRefView[];
   selected: string[];
   onChange: (keys: string[]) => void;
   firstRef?: Ref<HTMLButtonElement>;
@@ -182,7 +182,7 @@ function ProjectPicker({
   selected,
   onChange,
 }: {
-  projects: WebProjectRefView[];
+  projects: WebProductRefView[];
   selected: string[];
   onChange: (keys: string[]) => void;
 }) {
@@ -217,7 +217,7 @@ function InviteForm({
   pending,
   error,
 }: {
-  projects: WebProjectRefView[];
+  projects: WebProductRefView[];
   onInvite: (invite: Invite) => void;
   pending: boolean;
   error: InviteError | null;
@@ -369,7 +369,7 @@ function PersonRow({
   mutation,
 }: {
   person: PersonView;
-  projects: WebProjectRefView[];
+  projects: WebProductRefView[];
   onSaveProjects: (id: string, projectKeys: string[]) => void;
   onRemove: (id: string) => void;
   mutation: RowMutation | null;
@@ -518,7 +518,7 @@ function PersonRow({
       ) : (
         <>
           <div className="flex min-w-0 flex-1 flex-wrap gap-1">
-            {person.projects.map((project) => (
+            {person.products.map((project) => (
               <ProjectChip key={project.key} project={project} />
             ))}
           </div>
@@ -566,7 +566,7 @@ function PersonRow({
                 aria-label={`Edit projects for ${handle}`}
                 className="max-lg:h-10 max-lg:flex-1"
                 onClick={() => {
-                  setDraft(person.projects.map((p) => p.key));
+                  setDraft(person.products.map((p) => p.key));
                   changeMode("edit");
                 }}
               >

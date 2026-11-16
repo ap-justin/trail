@@ -18,14 +18,14 @@ const addProject = () =>
     .returning()
     .get();
 
-test("the owner signs in as owner and sees every project", async () => {
+test("the owner signs in as owner and sees every product", async () => {
   const a = addProject();
   const b = addProject();
   const viewer = await viewerOf(
     await signIn(owner, { githubId: TEST_OWNER_ID }),
   );
   expect(viewer).toMatchObject({ kind: "owner", login: owner });
-  expect(viewer.kind === "owner" && viewer.projects.map((p) => p.id)).toEqual(
+  expect(viewer.kind === "owner" && viewer.products.map((p) => p.id)).toEqual(
     expect.arrayContaining([a.id, b.id]),
   );
 });
@@ -48,7 +48,7 @@ const invite = (username: string, ...projectIds: string[]) => {
   return inviteId;
 };
 
-test("an invited account is a member with exactly its projects, and gets an actor on sign-in", async () => {
+test("an invited account is a member with exactly its products, and gets an actor on sign-in", async () => {
   const mine = addProject();
   addProject();
   invite("ada", mine.id);
@@ -69,7 +69,7 @@ test("an invited account is a member with exactly its projects, and gets an acto
       githubId: 42,
       githubLogin: "ada",
     },
-    projects: [{ id: mine.id, key: mine.key, name: "p" }],
+    products: [{ id: mine.id, key: mine.key, name: "p" }],
   });
 });
 
@@ -117,14 +117,14 @@ test("removing the invite makes a live session not_invited on its next request",
   });
 });
 
-test("a project added to a member shows on its next request", async () => {
+test("a product added to a member shows on its next request", async () => {
   const inviteId = invite("barbara");
   const cookie = await signIn("barbara");
-  expect(await viewerOf(cookie)).toMatchObject({ projects: [] });
+  expect(await viewerOf(cookie)).toMatchObject({ products: [] });
   const added = addProject();
   db.insert(productMember).values({ inviteId, productId: added.id }).run();
   expect(await viewerOf(cookie)).toMatchObject({
-    projects: [{ id: added.id }],
+    products: [{ id: added.id }],
   });
 });
 
@@ -195,7 +195,7 @@ test("a member's request under its old login leaves the login with the account n
   });
 });
 
-test("a renamed member keeps its access, and its projects, under the new login", async () => {
+test("a renamed member keeps its access, and its products, under the new login", async () => {
   const mine = addProject();
   invite("old-name", mine.id);
   await signIn("old-name", { githubId: 500 });
@@ -205,7 +205,7 @@ test("a renamed member keeps its access, and its projects, under the new login",
     kind: "member",
     login: "new-name",
     actor: { id: before?.id, githubLogin: "new-name" },
-    projects: [{ id: mine.id }],
+    products: [{ id: mine.id }],
   });
   expect(db.select().from(actor).where(eq(actor.githubId, 500)).get()).toEqual({
     ...before,

@@ -2,14 +2,14 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, test } from "vitest";
-import type { EntryView, WebIssueView } from "@/lib/api-types";
+import type { EntryView, WebItemView } from "@/lib/api-types";
 import { renderApp, signedInAs } from "@/test/app";
 import { issue, issueList, maya, project, trail } from "@/test/fixtures";
 import { server } from "@/test/server";
 
 function serveIssue() {
   server.use(
-    http.get("/api/web/issues/TRL-14", () => HttpResponse.json(issue())),
+    http.get("/api/web/items/TRL-14", () => HttpResponse.json(issue())),
   );
 }
 
@@ -32,13 +32,13 @@ describe("filing an issue", () => {
   test("New issue on a project page files in that project and goes to the new issue", async () => {
     signedInAs("member");
     server.use(
-      http.get("/api/web/projects/DOC", () =>
+      http.get("/api/web/products/DOC", () =>
         HttpResponse.json(project({ key: "DOC", name: "Docs site" })),
       ),
-      http.get("/api/web/projects/DOC/issues", () =>
+      http.get("/api/web/products/DOC/items", () =>
         HttpResponse.json(issueList([])),
       ),
-      http.get("/api/web/projects/DOC/status-updates", () =>
+      http.get("/api/web/products/DOC/status-updates", () =>
         HttpResponse.json({ items: [], nextCursor: null }),
       ),
     );
@@ -46,7 +46,7 @@ describe("filing an issue", () => {
       issue({
         key: "DOC-3",
         title: "Write the guide",
-        project: { key: "DOC", name: "Docs site" },
+        product: { key: "DOC", name: "Docs site" },
       });
     const sent: unknown[] = [];
     server.use(
@@ -54,7 +54,7 @@ describe("filing an issue", () => {
         sent.push(await request.json());
         return HttpResponse.json(filed(), { status: 201 });
       }),
-      http.get("/api/web/issues/DOC-3", () => HttpResponse.json(filed())),
+      http.get("/api/web/items/DOC-3", () => HttpResponse.json(filed())),
     );
     const { router } = renderApp("/projects/DOC");
     const [newIssue] = await screen.findAllByRole("button", {
@@ -74,7 +74,7 @@ describe("filing an issue", () => {
       expect(router.state.location.pathname).toBe("/issues/DOC-3"),
     );
     expect(sent).toEqual([
-      { projectKey: "DOC", title: "Write the guide", description: "" },
+      { product: "DOC", title: "Write the guide", description: "" },
     ]);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(
@@ -115,15 +115,16 @@ describe("commenting", () => {
     serveIssue();
     const sent: unknown[] = [];
     server.use(
-      http.post("/api/web/issues/TRL-14/comments", async ({ request }) => {
+      http.post("/api/web/items/TRL-14/comments", async ({ request }) => {
         sent.push(await request.json());
         const entry: EntryView = {
           kind: "comment",
           id: "t9",
           createdAt: "2026-11-11T12:00:00.000Z",
           actor: maya,
-          project: trail,
-          issue: { key: "TRL-14", title: issue().title },
+          product: trail,
+          project: null,
+          item: { key: "TRL-14", title: issue().title, type: "issue" },
           comment: { id: "c9", body: "Ship it.", sourceAuthor: null },
         };
         return HttpResponse.json(entry, { status: 201 });
@@ -150,7 +151,7 @@ describe("commenting", () => {
     signedInAs("member");
     serveIssue();
     server.use(
-      http.get("/api/web/issues/TRL-15", () =>
+      http.get("/api/web/items/TRL-15", () =>
         HttpResponse.json(
           issue({ key: "TRL-15", title: "Search", timeline: [] }),
         ),
@@ -161,15 +162,16 @@ describe("commenting", () => {
       answer = resolve;
     });
     server.use(
-      http.post("/api/web/issues/TRL-14/comments", async () => {
+      http.post("/api/web/items/TRL-14/comments", async () => {
         await answered;
         const entry: EntryView = {
           kind: "comment",
           id: "t9",
           createdAt: "2026-11-11T12:00:00.000Z",
           actor: maya,
-          project: trail,
-          issue: { key: "TRL-14", title: issue().title },
+          product: trail,
+          project: null,
+          item: { key: "TRL-14", title: issue().title, type: "issue" },
           comment: { id: "c9", body: "Ship it.", sourceAuthor: null },
         };
         return HttpResponse.json(entry, { status: 201 });
@@ -192,12 +194,12 @@ describe("commenting", () => {
     await waitFor(() =>
       expect(
         queryClient
-          .getQueryData<WebIssueView>(["issue", "TRL-14"])
+          .getQueryData<WebItemView>(["issue", "TRL-14"])
           ?.timeline.some((e) => e.id === "t9"),
       ).toBe(true),
     );
     expect(
-      queryClient.getQueryData<WebIssueView>(["issue", "TRL-15"])?.timeline,
+      queryClient.getQueryData<WebItemView>(["issue", "TRL-15"])?.timeline,
     ).toEqual([]);
     expect(screen.queryByText("Ship it.")).not.toBeInTheDocument();
   });
@@ -206,7 +208,7 @@ describe("commenting", () => {
     signedInAs("member");
     serveIssue();
     server.use(
-      http.post("/api/web/issues/TRL-14/comments", () =>
+      http.post("/api/web/items/TRL-14/comments", () =>
         HttpResponse.json(
           { error: { code: "too_large", message: "Comment is too long" } },
           { status: 413 },

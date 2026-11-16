@@ -60,7 +60,7 @@ async function openAndSettleSession(
 function serveIssue() {
   const reads = { count: 0 };
   server.use(
-    http.get("/api/web/issues/TRL-14", () => {
+    http.get("/api/web/items/TRL-14", () => {
       reads.count += 1;
       return HttpResponse.json(issue());
     }),

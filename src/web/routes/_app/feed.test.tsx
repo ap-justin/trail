@@ -272,15 +272,15 @@ describe("a project taken away while filtered to it", () => {
       screen.getByRole("combobox", { name: "Filter by project" }),
     );
     await userEvent.click(await screen.findByRole("option", { name: "trail" }));
-    await waitFor(() => expect(asked.at(-1)?.get("project")).toBe("TRL"));
+    await waitFor(() => expect(asked.at(-1)?.get("product")).toBe("TRL"));
     const filtered = FakeEventSource.current;
-    expect(filtered.url).toBe("/api/web/events?project=TRL");
+    expect(filtered.url).toBe("/api/web/events?product=TRL");
 
     server.use(
       http.get("/api/web/feed", ({ request }) => {
         const query = new URL(request.url).searchParams;
         asked.push(query);
-        return query.has("project")
+        return query.has("product")
           ? notFound()
           : HttpResponse.json(feedPage([statusEntry("e2", minutesAgo(30))]));
       }),
@@ -289,7 +289,7 @@ describe("a project taken away while filtered to it", () => {
     await waitFor(() =>
       expect(FakeEventSource.current.url).toBe("/api/web/events"),
     );
-    await waitFor(() => expect(asked.at(-1)?.has("project")).toBe(false));
+    await waitFor(() => expect(asked.at(-1)?.has("product")).toBe(false));
     expect(
       screen.getByRole("combobox", { name: "Filter by project" }),
     ).toHaveTextContent("All projects");

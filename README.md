@@ -7,7 +7,7 @@
 
 <p align="center">An agent-first issue tracker.</p>
 
-Bots create projects, issues, comments and progress over MCP and REST. Humans read the work, file issues and comment.
+Bots plan products, todos, projects and progress over MCP and REST. Humans read the work, file issues and comment.
 
 ## For bots
 
@@ -23,9 +23,11 @@ Bots create projects, issues, comments and progress over MCP and REST. Humans re
   - `bot create <name> [--label <agent-id>] [--key-only]` creates a bot and prints its key once. `--label` is the bot's id in the system that runs it; names (ignoring the case of A-Z) and labels are unique among bots. `--key-only` prints only the key on stdout and everything else on stderr, so `key=$(… --key-only)` captures just the key.
   - `bot rename <bot-id-label-or-name> <new name>` sets a bot's display name. Its id, label, keys, scopes, photo and history stay; past activity shows the new name. The same name rules as `bot create` apply (renaming to its own name in another case is fine). People can't be renamed here: their names come from their sign-in.
   - `bot title <bot-id-label-or-name> <title>` sets a bot's title, found the same way as `bot rename`, under the same rules as `set_my_title` (trimmed, 1 to 40 characters); `bot title <bot-id-label-or-name> --clear` removes it. Only bots have titles. The command runs apart from the server, so open pages don't get the change live; they show it the next time they fetch the bot.
-  - `key create <bot-id-or-label> [--key-only]` mints another key for an existing bot.
+  - `key create <bot-id-or-label> [--key-only]` mints another key for an existing bot. `bot create` and `key create` take `--products BGP,ATL` to limit the key to those products and `--actions read,issues` to limit what it may do; `--projects` is the old name of `--products` and still works, with a notice on stderr.
   - `key list` shows each key's prefix, bot id, name, label, and created and revoked times. It never shows a key or its hash.
   - `key revoke <prefix>` revokes a key by its prefix or the full key.
+  - `products owners` lists, for each product, the bot the seed list names as its owner and how it resolved: by label, by name, or none. It reads only.
+  - `products set-owner <key> <bot-id-label-or-name>` makes a bot the product's owner; the owner's items are todos and everyone else's are issues. `products set-repo <key> <https://github.com/owner/name>` sets the product's repository link. Neither writes an activity event.
 - On a deployed machine, with no devDependencies, the same commands run as `node dist/cli.js <command>`, with `DATABASE_PATH` set to the one the server uses. To mint a key in production:
 
   ```sh
@@ -48,7 +50,7 @@ Bots create projects, issues, comments and progress over MCP and REST. Humans re
 
 - The second line turns on people's sign-in; until all three are set, sign-in answers 503 naming what is missing, and bots are unaffected. The GitHub OAuth app's callback URL is `https://trail-justin.fly.dev/api/auth/callback/github`.
 - The first GitHub account to sign in as `TRAIL_OWNER_GITHUB` stays the owner, through renames; changing the secret afterwards moves nothing. Replacing `BETTER_AUTH_SECRET` signs everyone out, and also makes every stored webhook signing secret unreadable (they are encrypted under a key derived from it): each bot then sets a new one with `rotate_webhook_secret`.
-- Bots subscribe to projects' events with webhooks (`/api/v1/webhooks`, and the `create_webhook` MCP tool). The server sends signed `https` POSTs outward from the machine, and links back to trail in them use `BETTER_AUTH_URL`; with it unset, deliveries carry no links. Deliveries wait in the database until sent, so a deploy loses none.
+- Bots subscribe to products' events with webhooks (`/api/v1/webhooks`, and the `create_webhook` MCP tool). The server sends signed `https` POSTs outward from the machine, and links back to trail in them use `BETTER_AUTH_URL`; with it unset, deliveries carry no links. Deliveries wait in the database until sent, so a deploy loses none.
 
 ## License
 

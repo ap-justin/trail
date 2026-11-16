@@ -27,7 +27,7 @@ function feedProps(overrides: Partial<FeedViewProps> = {}): FeedViewProps {
     pendingCount: 0,
     onShowPending: vi.fn(),
     onAtTopChange: vi.fn(),
-    filters: { actors: [kai], projects: [{ key: "TRL", name: "trail" }] },
+    filters: { actors: [kai], products: [{ key: "TRL", name: "trail" }] },
     actorFilter: null,
     projectFilter: null,
     onActorFilterChange: vi.fn(),

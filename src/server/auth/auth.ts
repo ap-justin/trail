@@ -17,7 +17,7 @@ import {
   isEmailInvited,
   syncActor,
   syncEmailActor,
-  visibleProjects,
+  visibleProducts,
 } from "./identity.js";
 import { windowLimiter } from "./limit.js";
 import { type MailTransport, resendTransport, signInEmail } from "./mail.js";
@@ -330,7 +330,7 @@ export function createAuth({
       kind: access.isOwner ? "owner" : "member",
       login,
       actor: access.actor,
-      projects: visibleProjects(db, access),
+      products: visibleProducts(db, access),
     };
   }
 

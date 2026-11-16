@@ -4,7 +4,7 @@ import { AppPage, useChrome } from "@/app/chrome";
 import { NotFoundPage } from "@/app/not-found-page";
 import { IssueBreadcrumb, IssueView } from "@/components/issue";
 import { api, isNotFound } from "@/lib/api";
-import type { WebIssueView } from "@/lib/api-types";
+import type { WebItemView } from "@/lib/api-types";
 import { loadableOf } from "@/lib/loadable";
 import { paths } from "@/lib/paths";
 import { keys } from "@/lib/queries";
@@ -28,7 +28,7 @@ function IssuePage() {
   const comment = useAction(
     (vars: { key: string; body: string }) => api.comment(vars.key, vars.body),
     (entry, vars) => {
-      queryClient.setQueryData<WebIssueView>(keys.issue(vars.key), (current) =>
+      queryClient.setQueryData<WebItemView>(keys.issue(vars.key), (current) =>
         current && !current.timeline.some((e) => e.id === entry.id)
           ? { ...current, timeline: [...current.timeline, entry] }
           : current,
@@ -40,12 +40,12 @@ function IssuePage() {
   return (
     <AppPage
       section={null}
-      heading={<IssueBreadcrumb issueKey={key} project={issue.data?.project} />}
-      projectKey={issue.data?.project.key}
+      heading={<IssueBreadcrumb issueKey={key} project={issue.data?.product} />}
+      projectKey={issue.data?.product.key}
       back={
         issue.data && {
-          href: paths.project(issue.data.project.key),
-          label: `Back to ${issue.data.project.name}`,
+          href: paths.project(issue.data.product.key),
+          label: `Back to ${issue.data.product.name}`,
         }
       }
     >

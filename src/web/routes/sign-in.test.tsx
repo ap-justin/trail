@@ -109,7 +109,7 @@ describe("the return address", () => {
     await screen.findByRole("heading", { name: "Sign in to trail" });
     signedInAs("member");
     server.use(
-      http.get("/api/web/issues/TRL-14", () => HttpResponse.json(issue())),
+      http.get("/api/web/items/TRL-14", () => HttpResponse.json(issue())),
     );
     act(() => {
       focusManager.setFocused(false);
@@ -126,7 +126,7 @@ describe("the return address", () => {
   test("a member on sign-in goes on to the return address", async () => {
     signedInAs("member");
     server.use(
-      http.get("/api/web/issues/TRL-14", () => HttpResponse.json(issue())),
+      http.get("/api/web/items/TRL-14", () => HttpResponse.json(issue())),
     );
     const { router } = renderApp("/sign-in?redirect=%2Fissues%2FTRL-14");
     await waitFor(() =>

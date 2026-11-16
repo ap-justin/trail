@@ -13,7 +13,7 @@ import {
 import { KeyText, LabelChip } from "@/components/text";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import type { EntryView, WebActorView, WebIssueView } from "@/lib/api-types";
+import type { EntryView, WebActorView, WebItemView } from "@/lib/api-types";
 import type { Loadable } from "@/lib/loadable";
 import { paths } from "@/lib/paths";
 import { formatAbsolute, formatDay } from "@/lib/time";
@@ -23,7 +23,7 @@ export type IssueViewProps = {
   /** The key from the URL, named in the error copy before the issue has loaded. */
   issueKey: string;
   /** Not found covers a missing issue and one in a project the viewer can't see. */
-  issue: Loadable<WebIssueView> | { status: "not_found" };
+  issue: Loadable<WebItemView> | { status: "not_found" };
   /** Who a comment will be credited to. */
   viewer: { name: string };
   onRetry: () => void;
@@ -93,7 +93,7 @@ const strong = (text: string) => (
   <span className="font-medium text-foreground">{text}</span>
 );
 
-function Header({ issue }: { issue: WebIssueView }) {
+function Header({ issue }: { issue: WebItemView }) {
   return (
     <header className="flex flex-col gap-2 border-b px-4 pt-3.5 pb-3 lg:gap-1.5 lg:border-0 lg:p-0">
       <h1 className="text-lg leading-tight font-semibold lg:text-xl">
@@ -157,7 +157,7 @@ const none = <span className="text-muted-foreground">None</span>;
  * Read-only on purpose: people never change status, priority, labels, assignee or
  * estimate, so nothing here is a control, has a hover state or carries a chevron.
  */
-function Properties({ issue }: { issue: WebIssueView }) {
+function Properties({ issue }: { issue: WebItemView }) {
   const headingId = useId();
   return (
     <section
@@ -220,10 +220,10 @@ function Properties({ issue }: { issue: WebIssueView }) {
         </Property>
         <Property label="Project">
           <AppLink
-            href={paths.project(issue.project.key)}
+            href={paths.project(issue.product.key)}
             className="flex items-center gap-1 hover:underline lg:gap-2"
           >
-            <KeyText>{issue.project.key}</KeyText> {issue.project.name}
+            <KeyText>{issue.product.key}</KeyText> {issue.product.name}
           </AppLink>
         </Property>
         <Property label="Created" className="max-lg:hidden">
@@ -239,7 +239,7 @@ function Properties({ issue }: { issue: WebIssueView }) {
 
 const webScheme = /^https?:\/\//i;
 
-function Links({ links }: { links: WebIssueView["links"] }) {
+function Links({ links }: { links: WebItemView["links"] }) {
   const headingId = useId();
   if (links.length === 0) return null;
   return (
@@ -299,7 +299,7 @@ function Links({ links }: { links: WebIssueView["links"] }) {
 /** The words after the actor in a one-line timeline entry. */
 function changePhrase(entry: EntryView): ReactNode {
   switch (entry.kind) {
-    case "issue_created":
+    case "item_created":
       return entry.actor.kind === "bot"
         ? "created this issue"
         : "filed this issue";
@@ -341,9 +341,15 @@ function changePhrase(entry: EntryView): ReactNode {
       );
     // project-level kinds and comments never render as a change line
     case "comment":
-    case "status_update":
+    case "product_status_update":
+    case "product_created":
+    case "product_imported":
+    case "type_changed":
+    case "added_to_project":
+    case "removed_from_project":
+    case "project_status_update":
     case "project_created":
-    case "project_imported":
+    case "project_updated":
       return null;
     default:
       // typechecks only while every known kind has a case; at runtime, a kind the server added later lands here

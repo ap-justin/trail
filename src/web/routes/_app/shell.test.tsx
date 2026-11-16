@@ -30,15 +30,17 @@ describe("search", () => {
     signedInAs("member");
     serveFeed();
     const asked = serveSearch({
-      issues: [
+      items: [
         {
           key: "TRL-14",
           sourceKey: null,
           title: "Team access",
+          type: "issue",
           status: "open",
-          project: trail,
+          product: trail,
         },
       ],
+      products: [],
       projects: [],
     });
     renderApp("/");
@@ -52,13 +54,13 @@ describe("search", () => {
   test("following a result empties the box and closes the results", async () => {
     signedInAs("member");
     serveFeed();
-    serveSearch({ issues: [], projects: [trail] });
+    serveSearch({ items: [], products: [trail], projects: [] });
     server.use(
-      http.get("/api/web/projects/TRL", () => HttpResponse.json(project())),
-      http.get("/api/web/projects/TRL/issues", () =>
+      http.get("/api/web/products/TRL", () => HttpResponse.json(project())),
+      http.get("/api/web/products/TRL/items", () =>
         HttpResponse.json(issueList([])),
       ),
-      http.get("/api/web/projects/TRL/status-updates", () =>
+      http.get("/api/web/products/TRL/status-updates", () =>
         HttpResponse.json({ items: [], nextCursor: null }),
       ),
     );
@@ -96,7 +98,7 @@ describe("search", () => {
   test("no hits shows the empty state", async () => {
     signedInAs("member");
     serveFeed();
-    serveSearch({ issues: [], projects: [] });
+    serveSearch({ items: [], products: [], projects: [] });
     renderApp("/");
     await screen.findByText("No activity yet");
     await userEvent.type(searchBox(), "zzz");

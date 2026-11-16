@@ -10,16 +10,18 @@ import {
   SignalLowIcon,
   SignalMediumIcon,
 } from "lucide-react";
-import type { WebIssueRowView, WebProjectView } from "@/lib/api-types";
+import type { WebItemRowView, WebProductView } from "@/lib/api-types";
 import { cn } from "@/lib/utils";
 
-export type IssueStatus = WebIssueRowView["status"];
-export type ProjectHealth = NonNullable<WebProjectView["health"]>;
+export type IssueStatus = WebItemRowView["status"];
+export type ProjectHealth = NonNullable<WebProductView["health"]>;
 
 const statuses: Record<
   IssueStatus,
   { label: string; icon: LucideIcon; ink: string }
 > = {
+  // triage is drawn as Open, with no marker of its own
+  triage: { label: "Open", icon: CircleIcon, ink: "text-muted-foreground" },
   open: { label: "Open", icon: CircleIcon, ink: "text-muted-foreground" },
   in_progress: {
     label: "In progress",

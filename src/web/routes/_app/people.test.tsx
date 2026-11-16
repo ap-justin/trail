@@ -29,7 +29,7 @@ function servePeople() {
     pending: true,
     name: null,
     photoUrl: null,
-    projects: projectKeys.map((key) => ({ key, name: key })),
+    products: projectKeys.map((key) => ({ key, name: key })),
     invitedAt: "2026-11-11T10:00:00.000Z",
   });
   server.use(
@@ -152,7 +152,7 @@ describe("managing people", () => {
       {
         method: "POST",
         path: "/api/web/people",
-        body: { username: "newbie", projectKeys: [] },
+        body: { username: "newbie", products: [] },
       },
     ]);
   });
@@ -198,7 +198,7 @@ describe("managing people", () => {
       row("mayachen").getByRole("button", { name: "Save projects" }),
     );
     await waitFor(() => expect(writes).toHaveLength(1));
-    expect(writes[0]?.body).toEqual({ projectKeys: ["DOC", "OPB"] });
+    expect(writes[0]?.body).toEqual({ products: ["DOC", "OPB"] });
   });
 
   test("Remove deletes the person and the row goes", async () => {
@@ -383,8 +383,8 @@ describe("managing people", () => {
     expect(
       writes.map(({ method, path, body }) => [method, path, body]),
     ).toEqual([
-      ["POST", "/api/web/people", { username: "newbie", projectKeys: [] }],
-      ["PUT", "/api/web/people/newbie", { projectKeys: [] }],
+      ["POST", "/api/web/people", { username: "newbie", products: [] }],
+      ["PUT", "/api/web/people/newbie", { products: [] }],
       ["DELETE", "/api/web/people/newbie", null],
     ]);
   });
@@ -412,7 +412,7 @@ describe("managing people", () => {
       {
         method: "POST",
         path: "/api/web/people",
-        body: { username: "sam@studio.example", projectKeys: [] },
+        body: { username: "sam@studio.example", products: [] },
       },
       {
         method: "DELETE",

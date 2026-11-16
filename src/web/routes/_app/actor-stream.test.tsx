@@ -21,7 +21,7 @@ function serveCounted() {
       reads.me += 1;
       return HttpResponse.json(meView("member"));
     }),
-    http.get("/api/web/issues/TRL-14", () => {
+    http.get("/api/web/items/TRL-14", () => {
       reads.issue += 1;
       return HttpResponse.json(issue());
     }),

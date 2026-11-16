@@ -30,7 +30,7 @@ export function meView(state: MeView["state"]): MeView {
         login: null,
         email: null,
         actor: null,
-        projects: [],
+        products: [],
         ownerName,
         emailSignIn: true,
       };
@@ -40,7 +40,7 @@ export function meView(state: MeView["state"]): MeView {
         login: "stranger",
         email: null,
         actor: null,
-        projects: [],
+        products: [],
         ownerName,
         emailSignIn: true,
       };
@@ -50,7 +50,7 @@ export function meView(state: MeView["state"]): MeView {
         login: "mayachen",
         email: null,
         actor: maya,
-        projects: allProjects,
+        products: allProjects,
         ownerName,
         emailSignIn: true,
       };
@@ -72,7 +72,7 @@ export function feedPage(items: EntryView[]): FeedView {
   return {
     items,
     nextCursor: null,
-    filters: { actors: [kai], projects: [trail] },
+    filters: { actors: [kai], products: [trail], projects: [] },
   };
 }
 

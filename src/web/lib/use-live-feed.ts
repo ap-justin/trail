@@ -93,11 +93,11 @@ export function useLiveFeed(
   filter: FeedFilter,
   { onProjectGone }: { onProjectGone: () => void },
 ) {
-  const { actor, project } = filter;
+  const { actor, product: project } = filter;
   const queryClient = useQueryClient();
   const feed = useQuery({
-    queryKey: keys.feed({ actor, project }),
-    queryFn: () => api.feed({ actor, project }),
+    queryKey: keys.feed({ actor, product: project }),
+    queryFn: () => api.feed({ actor, product: project }),
     // the stream keeps it current; a focus refetch would only repeat it
     refetchOnWindowFocus: false,
     // the filter options stay while another filter's page loads
@@ -164,7 +164,7 @@ export function useLiveFeed(
 
   const refetch = useEffectEvent(() => {
     void queryClient.invalidateQueries({
-      queryKey: keys.feed({ actor, project }),
+      queryKey: keys.feed({ actor, product: project }),
     });
   });
   const readEverything = useEffectEvent(() => {
@@ -182,8 +182,8 @@ export function useLiveFeed(
   const readAfterClose = useEffectEvent(async () => {
     try {
       await queryClient.fetchQuery({
-        queryKey: keys.feed({ actor, project }),
-        queryFn: () => api.feed({ actor, project }),
+        queryKey: keys.feed({ actor, product: project }),
+        queryFn: () => api.feed({ actor, product: project }),
         staleTime: 0,
       });
     } catch (error) {
@@ -194,7 +194,7 @@ export function useLiveFeed(
   });
 
   useEffect(() => {
-    const source = new EventSource(api.eventsUrl({ actor, project }));
+    const source = new EventSource(api.eventsUrl({ actor, product: project }));
     let retry: ReturnType<typeof setTimeout> | undefined;
     source.addEventListener("open", () => {
       setConnection("open");
@@ -253,7 +253,7 @@ export function useLiveFeed(
     pendingCount: state.pending.length,
     showPending: () => dispatch({ type: "show_pending" }),
     setAtTop,
-    filters: feed.data?.filters ?? { actors: [], projects: [] },
+    filters: feed.data?.filters ?? { actors: [], products: [], projects: [] },
     retry: () => void feed.refetch(),
   };
 }

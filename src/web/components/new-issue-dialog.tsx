@@ -27,7 +27,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import type { WebProjectRefView } from "@/lib/api-types";
+import type { WebProductRefView } from "@/lib/api-types";
 
 export type NewIssue = {
   projectKey: string;
@@ -39,7 +39,7 @@ export type NewIssueDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** The projects the viewer can file in. */
-  projects: WebProjectRefView[];
+  projects: WebProductRefView[];
   /** The current project's key; the first project when null or not among `projects`. */
   defaultProjectKey: string | null;
   /** Who the issue will be credited to. */

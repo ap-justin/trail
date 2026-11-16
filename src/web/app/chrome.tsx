@@ -9,7 +9,7 @@ import {
 import { NewIssueDialog } from "@/components/new-issue-dialog";
 import { SearchResults } from "@/components/search-results";
 import { api } from "@/lib/api";
-import type { MeView, WebProjectRefView } from "@/lib/api-types";
+import type { MeView, WebProductRefView } from "@/lib/api-types";
 import { statusOf } from "@/lib/loadable";
 import { isMember, keys } from "@/lib/queries";
 import { useAction } from "@/lib/use-action";
@@ -17,7 +17,7 @@ import { useActorStream } from "@/lib/use-actor-stream";
 
 export type Session = {
   viewer: ShellViewer;
-  projects: WebProjectRefView[];
+  projects: WebProductRefView[];
   ownerName: string;
 };
 
@@ -33,7 +33,7 @@ export function sessionOf(me: MeView): Session | null {
       isOwner: me.state === "owner",
       photoUrl: me.actor.photoUrl,
     },
-    projects: me.projects,
+    projects: me.products,
     ownerName: me.ownerName,
   };
 }
@@ -72,7 +72,7 @@ export function AppChrome({
     queryClient.setQueryData(keys.issue(issue.key), issue);
     void queryClient.invalidateQueries({ queryKey: keys.projects });
     void queryClient.invalidateQueries({
-      queryKey: keys.project(issue.project.key),
+      queryKey: keys.project(issue.product.key),
     });
     setDialog(null);
     await navigate({ to: "/issues/$key", params: { key: issue.key } });
@@ -122,7 +122,9 @@ export function AppChrome({
         defaultProjectKey={dialog?.projectKey ?? null}
         viewer={session.viewer}
         ownerName={session.ownerName}
-        onSubmit={create.run}
+        onSubmit={({ projectKey, ...issue }) =>
+          create.run({ product: projectKey, ...issue })
+        }
         pending={create.pending}
         error={create.error?.message ?? null}
       />

@@ -25,7 +25,7 @@ function serveNoProjectsFeed() {
       HttpResponse.json({
         items: [],
         nextCursor: null,
-        filters: { actors: [], projects: [] },
+        filters: { actors: [], products: [], projects: [] },
       }),
     ),
   );
@@ -35,7 +35,7 @@ describe("session", () => {
   test("a member with no project is told so, not that nothing happened", async () => {
     server.use(
       http.get("/api/web/me", () =>
-        HttpResponse.json({ ...meView("member"), projects: [] }),
+        HttpResponse.json({ ...meView("member"), products: [] }),
       ),
     );
     serveNoProjectsFeed();
@@ -53,7 +53,7 @@ describe("session", () => {
   test("a member with no project has no Live indicator, though the stream is open", async () => {
     server.use(
       http.get("/api/web/me", () =>
-        HttpResponse.json({ ...meView("member"), projects: [] }),
+        HttpResponse.json({ ...meView("member"), products: [] }),
       ),
     );
     serveNoProjectsFeed();
@@ -67,7 +67,7 @@ describe("session", () => {
   test("a member added to a project while the Feed is open sees its history and filters on the next focus", async () => {
     server.use(
       http.get("/api/web/me", () =>
-        HttpResponse.json({ ...meView("member"), projects: [] }),
+        HttpResponse.json({ ...meView("member"), products: [] }),
       ),
     );
     serveNoProjectsFeed();
@@ -97,7 +97,7 @@ describe("session", () => {
   test("a member with no project sees Live once the stream brings rows", async () => {
     server.use(
       http.get("/api/web/me", () =>
-        HttpResponse.json({ ...meView("member"), projects: [] }),
+        HttpResponse.json({ ...meView("member"), products: [] }),
       ),
     );
     serveNoProjectsFeed();
@@ -133,7 +133,7 @@ describe("session", () => {
   test("an owner with no projects is told it is quiet, not that they lack access", async () => {
     server.use(
       http.get("/api/web/me", () =>
-        HttpResponse.json({ ...meView("owner"), projects: [] }),
+        HttpResponse.json({ ...meView("owner"), products: [] }),
       ),
     );
     serveNoProjectsFeed();
@@ -261,7 +261,7 @@ describe("session", () => {
     const { router } = await onFeed();
     signedInAs("anonymous");
     server.use(
-      http.get("/api/web/projects", () =>
+      http.get("/api/web/products", () =>
         HttpResponse.json(
           { error: { code: "unauthorized", message: "Sign in first" } },
           { status: 401 },
@@ -282,7 +282,7 @@ describe("session", () => {
     await onFeed();
     signedInAs("not_invited");
     server.use(
-      http.get("/api/web/projects", () =>
+      http.get("/api/web/products", () =>
         HttpResponse.json(
           { error: { code: "forbidden", message: "Not invited" } },
           { status: 403 },

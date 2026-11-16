@@ -5,11 +5,11 @@ import type {
   PeopleView,
   PersonView,
   SearchView,
-  WebIssueListView,
-  WebIssueRowView,
-  WebIssueView,
-  WebProjectListView,
-  WebProjectView,
+  WebItemListView,
+  WebItemRowView,
+  WebItemView,
+  WebProductDetailView,
+  WebProductListView,
   WebStatusUpdatePageView,
 } from "@/lib/api-types";
 
@@ -79,45 +79,45 @@ const query = (params: Record<string, string | number | null | undefined>) => {
 const web = (path: string) => `/api/web${path}`;
 const seg = encodeURIComponent;
 
-export type FeedFilter = { actor: string | null; project: string | null };
+export type FeedFilter = { actor: string | null; product: string | null };
 
 /** The server's page-size ceiling (`pageQuerySchema` in src/shared/schemas.ts). */
 export const MAX_PAGE = 200;
 
 export const api = {
   me: () => request<MeView>(web("/me")),
-  projects: () => request<WebProjectListView>(web("/projects")),
+  projects: () => request<WebProductListView>(web("/products")),
   project: (key: string) =>
-    request<WebProjectView>(web(`/projects/${seg(key)}`)),
-  issues: (key: string, status: WebIssueRowView["status"] | null) =>
-    request<WebIssueListView>(
-      web(`/projects/${seg(key)}/issues${query({ status, limit: MAX_PAGE })}`),
+    request<WebProductDetailView>(web(`/products/${seg(key)}`)),
+  issues: (key: string, status: WebItemRowView["status"] | null) =>
+    request<WebItemListView>(
+      web(`/products/${seg(key)}/items${query({ status, limit: MAX_PAGE })}`),
     ),
   statusUpdates: (key: string) =>
     request<WebStatusUpdatePageView>(
-      web(`/projects/${seg(key)}/status-updates${query({ limit: MAX_PAGE })}`),
+      web(`/products/${seg(key)}/status-updates${query({ limit: MAX_PAGE })}`),
     ),
-  issue: (key: string) => request<WebIssueView>(web(`/issues/${seg(key)}`)),
+  issue: (key: string) => request<WebItemView>(web(`/items/${seg(key)}`)),
   feed: (filter: FeedFilter) =>
     request<FeedView>(web(`/feed${query({ ...filter, limit: MAX_PAGE })}`)),
   search: (q: string) => request<SearchView>(web(`/search${query({ q })}`)),
   createIssue: (issue: {
-    projectKey: string;
+    product: string;
     title: string;
     description: string;
-  }) => request<WebIssueView>(web("/issues"), json("POST", issue)),
+  }) => request<WebItemView>(web("/issues"), json("POST", issue)),
   comment: (issueKey: string, body: string) =>
     request<EntryView>(
-      web(`/issues/${seg(issueKey)}/comments`),
+      web(`/items/${seg(issueKey)}/comments`),
       json("POST", { body }),
     ),
   people: () => request<PeopleView>(web("/people")),
-  invite: (invite: { username: string; projectKeys: string[] }) =>
+  invite: (invite: { username: string; products: string[] }) =>
     request<PersonView>(web("/people"), json("POST", invite)),
-  setProjects: (username: string, projectKeys: string[]) =>
+  setProjects: (username: string, products: string[]) =>
     request<PersonView>(
       web(`/people/${seg(username)}`),
-      json("PUT", { projectKeys }),
+      json("PUT", { products }),
     ),
   remove: (username: string) =>
     request<void>(web(`/people/${seg(username)}`), { method: "DELETE" }),

@@ -1,210 +1,294 @@
 import { beforeAll, describe, expect, test } from "vitest";
-import { atFakeTime, atFakeTimeAsync, setupTestApp } from "../test-app.js";
+import { atFakeTimeAsync, setupTestApp } from "../test-app.js";
+import { type Body, webSeed } from "./test-seed.js";
 
 const { request, signIn, owner, addMember, addProject, addBot } =
   setupTestApp();
+const { get, item, project, statusUpdate } = webSeed(request);
 
-// biome-ignore lint/suspicious/noExplicitAny: loose response bodies for field reads
-type Body = any;
-
-async function get(path: string, cookie: string) {
+/** The raw JSON text of a web GET, to prove what it never contains. */
+async function text(path: string, cookie: string) {
   const res = await request("GET", `/api/web${path}`, { key: null, cookie });
-  return { status: res.status, body: (await res.json()) as Body };
+  return res.text();
 }
 
-const bot = (path: string, json: unknown, key?: string) =>
-  request("POST", `/api/v1${path}`, { json, key });
-
-async function fileIssues(projectId: string, statuses: string[]) {
-  for (const [i, status] of statuses.entries()) {
-    const res = await bot("/issues", { projectId, title: `issue ${i}` });
-    const { id } = (await res.json()) as { id: string };
-    // a bot's issue on another's product files into triage; set the status the test wants
-    await request("PATCH", `/api/v1/issues/${id}`, { json: { status } });
-  }
-}
-
-test("GET /projects lists only the member's projects, each with open and in-progress counts and no status update yet", async () => {
-  const mine = addProject("Mine");
-  const theirs = addProject("Theirs");
-  await fileIssues(mine.id, [
-    "open",
-    "open",
-    "in_progress",
-    "done",
-    "canceled",
+// One project across a product the member sees (Alpha, Beta) and one they don't (Gamma).
+let alpha: { id: string; key: string };
+let beta: { id: string; key: string };
+let gamma: { id: string; key: string };
+let member = "";
+let ownerCookie = "";
+let keys: Record<string, string> = {};
+beforeAll(async () => {
+  alpha = addProject("Alpha");
+  beta = addProject("Beta");
+  gamma = addProject("Gamma");
+  // keys sort A to Z in creation order, so alpha < beta < gamma
+  const made = await atFakeTimeAsync([
+    () => item(alpha.key, "issue"),
+    () => item(alpha.key, "todo", { status: "done" }),
+    () => item(beta.key, "issue", { status: "open" }),
+    () => item(beta.key, "todo"),
+    () => item(gamma.key, "issue"),
+    () => item(gamma.key, "todo"),
   ]);
-  await fileIssues(theirs.id, ["open"]);
-  const cookie = await addMember("pat", [mine.id]);
-
-  const { status, body } = await get("/projects", cookie);
-
-  expect(status).toBe(200);
-  expect(body.items).toEqual([
-    {
-      key: mine.key,
-      name: "Mine",
-      description: "",
-      health: null,
-      latestStatusUpdate: null,
-      openCount: 2,
-      inProgressCount: 1,
-      updatedAt: expect.any(String),
-    },
-  ]);
-});
-
-test("a project's health and latest status update are its newest update's, with the author's name and kind", async () => {
-  const p = addProject("Health");
-  const reporter = addBot("reporter");
+  const [a1, a2, b1, b2, g1, g2] = made as string[];
+  keys = {
+    a1: a1 as string,
+    a2: a2 as string,
+    b1: b1 as string,
+    b2: b2 as string,
+    g1: g1 as string,
+    g2: g2 as string,
+  };
+  addBot("lead-bot");
   await atFakeTimeAsync([
     () =>
-      bot(`/projects/${p.id}/status-updates`, {
-        body: "fine",
-        health: "on_track",
-      }),
-    () =>
-      bot(
-        `/projects/${p.id}/status-updates`,
-        { body: "slipping", health: "at_risk" },
-        reporter.key,
+      project(
+        "Launch",
+        [alpha.key, beta.key, gamma.key],
+        [a1, a2, b1, b2, g1, g2] as string[],
+        { goal: "Ship it", lead: "lead-bot", targetDate: "2026-12-24" },
       ),
+    () => project("Seen only", [alpha.key]),
+    () => project("Gamma only", [gamma.key], [g1 as string]),
   ]);
-  const { body } = await get(`/projects/${p.key}`, await signIn(owner));
-  expect(body).toMatchObject({
-    key: p.key,
-    health: "at_risk",
-    latestStatusUpdate: {
-      body: "slipping",
-      health: "at_risk",
-      author: {
-        id: reporter.actor.id,
-        name: "reporter",
-        kind: "bot",
-        photoUrl: null,
-        title: null,
-      },
-      sourceAuthor: null,
-    },
+  await statusUpdate({ project: "launch" }, "going well", "on_track");
+  member = await addMember("partial", [alpha.id, beta.id]);
+  ownerCookie = await signIn(owner);
+});
+
+describe("GET /projects", () => {
+  test("a member sees only projects drawing from their products, each listing only those products", async () => {
+    const { status, body } = await get("/projects", member);
+    expect(status).toBe(200);
+    expect(body.items.map((p: Body) => p.slug)).toEqual([
+      "seen-only",
+      "launch",
+    ]);
+    expect(body.items[1]).toEqual({
+      slug: "launch",
+      name: "Launch",
+      goal: "Ship it",
+      health: "on_track",
+      latestStatusUpdate: expect.objectContaining({ body: "going well" }),
+      lead: expect.objectContaining({ name: "lead-bot", kind: "bot" }),
+      targetDate: "2026-12-24",
+      products: [
+        { key: alpha.key, name: "Alpha" },
+        { key: beta.key, name: "Beta" },
+      ],
+      // alpha's triage issue and beta's open issue and open todo; gamma's never
+      openCount: 3,
+      updatedAt: expect.any(String),
+    });
+    expect(body.nextCursor).toBeNull();
+  });
+
+  test("the owner sees every project and every product", async () => {
+    const { body } = await get("/projects", ownerCookie);
+    const launch = body.items.find((p: Body) => p.slug === "launch");
+    expect(body.items.map((p: Body) => p.slug)).toEqual(
+      expect.arrayContaining(["launch", "seen-only", "gamma-only"]),
+    );
+    expect(launch.products.map((p: Body) => p.key)).toEqual([
+      alpha.key,
+      beta.key,
+      gamma.key,
+    ]);
+    expect(launch.openCount).toBe(5);
+  });
+
+  test("pages newest first", async () => {
+    const first = await get("/projects?limit=1", member);
+    expect(first.body.items.map((p: Body) => p.slug)).toEqual(["seen-only"]);
+    const rest = await get(
+      `/projects?limit=1&cursor=${first.body.nextCursor}`,
+      member,
+    );
+    expect(rest.body.items.map((p: Body) => p.slug)).toEqual(["launch"]);
+  });
+
+  test("names no hidden product", async () => {
+    const json = await text("/projects", member);
+    expect(json).toContain(alpha.key);
+    expect(json).not.toContain(gamma.key);
+    expect(json).not.toContain("Gamma");
   });
 });
 
-test("a project's updatedAt is its newest issue update when that is later than the project's own", async () => {
-  const [p] = atFakeTime([() => addProject("Fresh")]);
-  if (!p) throw new Error("no project");
-  const created = await bot("/issues", { projectId: p.id, title: "x" });
-  const issue = (await created.json()) as { updatedAt: string };
-  const { body } = await get(`/projects/${p.key}`, await signIn(owner));
-  expect(body.updatedAt).toBe(issue.updatedAt);
+describe("GET /projects/:slug", () => {
+  test("says a product is hidden, and lists the visible ones", async () => {
+    const { status, body } = await get("/projects/launch", member);
+    expect(status).toBe(200);
+    expect(body).toMatchObject({
+      slug: "launch",
+      hiddenProducts: true,
+      products: [{ key: alpha.key }, { key: beta.key }],
+      openCount: 3,
+    });
+  });
+
+  test("hiddenProducts is false when the viewer sees every product", async () => {
+    const asOwner = await get("/projects/launch", ownerCookie);
+    const seen = await get("/projects/seen-only", member);
+    expect(asOwner.body.hiddenProducts).toBe(false);
+    expect(seen.body.hiddenProducts).toBe(false);
+  });
+
+  test("a project with none of the member's products is the same 404 as an unknown one", async () => {
+    const hidden = await get("/projects/gamma-only", member);
+    const unknown = await get("/projects/nope", member);
+    expect(hidden.status).toBe(404);
+    expect(unknown.status).toBe(404);
+    expect(hidden.body.error.message).toBe("no project gamma-only");
+    expect(unknown.body.error.message).toBe("no project nope");
+  });
+
+  test("names no hidden product", async () => {
+    const json = await text("/projects/launch", member);
+    expect(json).not.toContain(gamma.key);
+    expect(json).not.toContain("Gamma");
+  });
 });
 
-test("GET /projects/:key takes the key in any case", async () => {
-  const p = addProject("Case");
-  const { status, body } = await get(
-    `/projects/${p.key.toLowerCase()}`,
-    await signIn(owner),
-  );
-  expect(status).toBe(200);
-  expect(body.key).toBe(p.key);
+describe("GET /projects/:slug/items", () => {
+  test("groups the visible items by product A to Z, newest first in each, with counts over visible items", async () => {
+    const { status, body } = await get("/projects/launch/items", member);
+    expect(status).toBe(200);
+    expect(
+      body.groups.map((g: Body) => [
+        g.product.key,
+        g.count,
+        g.items.map((i: Body) => [i.key, i.type, i.status]),
+      ]),
+    ).toEqual([
+      [
+        alpha.key,
+        2,
+        [
+          [keys.a2, "todo", "done"],
+          [keys.a1, "issue", "triage"],
+        ],
+      ],
+      [
+        beta.key,
+        2,
+        [
+          [keys.b2, "todo", "open"],
+          [keys.b1, "issue", "open"],
+        ],
+      ],
+    ]);
+    expect(body.counts).toEqual({
+      all: { all: 4, open: 3, in_progress: 0, done: 1, canceled: 0 },
+      issue: { all: 2, open: 2, in_progress: 0, done: 0, canceled: 0 },
+      todo: { all: 2, open: 1, in_progress: 0, done: 1, canceled: 0 },
+    });
+    expect(body.nextCursor).toBeNull();
+  });
+
+  test("the product filter shows one group, and the counts follow it", async () => {
+    const { body } = await get(
+      `/projects/launch/items?product=${beta.key.toLowerCase()}`,
+      member,
+    );
+    expect(body.groups.map((g: Body) => g.product.key)).toEqual([beta.key]);
+    expect(body.counts.all).toEqual({
+      all: 2,
+      open: 2,
+      in_progress: 0,
+      done: 0,
+      canceled: 0,
+    });
+  });
+
+  test("type and status filters drop the groups left empty, and group counts follow them", async () => {
+    const { body } = await get(
+      "/projects/launch/items?type=todo&status=open",
+      member,
+    );
+    expect(
+      body.groups.map((g: Body) => [
+        g.product.key,
+        g.count,
+        g.items.map((i: Body) => i.key),
+      ]),
+    ).toEqual([[beta.key, 1, [keys.b2]]]);
+    expect(body.counts.all.all).toBe(4);
+  });
+
+  test("filtering by a product the member can't see is the same 404 as one the project lacks", async () => {
+    const hidden = await get(
+      `/projects/launch/items?product=${gamma.key}`,
+      member,
+    );
+    const absent = await get("/projects/launch/items?product=NOPE", member);
+    expect(hidden.status).toBe(404);
+    expect(absent.status).toBe(404);
+    expect(hidden.body.error.message).toBe(
+      absent.body.error.message.replace("NOPE", gamma.key),
+    );
+  });
+
+  test("pages across groups, each group's count the same on every page", async () => {
+    const first = await get("/projects/launch/items?limit=3", member);
+    expect(
+      first.body.groups.map((g: Body) => [
+        g.product.key,
+        g.count,
+        g.items.length,
+      ]),
+    ).toEqual([
+      [alpha.key, 2, 2],
+      [beta.key, 2, 1],
+    ]);
+    const rest = await get(
+      `/projects/launch/items?limit=3&cursor=${first.body.nextCursor}`,
+      member,
+    );
+    expect(rest.body).toMatchObject({
+      groups: [
+        { product: { key: beta.key }, count: 2, items: [{ key: keys.b1 }] },
+      ],
+      nextCursor: null,
+    });
+  });
+
+  test("a project with no items has no groups and zero counts", async () => {
+    const { body } = await get("/projects/seen-only/items", member);
+    expect(body.groups).toEqual([]);
+    expect(body.counts.all.all).toBe(0);
+  });
+
+  test("names no hidden product, item or count", async () => {
+    const json = await text("/projects/launch/items", member);
+    expect(json).not.toContain(gamma.key);
+    expect(json).not.toContain("Gamma");
+  });
+
+  test("an unreachable project is a 404 here too", async () => {
+    const { status } = await get("/projects/gamma-only/items", member);
+    expect(status).toBe(404);
+  });
 });
 
-test("GET /projects/:key/status-updates pages newest first", async () => {
-  const p = addProject("Updates");
+test("GET /projects/:slug/status-updates pages newest first, and 404s an unreachable project", async () => {
   await atFakeTimeAsync(
-    ["one", "two", "three"].map(
-      (body) => () =>
-        bot(`/projects/${p.id}/status-updates`, { body, health: "on_track" }),
+    ["one", "two"].map(
+      (body) => () => statusUpdate({ project: "seen-only" }, body),
     ),
   );
-  const cookie = await signIn(owner);
-  const first = await get(`/projects/${p.key}/status-updates?limit=2`, cookie);
-  expect(first.body.items.map((u: Body) => u.body)).toEqual(["three", "two"]);
+  const first = await get("/projects/seen-only/status-updates?limit=1", member);
+  expect(first.body.items.map((u: Body) => u.body)).toEqual(["two"]);
   const rest = await get(
-    `/projects/${p.key}/status-updates?limit=2&cursor=${first.body.nextCursor}`,
-    cookie,
+    `/projects/seen-only/status-updates?limit=1&cursor=${first.body.nextCursor}`,
+    member,
   );
   expect(rest.body).toMatchObject({
     items: [{ body: "one" }],
     nextCursor: null,
   });
-});
-
-describe("GET /projects/:key/issues", () => {
-  let p: { id: string; key: string };
-  let cookie = "";
-  beforeAll(async () => {
-    p = addProject("List");
-    const other = addProject("Other");
-    const assignee = addBot("assignee");
-    await atFakeTimeAsync([
-      () => fileIssues(p.id, ["open"]),
-      () => fileIssues(p.id, ["in_progress", "done"]),
-      () => fileIssues(other.id, ["open", "open", "open"]),
-    ]);
-    const res = await bot("/issues", {
-      projectId: p.id,
-      title: "labelled",
-      priority: 2,
-      labels: ["b", "a"],
-      assigneeId: assignee.actor.id,
-    });
-    expect(res.status).toBe(201);
-    const { id } = (await res.json()) as { id: string };
-    await request("PATCH", `/api/v1/issues/${id}`, {
-      json: { status: "open" },
-    });
-    cookie = await addMember("lister", [p.id]);
-  });
-
-  test("lists the project's issues newest first as display rows, with per-status counts", async () => {
-    const { status, body } = await get(`/projects/${p.key}/issues`, cookie);
-    expect(status).toBe(200);
-    expect(body.items).toHaveLength(4);
-    expect(body.items[0]).toEqual({
-      key: `${p.key}-4`,
-      title: "labelled",
-      status: "open",
-      priority: 2,
-      labels: ["a", "b"],
-      assignee: {
-        id: expect.any(String),
-        name: "assignee",
-        kind: "bot",
-        photoUrl: null,
-        title: null,
-      },
-      updatedAt: expect.any(String),
-    });
-    expect(body.items[3]).toMatchObject({ key: `${p.key}-1`, assignee: null });
-    expect(body.counts).toEqual({
-      all: 4,
-      open: 2,
-      in_progress: 1,
-      done: 1,
-      canceled: 0,
-    });
-    expect(body.nextCursor).toBeNull();
-  });
-
-  test("filters by status and keeps the counts of every status", async () => {
-    const { body } = await get(`/projects/${p.key}/issues?status=open`, cookie);
-    expect(body.items.map((i: Body) => i.key)).toEqual([
-      `${p.key}-4`,
-      `${p.key}-1`,
-    ]);
-    expect(body.counts.all).toBe(4);
-  });
-
-  test("pages with limit and cursor", async () => {
-    const first = await get(`/projects/${p.key}/issues?limit=3`, cookie);
-    expect(first.body.items).toHaveLength(3);
-    const rest = await get(
-      `/projects/${p.key}/issues?limit=3&cursor=${first.body.nextCursor}`,
-      cookie,
-    );
-    expect(rest.body).toMatchObject({
-      items: [{ key: `${p.key}-1` }],
-      nextCursor: null,
-    });
-  });
+  const hidden = await get("/projects/gamma-only/status-updates", member);
+  expect(hidden.status).toBe(404);
 });

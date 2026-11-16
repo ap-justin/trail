@@ -108,6 +108,31 @@ test("a human cannot create a project", () => {
   );
 });
 
+test("a person can file an issue but not add a todo, nor create or fill a project", () => {
+  const target = service.createProduct(bot, { key: projectKey(), name: "p" });
+  const filed = service.fileIssue(human, { product: target.key, title: "x" });
+  expect(filed).toMatchObject({ type: "issue", status: "triage" });
+  published = [];
+  rejectsCleanly(
+    () => service.addTodo(human, { product: target.key, title: "plan" }),
+    ForbiddenError,
+  );
+  rejectsCleanly(
+    () =>
+      service.createProject(human, { name: "mine", products: [target.key] }),
+    ForbiddenError,
+  );
+  const made = service.createProject(bot, {
+    name: "theirs",
+    products: [target.key],
+  });
+  published = [];
+  rejectsCleanly(
+    () => service.addToProject(human, made.slug, [filed.key]),
+    ForbiddenError,
+  );
+});
+
 test("a human can neither set nor clear a title", () => {
   rejectsCleanly(() => service.setMyTitle(human, "Owner"), ForbiddenError);
   rejectsCleanly(() => service.clearMyTitle(human), ForbiddenError);

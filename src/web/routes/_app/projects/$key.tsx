@@ -17,7 +17,8 @@ const statuses = {
   in_progress: true,
   done: true,
   canceled: true,
-} satisfies Record<IssueStatus, true>;
+  // triage is no tab of its own: the Open tab's ?status=open matches it
+} satisfies Record<Exclude<IssueStatus, "triage">, true>;
 
 const isStatus = (value: unknown): value is IssueStatus =>
   typeof value === "string" && Object.hasOwn(statuses, value);

@@ -1,5 +1,6 @@
 import { beforeAll, expect, test } from "vitest";
 import { setupTestApp } from "../test-app.js";
+import { webSeed } from "./test-seed.js";
 
 const { request, addMember, addProject } = setupTestApp();
 
@@ -19,6 +20,10 @@ beforeAll(async () => {
   await file(visible.id, "100% done_ish");
   await file(visible.id, "Paint");
   await file(hidden.id, "Rocket blueprint");
+  const seed = webSeed(request);
+  await seed.project("Rocket road", [visible.key, hidden.key]);
+  await seed.project("Rocket vault", [hidden.key]);
+  await seed.project("Moonshot", [visible.key], [], { slug: "rocket-moon" });
 });
 
 const search = async (q: string) => {
@@ -30,39 +35,44 @@ const search = async (q: string) => {
   return { status: res.status, body: (await res.json()) as Body };
 };
 
-test("finds visible issues by title and visible projects by name, and nothing in a hidden project", async () => {
+test("finds visible items by title, visible products by name and visible projects by name or slug, and nothing of a hidden product", async () => {
   const { status, body } = await search("rocket");
   expect(status).toBe(200);
   expect(body).toEqual({
-    issues: [
+    items: [
       {
         key: `${visible.key}-1`,
         sourceKey: null,
         title: "Fuel the rocket",
-        status: "open",
-        project: { key: visible.key, name: "Rocket launch" },
+        type: "issue",
+        status: "triage",
+        product: { key: visible.key, name: "Rocket launch" },
       },
     ],
-    projects: [{ key: visible.key, name: "Rocket launch" }],
+    products: [{ key: visible.key, name: "Rocket launch" }],
+    projects: [
+      { slug: "rocket-moon", name: "Moonshot" },
+      { slug: "rocket-road", name: "Rocket road" },
+    ],
   });
 });
 
-test("finds an issue by its key and a project by its key", async () => {
+test("finds an item by its key and a product by its key", async () => {
   const { body } = await search(`${visible.key.toLowerCase()}-3`);
-  expect(body.issues.map((i: Body) => i.title)).toEqual(["Paint"]);
-  const byProjectKey = await search(visible.key);
-  expect(byProjectKey.body.projects).toEqual([
+  expect(body.items.map((i: Body) => i.title)).toEqual(["Paint"]);
+  const byProductKey = await search(visible.key);
+  expect(byProductKey.body.products).toEqual([
     { key: visible.key, name: "Rocket launch" },
   ]);
   const hiddenKey = await search(hidden.key);
-  expect(hiddenKey.body).toEqual({ issues: [], projects: [] });
+  expect(hiddenKey.body).toEqual({ items: [], products: [], projects: [] });
 });
 
 test("matches % and _ literally", async () => {
-  expect((await search("%")).body.issues.map((i: Body) => i.title)).toEqual([
+  expect((await search("%")).body.items.map((i: Body) => i.title)).toEqual([
     "100% done_ish",
   ]);
-  expect((await search("F_el")).body.issues).toEqual([]);
+  expect((await search("F_el")).body.items).toEqual([]);
 });
 
 test("an empty query is a 422", async () => {

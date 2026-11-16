@@ -21,7 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { WebProjectView, WebStatusUpdateView } from "@/lib/api-types";
+import type { WebProductView, WebStatusUpdateView } from "@/lib/api-types";
 import { paths } from "@/lib/paths";
 import { formatAbsolute, formatRelative } from "@/lib/time";
 import { useMinuteClock } from "@/lib/use-minute-clock";
@@ -29,7 +29,7 @@ import { useMinuteClock } from "@/lib/use-minute-clock";
 export type ProjectsViewProps = {
   status: "loading" | "error" | "ready";
   /** The projects the viewer can see. */
-  projects: WebProjectView[];
+  projects: WebProductView[];
   /** Named in the empty state a person with no projects sees. */
   ownerName: string;
   isOwner: boolean;
@@ -111,7 +111,7 @@ function LatestUpdate({
   );
 }
 
-function ProjectName({ project }: { project: WebProjectView }) {
+function ProjectName({ project }: { project: WebProductView }) {
   return (
     <RowLink
       href={paths.project(project.key)}
@@ -127,7 +127,7 @@ function ProjectsTable({
   projects,
   now,
 }: {
-  projects: WebProjectView[];
+  projects: WebProductView[];
   now: Date;
 }) {
   return (
@@ -145,9 +145,6 @@ function ProjectsTable({
           </TableHead>
           <TableHead className="h-8 w-16 px-3 text-right text-2xs text-muted-foreground">
             Open
-          </TableHead>
-          <TableHead className="h-8 w-24 px-3 text-right text-2xs text-muted-foreground">
-            In progress
           </TableHead>
           <TableHead className="h-8 w-20 px-3 text-right text-2xs text-muted-foreground">
             Updated
@@ -180,10 +177,7 @@ function ProjectsTable({
               />
             </TableCell>
             <TableCell className="px-3 py-2.5 text-right tabular-nums">
-              {project.openCount}
-            </TableCell>
-            <TableCell className="px-3 py-2.5 text-right tabular-nums">
-              {project.inProgressCount}
+              {project.openIssues + project.openTodos}
             </TableCell>
             <TableCell className="px-3 py-2.5 text-right text-muted-foreground">
               <Age iso={project.updatedAt} now={now} />
@@ -199,7 +193,7 @@ function ProjectCards({
   projects,
   now,
 }: {
-  projects: WebProjectView[];
+  projects: WebProductView[];
   now: Date;
 }) {
   return (
@@ -222,7 +216,7 @@ function ProjectCards({
             layout="card"
           />
           <p className="text-xs text-muted-foreground">
-            {project.openCount} open · {project.inProgressCount} in progress
+            {project.openIssues + project.openTodos} open
           </p>
         </li>
       ))}
@@ -232,7 +226,7 @@ function ProjectCards({
 
 /**
  * Every project the viewer can see: a table at 1024px and up, a card each below. Open
- * and In progress count only those two statuses; done and canceled are not counted.
+ * counts open issues and todos; in progress, done and canceled are not counted.
  */
 export function ProjectsView(props: ProjectsViewProps) {
   const now = useMinuteClock(props.now);

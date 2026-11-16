@@ -6,13 +6,13 @@ import {
   queryOptions,
 } from "@tanstack/react-query";
 import { ApiError, api, type FeedFilter } from "@/lib/api";
-import type { MeView, WebIssueRowView } from "@/lib/api-types";
+import type { MeView, WebItemRowView } from "@/lib/api-types";
 
 export const keys = {
   me: ["me"] as const,
   projects: ["projects"] as const,
   project: (key: string) => ["project", key] as const,
-  issues: (key: string, status: WebIssueRowView["status"] | null) =>
+  issues: (key: string, status: WebItemRowView["status"] | null) =>
     ["project", key, "issues", status] as const,
   statusUpdates: (key: string) => ["project", key, "status-updates"] as const,
   issue: (key: string) => ["issue", key] as const,
@@ -55,7 +55,7 @@ export function createQueryClient(config: QueryClientConfig = {}) {
   const followProjects = () => {
     const me = client.getQueryData(meQuery.queryKey);
     if (!me || !isMember(me)) return;
-    const projects = me.projects
+    const projects = me.products
       .map((p) => p.key)
       .toSorted()
       .join("\u0000");

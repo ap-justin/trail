@@ -32,7 +32,7 @@ export type KeyScopeView = {
   actions: ApiKeyAction[] | null;
 };
 
-/** The scope to mint a key with: project keys in any case, and actions; a list left out is unrestricted. */
+/** The scope to mint a key with: product keys in any case (`projects`, the name before products), and actions; a list left out is unrestricted. */
 export type KeyScopeInput = { projects?: string[]; actions?: string[] };
 
 export const scopeView = (scope: KeyScope): KeyScopeView => ({
@@ -81,12 +81,12 @@ function validActions(raw: string[] | undefined): ApiKeyAction[] | null {
   return apiKeyActions.filter((a) => wanted.has(a));
 }
 
-/** The ids of the projects with these keys; null for a list left out. */
-function projectIdsOf(tx: Tx, keys: string[] | undefined): string[] | null {
+/** The ids of the products with these keys; null for a list left out. */
+function productIdsOf(tx: Tx, keys: string[] | undefined): string[] | null {
   if (keys === undefined) return null;
   if (keys.length === 0) {
     throw new ValidationError(
-      "projects must name at least one project: leave it out for a key that reaches every project",
+      "products must name at least one product: leave it out for a key that reaches every product",
     );
   }
   const wanted = [...new Set(keys.map((k) => k.trim().toUpperCase()))];
@@ -98,7 +98,7 @@ function projectIdsOf(tx: Tx, keys: string[] | undefined): string[] | null {
   const unknown = wanted.filter((k) => !found.some((p) => p.key === k));
   if (unknown.length > 0) {
     throw new ValidationError(
-      `no project with key ${unknown.join(", ")}: scope the key to the keys of existing projects, like TRL`,
+      `no product with key ${unknown.join(", ")}: scope the key to the keys of existing products, like TRL`,
     );
   }
   return found.map((p) => p.id);
@@ -106,7 +106,7 @@ function projectIdsOf(tx: Tx, keys: string[] | undefined): string[] | null {
 
 function mintKey(tx: Tx, actorId: string, scope: KeyScopeInput): string {
   const actions = validActions(scope.actions);
-  const projectIds = projectIdsOf(tx, scope.projects);
+  const productIds = productIdsOf(tx, scope.projects);
   const prefix = randomBytes(4).toString("hex");
   const key = `trail_${prefix}_${randomBytes(32).toString("base64url")}`;
   const { id } = tx
@@ -114,11 +114,9 @@ function mintKey(tx: Tx, actorId: string, scope: KeyScopeInput): string {
     .values({ actorId, prefix, hash: sha256(key).toString("hex"), actions })
     .returning({ id: apiKey.id })
     .get();
-  if (projectIds !== null) {
+  if (productIds !== null) {
     tx.insert(apiKeyProduct)
-      .values(
-        projectIds.map((projectId) => ({ apiKeyId: id, productId: projectId })),
-      )
+      .values(productIds.map((productId) => ({ apiKeyId: id, productId })))
       .run();
   }
   return key;
@@ -207,7 +205,7 @@ function onlyBotByLabelOrName(tx: Tx, ref: string): Actor | undefined {
  * id wins outright, and a label or name matching two bots is ambiguous. An id
  * that is a person's is refused, `why` saying what that person can't have.
  */
-function botByRef(tx: Tx, ref: string, why: string): Actor {
+export function botByRef(tx: Tx, ref: string, why: string): Actor {
   const bot =
     tx.select().from(actor).where(eq(actor.id, ref)).get() ??
     onlyBotByLabelOrName(tx, ref);

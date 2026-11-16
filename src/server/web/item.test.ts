@@ -1,19 +1,13 @@
 import { expect, test } from "vitest";
 import { atFakeTimeAsync, setupTestApp } from "../test-app.js";
+import { type Body, webSeed } from "./test-seed.js";
 
-const { request, signIn, owner, addProject, addBot, bot } = setupTestApp();
+const { request, signIn, owner, addProject, addBot, addMember, bot } =
+  setupTestApp();
 const ownerCookie = await signIn(owner);
+const seed = webSeed(request);
 
-// biome-ignore lint/suspicious/noExplicitAny: loose response bodies for field reads
-type Body = any;
-
-async function get(path: string) {
-  const res = await request("GET", `/api/web${path}`, {
-    key: null,
-    cookie: ownerCookie,
-  });
-  return { status: res.status, body: (await res.json()) as Body };
-}
+const get = (path: string, cookie = ownerCookie) => seed.get(path, cookie);
 
 const v1 = (method: string, path: string, json?: unknown, key?: string) =>
   request(method, `/api/v1${path}`, { json, key });
@@ -26,7 +20,7 @@ const tester = {
   title: null,
 };
 
-test("an issue reads with its fields, its people as actors, and a timeline oldest first with one entry per changed field", async () => {
+test("an issue reads with its type, product and fields, its people as actors, and a timeline oldest first with one entry per changed field", async () => {
   const p = addProject("Detail");
   const worker = addBot("worker");
   const [created] = await atFakeTimeAsync([
@@ -65,13 +59,15 @@ test("an issue reads with its fields, its people as actors, and a timeline oldes
       }),
   ]);
 
-  const { status, body } = await get(`/issues/${p.key}-1`);
+  const { status, body } = await get(`/items/${p.key}-1`);
   expect(status).toBe(200);
   const { timeline, ...fields } = body;
   expect(fields).toEqual({
     key: `${p.key}-1`,
+    type: "issue",
     sourceKey: null,
-    project: { key: p.key, name: "Detail" },
+    product: { key: p.key, name: "Detail" },
+    projects: [],
     title: "Fix it now",
     description: "details",
     status: "in_progress",
@@ -93,78 +89,96 @@ test("an issue reads with its fields, its people as actors, and a timeline oldes
     photoUrl: null,
     title: null,
   };
-  const issue = { key: `${p.key}-1`, title: "Fix it now" };
-  const project = { key: p.key, name: "Detail" };
+  const item = { key: `${p.key}-1`, title: "Fix it now", type: "issue" };
+  const product = { key: p.key, name: "Detail" };
+  const project = null;
   expect(
     timeline.map(({ id: _, createdAt: __, ...rest }: Body) => rest),
   ).toEqual([
     {
-      kind: "issue_created",
+      kind: "item_created",
       actor: tester,
+      product,
       project,
-      issue,
+      item,
       sourceAuthor: null,
     },
     {
       kind: "status_changed",
       actor: tester,
+      product,
       project,
-      issue,
-      from: "open",
+      item,
+      from: "triage",
       to: "in_progress",
     },
-    { kind: "priority_changed", actor: tester, project, issue, from: 0, to: 2 },
+    {
+      kind: "priority_changed",
+      actor: tester,
+      product,
+      project,
+      item,
+      from: 0,
+      to: 2,
+    },
     {
       kind: "assignee_changed",
       actor: tester,
+      product,
       project,
-      issue,
+      item,
       from: null,
       to: workerActor,
     },
     {
       kind: "estimate_changed",
       actor: tester,
+      product,
       project,
-      issue,
+      item,
       from: null,
       to: 3,
     },
     {
       kind: "comment",
       actor: workerActor,
+      product,
       project,
-      issue,
+      item,
       comment: { id: expect.any(String), body: "on it", sourceAuthor: null },
     },
     {
       kind: "labels_changed",
       actor: tester,
+      product,
       project,
-      issue,
+      item,
       added: ["ui"],
       removed: ["bug"],
     },
     {
       kind: "link_added",
       actor: tester,
+      product,
       project,
-      issue,
+      item,
       link: { url: "https://example.com/2", title: "two" },
     },
     {
       kind: "assignee_changed",
       actor: tester,
+      product,
       project,
-      issue,
+      item,
       from: workerActor,
       to: null,
     },
     {
       kind: "estimate_changed",
       actor: tester,
+      product,
       project,
-      issue,
+      item,
       from: 3,
       to: null,
     },
@@ -204,7 +218,7 @@ test("an imported issue is found by its source key and credits the importing bot
   );
   expect(res.status).toBe(200);
 
-  const { status, body } = await get("/issues/jus-187");
+  const { status, body } = await get("/items/jus-187");
   expect(status).toBe(200);
   const importerActor = {
     id: importer.actor.id,
@@ -221,7 +235,7 @@ test("an imported issue is found by its source key and credits the importing bot
   });
   expect(body.timeline).toMatchObject([
     {
-      kind: "issue_created",
+      kind: "item_created",
       actor: importerActor,
       sourceAuthor: "Jane",
       createdAt: "2026-01-02T03:04:05.000Z",
@@ -232,4 +246,85 @@ test("an imported issue is found by its source key and credits the importing bot
       comment: { body: "imported comment", sourceAuthor: "Joe" },
     },
   ]);
+});
+
+test("a todo reads as type todo, and its timeline shows it being added to and removed from projects", async () => {
+  const p = addProject("Planned");
+  const [key] = await atFakeTimeAsync([() => seed.item(p.key, "todo")]);
+  const [slug] = await atFakeTimeAsync([
+    () => seed.project("Launch", [p.key], [key as string]),
+  ]);
+  await atFakeTimeAsync<unknown>([
+    () => seed.project("Polish", [p.key], [key as string]),
+    () => v1("DELETE", `/projects/${slug}/items/${key}`),
+  ]);
+
+  const { body } = await get(`/items/${key}`);
+
+  expect(body).toMatchObject({
+    type: "todo",
+    assignee: { name: "tester" },
+    projects: [{ slug: "polish", name: "Polish" }],
+  });
+  expect(
+    body.timeline.map((e: Body) => [e.kind, e.project?.slug ?? null]),
+  ).toEqual([
+    ["item_created", null],
+    ["added_to_project", "launch"],
+    ["added_to_project", "polish"],
+    ["removed_from_project", "launch"],
+  ]);
+  expect(body.timeline[1]).toMatchObject({
+    actor: tester,
+    product: { key: p.key, name: "Planned" },
+    project: { slug: "launch", name: "Launch" },
+    item: { key, title: `todo ${p.key}`, type: "todo" },
+  });
+});
+
+test("accepting an issue as a todo is a type change on the timeline", async () => {
+  const p = addProject("Accept");
+  const key = await seed.item(p.key, "issue");
+  await v1("PATCH", `/items/${key}`, { type: "todo" });
+  const { body } = await get(`/items/${key}`);
+  expect(body.type).toBe("todo");
+  expect(
+    body.timeline
+      .filter((e: Body) => e.kind === "type_changed")
+      .map((e: Body) => [e.from, e.to]),
+  ).toEqual([["issue", "todo"]]);
+});
+
+test("a member sees an item's project that also draws from a product they can't see, and nothing of that product", async () => {
+  const seen = addProject("Seen");
+  const unseen = addProject("Unseen");
+  const key = await seed.item(seen.key, "issue");
+  const other = await seed.item(unseen.key, "issue");
+  await seed.project("Across", [seen.key, unseen.key], [key, other]);
+  const cookie = await addMember("crosser", [seen.id]);
+
+  const res = await request("GET", `/api/web/items/${key}`, {
+    key: null,
+    cookie,
+  });
+  const text = await res.text();
+
+  expect(res.status).toBe(200);
+  expect(JSON.parse(text).projects).toEqual([
+    { slug: "across", name: "Across" },
+  ]);
+  expect(text).not.toContain(unseen.key);
+  expect(text).not.toContain("Unseen");
+});
+
+test("an item of a product the member can't see is the same 404 as a missing one", async () => {
+  const hidden = addProject("Hidden");
+  const key = await seed.item(hidden.key, "issue");
+  const cookie = await addMember("outsider", []);
+  const found = await get(`/items/${key}`, cookie);
+  const missing = await get("/items/NOPE-1", cookie);
+  expect(found.status).toBe(404);
+  expect(missing.status).toBe(404);
+  expect(found.body.error.message).toBe(`no item ${key}`);
+  expect(missing.body.error.message).toBe("no item NOPE-1");
 });

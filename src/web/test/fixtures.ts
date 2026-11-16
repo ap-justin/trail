@@ -2,10 +2,10 @@ import type {
   EntryView,
   PersonView,
   WebActorView,
-  WebIssueListView,
-  WebIssueRowView,
-  WebIssueView,
-  WebProjectView,
+  WebItemListView,
+  WebItemRowView,
+  WebItemView,
+  WebProductView,
   WebStatusUpdateView,
 } from "@/lib/api-types";
 
@@ -45,8 +45,9 @@ export function commentEntry(
     id,
     createdAt,
     actor: kai,
-    project: trail,
-    issue: { key: "TRL-14", title: "Team access: invite people" },
+    product: trail,
+    project: null,
+    item: { key: "TRL-14", title: "Team access: invite people", type: "issue" },
     comment: {
       id: `c-${id}`,
       body: "Owner-only invite is right.",
@@ -62,8 +63,9 @@ export function statusEntry(id: string, createdAt: string): EntryView {
     id,
     createdAt,
     actor: kai,
-    project: trail,
-    issue: { key: "TRL-12", title: "Stream the feed over SSE" },
+    product: trail,
+    project: null,
+    item: { key: "TRL-12", title: "Stream the feed over SSE", type: "issue" },
     from: "in_progress",
     to: "done",
   };
@@ -75,12 +77,13 @@ export function projectImportedEntry(
   imported: { issues: number; comments: number },
 ): EntryView {
   return {
-    kind: "project_imported",
+    kind: "product_imported",
     id,
     createdAt,
     actor: kai,
-    project: trail,
-    issue: null,
+    product: trail,
+    project: null,
+    item: null,
     imported,
   };
 }
@@ -108,25 +111,28 @@ export function statusUpdate(
 }
 
 export function project(
-  overrides: Partial<WebProjectView> = {},
-): WebProjectView {
+  overrides: Partial<WebProductView> = {},
+): WebProductView {
   return {
     ...trail,
     description: "Agent-first issue tracker",
+    repoUrl: null,
     health: "on_track",
     latestStatusUpdate: statusUpdate(),
-    openCount: 9,
-    inProgressCount: 3,
+    openIssues: 7,
+    openTodos: 2,
+    projectCount: 0,
     updatedAt: "2026-11-11T09:12:00.000Z",
     ...overrides,
   };
 }
 
 export function issueRow(
-  overrides: Partial<WebIssueRowView> = {},
-): WebIssueRowView {
+  overrides: Partial<WebItemRowView> = {},
+): WebItemRowView {
   return {
     key: "TRL-17",
+    type: "issue",
     title: "Human UI: feed, projects, issue page",
     status: "open",
     priority: 2,
@@ -138,29 +144,33 @@ export function issueRow(
 }
 
 export function issueList(
-  items: WebIssueRowView[],
-  counts: Partial<WebIssueListView["counts"]> = {},
-): WebIssueListView {
-  return {
-    items,
-    nextCursor: null,
-    counts: {
-      all: 38,
-      open: 9,
-      in_progress: 3,
-      done: 24,
-      canceled: 2,
-      ...counts,
-    },
+  items: WebItemRowView[],
+  counts: Partial<WebItemListView["counts"]["all"]> = {},
+): WebItemListView {
+  const all = {
+    all: 38,
+    open: 9,
+    in_progress: 3,
+    done: 24,
+    canceled: 2,
+    ...counts,
   };
+  const none = { all: 0, open: 0, in_progress: 0, done: 0, canceled: 0 };
+  return { items, nextCursor: null, counts: { all, issue: all, todo: none } };
 }
 
-export function issue(overrides: Partial<WebIssueView> = {}): WebIssueView {
-  const on = { project: trail, issue: { key: "TRL-14", title: "Team access" } };
+export function issue(overrides: Partial<WebItemView> = {}): WebItemView {
+  const on = {
+    product: trail,
+    project: null,
+    item: { key: "TRL-14", title: "Team access", type: "issue" as const },
+  };
   return {
     key: "TRL-14",
+    type: "issue",
     sourceKey: null,
-    project: trail,
+    product: trail,
+    projects: [],
     title: "Team access: invite people by GitHub username",
     description: "Invited people sign in with GitHub.",
     status: "in_progress",
@@ -182,7 +192,7 @@ export function issue(overrides: Partial<WebIssueView> = {}): WebIssueView {
     timeline: [
       {
         ...on,
-        kind: "issue_created",
+        kind: "item_created",
         id: "t1",
         createdAt: "2026-11-09T14:02:00.000Z",
         actor: tara,
@@ -231,7 +241,7 @@ export const people: PersonView[] = [
     pending: false,
     name: "Justin Salas",
     photoUrl: null,
-    projects: [],
+    products: [],
     invitedAt: null,
   },
   {
@@ -241,7 +251,7 @@ export const people: PersonView[] = [
     pending: false,
     name: "Maya Chen",
     photoUrl: null,
-    projects: [trail, { key: "DOC", name: "Docs site" }],
+    products: [trail, { key: "DOC", name: "Docs site" }],
     invitedAt: "2026-11-09T10:00:00.000Z",
   },
   {
@@ -251,7 +261,7 @@ export const people: PersonView[] = [
     pending: true,
     name: null,
     photoUrl: null,
-    projects: [{ key: "OPB", name: "OpenBot" }],
+    products: [{ key: "OPB", name: "OpenBot" }],
     invitedAt: "2026-11-10T10:00:00.000Z",
   },
 ];

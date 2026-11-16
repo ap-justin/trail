@@ -49,7 +49,7 @@ const file = async (projectId: string, title: string, key?: string) => {
   return (await res.json()) as { id: string; key: string };
 };
 
-test("a member's stream delivers its projects' entries with the event's seq as id, and never a hidden project's", async () => {
+test("a member's stream delivers its products' entries with the event's seq as id, and never a hidden product's", async () => {
   const mine = addProject("Mine");
   const hidden = addProject("Hidden");
   const stream = await openStream(await addMember("watcher", [mine.id]));
@@ -59,13 +59,75 @@ test("a member's stream delivers its projects' entries with the event's seq as i
 
   const entry = await stream.nextEntry();
   expect(entry).toMatchObject({
-    kind: "issue_created",
-    project: { key: mine.key },
-    issue: { key: filed.key, title: "public" },
+    kind: "item_created",
+    product: { key: mine.key },
+    item: { key: filed.key, title: "public" },
     actor: { name: "tester", kind: "bot" },
   });
   expect(entry?.seq).toBeGreaterThan(0);
   await stream.cancel();
+});
+
+test("an item entry carries the item's type and product; a project's own entry reaches only a member who sees one of its products", async () => {
+  const seen = addProject("Streamed");
+  const unseen = addProject("Unstreamed");
+  const stream = await openStream(
+    await addMember("project-watcher", [seen.id]),
+  );
+
+  const todo = await request("POST", "/api/v1/items", {
+    json: { type: "todo", product: seen.key, title: "planned" },
+  });
+  expect(await stream.nextEntry()).toMatchObject({
+    kind: "item_created",
+    product: { key: seen.key, name: "Streamed" },
+    project: null,
+    item: { key: ((await todo.json()) as { key: string }).key, type: "todo" },
+  });
+  await request("POST", "/api/v1/projects", {
+    json: { name: "Out of sight", products: [unseen.key] },
+  });
+  await request("POST", "/api/v1/projects", {
+    json: { name: "In sight", products: [seen.key, unseen.key] },
+  });
+  expect(await stream.nextEntry()).toMatchObject({
+    kind: "project_created",
+    product: null,
+    project: { slug: "in-sight", name: "In sight" },
+    item: null,
+  });
+  await stream.cancel();
+});
+
+test("a project filter narrows the stream to that project's events", async () => {
+  const p = addProject("ProjectFiltered");
+  await request("POST", "/api/v1/projects", {
+    json: { name: "Watched", products: [p.key] },
+  });
+  await request("POST", "/api/v1/projects", {
+    json: { name: "Ignored", products: [p.key] },
+  });
+  const stream = await openStream(ownerCookie, { query: "?project=watched" });
+  await request("PATCH", "/api/v1/projects/ignored", { json: { goal: "no" } });
+  await file(p.id, "not in a project");
+  await request("PATCH", "/api/v1/projects/watched", { json: { goal: "yes" } });
+  expect(await stream.nextEntry()).toMatchObject({
+    kind: "project_updated",
+    project: { slug: "watched" },
+    changed: ["goal"],
+  });
+  await stream.cancel();
+});
+
+test("a project the member can't see is the stream's 404", async () => {
+  const hidden = addProject("StreamHidden");
+  await request("POST", "/api/v1/projects", {
+    json: { name: "Stream hidden", products: [hidden.key] },
+  });
+  const res = await app.request("/api/web/events?project=stream-hidden", {
+    headers: { cookie: await addMember("stream-outsider", []) },
+  });
+  expect(res.status).toBe(404);
 });
 
 test("a pictured bot's streamed entry carries its photoUrl", async () => {
@@ -160,7 +222,7 @@ test("an event that changed several fields arrives as several entries under one 
   await stream.cancel();
 });
 
-test("a project removed from the member mid-stream stops delivering at once, while its others still do", async () => {
+test("a product removed from the member mid-stream stops delivering at once, while its others still do", async () => {
   const kept = addProject("Kept");
   const dropped = addProject("Dropped");
   const stream = await openStream(
@@ -170,15 +232,15 @@ test("a project removed from the member mid-stream stops delivering at once, whi
   const res = await request("PUT", "/api/web/people/shifting", {
     key: null,
     cookie: ownerCookie,
-    json: { projectKeys: [kept.key] },
+    json: { products: [kept.key] },
   });
   expect(res.status).toBe(200);
   await file(dropped.id, "gone");
   await file(kept.id, "still here");
 
   expect(await stream.nextEntry()).toMatchObject({
-    project: { key: kept.key },
-    issue: { title: "still here" },
+    product: { key: kept.key },
+    item: { title: "still here" },
   });
   await stream.cancel();
 });
@@ -196,24 +258,24 @@ test("Last-Event-ID resumes with the visible entries after it, then goes live", 
   await file(hidden.id, "never");
   const stream = await openStream(cookie, { lastEventId: seen?.seq });
   expect(await stream.nextEntry()).toMatchObject({
-    issue: { title: "missed" },
+    item: { title: "missed" },
   });
   await file(p.id, "live");
-  expect(await stream.nextEntry()).toMatchObject({ issue: { title: "live" } });
+  expect(await stream.nextEntry()).toMatchObject({ item: { title: "live" } });
   await stream.cancel();
 });
 
-test("the actor and project filters narrow the stream like the feed's", async () => {
+test("the actor and product filters narrow the stream like the feed's", async () => {
   const a = addProject("FilterA");
   const b = addProject("FilterB");
   const other = addBot("other");
   const stream = await openStream(ownerCookie, {
-    query: `?project=${a.key}&actor=${other.actor.id}`,
+    query: `?product=${a.key}&actor=${other.actor.id}`,
   });
   await file(b.id, "wrong project", other.key);
   await file(a.id, "wrong actor");
   await file(a.id, "right", other.key);
-  expect(await stream.nextEntry()).toMatchObject({ issue: { title: "right" } });
+  expect(await stream.nextEntry()).toMatchObject({ item: { title: "right" } });
   await stream.cancel();
 });
 
@@ -231,12 +293,12 @@ test("an idle stream sends a comment line every 15 seconds", async () => {
   await stream.cancel();
 });
 
-test("a stream filtered to a quiet project still sends a comment line every 15 seconds while other projects are busy", async () => {
+test("a stream filtered to a quiet product still sends a comment line every 15 seconds while other products are busy", async () => {
   const quiet = addProject("Quiet");
   const busy = addProject("Busy elsewhere");
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   const stream = await openStream(ownerCookie, {
-    query: `?project=${quiet.key}`,
+    query: `?product=${quiet.key}`,
   });
   for (let i = 0; i < 3; i++) {
     await vi.advanceTimersByTimeAsync(5_000);
@@ -246,7 +308,7 @@ test("a stream filtered to a quiet project still sends a comment line every 15 s
   await stream.cancel();
 });
 
-test("a member who renamed on GitHub keeps receiving its projects' entries", async () => {
+test("a member who renamed on GitHub keeps receiving its products' entries", async () => {
   const p = addProject("Renamed");
   await addMember("before-rename", [p.id], { githubId: 8101 });
   const stream = await openStream(
@@ -254,7 +316,7 @@ test("a member who renamed on GitHub keeps receiving its projects' entries", asy
   );
   await file(p.id, "still mine");
   expect(await stream.nextEntry()).toMatchObject({
-    issue: { title: "still mine" },
+    item: { title: "still mine" },
   });
   await stream.cancel();
 });
@@ -377,7 +439,7 @@ test("a resume more than 500 events back gets one reset event at the newest seq 
   });
   await file(p.id, "after the reset");
   expect(await stream.nextEntry()).toMatchObject({
-    issue: { title: "after the reset" },
+    item: { title: "after the reset" },
   });
   await stream.cancel();
 });
@@ -414,7 +476,7 @@ test("a resume exactly 500 events back replays all 500, with no reset", async ()
   }
   await file(p.id, "after the replay");
   expect(await stream.nextEntry()).toMatchObject({
-    issue: { title: "after the replay" },
+    item: { title: "after the replay" },
   });
   await stream.cancel();
 });
@@ -432,7 +494,7 @@ test("a member's replay cap counts only the events it can see: 500 visible among
   }
   await file(mine.id, "live after replay");
   expect(await stream.nextEntry()).toMatchObject({
-    issue: { title: "live after replay" },
+    item: { title: "live after replay" },
   });
   await stream.cancel();
 });
@@ -462,7 +524,7 @@ test("a client exactly 1000 events behind keeps its stream and gets every entry"
   }
   await file(p.id, "after the flood");
   expect(await stream.nextEntry()).toMatchObject({
-    issue: { title: "after the flood" },
+    item: { title: "after the flood" },
   });
   await stream.cancel();
 });
@@ -575,10 +637,11 @@ test("an actor-only stream gets actor events but no feed entries, and never subs
   }
 });
 
-test("an actor-only stream with a project or actor filter is a 422", async () => {
+test("an actor-only stream with a product, project or actor filter is a 422", async () => {
   const p = addProject("ShellFiltered");
   for (const query of [
-    `?only=actors&project=${p.key}`,
+    `?only=actors&product=${p.key}`,
+    "?only=actors&project=launch",
     `?only=actors&actor=${bot.actor.id}`,
   ]) {
     const res = await app.request(`/api/web/events${query}`, {
@@ -642,7 +705,7 @@ test("an owner's filtered stream still gets every actor event, and a member with
   const other = addBot("filtered-other");
   const pictured = addBot("filtered-pictured");
   const filtered = await openStream(ownerCookie, {
-    query: `?project=${p.key}&actor=${other.actor.id}`,
+    query: `?product=${p.key}&actor=${other.actor.id}`,
   });
   const bareCookie = await addMember("no-projects", []);
   const bare = await openStream(bareCookie);
@@ -729,7 +792,7 @@ test("an actor event leaves Last-Event-ID where the entries put it", async () =>
   await file(p.id, "after the photo");
   const resumed = await openStream(ownerCookie, { lastEventId: before?.seq });
   expect(await resumed.nextEntry()).toMatchObject({
-    issue: { title: "after the photo" },
+    item: { title: "after the photo" },
   });
   await resumed.cancel();
 });

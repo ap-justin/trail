@@ -81,7 +81,7 @@ describe("a bot's title changing live", () => {
     signedInAs("member");
     let reads = 0;
     server.use(
-      http.get("/api/web/issues/TRL-14", () => {
+      http.get("/api/web/items/TRL-14", () => {
         reads += 1;
         return HttpResponse.json(issue());
       }),
@@ -114,11 +114,11 @@ describe("a bot's title changing live", () => {
   test("on a project page: the status update's author, not the issue list's assignee", async () => {
     signedInAs("member");
     server.use(
-      http.get("/api/web/projects/TRL", () => HttpResponse.json(project())),
-      http.get("/api/web/projects/TRL/issues", () =>
+      http.get("/api/web/products/TRL", () => HttpResponse.json(project())),
+      http.get("/api/web/products/TRL/items", () =>
         HttpResponse.json(issueList([issueRow({ assignee: tara })])),
       ),
-      http.get("/api/web/projects/TRL/status-updates", () =>
+      http.get("/api/web/products/TRL/status-updates", () =>
         HttpResponse.json({
           items: [statusUpdate({ author: tara })],
           nextCursor: null,

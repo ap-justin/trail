@@ -36,7 +36,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import type { WebProjectRefView } from "@/lib/api-types";
+import type { WebProductRefView } from "@/lib/api-types";
 import { paths } from "@/lib/paths";
 import { type ThemeChoice, themeChoices, themeLabels } from "@/lib/theme";
 import { cn } from "@/lib/utils";
@@ -54,7 +54,7 @@ export type ShellSection = "feed" | "projects" | "people" | "account";
 export type AppShellProps = {
   viewer: ShellViewer;
   /** The projects the viewer can see, as key plus name. */
-  projects: WebProjectRefView[];
+  projects: WebProductRefView[];
   /** The nav item for the current page; null on pages under none (an issue, Not found). */
   section: ShellSection | null;
   /** The project the page sits in: a project page's own key, or an issue's project. */

@@ -12,7 +12,7 @@ export type SearchResultsProps = {
   /** The query `results` and `status` answer; while it trails `query` the panel shows loading. */
   answeredQuery: string;
   /** Visible projects and issues matching `answeredQuery`; null before the first answer. */
-  results: Pick<SearchView, "issues" | "projects"> | null;
+  results: Pick<SearchView, "items" | "products"> | null;
   status: "loading" | "error" | "ready";
 };
 
@@ -64,7 +64,7 @@ type Results = NonNullable<SearchResultsProps["results"]>;
 function announcement(shown: Results | "loading" | "error" | null): string {
   if (shown === "loading" || shown === null) return "Loading";
   if (shown === "error") return "Couldn't search";
-  const count = shown.projects.length + shown.issues.length;
+  const count = shown.products.length + shown.items.length;
   if (count === 0) return "No results";
   return count === 1 ? "1 result" : `${count} results`;
 }
@@ -90,7 +90,7 @@ function SearchResultsPlaceholder({ status }: { status: "loading" | "error" }) {
 }
 
 function SearchResultsBody({ results }: { results: Results }) {
-  if (results.projects.length === 0 && results.issues.length === 0) {
+  if (results.products.length === 0 && results.items.length === 0) {
     return (
       <EmptyState
         icon={SearchIcon}
@@ -102,7 +102,7 @@ function SearchResultsBody({ results }: { results: Results }) {
   }
   return (
     <ul aria-label="Search results">
-      {results.projects.map((project) => (
+      {results.products.map((project) => (
         <li key={project.key}>
           <AppLink
             href={paths.project(project.key)}
@@ -119,7 +119,7 @@ function SearchResultsBody({ results }: { results: Results }) {
           </AppLink>
         </li>
       ))}
-      {results.issues.map((issue) => (
+      {results.items.map((issue) => (
         <li key={issue.key}>
           <AppLink
             href={paths.issue(issue.key)}

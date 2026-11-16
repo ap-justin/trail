@@ -21,6 +21,10 @@ beforeAll(async () => {
     json: { projectId: a.id, title: "target" },
   });
   issueKey = ((await res.json()) as { key: string }).key;
+  const made = await request("POST", "/api/v1/projects", {
+    json: { name: "Seen", slug: "seen", products: [a.key] },
+  });
+  expect(made.status).toBe(201);
   cookies.owner = await signIn(owner);
   cookies.memberA = await addMember("member-a", [a.id]);
   cookies.memberNone = await addMember("member-none", []);
@@ -28,7 +32,7 @@ beforeAll(async () => {
   const invited = await request("POST", "/api/web/people", {
     key: null,
     cookie: cookies.owner,
-    json: { username: "deletable", projectKeys: [] },
+    json: { username: "deletable", products: [] },
   });
   expect(invited.status).toBe(201);
 });
@@ -65,34 +69,59 @@ const members = (owner: number, memberA: number, memberNone: number) => ({
 const matrix: [string, Call, Record<Viewer, number>][] = [
   ["GET /me", { method: "GET", path: () => "/me" }, everyone(200)],
   [
+    "GET /products",
+    { method: "GET", path: () => "/products" },
+    members(200, 200, 200),
+  ],
+  [
+    "GET /products/:key",
+    { method: "GET", path: () => `/products/${a.key}` },
+    members(200, 200, 404),
+  ],
+  [
+    "GET /products/:key/items",
+    { method: "GET", path: () => `/products/${a.key}/items` },
+    members(200, 200, 404),
+  ],
+  [
+    "GET /products/:key/status-updates",
+    { method: "GET", path: () => `/products/${a.key}/status-updates` },
+    members(200, 200, 404),
+  ],
+  [
     "GET /projects",
     { method: "GET", path: () => "/projects" },
     members(200, 200, 200),
   ],
   [
-    "GET /projects/:key",
-    { method: "GET", path: () => `/projects/${a.key}` },
+    "GET /projects/:slug",
+    { method: "GET", path: () => "/projects/seen" },
     members(200, 200, 404),
   ],
   [
-    "GET /projects/:key/issues",
-    { method: "GET", path: () => `/projects/${a.key}/issues` },
+    "GET /projects/:slug/items",
+    { method: "GET", path: () => "/projects/seen/items" },
     members(200, 200, 404),
   ],
   [
-    "GET /projects/:key/status-updates",
-    { method: "GET", path: () => `/projects/${a.key}/status-updates` },
+    "GET /projects/:slug/status-updates",
+    { method: "GET", path: () => "/projects/seen/status-updates" },
     members(200, 200, 404),
   ],
   [
-    "GET /issues/:key",
-    { method: "GET", path: () => `/issues/${issueKey}` },
+    "GET /items/:key",
+    { method: "GET", path: () => `/items/${issueKey}` },
     members(200, 200, 404),
   ],
   ["GET /feed", { method: "GET", path: () => "/feed" }, members(200, 200, 200)],
   [
+    "GET /feed?product=",
+    { method: "GET", path: () => `/feed?product=${a.key}` },
+    members(200, 200, 404),
+  ],
+  [
     "GET /feed?project=",
-    { method: "GET", path: () => `/feed?project=${a.key}` },
+    { method: "GET", path: () => "/feed?project=seen" },
     members(200, 200, 404),
   ],
   [
@@ -106,8 +135,13 @@ const matrix: [string, Call, Record<Viewer, number>][] = [
     members(200, 200, 200),
   ],
   [
+    "GET /events?product=",
+    { method: "GET", path: () => `/events?product=${a.key}` },
+    members(200, 200, 404),
+  ],
+  [
     "GET /events?project=",
-    { method: "GET", path: () => `/events?project=${a.key}` },
+    { method: "GET", path: () => "/events?project=seen" },
     members(200, 200, 404),
   ],
   [
@@ -115,15 +149,15 @@ const matrix: [string, Call, Record<Viewer, number>][] = [
     {
       method: "POST",
       path: () => "/issues",
-      json: () => ({ projectKey: a.key, title: "filed" }),
+      json: () => ({ product: a.key, title: "filed" }),
     },
     members(201, 201, 404),
   ],
   [
-    "POST /issues/:key/comments",
+    "POST /items/:key/comments",
     {
       method: "POST",
-      path: () => `/issues/${issueKey}/comments`,
+      path: () => `/items/${issueKey}/comments`,
       json: () => ({ body: "hi" }),
     },
     members(201, 201, 404),
@@ -138,7 +172,7 @@ const matrix: [string, Call, Record<Viewer, number>][] = [
     {
       method: "POST",
       path: () => "/people",
-      json: () => ({ username: `invitee-${++invites}`, projectKeys: [a.key] }),
+      json: () => ({ username: `invitee-${++invites}`, products: [a.key] }),
     },
     members(201, 404, 404),
   ],
@@ -147,7 +181,7 @@ const matrix: [string, Call, Record<Viewer, number>][] = [
     {
       method: "PUT",
       path: () => "/people/member-none",
-      json: () => ({ projectKeys: [] }),
+      json: () => ({ products: [] }),
     },
     members(200, 404, 404),
   ],
@@ -167,7 +201,7 @@ describe.each(matrix)("%s", (_, call, expected) => {
   });
 });
 
-test.each(["/api/v1/projects", "/mcp"])(
+test.each(["/api/v1/products", "/mcp"])(
   "a session cookie without a bot key is a 401 on %s",
   async (path) => {
     const res = await app.request(path, {
@@ -183,27 +217,34 @@ test.each(["/api/v1/projects", "/mcp"])(
   },
 );
 
-// Every route that takes a project or issue key, or a project filter, as a member of A
-// only: the same request, before a project K exists and once K exists out of sight.
+// Every route that takes a product or item key, a project slug, or a filter by
+// either, as a member of A only: the same request, before a product K and a
+// project S exist and once both exist out of sight (S draws only from K).
 const keyed: [string, string, (k: string) => unknown][] = [
-  ["GET", "/projects/{K}", () => undefined],
-  ["GET", "/projects/{K}/issues", () => undefined],
-  ["GET", "/projects/{K}/status-updates", () => undefined],
-  ["GET", "/issues/{K}-1", () => undefined],
-  ["GET", "/feed?project={K}", () => undefined],
-  ["GET", "/events?project={K}", () => undefined],
-  ["POST", "/issues", (k) => ({ projectKey: k, title: "t" })],
-  ["POST", "/issues/{K}-1/comments", () => ({ body: "b" })],
+  ["GET", "/products/{K}", () => undefined],
+  ["GET", "/products/{K}/items", () => undefined],
+  ["GET", "/products/{K}/status-updates", () => undefined],
+  ["GET", "/items/{K}-1", () => undefined],
+  ["GET", "/feed?product={K}", () => undefined],
+  ["GET", "/events?product={K}", () => undefined],
+  ["POST", "/issues", (k) => ({ product: k, title: "t" })],
+  ["POST", "/items/{K}-1/comments", () => ({ body: "b" })],
+  ["GET", "/projects/{S}", () => undefined],
+  ["GET", "/projects/{S}/items", () => undefined],
+  ["GET", "/projects/{S}/status-updates", () => undefined],
+  ["GET", "/feed?project={S}", () => undefined],
+  ["GET", "/events?project={S}", () => undefined],
 ];
 
-test("a project or issue the viewer can't see answers exactly as one that doesn't exist, on every keyed route", async () => {
+test("a product, item or project the viewer can't see answers exactly as one that doesn't exist, on every keyed route", async () => {
   const k = projectKey();
+  const slug = `hidden-${k.toLowerCase()}`;
   const snapshot = async () =>
     Promise.all(
       keyed.map(async ([method, template, json]) => {
         const res = await request(
           method,
-          `/api/web${template.replaceAll("{K}", k)}`,
+          `/api/web${template.replaceAll("{K}", k).replaceAll("{S}", slug)}`,
           { key: null, cookie: cookies.memberA, json: json(k) },
         );
         return {
@@ -215,14 +256,18 @@ test("a project or issue the viewer can't see answers exactly as one that doesn'
       }),
     );
   const missing = await snapshot();
-  const created = await request("POST", "/api/v1/projects", {
+  const created = await request("POST", "/api/v1/products", {
     json: { key: k, name: "out of sight" },
   });
   expect(created.status).toBe(201);
-  const filed = await request("POST", "/api/v1/issues", {
-    json: { projectId: k, title: "hidden" },
+  const filed = await request("POST", "/api/v1/items", {
+    json: { type: "issue", product: k, title: "hidden" },
   });
   expect(filed.status).toBe(201);
+  const grouped = await request("POST", "/api/v1/projects", {
+    json: { name: "Hidden", slug, products: [k] },
+  });
+  expect(grouped.status).toBe(201);
   const hidden = await snapshot();
 
   expect(hidden).toEqual(missing);

@@ -149,7 +149,7 @@ describe("a key's scope", () => {
       }),
     ).toThrow(
       new ValidationError(
-        "no project with key NOPE, ZZ: scope the key to the keys of existing projects, like TRL",
+        "no product with key NOPE, ZZ: scope the key to the keys of existing products, like TRL",
       ),
     );
     // listKeys joins api_key, so an orphaned bot row is only visible on actor
@@ -176,7 +176,7 @@ describe("a key's scope", () => {
     [
       "projects",
       { projects: [] },
-      "projects must name at least one project: leave it out for a key that reaches every project",
+      "products must name at least one product: leave it out for a key that reaches every product",
     ],
     [
       "actions",

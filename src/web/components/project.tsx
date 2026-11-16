@@ -30,10 +30,10 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type {
-  WebIssueListView,
-  WebIssueRowView,
-  WebProjectRefView,
-  WebProjectView,
+  WebItemListView,
+  WebItemRowView,
+  WebProductRefView,
+  WebProductView,
   WebStatusUpdatePageView,
   WebStatusUpdateView,
 } from "@/lib/api-types";
@@ -44,9 +44,9 @@ import { useMinuteClock } from "@/lib/use-minute-clock";
 import { cn } from "@/lib/utils";
 
 export type ProjectViewProps = {
-  project: WebProjectRefView;
+  project: WebProductRefView;
   /** The list under the current status filter; `counts` are per status whatever the filter. */
-  issues: Loadable<WebIssueListView>;
+  issues: Loadable<WebItemListView>;
   /** Newest first. */
   statusUpdates: Loadable<WebStatusUpdatePageView>;
   /** The status filter; null is All. The URL (`?status=`) is the route's. */
@@ -59,7 +59,7 @@ export type ProjectViewProps = {
   now?: Date;
 };
 
-const filterStatuses: IssueStatus[] = [
+const filterStatuses: Exclude<IssueStatus, "triage">[] = [
   "open",
   "in_progress",
   "done",
@@ -67,10 +67,10 @@ const filterStatuses: IssueStatus[] = [
 ];
 const ALL = "all";
 
-type Counts = WebIssueListView["counts"];
+type Counts = WebItemListView["counts"]["all"];
 
 /** The shell heading on a project page: `Projects / TRL trail` at 1440, `TRL trail` below. */
-export function ProjectHeading({ project }: { project: WebProjectRefView }) {
+export function ProjectHeading({ project }: { project: WebProductRefView }) {
   return (
     <span className="flex min-w-0 items-center gap-2">
       <span className="flex items-center gap-2 font-normal text-muted-foreground max-lg:hidden">
@@ -86,7 +86,7 @@ export function ProjectHeading({ project }: { project: WebProjectRefView }) {
 }
 
 /** The heading's accessory: the latest status update's health, or nothing without one. */
-export function ProjectHealth({ project }: { project: WebProjectView }) {
+export function ProjectHealth({ project }: { project: WebProductView }) {
   if (!project.latestStatusUpdate || !project.health) return null;
   return <HealthPill health={project.health} className="max-lg:ml-auto" />;
 }
@@ -175,7 +175,7 @@ function RowTime({ iso, now }: { iso: string; now: Date }) {
   );
 }
 
-function Assignee({ issue }: { issue: WebIssueRowView }) {
+function Assignee({ issue }: { issue: WebItemRowView }) {
   if (!issue.assignee) {
     return <span className="text-muted-foreground">Unassigned</span>;
   }
@@ -203,7 +203,7 @@ function Labels({ labels }: { labels: string[] }) {
 
 const head = "h-7.5 px-0 text-2xs text-muted-foreground";
 
-function IssueTable({ issues, now }: { issues: WebIssueRowView[]; now: Date }) {
+function IssueTable({ issues, now }: { issues: WebItemRowView[]; now: Date }) {
   return (
     <Table className="table-fixed max-lg:hidden">
       <TableHeader>
@@ -269,7 +269,7 @@ function IssueTable({ issues, now }: { issues: WebIssueRowView[]; now: Date }) {
  * Below 1024px: key and title over status, priority glyph, labels, assignee and age. The
  * whole row is the link, named by key and title and described by the meta line.
  */
-function IssueRows({ issues, now }: { issues: WebIssueRowView[]; now: Date }) {
+function IssueRows({ issues, now }: { issues: WebItemRowView[]; now: Date }) {
   const metaId = useId();
   return (
     <ul className="lg:hidden">
@@ -338,7 +338,10 @@ function IssueListBody({
     return <ListSkeleton className="px-4 lg:px-2" />;
   if (issues.status === "error")
     return <IssueListError onRetry={onRetryIssues} />;
-  const { items, counts } = issues.data;
+  const {
+    items,
+    counts: { all: counts },
+  } = issues.data;
   if (counts.all === 0) {
     return <IssueListEmpty projectKey={project.key} onNewIssue={onNewIssue} />;
   }
@@ -426,7 +429,7 @@ export function ProjectView(props: ProjectViewProps) {
   const [pane, setPane] = useState<Pane>("issues");
   const updatesHeading = useId();
   const counts =
-    props.issues.status === "ready" ? props.issues.data.counts : null;
+    props.issues.status === "ready" ? props.issues.data.counts.all : null;
   const filterValue = props.status ?? ALL;
   const changeFilter = (value: string) => {
     const next = filterStatuses.find((status) => status === value) ?? null;

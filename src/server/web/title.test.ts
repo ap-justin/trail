@@ -57,7 +57,7 @@ test("feed actors and the feed's bot filter carry the bot's title, null without 
 });
 
 test("an issue's creator carries the bot's title, and a person's /me and new comment carry a null one", async () => {
-  const issue = await web(`/issues/${titledIssueKey}`, memberCookie);
+  const issue = await web(`/items/${titledIssueKey}`, memberCookie);
   expect(issue.creator).toMatchObject({
     id: titled.actor.id,
     title: "Release manager",
@@ -68,7 +68,7 @@ test("an issue's creator carries the bot's title, and a person's /me and new com
   });
   const res = await request(
     "POST",
-    `/api/web/issues/${titledIssueKey}/comments`,
+    `/api/web/items/${titledIssueKey}/comments`,
     { key: null, cookie: memberCookie, json: { body: "thanks" } },
   );
   expect(res.status).toBe(201);

@@ -1,14 +1,26 @@
 import { createRoute } from "@hono/zod-openapi";
-import { and, asc, desc, eq, exists, gt, lt, type SQL, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  exists,
+  gt,
+  inArray,
+  lt,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import {
   errorSchema,
   type FeedView,
   feedQuerySchema,
   feedSchema,
+  WEB_FEED_PROJECTS_MAX,
 } from "../../shared/schemas.js";
 import { jsonContent } from "../api/routes.js";
 import type { Db } from "../db/client.js";
-import { activityEvent, actor } from "../db/schema.js";
+import { activityEvent, actor, project } from "../db/schema.js";
 import {
   decodeFeedCursor,
   encodeFeedCursor,
@@ -19,9 +31,12 @@ import { amongVisible } from "../service/visible.js";
 import { entriesOf, shownEvent } from "./entries.js";
 import { createWebRouter, type Member } from "./env.js";
 import {
+  projectIdsAmong,
   selectWebActors,
   toWebActor,
+  visibleEvents,
   visibleIds,
+  visibleProduct,
   visibleProject,
 } from "./visible.js";
 
@@ -34,32 +49,40 @@ const getFeed = createRoute({
       feedSchema,
       "Entries newest first; limit counts events, and an event that changed several fields is several entries",
     ),
-    404: jsonContent(errorSchema, "No such project to filter by"),
+    404: jsonContent(errorSchema, "No such product or project to filter by"),
     422: jsonContent(errorSchema, "A cursor issued under other filters"),
   },
 });
 
-/** The filters a feed or event stream was asked for, the project resolved against the viewer's. */
+/** The filters a feed or event stream was asked for, the product and project resolved against the viewer's. */
 export function feedFilters(
+  db: Db,
   member: Member,
-  query: { actor?: string; project?: string },
+  query: { actor?: string; product?: string; project?: string },
 ): FeedFilters {
   return {
     projectId:
+      query.product === undefined
+        ? null
+        : visibleProduct(member, query.product).id,
+    actorId: query.actor ?? null,
+    groupId:
       query.project === undefined
         ? null
-        : visibleProject(member, query.project).id,
-    actorId: query.actor ?? null,
+        : visibleProject(db, member, query.project).id,
   };
 }
 
-/** The events these filters show among the projects with these ids, the ids checked inside the query. */
-export function feedWhere(projectIds: string[], filters: FeedFilters) {
+/** The events these filters show to a viewer of the products with these ids, the ids checked inside the query. */
+export function feedWhere(db: Db, productIds: string[], filters: FeedFilters) {
   return [
-    amongVisible(activityEvent.productId, projectIds),
+    visibleEvents(db, productIds),
     filters.projectId === null
       ? undefined
       : eq(activityEvent.productId, filters.projectId),
+    filters.groupId == null
+      ? undefined
+      : eq(activityEvent.projectId, filters.groupId),
     filters.actorId === null
       ? undefined
       : eq(activityEvent.actorId, filters.actorId),
@@ -70,7 +93,7 @@ export function feedWhere(projectIds: string[], filters: FeedFilters) {
 /** Up to `limit` shown events after `seq`, oldest first: what a stream resuming from `seq` missed. */
 export function eventsAfter(
   db: Db,
-  projectIds: string[],
+  productIds: string[],
   filters: FeedFilters,
   seq: number,
   limit: number,
@@ -78,7 +101,9 @@ export function eventsAfter(
   return db
     .select()
     .from(activityEvent)
-    .where(and(...feedWhere(projectIds, filters), gt(activityEvent.seq, seq)))
+    .where(
+      and(...feedWhere(db, productIds, filters), gt(activityEvent.seq, seq)),
+    )
     .orderBy(asc(activityEvent.seq))
     .limit(limit)
     .all();
@@ -87,12 +112,18 @@ export function eventsAfter(
 function feedPage(
   db: Db,
   member: Member,
-  query: { cursor?: string; limit?: number; actor?: string; project?: string },
+  query: {
+    cursor?: string;
+    limit?: number;
+    actor?: string;
+    product?: string;
+    project?: string;
+  },
 ): FeedView {
   const limit = pageLimit(query.limit);
-  const filters = feedFilters(member, query);
+  const filters = feedFilters(db, member, query);
   const ids = visibleIds(member);
-  const where: (SQL | undefined)[] = feedWhere(ids, filters);
+  const where: (SQL | undefined)[] = feedWhere(db, ids, filters);
   if (query.cursor !== undefined) {
     where.push(
       lt(activityEvent.seq, decodeFeedCursor(query.cursor, filters, "cursor")),
@@ -115,18 +146,25 @@ function feedPage(
         : null,
     filters: {
       actors: botsActingIn(db, ids),
-      projects: member.projects.map(({ key, name }) => ({ key, name })),
+      products: member.products.map(({ key, name }) => ({ key, name })),
+      projects: db
+        .select({ slug: project.slug, name: project.name })
+        .from(project)
+        .where(inArray(project.id, projectIdsAmong(db, ids)))
+        .orderBy(asc(project.name), asc(project.slug))
+        .limit(WEB_FEED_PROJECTS_MAX)
+        .all(),
     },
   };
 }
 
-/** The bots with an event in these projects, A to Z. */
-function botsActingIn(db: Db, projectIds: string[]) {
+/** The bots with an event in these products, A to Z. */
+function botsActingIn(db: Db, productIds: string[]) {
   return selectWebActors(db)
     .where(
       and(
         eq(actor.kind, "bot"),
-        // per bot, so the (actor_id, product_id) index answers it without walking the projects' history
+        // per bot, so the (actor_id, product_id) index answers it without walking the products' history
         exists(
           db
             .select({ one: sql`1` })
@@ -134,7 +172,7 @@ function botsActingIn(db: Db, projectIds: string[]) {
             .where(
               and(
                 eq(activityEvent.actorId, actor.id),
-                amongVisible(activityEvent.productId, projectIds),
+                amongVisible(activityEvent.productId, productIds),
               ),
             ),
         ),

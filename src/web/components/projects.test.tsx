@@ -45,16 +45,15 @@ describe("projects", () => {
     }
   });
 
-  test("Open shows the open count and In progress the in-progress count, nothing summed", () => {
+  test("Open shows the open issues and todos together", () => {
     renderProjects({
-      projects: [project({ openCount: 9, inProgressCount: 3 })],
+      projects: [project({ openIssues: 7, openTodos: 2 })],
     });
     const row = within(table()).getAllByRole("row")[1];
     if (!row) throw new Error("no project row");
     const cells = within(row).getAllByRole("cell");
     expect(cells[3]).toHaveTextContent(/^9$/);
-    expect(cells[4]).toHaveTextContent(/^3$/);
-    expect(card().getByText("9 open · 3 in progress")).toBeInTheDocument();
+    expect(card().getByText("9 open")).toBeInTheDocument();
   });
 
   test("a card reads name, the update, its author and age, then the counts", () => {
@@ -65,7 +64,7 @@ describe("projects", () => {
       within(item).getByText(/^SSE feed shipped/),
       within(item).getByText("Tara"),
       within(item).getByText("41m ago"),
-      within(item).getByText("9 open · 3 in progress"),
+      within(item).getByText("9 open"),
     ];
     for (const [before, after] of order
       .slice(0, -1)

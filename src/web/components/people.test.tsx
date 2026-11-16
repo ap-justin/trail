@@ -411,7 +411,7 @@ describe("people invited by email", () => {
     pending: false,
     name: "dana.okafor",
     photoUrl: null,
-    projects: [{ key: "TRL", name: "trail" }],
+    products: [{ key: "TRL", name: "trail" }],
     invitedAt: "2026-11-12T10:00:00.000Z",
   };
   const sam: PersonView = {
@@ -419,7 +419,7 @@ describe("people invited by email", () => {
     email: "sam@studio.example",
     pending: true,
     name: null,
-    projects: [],
+    products: [],
   };
   const withEmailPeople = () =>
     renderPeople({ people: [...people, dana, sam] });

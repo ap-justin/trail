@@ -31,7 +31,7 @@ import {
 import type {
   EntryView,
   WebActorView,
-  WebProjectRefView,
+  WebProductRefView,
 } from "@/lib/api-types";
 import { paths } from "@/lib/paths";
 import {
@@ -59,7 +59,7 @@ export type FeedViewProps = {
   /** Whether the top of the list is in view; while it isn't, hold new entries as pending. */
   onAtTopChange: (atTop: boolean) => void;
   /** Bots that acted in a visible project, and the visible projects. */
-  filters: { actors: WebActorView[]; projects: WebProjectRefView[] };
+  filters: { actors: WebActorView[]; products: WebProductRefView[] };
   /** A bot's actor id, or null for all bots. */
   actorFilter: string | null;
   /** A project key, or null for all projects. */
@@ -305,7 +305,7 @@ function FeedFilters({
         label="Filter by project"
         allLabel="All projects"
         icon={FolderIcon}
-        options={filters.projects.map((p) => ({ value: p.key, label: p.name }))}
+        options={filters.products.map((p) => ({ value: p.key, label: p.name }))}
         value={projectFilter}
         onChange={onProjectFilterChange}
       />
@@ -355,7 +355,7 @@ function issueSubject(issue: { key: string }, title: string) {
   );
 }
 
-function projectSubject(project: WebProjectRefView) {
+function projectSubject(project: WebProductRefView) {
   return (
     <RowLink href={paths.project(project.key)} className="font-medium">
       {project.name}
@@ -369,18 +369,18 @@ const muted = (text: string) => (
 
 function sentenceFor(entry: EntryView): Sentence | null {
   switch (entry.kind) {
-    case "issue_created":
+    case "item_created":
       return {
         verb: muted(entry.actor.kind === "bot" ? "created" : "filed"),
-        subject: issueSubject(entry.issue, entry.issue.title),
-        title: entry.issue.title,
+        subject: issueSubject(entry.item, entry.item.title),
+        title: entry.item.title,
         sourceAuthor: entry.sourceAuthor,
       };
     case "status_changed":
       return {
         verb: muted("changed status of"),
-        subject: issueSubject(entry.issue, entry.issue.title),
-        title: entry.issue.title,
+        subject: issueSubject(entry.item, entry.item.title),
+        title: entry.item.title,
         tail: (
           <>
             {muted("to")}
@@ -391,8 +391,8 @@ function sentenceFor(entry: EntryView): Sentence | null {
     case "priority_changed":
       return {
         verb: muted("changed priority of"),
-        subject: issueSubject(entry.issue, entry.issue.title),
-        title: entry.issue.title,
+        subject: issueSubject(entry.item, entry.item.title),
+        title: entry.item.title,
         tail: (
           <>
             {muted("to")}
@@ -403,8 +403,8 @@ function sentenceFor(entry: EntryView): Sentence | null {
     case "labels_changed":
       return {
         verb: muted("changed labels on"),
-        subject: issueSubject(entry.issue, entry.issue.title),
-        title: entry.issue.title,
+        subject: issueSubject(entry.item, entry.item.title),
+        title: entry.item.title,
         tail: (
           <>
             {entry.added.length > 0 && muted("added")}
@@ -421,15 +421,15 @@ function sentenceFor(entry: EntryView): Sentence | null {
     case "link_added":
       return {
         verb: muted("added a link to"),
-        subject: issueSubject(entry.issue, entry.issue.title),
+        subject: issueSubject(entry.item, entry.item.title),
         title: entry.link.title,
       };
     case "assignee_changed":
       return entry.to
         ? {
             verb: muted("assigned"),
-            subject: issueSubject(entry.issue, entry.issue.title),
-            title: entry.issue.title,
+            subject: issueSubject(entry.item, entry.item.title),
+            title: entry.item.title,
             tail: (
               <>
                 {muted("to")}
@@ -439,20 +439,20 @@ function sentenceFor(entry: EntryView): Sentence | null {
           }
         : {
             verb: muted("unassigned"),
-            subject: issueSubject(entry.issue, entry.issue.title),
-            title: entry.issue.title,
+            subject: issueSubject(entry.item, entry.item.title),
+            title: entry.item.title,
           };
     case "estimate_changed":
       return entry.to === null
         ? {
             verb: muted("cleared the estimate of"),
-            subject: issueSubject(entry.issue, entry.issue.title),
-            title: entry.issue.title,
+            subject: issueSubject(entry.item, entry.item.title),
+            title: entry.item.title,
           }
         : {
             verb: muted("changed estimate of"),
-            subject: issueSubject(entry.issue, entry.issue.title),
-            title: entry.issue.title,
+            subject: issueSubject(entry.item, entry.item.title),
+            title: entry.item.title,
             tail: (
               <>
                 {muted("to")}
@@ -463,29 +463,29 @@ function sentenceFor(entry: EntryView): Sentence | null {
     case "comment":
       return {
         verb: muted("commented on"),
-        subject: issueSubject(entry.issue, entry.issue.title),
-        title: entry.issue.title,
+        subject: issueSubject(entry.item, entry.item.title),
+        title: entry.item.title,
         quote: entry.comment.body,
         sourceAuthor: entry.comment.sourceAuthor,
       };
-    case "status_update":
+    case "product_status_update":
       return {
         verb: (
           <span className="text-muted-foreground">
             <span className="max-lg:hidden">posted a </span>status update on
           </span>
         ),
-        subject: projectSubject(entry.project),
+        subject: projectSubject(entry.product),
         tail: <HealthPill health={entry.statusUpdate.health} />,
         quote: entry.statusUpdate.body,
         sourceAuthor: entry.statusUpdate.sourceAuthor,
       };
-    case "project_created":
+    case "product_created":
       return {
         verb: muted("created"),
-        subject: projectSubject(entry.project),
+        subject: projectSubject(entry.product),
       };
-    case "project_imported": {
+    case "product_imported": {
       // an import that only touched labels, status updates or the project row counts 0 of both
       const counts = [
         entry.imported.issues > 0 && countOf(entry.imported.issues, "issue"),
@@ -494,7 +494,7 @@ function sentenceFor(entry: EntryView): Sentence | null {
       ].filter(Boolean);
       return {
         verb: muted("imported"),
-        subject: projectSubject(entry.project),
+        subject: projectSubject(entry.product),
         tail: counts.length > 0 && (
           <>
             {muted("with")}
@@ -503,6 +503,14 @@ function sentenceFor(entry: EntryView): Sentence | null {
         ),
       };
     }
+    // kinds this feed doesn't draw yet: skipped like a kind it doesn't know
+    case "type_changed":
+    case "added_to_project":
+    case "removed_from_project":
+    case "project_status_update":
+    case "project_created":
+    case "project_updated":
+      return null;
     default:
       // typechecks only while every known kind has a case; at runtime, a kind the server added later lands here
       entry satisfies never;
@@ -578,7 +586,7 @@ function FeedRow({
           </p>
         )}
       </div>
-      <KeyText className="max-lg:hidden">{entry.project.key}</KeyText>
+      <KeyText className="max-lg:hidden">{entry.product?.key}</KeyText>
       <span className="w-14 text-right text-xs whitespace-nowrap text-muted-foreground max-lg:hidden">
         <RowTime iso={entry.createdAt} now={now} />
       </span>

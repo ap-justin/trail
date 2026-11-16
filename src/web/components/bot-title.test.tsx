@@ -58,7 +58,7 @@ function renderFeed(overrides: Partial<FeedViewProps> = {}) {
       pendingCount={0}
       onShowPending={vi.fn()}
       onAtTopChange={vi.fn()}
-      filters={{ actors: [kaiTitled, tara], projects: [trail] }}
+      filters={{ actors: [kaiTitled, tara], products: [trail] }}
       actorFilter={null}
       projectFilter={null}
       onActorFilterChange={vi.fn()}
@@ -147,8 +147,9 @@ describe("feed", () => {
 describe("issue", () => {
   function renderIssue(assignee: WebActorView = kaiTitled) {
     const on = {
-      project: trail,
-      issue: { key: "TRL-14", title: "Team access" },
+      product: trail,
+      project: null,
+      item: { key: "TRL-14", title: "Team access", type: "issue" as const },
     };
     render(
       <IssueView

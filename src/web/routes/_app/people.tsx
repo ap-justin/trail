@@ -48,7 +48,9 @@ function PeoplePage() {
         people={people.data?.items ?? []}
         projects={session.projects}
         onRetry={() => void people.refetch()}
-        onInvite={invite.run}
+        onInvite={({ username, projectKeys }) =>
+          invite.run({ username, products: projectKeys })
+        }
         invitePending={invite.pending}
         inviteError={
           invite.error && {

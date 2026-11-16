@@ -83,14 +83,14 @@ test("feed actors and the feed's bot filter carry the photo URL, null without on
 test("an issue's creator carries the photo URL, null without one", async () => {
   const withPhoto = await web(
     "GET",
-    `/issues/${picturedIssueKey}`,
+    `/items/${picturedIssueKey}`,
     memberCookie,
   );
   expect(withPhoto.creator).toMatchObject({
     id: pictured.actor.id,
     photoUrl: botUrl,
   });
-  const without = await web("GET", `/issues/${plainIssueKey}`, memberCookie);
+  const without = await web("GET", `/items/${plainIssueKey}`, memberCookie);
   expect(without.creator).toMatchObject({ id: plain.actor.id, photoUrl: null });
 });
 
@@ -113,7 +113,7 @@ test("an issue's assignee, its timeline comments, and a project's status update 
     json: { body: "going well", health: "on_track" },
   });
 
-  const issue = await web("GET", `/issues/${key}`, memberCookie);
+  const issue = await web("GET", `/items/${key}`, memberCookie);
   expect(issue.assignee).toMatchObject({
     id: pictured.actor.id,
     photoUrl: botUrl,
@@ -123,19 +123,15 @@ test("an issue's assignee, its timeline comments, and a project's status update 
     id: pictured.actor.id,
     photoUrl: botUrl,
   });
-  const created = issue.timeline.find((e: Body) => e.kind === "issue_created");
+  const created = issue.timeline.find((e: Body) => e.kind === "item_created");
   expect(created.actor.photoUrl).toBeNull();
 
-  const proj = await web("GET", `/projects/${project.key}`, memberCookie);
+  const proj = await web("GET", `/products/${project.key}`, memberCookie);
   expect(proj.latestStatusUpdate.author).toMatchObject({
     id: pictured.actor.id,
     photoUrl: botUrl,
   });
-  const rows = await web(
-    "GET",
-    `/projects/${project.key}/issues`,
-    memberCookie,
-  );
+  const rows = await web("GET", `/products/${project.key}/items`, memberCookie);
   const row = rows.items.find((i: Body) => i.key === key);
   expect(row.assignee).toMatchObject({ photoUrl: botUrl });
 });
@@ -147,7 +143,7 @@ test("/me and a person's new comment carry their photo URL", async () => {
   expect((await web("GET", "/me", bareCookie)).actor.photoUrl).toBeNull();
   const comment = await web(
     "POST",
-    `/issues/${plainIssueKey}/comments`,
+    `/items/${plainIssueKey}/comments`,
     memberCookie,
     { body: "hello" },
   );
@@ -157,7 +153,7 @@ test("/me and a person's new comment carry their photo URL", async () => {
 test("the people list carries each signed-in person's photo URL, null for the owner without one and a pending invite", async () => {
   await web("POST", "/people", ownerCookie, {
     username: "not-yet",
-    projectKeys: [],
+    products: [],
   });
   const { items } = await web("GET", "/people", ownerCookie);
   const row = (username: string) =>
@@ -206,8 +202,8 @@ test("replacing a bot's photo, then clearing it, shows on every author view at o
 
   const photoOnEveryView = async () => {
     const feed = await web("GET", "/feed", memberCookie);
-    const issue = await web("GET", `/issues/${key}`, memberCookie);
-    const proj = await web("GET", `/projects/${project.key}`, memberCookie);
+    const issue = await web("GET", `/items/${key}`, memberCookie);
+    const proj = await web("GET", `/products/${project.key}`, memberCookie);
     const urls = {
       feedActors: feed.items
         .filter((e: Body) => e.actor.id === shifter.actor.id)

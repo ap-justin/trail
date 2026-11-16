@@ -11,7 +11,7 @@ import {
   product,
   productMember,
 } from "../db/schema.js";
-import { accessOfEmail, syncEmailActor, visibleProjects } from "./identity.js";
+import { accessOfEmail, syncEmailActor, visibleProducts } from "./identity.js";
 
 const dir = mkdtempSync(join(tmpdir(), "trail-identity-"));
 const db = openDatabase(join(dir, "trail.db"));
@@ -86,7 +86,7 @@ test("an invited email gets a human actor on its first let-in, named for the par
       .where(eq(actorPhoto.actorId, stored?.id ?? ""))
       .all(),
   ).toEqual([]);
-  expect(access && visibleProjects(db, access).map((p) => p.key)).toEqual([
+  expect(access && visibleProducts(db, access).map((p) => p.key)).toEqual([
     "DOC",
   ]);
 });

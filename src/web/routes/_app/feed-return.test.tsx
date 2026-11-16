@@ -22,7 +22,7 @@ const expectFiltersShown = () =>
 test("coming back to a feed Query still holds shows its rows, even when the refetch brings the same data", async () => {
   signedInAs("member");
   server.use(
-    http.get("/api/web/projects", () =>
+    http.get("/api/web/products", () =>
       HttpResponse.json({ items: [], nextCursor: null }),
     ),
   );
@@ -46,7 +46,7 @@ test("coming back to a feed Query still holds shows its rows, even when the refe
 test("coming back to a cached feed shows its rows while the refresh is still in flight", async () => {
   signedInAs("member");
   server.use(
-    http.get("/api/web/projects", () =>
+    http.get("/api/web/products", () =>
       HttpResponse.json({ items: [], nextCursor: null }),
     ),
   );

@@ -1,10 +1,10 @@
-import type { HumanActor, VisibleProject } from "./identity.js";
+import type { HumanActor, VisibleProduct } from "./identity.js";
 
-export type { HumanActor, VisibleProject };
+export type { HumanActor, VisibleProduct };
 
 /**
  * Who a request comes from, by its session cookie. Resolved on every request,
- * so a removed invite or project takes effect on the next one; an invite is
+ * so a removed invite or product takes effect on the next one; an invite is
  * only claimed at sign-in, so a new one waits for the account's next sign-in.
  */
 export type Viewer =
@@ -19,8 +19,8 @@ export type Viewer =
       /** lowercased GitHub login; null for a person let in by email, whose address is `actor.email` */
       login: string | null;
       actor: HumanActor;
-      /** the owner sees every project; a member, those its invite lists */
-      projects: VisibleProject[];
+      /** the owner sees every product; a member, those its invite lists */
+      products: VisibleProduct[];
     };
 
 export type ViewerEnv = { Variables: { viewer: Viewer } };

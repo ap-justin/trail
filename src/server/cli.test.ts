@@ -133,9 +133,9 @@ test.each([
   expect(withDb((db) => resolveKey(db, quiet.stdout.trim()))).toEqual(bot);
 });
 
-// the projects a scoped key can name
+// the products a scoped key can name
 withDb((db) => {
-  const { actor } = createBot(db, "project owner");
+  const { actor } = createBot(db, "product owner");
   db.insert(product)
     .values(
       ["BGP", "ATL"].map((key) => ({ key, name: key, createdBy: actor.id })),
@@ -147,7 +147,7 @@ const scopeOf = (key: string) =>
   withDb((db) => listKeys(db).find((k) => k.prefix === key.slice(6, 14)))
     ?.scope;
 
-test("key create --projects --actions mints a key with that scope, project keys in any case", () => {
+test("key create --products --actions mints a key with that scope, product keys in any case", () => {
   const first = createdKey(run("bot", "create", "scoped later").stdout);
   const bot = withDb((db) => resolveKey(db, first));
   if (!bot) throw new Error("first key did not resolve");
@@ -155,7 +155,7 @@ test("key create --projects --actions mints a key with that scope, project keys 
     "key",
     "create",
     bot.id,
-    "--projects",
+    "--products",
     "bgp,ATL",
     "--actions",
     "read,issues,comments",
@@ -169,16 +169,16 @@ test("key create --projects --actions mints a key with that scope, project keys 
   });
   expect(scopeOf(first)).toEqual({ products: null, actions: null });
   expect(stdout).toMatch(
-    /^actor {2}\S+\nkey {4}\S+\nscope {2}projects ATL,BGP; actions read,issues,comments\n$/,
+    /^actor {2}\S+\nkey {4}\S+\nscope {2}products ATL,BGP; actions read,issues,comments\n$/,
   );
 });
 
-test("bot create --projects --key-only prints the key alone on stdout, its scope on stderr", () => {
+test("bot create --products --key-only prints the key alone on stdout, its scope on stderr", () => {
   const { code, stdout, stderr } = run(
     "bot",
     "create",
     "bg-ivy",
-    "--projects",
+    "--products",
     "BGP",
     "--key-only",
   );
@@ -189,7 +189,7 @@ test("bot create --projects --key-only prints the key alone on stdout, its scope
   });
   expect(scopeOf(stdout)).toEqual({ products: ["BGP"], actions: null });
   expect(stderr).toMatch(
-    /^actor {2}\S+\nscope {2}projects BGP; all actions\n/m,
+    /^actor {2}\S+\nscope {2}products BGP; all actions\n/m,
   );
 });
 
@@ -200,14 +200,14 @@ test("bot create --actions alone limits only the actions", () => {
     products: null,
     actions: ["read"],
   });
-  expect(stdout).toMatch(/^scope {2}all projects; actions read$/m);
+  expect(stdout).toMatch(/^scope {2}all products; actions read$/m);
 });
 
 test.each([
   [
-    "an unknown project key",
-    ["--projects", "BGP,nope"],
-    /^trail: no project with key NOPE: /,
+    "an unknown product key",
+    ["--products", "BGP,nope"],
+    /^trail: no product with key NOPE: /,
   ],
   [
     "an unknown action",
@@ -240,7 +240,7 @@ test.each([
 );
 
 test.each([
-  ["--projects ''", ["--projects", ""]],
+  ["--products ''", ["--products", ""]],
   ["--actions ,", ["--actions", ","]],
   ["--actions with a blank entry", ["--actions=read,,issues"]],
 ])("%s is a usage error before the database is opened", (_, flags) => {
@@ -254,8 +254,117 @@ test.each([
   expect(code).toBe(2);
   expect(stdout).toBe("");
   expect(stderr).toMatch(
-    /^trail: --(projects|actions) takes a comma-separated list/,
+    /^trail: --(products|actions) takes a comma-separated list/,
   );
+});
+
+test("--projects, the flag's name before products, still scopes the key, with a one-line notice on stderr", () => {
+  const { code, stdout, stderr } = run(
+    "bot",
+    "create",
+    "old-flag",
+    "--projects",
+    "BGP",
+    "--key-only",
+  );
+  expect(code).toBe(0);
+  expect(scopeOf(stdout)).toEqual({ products: ["BGP"], actions: null });
+  expect(stderr.split("\n")[0]).toBe(
+    "trail: --projects is deprecated: use --products",
+  );
+});
+
+test("--products and --projects together are a usage error", () => {
+  const { code, stdout, stderr } = run(
+    "key",
+    "create",
+    "agent-quiet",
+    "--products",
+    "BGP",
+    "--projects",
+    "ATL",
+  );
+  expect(code).toBe(2);
+  expect(stdout).toBe("");
+  expect(stderr).toMatch(/^trail: send --products or --projects, not both/);
+});
+
+test("products owners prints how each product's owner resolves, one line per product, writing nothing", () => {
+  const ivy = withDb((db) => createBot(db, "ivy").actor);
+  const productRows = () => withDb((db) => db.select().from(product).all());
+  const before = productRows();
+  const { code, stdout, stderr } = run("products", "owners");
+  expect(code).toBe(0);
+  expect(stderr).toBe("");
+  const lines = stdout.trimEnd().split("\n");
+  expect(lines[0]).toMatch(/^product\s+bot\s+resolved\s+owner$/);
+  expect(lines.slice(1).map((l) => l.split(/\s+/))).toEqual([
+    ["ATL", "-", "none", "-"],
+    ["BGP", "Ivy", "name", ivy.id],
+  ]);
+  expect(productRows()).toEqual(before);
+});
+
+test("products set-owner sets the owner by bot name, label or id, and prints from and to", () => {
+  const owner = withDb(
+    (db) => createBot(db, "Atlas", { label: "agent-atlas" }).actor,
+  );
+  const first = run("products", "set-owner", "atl", "agent-atlas");
+  expect(first.code).toBe(0);
+  expect(first.stdout).toBe(
+    `product  ATL\nfrom     -\nto       Atlas (${owner.id})\n`,
+  );
+  const ownerOf = () =>
+    withDb(
+      (db) =>
+        db.$client
+          .prepare<[], string | null>(
+            "select owner_id from product where key = 'ATL'",
+          )
+          .pluck()
+          .get() ?? null,
+    );
+  expect(ownerOf()).toBe(owner.id);
+  const again = run("products", "set-owner", "ATL", "product owner");
+  expect(again.code).toBe(0);
+  expect(again.stdout).toMatch(/^from {5}Atlas \(\S+\)\nto {7}product owner /m);
+  expect(ownerOf()).not.toBe(owner.id);
+});
+
+test("products set-owner refuses a person and an unknown product or bot with exit 1, changing nothing", () => {
+  const person = withDb((db) => createHuman(db, { displayName: "Pat" }));
+  for (const argv of [
+    ["products", "set-owner", "BGP", person.id],
+    ["products", "set-owner", "BGP", "nobody-at-all"],
+    ["products", "set-owner", "NOPE", "ivy"],
+  ]) {
+    const { code, stdout, stderr } = run(...argv);
+    expect(code, argv.join(" ")).toBe(1);
+    expect(stdout).toBe("");
+    expect(stderr).toMatch(/^trail: /);
+  }
+  expect(run("products", "set-owner", "NOPE", "ivy").stderr).toBe(
+    "trail: no product NOPE: `trail products owners` lists every product's key\n",
+  );
+});
+
+test("products set-repo sets a GitHub URL, a trailing .git dropped; anything else is exit 2", () => {
+  const set = run(
+    "products",
+    "set-repo",
+    "bgp",
+    "https://github.com/acme/bgp.git",
+  );
+  expect(set.code).toBe(0);
+  expect(set.stdout).toBe(
+    "product  BGP\nfrom     -\nto       https://github.com/acme/bgp\n",
+  );
+  const bad = run("products", "set-repo", "BGP", "https://gitlab.com/acme/bgp");
+  expect(bad.code).toBe(2);
+  expect(bad.stderr).toMatch(/^trail: repoUrl must be a GitHub repository/);
+  const missing = run("products", "set-repo", "BGP");
+  expect(missing.code).toBe(2);
+  expect(missing.stderr).toMatch(/^trail: missing <url>/);
 });
 
 test("key create for no such bot exits 1", () => {
@@ -284,12 +393,12 @@ test("key list shows each key's prefix, bot, label, times and scope, never the k
   expect(stdout).not.toContain(hash);
   const header = stdout.split("\n")[0];
   expect(header).toMatch(
-    /^prefix\s+actor\s+name\s+label\s+created\s+revoked\s+projects\s+actions$/,
+    /^prefix\s+actor\s+name\s+label\s+created\s+revoked\s+products\s+actions$/,
   );
   const line = stdout.split("\n").find((l) => l.startsWith(prefix));
   expect(line).toMatch(
     new RegExp(
-      `^${prefix}\\s+\\S+\\s+listed\\s+agent-listed\\s+\\d{4}-\\d\\d-\\d\\dT\\S+Z\\s+\\d{4}-\\d\\d-\\d\\dT\\S+Z\\s+all projects\\s+all actions$`,
+      `^${prefix}\\s+\\S+\\s+listed\\s+agent-listed\\s+\\d{4}-\\d\\d-\\d\\dT\\S+Z\\s+\\d{4}-\\d\\d-\\d\\dT\\S+Z\\s+all products\\s+all actions$`,
     ),
   );
 
@@ -297,7 +406,7 @@ test("key list shows each key's prefix, bot, label, times and scope, never the k
     "bot",
     "create",
     "listed scoped",
-    "--projects",
+    "--products",
     "atl,bgp",
     "--actions",
     "comments,read",
