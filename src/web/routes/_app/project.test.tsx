@@ -131,6 +131,62 @@ describe("project page", () => {
   });
 });
 
+describe("while the next filter loads", () => {
+  /** Human UI launch's items, read at once unfiltered and held for any filter until `release`. */
+  function serveHeld() {
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    serveProject();
+    server.use(
+      http.get("/api/web/projects/human-ui/items", async ({ request }) => {
+        const query = new URL(request.url).searchParams;
+        const both = [
+          { product: openBot, items: [issueRow({ key: "OPB-3" })] },
+          { product: trail, items: [todoRow()] },
+        ];
+        const filtered = ["product", "type", "status"].some((f) =>
+          query.has(f),
+        );
+        if (!filtered) return HttpResponse.json(projectItems(both));
+        await held;
+        return HttpResponse.json(projectItems(both.slice(1)));
+      }),
+    );
+    return release;
+  }
+
+  const allTab = () => screen.getByRole("tab", { name: /^All/ });
+
+  test("a new status tab keeps the last list and its counts", async () => {
+    signedInAs("member");
+    const release = serveHeld();
+    renderApp("/projects/human-ui");
+    expect(await screen.findAllByText(todoRow().title)).not.toHaveLength(0);
+    expect(allTab()).toHaveTextContent("2");
+    await userEvent.click(screen.getByRole("tab", { name: /^Open/ }));
+    expect(screen.getAllByText(todoRow().title)).not.toHaveLength(0);
+    expect(allTab()).toHaveTextContent("2");
+    release();
+  });
+
+  test("a new product drops the last counts, which counted the other products", async () => {
+    signedInAs("member");
+    const release = serveHeld();
+    const { router } = renderApp("/projects/human-ui");
+    expect(await screen.findAllByText(todoRow().title)).not.toHaveLength(0);
+    await router.navigate({
+      to: "/projects/$slug",
+      params: { slug: "human-ui" },
+      search: { product: "TRL" },
+    });
+    await waitFor(() => expect(allTab()).not.toHaveTextContent("2"));
+    release();
+    await waitFor(() => expect(allTab()).toHaveTextContent("1"));
+  });
+});
+
 describe("pages", () => {
   test("a group split across pages is one group, and later groups are drawn", async () => {
     signedInAs("member");
@@ -214,6 +270,49 @@ describe("old product links", () => {
     // the product page's own reads, answered before the test ends
     await screen.findByRole("heading", { name: "Page not found", level: 1 });
   });
+  test("/projects/trl, no such project, is the TRL product in place, with its filters", async () => {
+    signedInAs("member");
+    server.use(
+      http.get("/api/web/projects/trl", notFound),
+      http.get("/api/web/projects/trl/items", notFound),
+      http.get("/api/web/projects/trl/status-updates", notFound),
+      http.get("/api/web/products/TRL", notFound),
+      http.get("/api/web/products/TRL/items", notFound),
+      http.get("/api/web/products/TRL/status-updates", notFound),
+    );
+    const { router } = renderApp(
+      "/projects/trl?status=done&type=todo&product=OPB",
+    );
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe("/products/TRL"),
+    );
+    expect(router.state.location.search).toEqual({
+      status: "done",
+      type: "todo",
+    });
+    expect(router.history.length).toBe(1);
+    await screen.findByRole("heading", { name: "Page not found", level: 1 });
+  });
+
+  test("a project named like a product is the project", async () => {
+    signedInAs("member");
+    server.use(
+      http.get("/api/web/projects/trl", () =>
+        HttpResponse.json(projectDetail()),
+      ),
+      http.get("/api/web/projects/trl/items", () =>
+        HttpResponse.json(
+          projectItems([{ product: trail, items: [todoRow()] }]),
+        ),
+      ),
+      http.get("/api/web/projects/trl/status-updates", () =>
+        HttpResponse.json({ items: [], nextCursor: null }),
+      ),
+    );
+    const { router } = renderApp("/projects/trl");
+    expect(await screen.findAllByText(todoRow().title)).not.toHaveLength(0);
+    expect(router.state.location.pathname).toBe("/projects/trl");
+  });
 });
 
 describe("not found", () => {
@@ -234,5 +333,10 @@ describe("not found", () => {
   test("a project the server won't show renders the same page as an unknown URL", async () => {
     const unknown = await notFoundMarkup("/no-such-page");
     expect(await notFoundMarkup("/projects/secret-launch")).toBe(unknown);
+  });
+
+  test("/projects/sec, a product the viewer can't see, is the same page as one that doesn't exist", async () => {
+    const unknown = await notFoundMarkup("/projects/zzz");
+    expect(await notFoundMarkup("/projects/sec")).toBe(unknown);
   });
 });

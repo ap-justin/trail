@@ -1,12 +1,12 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Navigate } from "@tanstack/react-router";
 import { AppPage, useChrome } from "@/app/chrome";
 import { NotFoundPage } from "@/app/not-found-page";
 import { IssueBreadcrumb, IssueView } from "@/components/issue";
 import { api, isNotFound } from "@/lib/api";
 import type { WebItemView } from "@/lib/api-types";
 import { loadableOf } from "@/lib/loadable";
-import { paths } from "@/lib/paths";
+import { itemParams, paths } from "@/lib/paths";
 import { keys } from "@/lib/queries";
 import { useAction } from "@/lib/use-action";
 
@@ -19,11 +19,21 @@ export const Route = createFileRoute("/_app/products/$key/$n")({
 function ItemPage() {
   const params = Route.useParams();
   const key = `${params.key}-${params.n}`;
+  // the server would read `TRL-abc` as a source key; no item number is spelled that way
+  const numbered = /^\d+$/.test(params.n);
   const { session } = useChrome();
   const queryClient = useQueryClient();
   const issue = useQuery({
     queryKey: keys.issue(key),
-    queryFn: () => api.issue(key),
+    queryFn: async () => {
+      const item = await api.issue(key);
+      // the server answers a source key or a key in another spelling with the item itself,
+      // which the page then shows at its own address
+      if (item.key !== key)
+        queryClient.setQueryData(keys.issue(item.key), item);
+      return item;
+    },
+    enabled: numbered,
   });
   // the key travels with the write: Query hands a pending write the latest render's options
   const comment = useAction(
@@ -37,7 +47,16 @@ function ItemPage() {
     },
   );
 
-  if (isNotFound(issue.error)) return <NotFoundPage />;
+  if (!numbered || isNotFound(issue.error)) return <NotFoundPage />;
+  if (issue.data && issue.data.key !== key) {
+    return (
+      <Navigate
+        to="/products/$key/$n"
+        params={itemParams(issue.data.key)}
+        replace
+      />
+    );
+  }
   return (
     <AppPage
       section={null}

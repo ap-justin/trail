@@ -13,6 +13,7 @@ import { MarkdownText } from "@/components/markdown-text";
 import {
   FeedEmpty,
   FeedError,
+  FeedFilterEmpty,
   FeedNoProducts,
   LoadingRegion,
   SkeletonBlock,
@@ -113,6 +114,15 @@ export function FeedView(props: FeedViewProps) {
     firstDayRef.current?.focus();
   }, [props.pendingCount]);
 
+  // Clear filters unmounts with the empty state, so focus waits on the filters
+  const filtersRef = useRef<HTMLFieldSetElement>(null);
+  const clearFilters = () => {
+    filtersRef.current?.focus();
+    if (props.actorFilter !== null) props.onActorFilterChange(null);
+    if (props.productFilter !== null) props.onProductFilterChange(null);
+    if (props.projectFilter !== null) props.onProjectFilterChange(null);
+  };
+
   const showPending = () => {
     topRef.current?.scrollIntoView({ block: "start" });
     focusFirstDayOnMerge.current = true;
@@ -128,7 +138,7 @@ export function FeedView(props: FeedViewProps) {
     <div className="isolate w-full lg:px-6 lg:py-4">
       <div className="mx-auto flex max-w-220 flex-col">
         <div ref={topRef} />
-        {!nothingToFollow && <FeedFilters {...props} />}
+        {!nothingToFollow && <FeedFilters {...props} ref={filtersRef} />}
         {props.pendingCount > 0 && (
           // zero height so the pill floats over the rows instead of pushing them down
           <div className="sticky top-15 z-10 flex h-0 justify-center">
@@ -151,7 +161,12 @@ export function FeedView(props: FeedViewProps) {
         <p role="status" className="sr-only">
           {newEntriesMessage(props.pendingCount || props.freshIds.size)}
         </p>
-        <FeedBody {...props} now={now} firstDayRef={firstDayRef} />
+        <FeedBody
+          {...props}
+          now={now}
+          firstDayRef={firstDayRef}
+          onClearFilters={clearFilters}
+        />
       </div>
     </div>
   );
@@ -171,11 +186,26 @@ function FeedBody({
   noProducts,
   now,
   firstDayRef,
-}: FeedViewProps & { now: Date; firstDayRef: Ref<HTMLHeadingElement> }) {
+  actorFilter,
+  productFilter,
+  projectFilter,
+  onClearFilters,
+}: FeedViewProps & {
+  now: Date;
+  firstDayRef: Ref<HTMLHeadingElement>;
+  onClearFilters: () => void;
+}) {
   if (status === "loading") return <FeedSkeleton />;
   if (status === "error") return <FeedError onRetry={onRetry} />;
   if (entries.length === 0) {
-    return noProducts ? <FeedNoProducts /> : <FeedEmpty />;
+    if (noProducts) return <FeedNoProducts />;
+    const filtered =
+      actorFilter !== null || productFilter !== null || projectFilter !== null;
+    return filtered ? (
+      <FeedFilterEmpty onClear={onClearFilters} />
+    ) : (
+      <FeedEmpty />
+    );
   }
   return (
     <div className={cn(connection === "reconnecting" && "opacity-60")}>
@@ -233,10 +263,17 @@ function FeedFilters({
   onActorFilterChange,
   onProductFilterChange,
   onProjectFilterChange,
-}: FeedViewProps) {
+  ref,
+}: FeedViewProps & { ref: Ref<HTMLFieldSetElement> }) {
   return (
     // one row that scrolls sideways below lg; the bottom padding keeps focus rings inside the clip
-    <div className="flex items-center gap-2 overflow-x-auto px-4 pt-2.5 pb-1 lg:flex-wrap lg:overflow-visible lg:px-3 lg:pt-0">
+    // min-w-0: a fieldset's min-content minimum would stop the row scrolling
+    <fieldset
+      ref={ref}
+      aria-label="Filter the feed"
+      tabIndex={-1}
+      className="flex min-w-0 items-center gap-2 overflow-x-auto px-4 pt-2.5 pb-1 outline-none lg:flex-wrap lg:overflow-visible lg:px-3 lg:pt-0"
+    >
       <FilterSelect
         label="Filter by bot"
         allLabel="All bots"
@@ -266,7 +303,7 @@ function FeedFilters({
         value={projectFilter}
         onChange={onProjectFilterChange}
       />
-    </div>
+    </fieldset>
   );
 }
 

@@ -306,11 +306,45 @@ describe("type toggle and status tabs", () => {
     });
   });
 
+  test("a status the chips don't list, Canceled from a shared link, gets a pressed chip of its own", () => {
+    renderProduct({ filters: { type: null, status: "canceled" } });
+    const chips = screen.getByRole("group", { name: "Filter by status" });
+    expect(
+      within(chips)
+        .getAllByRole("button")
+        .map((b) => b.textContent),
+    ).toEqual(["All", "Open", "In progress", "Done", "Canceled"]);
+    expect(
+      within(chips).getByRole("button", { name: "Canceled" }),
+    ).toHaveAttribute("aria-pressed", "true");
+  });
+
+  test("Show all leaves focus on the list, not the top of the page", async () => {
+    const user = userEvent.setup();
+    render(<FilteredProduct />);
+    await user.click(within(tabs()).getByRole("tab", { name: /^Canceled/ }));
+    await user.click(
+      within(typeToggle()).getByRole("button", { name: /^Todos/ }),
+    );
+    await user.click(screen.getByRole("button", { name: "Show all" }));
+    expect(screen.getByRole("tabpanel", { name: /^All/ })).toHaveFocus();
+  });
+
+  test("Try again on the list leaves focus on the list", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <ProductView {...props({ items: { status: "error" } })} />,
+    );
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    rerender(<ProductView {...props({ items: { status: "loading" } })} />);
+    expect(screen.getByRole("tabpanel", { name: /^All/ })).toHaveFocus();
+  });
+
   test("a product with no items at all offers New issue", async () => {
     const user = userEvent.setup();
     const p = renderProduct({ items: { status: "ready", data: itemList([]) } });
     expect(
-      screen.getByRole("heading", { name: "No issues in TRL yet" }),
+      screen.getByRole("heading", { name: "No items in TRL yet" }),
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "New issue" }));
     expect(p.onNewIssue).toHaveBeenCalledOnce();
@@ -391,6 +425,20 @@ describe("aside", () => {
       statusUpdates: { status: "ready", data: { items: [], nextCursor: null } },
     });
     expect(aside("Status updates")).toHaveTextContent("No status update yet");
+  });
+
+  test("Try again on status updates leaves focus on their heading", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <ProductView {...props({ statusUpdates: { status: "error" } })} />,
+    );
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    rerender(
+      <ProductView {...props({ statusUpdates: { status: "loading" } })} />,
+    );
+    expect(
+      screen.getByRole("heading", { name: "Status updates" }),
+    ).toHaveFocus();
   });
 
   test("the 375 tabs show Items, Projects or Status updates, each a panel named by its tab", async () => {

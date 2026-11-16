@@ -227,6 +227,34 @@ describe("feed states", () => {
     ).toBeInTheDocument();
   });
 
+  test("filters that match nothing say so and Clear filters drops each one in force", async () => {
+    const user = userEvent.setup();
+    const p = renderFeed({
+      entries: [],
+      productFilter: "TRL",
+      projectFilter: humanUi.slug,
+    });
+    expect(screen.queryByText("No activity yet")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Nothing matches these filters" }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(p.onProductFilterChange).toHaveBeenCalledWith(null);
+    expect(p.onProjectFilterChange).toHaveBeenCalledWith(null);
+    expect(p.onActorFilterChange).not.toHaveBeenCalled();
+    // the button goes with the empty state; focus waits on the filters
+    expect(
+      screen.getByRole("group", { name: "Filter the feed" }),
+    ).toHaveFocus();
+  });
+
+  test("a filter whose value has left the options reads All, not the raw value", () => {
+    renderFeed({ actorFilter: "act_gone" });
+    const bot = screen.getByRole("combobox", { name: "Filter by bot" });
+    expect(bot).toHaveTextContent("All bots");
+    expect(bot).not.toHaveTextContent("act_gone");
+  });
+
   test("empty for a member with no project says so", () => {
     renderFeed({ entries: [], noProducts: true });
     expect(

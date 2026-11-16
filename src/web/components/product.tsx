@@ -1,5 +1,5 @@
 import { ExternalLinkIcon } from "lucide-react";
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { ActorAvatar } from "@/components/actor";
 import { AppLink, RowLink } from "@/components/app-link";
 import {
@@ -15,8 +15,8 @@ import {
 } from "@/components/item-list";
 import { Pane, PaneTabs } from "@/components/pane-tabs";
 import {
-  IssueListEmpty,
   IssueListError,
+  ItemListEmpty,
   ListSkeleton,
 } from "@/components/states";
 import {
@@ -125,6 +125,7 @@ function ItemsBody({
   onFiltersChange,
   onNewIssue,
   onRetryItems,
+  focusList,
   now,
 }: Pick<
   ProductViewProps,
@@ -134,20 +135,34 @@ function ItemsBody({
   | "onFiltersChange"
   | "onNewIssue"
   | "onRetryItems"
-> & { now: Date }) {
+> & {
+  /** The Show all and Try again buttons unmount as the list reloads; focus waits on the list. */
+  focusList: () => void;
+  now: Date;
+}) {
   if (items.status === "loading")
     return <ListSkeleton className="px-4 lg:px-2" />;
   if (items.status === "error")
-    return <IssueListError onRetry={onRetryItems} />;
+    return (
+      <IssueListError
+        onRetry={() => {
+          focusList();
+          onRetryItems();
+        }}
+      />
+    );
   if (items.data.counts.all.all === 0) {
-    return <IssueListEmpty projectKey={product.key} onNewIssue={onNewIssue} />;
+    return <ItemListEmpty productKey={product.key} onNewIssue={onNewIssue} />;
   }
   const rows = items.data.items.filter((item) => matchesFilters(item, filters));
   if (rows.length === 0) {
     return (
       <FilterEmpty
         filters={filters}
-        onShowAll={() => onFiltersChange(NO_FILTERS)}
+        onShowAll={() => {
+          focusList();
+          onFiltersChange(NO_FILTERS);
+        }}
       />
     );
   }
@@ -198,6 +213,8 @@ export function ProductView(props: ProductViewProps) {
   const repoHeading = useId();
   const projectsHeading = useId();
   const updatesHeading = useId();
+  const listRef = useRef<HTMLDivElement>(null);
+  const updatesHeadingRef = useRef<HTMLHeadingElement>(null);
   const { detail, filters, onFiltersChange } = props;
   const projects = detail?.projects ?? [];
   const counts =
@@ -241,8 +258,16 @@ export function ProductView(props: ProductViewProps) {
             onFiltersChange={onFiltersChange}
           />
           {/* one panel, keyed to whichever tab is current, so the list is that tab's panel */}
-          <TabsContent value={statusTabValue(filters)}>
-            <ItemsBody {...props} now={now} />
+          <TabsContent
+            ref={listRef}
+            value={statusTabValue(filters)}
+            className="outline-none"
+          >
+            <ItemsBody
+              {...props}
+              focusList={() => listRef.current?.focus()}
+              now={now}
+            />
           </TabsContent>
         </Tabs>
       </Pane>
@@ -272,12 +297,19 @@ export function ProductView(props: ProductViewProps) {
         )}
         <Pane value="updates">
           <section aria-labelledby={updatesHeading}>
-            <AsideHeading id={updatesHeading} className="max-lg:sr-only">
+            <AsideHeading
+              ref={updatesHeadingRef}
+              id={updatesHeading}
+              className="max-lg:sr-only"
+            >
               Status updates
             </AsideHeading>
             <StatusUpdateList
               updates={props.statusUpdates}
-              onRetry={props.onRetryStatusUpdates}
+              onRetry={() => {
+                updatesHeadingRef.current?.focus();
+                props.onRetryStatusUpdates();
+              }}
             />
           </section>
         </Pane>

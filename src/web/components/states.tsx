@@ -4,6 +4,7 @@ import {
   type LucideIcon,
   PackageIcon,
   PlusIcon,
+  SearchIcon,
   TriangleAlertIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -140,6 +141,27 @@ export function FeedEmpty() {
   );
 }
 
+/** Nothing under the feed filters: say so, and offer them all back. */
+export function FeedFilterEmpty({ onClear }: { onClear: () => void }) {
+  return (
+    <EmptyState
+      icon={SearchIcon}
+      title="Nothing matches these filters"
+      description="Try other filters, or clear them to see all activity."
+      action={
+        <Button
+          variant="outline"
+          size="sm"
+          className={panelAction}
+          onClick={onClear}
+        >
+          Clear filters
+        </Button>
+      }
+    />
+  );
+}
+
 /** A member the owner has not added to any product: nothing can appear until they do. */
 export function FeedNoProducts() {
   return (
@@ -187,17 +209,17 @@ export function LoadingRegion({
   );
 }
 
-export function IssueListEmpty({
-  projectKey,
+export function ItemListEmpty({
+  productKey,
   onNewIssue,
 }: {
-  projectKey: string;
+  productKey: string;
   onNewIssue: () => void;
 }) {
   return (
     <EmptyState
       icon={FolderIcon}
-      title={`No issues in ${projectKey} yet`}
+      title={`No items in ${productKey} yet`}
       description="Bots file issues here. You can file one too."
       action={
         <Button size="sm" className={panelAction} onClick={onNewIssue}>

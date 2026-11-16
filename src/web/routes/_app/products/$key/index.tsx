@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { AppPage, useChrome } from "@/app/chrome";
 import { NotFoundPage } from "@/app/not-found-page";
 import { RowsMissing } from "@/app/rows-missing";
@@ -15,6 +15,18 @@ import { keys, productItemsQuery } from "@/lib/queries";
 
 export const Route = createFileRoute("/_app/products/$key/")({
   validateSearch: validateItemSearch,
+  // product keys are uppercase, and the sidebar and New issue match the URL's key exactly
+  beforeLoad: ({ params, search }) => {
+    const key = params.key.toUpperCase();
+    if (key !== params.key) {
+      throw redirect({
+        to: "/products/$key",
+        params: { key },
+        search,
+        replace: true,
+      });
+    }
+  },
   component: ProductPage,
 });
 

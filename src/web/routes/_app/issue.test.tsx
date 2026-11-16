@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, test } from "vitest";
 import type { EntryView, WebItemView } from "@/lib/api-types";
-import { renderApp, signedInAs } from "@/test/app";
+import { notFound, renderApp, signedInAs } from "@/test/app";
 import { issue, issueList, maya, product, trail } from "@/test/fixtures";
 import { server } from "@/test/server";
 
@@ -56,6 +56,64 @@ describe("old links", () => {
       }),
     ).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/products/TRL/14");
+  });
+
+  test("/issues/JUS-187, an imported item's source key, lands on the item's own key in place", async () => {
+    signedInAs("member");
+    const imported = issue({ key: "TRL-5", sourceKey: "JUS-187" });
+    server.use(
+      http.get("/api/web/items/JUS-187", () => HttpResponse.json(imported)),
+      http.get("/api/web/items/TRL-5", () => HttpResponse.json(imported)),
+    );
+    const { router } = renderApp("/issues/JUS-187");
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe("/products/TRL/5"),
+    );
+    expect(
+      await screen.findByRole("heading", { level: 1, name: imported.title }),
+    ).toBeInTheDocument();
+    // every hop replaced the entry before it, so Back leaves the item
+    expect(router.history.length).toBe(1);
+  });
+
+  test.each([
+    "/issues/trl-14",
+    "/issues/TRL-014",
+    "/products/trl/14",
+    "/products/TRL/014",
+  ])("%s is spelled as the item's own key", async (path) => {
+    signedInAs("member");
+    server.use(
+      http.get("/api/web/items/:key", ({ params }) =>
+        String(params.key).toUpperCase().replace(/-0+/, "-") === "TRL-14"
+          ? HttpResponse.json(issue())
+          : notFound(),
+      ),
+    );
+    const { router } = renderApp(path);
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe("/products/TRL/14"),
+    );
+    expect(
+      await screen.findByRole("heading", { level: 1, name: issue().title }),
+    ).toBeInTheDocument();
+    expect(router.history.length).toBe(1);
+  });
+
+  test("a number that isn't one is Not found, and nothing is read", async () => {
+    signedInAs("member");
+    const asked: string[] = [];
+    server.use(
+      http.get("/api/web/items/:key", ({ params }) => {
+        asked.push(String(params.key));
+        return notFound();
+      }),
+    );
+    renderApp("/products/TRL/abc");
+    expect(
+      await screen.findByRole("heading", { name: "Page not found", level: 1 }),
+    ).toBeInTheDocument();
+    expect(asked).toEqual([]);
   });
 });
 

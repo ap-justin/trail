@@ -17,8 +17,12 @@ function FeedPage() {
   });
   const { session } = useChrome();
   const feed = useLiveFeed(filter, {
-    onFilterGone: () =>
-      setFilter((f) => ({ ...f, product: null, project: null })),
+    onFilterGone: (gone) =>
+      setFilter((f) => ({
+        ...f,
+        product: gone.product ? null : f.product,
+        project: gone.project ? null : f.project,
+      })),
   });
   const noProducts = !session.viewer.isOwner && session.products.length === 0;
   return (

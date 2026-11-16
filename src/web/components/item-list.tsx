@@ -50,7 +50,7 @@ const filterStatuses: StatusFilter[] = [
   "done",
   "canceled",
 ];
-// the 375 chips leave Canceled out
+// the 375 chips leave Canceled out, unless it is the filter in force
 const chipStatuses: StatusFilter[] = ["open", "in_progress", "done"];
 const ALL = "all";
 
@@ -194,7 +194,12 @@ function StatusChips({
       }}
       className="w-full scrollbar-none overflow-x-auto px-4 pt-2.5 pb-3 mask-r-from-[calc(100%-var(--spacing)*4)] lg:hidden"
     >
-      {statusOptions(chipStatuses, null).map((option) => (
+      {statusOptions(
+        value && !chipStatuses.includes(value)
+          ? [...chipStatuses, value]
+          : chipStatuses,
+        null,
+      ).map((option) => (
         <ToggleGroupItem
           key={option.value}
           value={option.value}

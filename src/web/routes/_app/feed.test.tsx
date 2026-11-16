@@ -375,6 +375,71 @@ describe("the project filter", () => {
   });
 });
 
+describe("one of two filters taken away", () => {
+  /** Filters the feed to TRL and Human UI launch, then has the server 404 whatever `gone` names. */
+  async function filterBothThenLose(gone: "product" | "project") {
+    signedInAs("member");
+    const page = feedPage([statusEntry("e2", minutesAgo(30))]);
+    const withProjects = {
+      ...page,
+      filters: { ...page.filters, projects: [humanUi] },
+    };
+    server.use(
+      http.get("/api/web/feed", () => HttpResponse.json(withProjects)),
+    );
+    renderApp("/");
+    await waitFor(() => expect(rowFor("e2")).not.toBeNull());
+    await userEvent.click(
+      screen.getByRole("combobox", { name: "Filter by product" }),
+    );
+    await userEvent.click(
+      await screen.findByRole("option", { name: "TRL trail" }),
+    );
+    await userEvent.click(
+      screen.getByRole("combobox", { name: "Filter by project" }),
+    );
+    await userEvent.click(
+      await screen.findByRole("option", { name: "Human UI launch" }),
+    );
+    await waitFor(() =>
+      expect(FakeEventSource.current.url).toBe(
+        "/api/web/events?product=TRL&project=human-ui",
+      ),
+    );
+    const filtered = FakeEventSource.current;
+    server.use(
+      http.get("/api/web/feed", ({ request }) =>
+        new URL(request.url).searchParams.has(gone)
+          ? notFound()
+          : HttpResponse.json(withProjects),
+      ),
+    );
+    filtered.fail({ closed: true });
+  }
+
+  test("a lost project clears the project and keeps the product", async () => {
+    await filterBothThenLose("project");
+    await waitFor(() =>
+      expect(FakeEventSource.current.url).toBe("/api/web/events?product=TRL"),
+    );
+    expect(
+      screen.getByRole("combobox", { name: "Filter by project" }),
+    ).toHaveTextContent("All projects");
+  });
+
+  test("a lost product clears the product and keeps the project", async () => {
+    await filterBothThenLose("product");
+    await waitFor(() =>
+      expect(FakeEventSource.current.url).toBe(
+        "/api/web/events?project=human-ui",
+      ),
+    );
+    expect(
+      screen.getByRole("combobox", { name: "Filter by product" }),
+    ).toHaveTextContent("All products");
+  });
+});
+
 describe("a filter change with arrivals in flight", () => {
   const chooseKai = async () => {
     await userEvent.click(

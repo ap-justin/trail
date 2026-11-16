@@ -47,7 +47,12 @@ export function FilterSelect<T extends string>({
         className="shrink-0 text-xs font-medium max-lg:h-10!"
       >
         <Icon aria-hidden="true" className="size-3.5" />
-        <SelectValue />
+        {/* a value gone from the options (a bot no longer listed) reads as the All label */}
+        <SelectValue>
+          {(chosen: T | null) =>
+            items.find((item) => item.value === chosen)?.label ?? allLabel
+          }
+        </SelectValue>
       </SelectTrigger>
       {/* as wide as its widest item, title pills included, inside the viewport */}
       <SelectContent

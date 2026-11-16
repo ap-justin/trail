@@ -382,4 +382,36 @@ describe("empty and failed", () => {
     await user.click(screen.getByRole("button", { name: "Try again" }));
     expect(p.onRetryItems).toHaveBeenCalledOnce();
   });
+
+  test("Try again and Show all leave focus on the list, not the top of the page", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <ProjectView {...props({ items: { status: "error" } })} />,
+    );
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    rerender(<ProjectView {...props({ items: { status: "loading" } })} />);
+    expect(screen.getByRole("tabpanel", { name: /^All/ })).toHaveFocus();
+    const filtered = {
+      product: null,
+      type: "todo",
+      status: "canceled",
+    } as const;
+    rerender(<ProjectView {...props({ filters: filtered })} />);
+    await user.click(screen.getByRole("button", { name: "Show all" }));
+    expect(screen.getByRole("tabpanel", { name: /^Canceled/ })).toHaveFocus();
+  });
+
+  test("Try again on status updates leaves focus on their heading", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <ProjectView {...props({ statusUpdates: { status: "error" } })} />,
+    );
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    rerender(
+      <ProjectView {...props({ statusUpdates: { status: "loading" } })} />,
+    );
+    expect(
+      screen.getByRole("heading", { name: "Status updates" }),
+    ).toHaveFocus();
+  });
 });

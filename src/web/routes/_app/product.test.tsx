@@ -78,6 +78,71 @@ describe("product page", () => {
   });
 });
 
+describe("while the next filter loads", () => {
+  /** TRL's All list holds an open and a done row; any other status waits on `release`. */
+  function serveHeld() {
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const open = issueRow({ key: "TRL-17", title: "Open one" });
+    const done = issueRow({ key: "TRL-18", title: "Done one", status: "done" });
+    server.use(
+      http.get("/api/web/products/TRL", () =>
+        HttpResponse.json(productDetail()),
+      ),
+      http.get("/api/web/products/TRL/items", async ({ request }) => {
+        const status = new URL(request.url).searchParams.get("status");
+        if (status === null) return HttpResponse.json(issueList([open, done]));
+        await held;
+        return HttpResponse.json(issueList([done]));
+      }),
+      http.get("/api/web/products/TRL/status-updates", () =>
+        HttpResponse.json({ items: [], nextCursor: null }),
+      ),
+    );
+    return { release, held };
+  }
+
+  test("the last list stays under the new tab, filtered to it, with its counts", async () => {
+    signedInAs("member");
+    const { release } = serveHeld();
+    renderApp("/products/TRL");
+    expect(await screen.findAllByText("Open one")).not.toHaveLength(0);
+    await userEvent.click(screen.getByRole("tab", { name: /^Done/ }));
+    expect(selectedTab()).toMatch(/^Done/);
+    expect(screen.getByRole("tab", { name: /^Done/ })).toHaveTextContent("24");
+    expect(screen.getAllByText("Done one")).not.toHaveLength(0);
+    expect(screen.queryByText("Open one")).not.toBeInTheDocument();
+    expect(screen.queryByText("Loading")).not.toBeInTheDocument();
+    release();
+  });
+
+  test("another product's list is never shown while this one loads", async () => {
+    signedInAs("member");
+    const { release, held } = serveHeld();
+    server.use(
+      http.get("/api/web/products/DOC", () =>
+        HttpResponse.json(productDetail()),
+      ),
+      http.get("/api/web/products/DOC/items", async () => {
+        await held;
+        return HttpResponse.json(issueList([]));
+      }),
+      http.get("/api/web/products/DOC/status-updates", () =>
+        HttpResponse.json({ items: [], nextCursor: null }),
+      ),
+    );
+    const { router } = renderApp("/products/TRL");
+    expect(await screen.findAllByText("Open one")).not.toHaveLength(0);
+    await router.navigate({ to: "/products/$key", params: { key: "DOC" } });
+    await waitFor(() =>
+      expect(screen.queryByText("Open one")).not.toBeInTheDocument(),
+    );
+    release();
+  });
+});
+
 describe("type filter", () => {
   /** Answers TRL's reads, recording each item-list request's type and status. */
   function serveTyped() {
@@ -200,6 +265,23 @@ describe("links", () => {
     expect(
       within(products).getByRole("link", { name: "TRL trail" }),
     ).toHaveAttribute("aria-current", "page");
+  });
+
+  test("/products/trl is the TRL page in place, filters and all", async () => {
+    signedInAs("member");
+    const statuses = serveProduct();
+    const { router } = renderApp("/products/trl?status=in_progress");
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe("/products/TRL"),
+    );
+    expect(router.state.location.search).toEqual({ status: "in_progress" });
+    expect(router.history.length).toBe(1);
+    await screen.findAllByText("Human UI: feed, projects, issue page");
+    const products = screen.getByRole("navigation", { name: "Products" });
+    expect(
+      within(products).getByRole("link", { name: "TRL trail" }),
+    ).toHaveAttribute("aria-current", "page");
+    expect(statuses).toEqual(["in_progress"]);
   });
 
   test("an issue row's link is described by its meta line", async () => {

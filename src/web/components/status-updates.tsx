@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 import {
   ActorAvatar,
   ActorBadge,
@@ -129,21 +129,25 @@ export function LatestUpdate({
   );
 }
 
-/** A 32px aside heading over a rule. */
+/** A 32px aside heading over a rule; focusable from script, for focus a removed button had. */
 export function AsideHeading({
   id,
   children,
   className,
+  ref,
 }: {
   id: string;
   children: ReactNode;
   className?: string;
+  ref?: Ref<HTMLHeadingElement>;
 }) {
   return (
     <h2
+      ref={ref}
       id={id}
+      tabIndex={-1}
       className={cn(
-        "flex h-8 items-center gap-1.5 border-b font-medium",
+        "flex h-8 items-center gap-1.5 border-b font-medium outline-none",
         className,
       )}
     >

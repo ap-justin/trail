@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute, redirect } from "@tanstack/react-router";
-import { AppPage } from "@/app/chrome";
+import { createFileRoute, Navigate, redirect } from "@tanstack/react-router";
+import { AppPage, useChrome } from "@/app/chrome";
 import { NotFoundPage } from "@/app/not-found-page";
 import { RowsMissing } from "@/app/rows-missing";
 import {
@@ -46,6 +46,7 @@ function ProjectPage() {
   const { slug } = Route.useParams();
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
+  const { session } = useChrome();
   const project = useQuery({
     queryKey: keys.project(slug),
     queryFn: () => api.project(slug),
@@ -72,7 +73,21 @@ function ProjectPage() {
     queryFn: () => api.projectStatusUpdates(slug),
   });
 
-  if (isNotFound(project.error)) return <NotFoundPage />;
+  if (isNotFound(project.error)) {
+    // an old lowercase product link, /projects/trl: only a product the viewer sees is one,
+    // so a hidden product reads exactly as an unknown slug
+    const key = slug.toUpperCase();
+    return session.products.some((p) => p.key === key) ? (
+      <Navigate
+        to="/products/$key"
+        params={{ key }}
+        search={{ status: search.status, type: search.type }}
+        replace
+      />
+    ) : (
+      <NotFoundPage />
+    );
+  }
   return (
     <AppPage
       section="projects"
@@ -97,7 +112,12 @@ function ProjectPage() {
           })
         }
         onRetryProject={() => void project.refetch()}
-        onRetryItems={() => void items.refetch()}
+        // a refetch ignores `enabled`, so items still waiting on the project wait on its retry
+        onRetryItems={() =>
+          void (itemsWaitOnProject && project.data === undefined
+            ? project.refetch()
+            : items.refetch())
+        }
         onRetryStatusUpdates={() => void updates.refetch()}
       />
       <RowsMissing

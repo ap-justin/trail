@@ -20,6 +20,9 @@ export const FRESH_MS = 2000;
 /** The wait before opening a new stream once the browser has given up on one. */
 export const RECONNECT_MS = 5000;
 
+/** Which feed filters named something the viewer can no longer see. */
+export type FilterGone = { product: boolean; project: boolean };
+
 export type LiveConnection = "connecting" | "open" | "reconnecting";
 
 type Arrivals = {
@@ -87,11 +90,12 @@ function arrivals(state: Arrivals, action: ArrivalAction): Arrivals {
 /**
  * The feed under `filter`: the newest page from `/feed`, with entries from the
  * `/events` stream merged on top. The stream reopens when the filter changes.
- * `onFilterGone` runs when the filtered product or project turns out to be hidden or missing.
+ * `onFilterGone` runs when the filtered product or project turns out to be hidden or missing,
+ * naming which.
  */
 export function useLiveFeed(
   filter: FeedFilter,
-  { onFilterGone }: { onFilterGone: () => void },
+  { onFilterGone }: { onFilterGone: (gone: FilterGone) => void },
 ) {
   const { actor, product, project } = filter;
   // rebuilt from the parts, so the effects below depend on values, not the caller's object
@@ -164,6 +168,20 @@ export function useLiveFeed(
     );
   });
 
+  /** Whether `/feed` under `filter` answers 404; read into the cache, so a filter left standing has its page. */
+  const feedGone = async (filter: FeedFilter) => {
+    try {
+      await queryClient.fetchQuery({
+        queryKey: keys.feed(filter),
+        queryFn: () => api.feed(filter),
+        staleTime: 0,
+      });
+      return false;
+    } catch (error) {
+      return error instanceof Error && isNotFound(error);
+    }
+  };
+
   const refetch = useEffectEvent(() => {
     void queryClient.invalidateQueries({ queryKey: keys.feed(current) });
   });
@@ -180,17 +198,18 @@ export function useLiveFeed(
   // the server closes a stream on a 4xx: a 404 is a filtered product or project this person lost,
   // which only /feed can say, since EventSource never exposes the status
   const readAfterClose = useEffectEvent(async () => {
-    try {
-      await queryClient.fetchQuery({
-        queryKey: keys.feed(current),
-        queryFn: () => api.feed(current),
-        staleTime: 0,
-      });
-    } catch (error) {
-      const filtered = product !== null || project !== null;
-      if (filtered && error instanceof Error && isNotFound(error)) {
-        onFilterGone();
+    if (!(await feedGone(current))) return;
+    // with both set, the 404 doesn't say which: each alone answers for itself
+    if (product !== null && project !== null) {
+      const [productGone, projectGone] = await Promise.all([
+        feedGone({ actor, product, project: null }),
+        feedGone({ actor, product: null, project }),
+      ]);
+      if (productGone || projectGone) {
+        onFilterGone({ product: productGone, project: projectGone });
       }
+    } else if (product !== null || project !== null) {
+      onFilterGone({ product: product !== null, project: project !== null });
     }
   });
 

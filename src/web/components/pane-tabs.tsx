@@ -1,4 +1,4 @@
-import type { ComponentProps } from "react";
+import { type ComponentProps, useSyncExternalStore } from "react";
 import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 
@@ -36,20 +36,45 @@ export function PaneTabs({
   );
 }
 
+// the strip's lg:hidden breakpoint
+const DESKTOP = "(min-width: 1024px)";
+
+function subscribeDesktop(onChange: () => void) {
+  const query = window.matchMedia(DESKTOP);
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+}
+const isDesktop = () => window.matchMedia(DESKTOP).matches;
+
 /**
  * One pane: a tab panel that shows only while its tab is selected below 1024px. At 1024px
  * and up every pane shows, so the `hidden` and `inert` Base UI puts on an unselected panel
- * are lifted and the breakpoint hides it instead.
+ * are lifted and the breakpoint hides it instead; with no tab there to name it, it drops
+ * the panel's role, label and tab stop too.
  */
 export function Pane({
   className,
   ...props
-}: Omit<ComponentProps<typeof TabsContent>, "keepMounted" | "hidden">) {
+}: Omit<
+  ComponentProps<typeof TabsContent>,
+  "keepMounted" | "hidden" | "render"
+>) {
+  const desktop = useSyncExternalStore(subscribeDesktop, isDesktop);
   return (
     <TabsContent
       keepMounted
       hidden={false}
       inert={false}
+      render={
+        desktop
+          ? ({
+              role: _role,
+              tabIndex: _tabIndex,
+              "aria-labelledby": _labelledBy,
+              ...rest
+            }) => <div {...rest} />
+          : undefined
+      }
       className={cn(
         "flex-none rounded-sm focus-visible:ring-3 focus-visible:ring-ring/25 max-lg:data-hidden:hidden",
         className,

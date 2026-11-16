@@ -1,5 +1,5 @@
 import { PackageIcon } from "lucide-react";
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { ActorAvatar, ActorBadge, BotTitle } from "@/components/actor";
 import { AppLink } from "@/components/app-link";
 import { ProductSelect } from "@/components/filter-select";
@@ -174,24 +174,37 @@ function ItemsBody({
   filters,
   onFiltersChange,
   onRetryItems,
+  focusList,
   now,
 }: {
   items: Loadable<WebProjectItemsView>;
   filters: ProjectItemFilters;
   onFiltersChange: (filters: ProjectItemFilters) => void;
   onRetryItems: () => void;
+  /** The Show all and Try again buttons unmount as the list reloads; focus waits on the list. */
+  focusList: () => void;
   now: Date;
 }) {
   if (items.status === "loading")
     return <ListSkeleton className="px-4 lg:px-2" />;
   if (items.status === "error")
-    return <IssueListError onRetry={onRetryItems} />;
+    return (
+      <IssueListError
+        onRetry={() => {
+          focusList();
+          onRetryItems();
+        }}
+      />
+    );
   const groups = visibleGroups(items.data, filters);
   if (groups.length === 0) {
     return (
       <FilterEmpty
         filters={filters}
-        onShowAll={() => onFiltersChange(NO_PROJECT_FILTERS)}
+        onShowAll={() => {
+          focusList();
+          onFiltersChange(NO_PROJECT_FILTERS);
+        }}
       />
     );
   }
@@ -230,6 +243,8 @@ function ProjectBody(
   const [pane, setPane] = useState<PaneName>("items");
   const detailsHeading = useId();
   const updatesHeading = useId();
+  const listRef = useRef<HTMLDivElement>(null);
+  const updatesHeadingRef = useRef<HTMLHeadingElement>(null);
   // no items at all leaves nothing to filter; none under a product filter is a filter result
   const empty =
     items.status === "ready" &&
@@ -296,12 +311,17 @@ function ProjectBody(
                 }
               />
               {/* one panel, keyed to whichever tab is current, so the list is that tab's panel */}
-              <TabsContent value={statusTabValue(filters)}>
+              <TabsContent
+                ref={listRef}
+                value={statusTabValue(filters)}
+                className="outline-none"
+              >
                 <ItemsBody
                   items={items}
                   filters={filters}
                   onFiltersChange={onFiltersChange}
                   onRetryItems={props.onRetryItems}
+                  focusList={() => listRef.current?.focus()}
                   now={now}
                 />
               </TabsContent>
@@ -316,12 +336,19 @@ function ProjectBody(
         </section>
         <Pane value="updates">
           <section aria-labelledby={updatesHeading}>
-            <AsideHeading id={updatesHeading} className="max-lg:sr-only">
+            <AsideHeading
+              ref={updatesHeadingRef}
+              id={updatesHeading}
+              className="max-lg:sr-only"
+            >
               Status updates
             </AsideHeading>
             <StatusUpdateList
               updates={props.statusUpdates}
-              onRetry={props.onRetryStatusUpdates}
+              onRetry={() => {
+                updatesHeadingRef.current?.focus();
+                props.onRetryStatusUpdates();
+              }}
             />
           </section>
         </Pane>
