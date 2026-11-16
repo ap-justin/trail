@@ -253,17 +253,19 @@ export type LegacyProductRef = {
   product?: string;
 };
 
-/** The product's id or key a legacy call named, under whichever one spelling it used; two spellings are refused. */
+/** The product's id or key a legacy call named, under whichever spellings it used; two spellings with different values are refused. */
 export function legacyProduct(ref: LegacyProductRef): string | undefined {
-  const sent = [ref.projectId, ref.project, ref.product].filter(
-    (value) => value !== undefined,
+  const sent = new Set(
+    [ref.projectId, ref.project, ref.product].filter(
+      (value) => value !== undefined,
+    ),
   );
-  if (sent.length > 1) {
+  if (sent.size > 1) {
     throw new ValidationError(
-      "send one of projectId, project or product: they name the same product, and two together is ambiguous",
+      "send one of projectId, project or product: they name the same product, and two different values are ambiguous",
     );
   }
-  return sent[0];
+  return [...sent][0];
 }
 
 /** The legacy create: `projectId` (or an alias) takes the product's id or key. */
@@ -3646,13 +3648,18 @@ export function createService({
             .from(webhookSubscription)
             .where(eq(webhookSubscription.actorId, actor.id))
             .all();
-          if (!webhooksOf(from, own).every((w) => withinScope(actor, w))) {
+          const reads = actor.scope?.actions?.includes("read") ?? true;
+          const manages = (w: Webhook) =>
+            withinScope(actor, w) && (reads || w.kind === "inbox");
+          if (!webhooksOf(from, own).every(manages)) {
             throw new ConflictError(
-              `this bot has reached its limit of ${WEBHOOKS_PER_BOT_MAX} webhooks, and this key can't manage all of them: a key that reaches every product the bot follows can delete one to make room`,
+              `this bot has reached its limit of ${WEBHOOKS_PER_BOT_MAX} webhooks, and this key can't manage all of them: a key that can read every product the bot follows can delete one to make room`,
             );
           }
           throw new ConflictError(
-            `this bot already has ${count} webhooks, the most allowed: delete one you no longer use, or add the product to one you have with update_webhook`,
+            kind === "inbox"
+              ? `this bot already has ${count} webhooks, the most allowed: delete one you no longer use to make room for the inbox webhook`
+              : `this bot already has ${count} webhooks, the most allowed: delete one you no longer use, or add the product to one you have with update_webhook`,
           );
         }
       };

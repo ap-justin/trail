@@ -1,11 +1,13 @@
-import { screen, within } from "@testing-library/react";
+import { focusManager } from "@tanstack/react-query";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import type {
   WebConversationPageView,
   WebMessagePageView,
 } from "@/lib/api-types";
+import { MESSAGES_STALE_MS } from "@/lib/queries";
 import { notFound, renderApp, serveFeed, signedInAs } from "@/test/app";
 import { ada, alpha, beta, conversation, message } from "@/test/fixtures";
 import { server } from "@/test/server";
@@ -39,6 +41,16 @@ function serveConversation(pages: WebMessagePageView[]) {
   return asked;
 }
 
+function refocusWindow() {
+  act(() => {
+    focusManager.setFocused(false);
+    focusManager.setFocused(true);
+  });
+}
+
+/** Long enough for a focus refetch, had one started, to have sent its first request. */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
+
 const reply = message({
   id: "m-2",
   sender: beta,
@@ -62,6 +74,18 @@ describe("owner only", () => {
     expect(
       screen.queryByRole("link", { name: "Messages" }),
     ).not.toBeInTheDocument();
+  });
+
+  test("a member opening the list sees Not found, and the list is never read", async () => {
+    signedInAs("member");
+    const asked = serveConversations([
+      { items: [conversation()], nextCursor: null },
+    ]);
+    renderApp("/messages");
+    expect(
+      await screen.findByRole("heading", { name: "Page not found", level: 1 }),
+    ).toBeInTheDocument();
+    expect(asked).toHaveLength(0);
   });
 
   test("a member opening a pair sees Not found, and its messages are never read", async () => {
@@ -142,6 +166,18 @@ describe("the conversation list", () => {
     ).not.toBeInTheDocument();
   });
 
+  test("coming back to the window soon after doesn't re-read the list", async () => {
+    signedInAs("owner");
+    const asked = serveConversations([
+      { items: [conversation()], nextCursor: null },
+    ]);
+    renderApp("/messages");
+    await screen.findByRole("link", { name: "Alpha and Beta" });
+    refocusWindow();
+    await settle();
+    expect(asked).toHaveLength(1);
+  });
+
   test("a row opens its pair's conversation", async () => {
     signedInAs("owner");
     serveConversations([{ items: [conversation()], nextCursor: null }]);
@@ -171,6 +207,39 @@ describe("a conversation", () => {
     expect(await within(list).findByText("running")).toBeInTheDocument();
     expect(within(list).getAllByRole("listitem")).toHaveLength(2);
     expect(asked.map((url) => url.searchParams.get("cursor"))).toEqual([
+      null,
+      "1",
+    ]);
+  });
+
+  test("coming back to the window re-reads the loaded pages only once they've gone stale", async () => {
+    signedInAs("owner");
+    const asked = serveConversation([
+      { items: [message()], nextCursor: "1" },
+      { items: [reply], nextCursor: null },
+    ]);
+    renderApp("/messages/a-alpha/a-beta");
+    const list = await screen.findByRole("list", { name: "Messages" });
+    await userEvent.click(
+      screen.getByRole("button", { name: "Load newer messages" }),
+    );
+    await within(list).findByText("running");
+
+    refocusWindow();
+    await settle();
+    expect(asked).toHaveLength(2);
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(Date.now() + MESSAGES_STALE_MS + 1);
+      refocusWindow();
+      await waitFor(() => expect(asked).toHaveLength(4));
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(asked.map((url) => url.searchParams.get("cursor"))).toEqual([
+      null,
+      "1",
       null,
       "1",
     ]);

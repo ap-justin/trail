@@ -479,3 +479,46 @@ test("the photo route is documented under its own /api server, and the documente
   expect(served.status).toBe(200);
   expect(served.headers.get("content-type")).toBe("image/png");
 });
+
+test("POST /messages documents each refusal under the status the server answers it with", async () => {
+  const res = await request("GET", "/api/v1/openapi.json", { key: null });
+  const spec = (await res.json()) as {
+    paths: Record<
+      string,
+      Record<string, { responses: Record<string, { description: string }> }>
+    >;
+  };
+  const responses = spec.paths["/messages"]?.post?.responses;
+  const notFound = responses?.["404"]?.description;
+  expect(notFound).toMatch(/names no bot/);
+  expect(notFound).toMatch(/replyTo is not one of your messages/);
+  const invalid = responses?.["422"]?.description;
+  expect(invalid).toMatch(/a person's id/);
+  expect(invalid).toMatch(/yourself/);
+  expect(invalid).toMatch(/not the replyTo message's other bot/);
+  expect(invalid).toMatch(/neither to nor replyTo/);
+});
+
+test("the deprecated POST /issues says a product field is required in a form generated clients read", async () => {
+  const res = await request("GET", "/api/v1/openapi.json", { key: null });
+  const spec = (await res.json()) as {
+    components: {
+      schemas: Record<
+        string,
+        { description?: string; anyOf?: { required: string[] }[] }
+      >;
+    };
+  };
+  const create = spec.components.schemas.IssueCreate;
+  expect(create?.anyOf).toEqual([
+    { required: ["projectId"] },
+    { required: ["project"] },
+    { required: ["product"] },
+  ]);
+  expect(create?.description).toMatch(/projectId, project or product/);
+
+  const none = await request("POST", "/api/v1/issues", {
+    json: { title: "no product" },
+  });
+  expect(none.status).toBe(422);
+});

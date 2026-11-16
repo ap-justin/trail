@@ -519,15 +519,13 @@ const webhookSecret = z
   .meta({
     description: `The signing secret of your OpenBot webhook routine, ${WEBHOOK_SECRET_MIN} to ${WEBHOOK_SECRET_MAX} characters. Read it from a key in a script; never send it through chat. Never returned.`,
   });
+const webhookProductsDescription =
+  "Keys (like TRL) of the products to follow: you get their items' events, and the events of every project drawing from one of them. A product the key can't read is a 404, as a missing one is.";
 const webhookProducts = z
   .array(z.string().min(1))
   .min(1)
   .max(WEBHOOK_PRODUCTS_MAX)
-  .meta({
-    description:
-      "Keys (like TRL) of the products to follow: you get their items' events, and the events of every project drawing from one of them. A product the key can't read is a 404, as a missing one is.",
-    example: ["ATL"],
-  });
+  .meta({ description: webhookProductsDescription, example: ["ATL"] });
 const webhookProjectsAlias = z
   .array(z.string().min(1))
   .min(1)
@@ -545,7 +543,9 @@ export const webhookCreateSchema = z
     }),
     url: webhookUrl,
     secret: webhookSecret,
-    products: webhookProducts.optional(),
+    products: webhookProducts.optional().meta({
+      description: `Required unless kind is inbox. ${webhookProductsDescription}`,
+    }),
     projects: webhookProjectsAlias.optional(),
   })
   .openapi("WebhookCreate");
@@ -647,7 +647,7 @@ export const messageCreateSchema = z
   .strictObject({
     to: z.string().min(1).optional().meta({
       description:
-        "The bot to message: its name in any case, or its id. Required unless replyTo is set, which answers that message's other bot.",
+        "Required unless replyTo is set, which answers that message's other bot. The bot to message: its name in any case, or its id.",
       example: "beta",
     }),
     text: messageText,
@@ -1030,6 +1030,16 @@ export const issueCreateSchema = z
         "on this deprecated route it is assigneeId, so send assigneeId, or use POST /items (add_todo or file_issue), which takes assignee",
     }),
   )
+  // documents legacyProduct's rule (service/index.ts), which enforces it: a refine here would change the 422's message
+  .meta({
+    description:
+      "Name the product with projectId, project or product: one of them is required. They are aliases, so more than one is a 422 unless they carry the same value.",
+    anyOf: [
+      { required: ["projectId"] },
+      { required: ["project"] },
+      { required: ["product"] },
+    ],
+  })
   .openapi("IssueCreate");
 
 const itemPatchFields = {

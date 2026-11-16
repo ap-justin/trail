@@ -1,7 +1,11 @@
 import { createHmac } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { beforeEach, expect, test } from "vitest";
-import { activityEvent, webhookDelivery } from "../db/schema.js";
+import {
+  activityEvent,
+  webhookDelivery,
+  webhookSubscription,
+} from "../db/schema.js";
 import { MESSAGE_TEXT_MAX_BYTES } from "../service/messages.js";
 import { projectKey, setupTestApp, testWebhookSettings } from "../test-app.js";
 import { createWebhookWorker } from "./worker.js";
@@ -138,6 +142,57 @@ test("only the recipient's inbox webhook fires: not the sender's, and no activit
   expect(sent.map((s) => s.url)).toContain(
     `https://beta.example.com/activity${n}`,
   );
+  // the reads the negatives above rest on do move for a real activity event
+  expect(db.select().from(activityEvent).all().length).toBeGreaterThan(events);
+  expect(published.length).toBeGreaterThan(publishedBefore);
+});
+
+test("every inbox webhook of the recipient gets the message, and a paused one waits until it resumes", async () => {
+  const { alpha, beta } = bots();
+  const urls = ["first", "second", "paused"].map(
+    (name) => `https://beta.example.com/${name}${n}`,
+  );
+  const [first, second, paused] = (await Promise.all(
+    urls.map((url) =>
+      api(beta.key, "POST", "/webhooks", {
+        kind: "inbox",
+        url,
+        secret: SECRET,
+      }),
+    ),
+  )) as [Body, Body, Body];
+  db.update(webhookSubscription)
+    .set({ pausedAt: new Date() })
+    .where(eq(webhookSubscription.id, paused.id))
+    .run();
+  const { message } = await api(alpha.key, "POST", "/messages", {
+    to: beta.actor.id,
+    text: "to all",
+  });
+  await worker.tick();
+  expect(sent.map((s) => s.url).sort()).toEqual([urls[0], urls[1]].sort());
+  expect(
+    db
+      .select()
+      .from(webhookDelivery)
+      .where(eq(webhookDelivery.messageId, message.id))
+      .all()
+      .map((d) => [d.subscriptionId, d.status])
+      .sort(),
+  ).toEqual(
+    [
+      [first.id, "delivered"],
+      [second.id, "delivered"],
+      [paused.id, "pending"],
+    ].sort(),
+  );
+
+  // an update, even with no fields, resumes it, and the message it missed goes out
+  sent.length = 0;
+  await api(beta.key, "PATCH", `/webhooks/${paused.id}`, {});
+  await worker.tick();
+  expect(sent.map((s) => s.url)).toEqual([urls[2]]);
+  expect(JSON.parse((sent[0] as Sent).body).data.message.id).toBe(message.id);
 });
 
 test("an inbox webhook takes no products, and an activity webhook can't be made without them", async () => {

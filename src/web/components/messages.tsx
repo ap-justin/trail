@@ -27,6 +27,10 @@ import { cn } from "@/lib/utils";
 export type LoadMoreState = "idle" | "pending" | "error";
 
 type Paging = {
+  /** Pages loaded so far; a rise means Load more's page arrived. */
+  pageCount: number;
+  /** Where the last loaded page begins in the list given: the row Load more focuses. */
+  lastPageStart: number;
   /** The server sent a `nextCursor`: there is a page after the ones shown. */
   hasMore: boolean;
   /** Fetch the next page and append it to the list given. */
@@ -51,6 +55,8 @@ export type ConversationViewProps = Paging & {
   status: "loading" | "error" | "not_found" | "ready";
   /** Every page loaded so far, in the server's order: oldest first, so a next page is newer. */
   messages: WebMessageView[];
+  /** The two bot ids the URL names: an empty conversation has no messages to name them. */
+  pairIds: readonly [string, string];
   onRetry: () => void;
   className?: string;
 };
@@ -63,6 +69,12 @@ const panelAction = "max-lg:h-10 max-lg:px-3.5";
 
 const pairName = (bots: readonly [WebActorView, WebActorView]) =>
   `${bots[0].name} and ${bots[1].name}`;
+
+/** Two bots by id, the order the server gives `conversation.bots`, so a pair reads the same on the list and its page. */
+function byId<T extends { id: string } | string>(a: T, b: T): [T, T] {
+  const key = (x: T) => (typeof x === "string" ? x : x.id);
+  return key(a) < key(b) ? [a, b] : [b, a];
+}
 
 const countOf = (n: number) => `${n} ${n === 1 ? "message" : "messages"}`;
 
@@ -80,25 +92,30 @@ function Preview({
 /**
  * The shell heading on a conversation page, as `headingKind="breadcrumb"` (the page has
  * its own h1): `Messages / Alpha and Beta` at 1440, the pair alone below, where the
- * shell's `back` leads to the list.
+ * shell's `back` leads to the list. Until the pair is known, `Messages` at every width.
  */
 export function ConversationBreadcrumb({
   listHref,
   bots,
 }: {
   listHref: string;
-  /** Absent until the messages have loaded, and on an empty conversation. */
+  /** In either order. Absent until the messages have loaded, and on an empty conversation. */
   bots?: readonly [WebActorView, WebActorView];
 }) {
   return (
     <span className="flex min-w-0 items-center gap-2">
-      <span className="flex items-center gap-2 font-normal text-muted-foreground max-lg:hidden">
+      <span
+        className={cn(
+          "flex items-center gap-2 font-normal text-muted-foreground",
+          bots && "max-lg:hidden",
+        )}
+      >
         <AppLink href={listHref} className="hover:text-foreground">
           Messages
         </AppLink>
         {bots && <span aria-hidden="true">/</span>}
       </span>
-      {bots && <span className="truncate">{pairName(bots)}</span>}
+      {bots && <span className="truncate">{pairName(byId(...bots))}</span>}
     </span>
   );
 }
@@ -116,23 +133,28 @@ function Bot({ bot }: { bot: WebActorView }) {
 /**
  * After Load more, focus moves to the first row of the page that arrived, so a keyboard
  * user carries on from there instead of from a button that may have gone. `rowAt` finds
- * that row's focus target in the list.
+ * that row's focus target in the list. Keyed off the page count, not the row count: a
+ * refetch can add rows at the top without a page arriving.
  */
 function useFocusNewPage(
-  count: number,
+  { pageCount, lastPageStart, loadMore }: Paging,
   rowAt: (index: number) => HTMLElement | null | undefined,
 ) {
-  const firstNewRow = useRef<number | null>(null);
+  // the page count when Load more was pressed; null when no press is waiting
+  const pressedAt = useRef<number | null>(null);
   const focusRow = useRef(rowAt);
   focusRow.current = rowAt;
   useEffect(() => {
-    const index = firstNewRow.current;
-    if (index === null || count <= index) return;
-    firstNewRow.current = null;
-    focusRow.current(index)?.focus();
-  }, [count]);
+    if (loadMore === "error") pressedAt.current = null;
+  }, [loadMore]);
+  useEffect(() => {
+    const pressed = pressedAt.current;
+    if (pressed === null || pageCount <= pressed) return;
+    pressedAt.current = null;
+    focusRow.current(lastPageStart)?.focus();
+  }, [pageCount, lastPageStart]);
   return () => {
-    firstNewRow.current = count;
+    pressedAt.current = pageCount;
   };
 }
 
@@ -253,7 +275,7 @@ function ConversationRow({
 export function ConversationsView(props: ConversationsViewProps) {
   const now = useMinuteClock(props.now);
   const listRef = useRef<HTMLUListElement>(null);
-  const willLoadMore = useFocusNewPage(props.conversations.length, (index) =>
+  const willLoadMore = useFocusNewPage(props, (index) =>
     listRef.current?.children[index]?.querySelector("a"),
   );
   let body: ReactNode;
@@ -357,7 +379,10 @@ function ReplyQuote({
 function MessageCard({ message }: { message: WebMessageView }) {
   return (
     // a focus target for the first message of a newly loaded page, never in the tab order
-    <li tabIndex={-1} className="rounded-xl border outline-none">
+    <li
+      tabIndex={-1}
+      className="rounded-xl border outline-none focus-visible:ring-3 focus-visible:ring-ring/25"
+    >
       <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 rounded-t-xl border-b bg-muted px-3 py-2">
         <ActorAvatar actor={message.sender} size="xs" />
         <ActorName
@@ -387,6 +412,11 @@ function MessageCard({ message }: { message: WebMessageView }) {
   );
 }
 
+/** A bot named only by the id in the URL: a key, so mono, and free to break mid-id at 375. */
+function BotId({ id }: { id: string }) {
+  return <span className="font-mono break-all">{id}</span>;
+}
+
 function ConversationHeader({
   bots,
 }: {
@@ -413,25 +443,37 @@ function ConversationHeader({
 export function ConversationView(props: ConversationViewProps) {
   const listRef = useRef<HTMLOListElement>(null);
   const willLoadMore = useFocusNewPage(
-    props.messages.length,
+    props,
     (index) => listRef.current?.children[index] as HTMLElement | undefined,
   );
   if (props.status === "not_found") return <NotFoundPanel />;
+  // until the pair's names arrive the breadcrumb's `Messages` titles the page
+  const hiddenTitle = <h1 className="sr-only">Messages</h1>;
   let body: ReactNode;
-  if (props.status === "loading") body = <MessagesSkeleton />;
-  else if (props.status === "error") {
+  if (props.status === "loading") {
     body = (
-      <ErrorState
-        title="Couldn't load this conversation"
-        description="Check your connection, then try again."
-        onRetry={props.onRetry}
-      />
+      <>
+        {hiddenTitle}
+        <MessagesSkeleton />
+      </>
+    );
+  } else if (props.status === "error") {
+    body = (
+      <>
+        {hiddenTitle}
+        <ErrorState
+          title="Couldn't load this conversation"
+          description="Check your connection, then try again."
+          onRetry={props.onRetry}
+        />
+      </>
     );
   } else {
     const [first] = props.messages;
+    const [a, b] = byId(...props.pairIds);
     body = first ? (
       <>
-        <ConversationHeader bots={[first.sender, first.recipient]} />
+        <ConversationHeader bots={byId(first.sender, first.recipient)} />
         <ol
           ref={listRef}
           aria-label="Messages"
@@ -451,11 +493,19 @@ export function ConversationView(props: ConversationViewProps) {
         )}
       </>
     ) : (
-      <EmptyState
-        icon={MessagesSquareIcon}
-        title="No messages yet"
-        description="Messages between these two bots show up here."
-      />
+      <>
+        {hiddenTitle}
+        <EmptyState
+          icon={MessagesSquareIcon}
+          title="No messages yet"
+          description={
+            <>
+              Messages between <BotId id={a} /> and <BotId id={b} /> show up
+              here.
+            </>
+          }
+        />
+      </>
     );
   }
   return (

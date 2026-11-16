@@ -1,11 +1,6 @@
 import { expect, test } from "vitest";
 import { actor } from "../db/schema.js";
 import { createKey } from "../service/keys.js";
-import {
-  MESSAGE_TEXT_MAX_BYTES,
-  MESSAGE_WINDOW_MS,
-  MESSAGES_PER_PAIR,
-} from "../service/messages.js";
 import { setupTestApp } from "../test-app.js";
 import { type Body, mcpClients } from "./test-client.js";
 
@@ -254,11 +249,11 @@ test("a reply to a message sent with expectsReply false is refused, and a new me
   });
 });
 
-test(`a sender gets ${MESSAGES_PER_PAIR} messages to one bot per window, then a refusal saying when to retry`, async () => {
+test("a sender gets 30 messages to one bot per 10 minutes, then a refusal saying when to retry", async () => {
   const { alpha, beta } = await pair();
   const gamma = addBot(`gamma-rate${bots}`);
   clock = Date.now();
-  for (let i = 0; i < MESSAGES_PER_PAIR; i++) {
+  for (let i = 0; i < 30; i++) {
     await call(alpha.client, "message_bot", {
       to: beta.actor.id,
       text: `note ${i}`,
@@ -269,8 +264,8 @@ test(`a sender gets ${MESSAGES_PER_PAIR} messages to one bot per window, then a 
     to: beta.actor.id,
     text: "one more",
   });
-  // the first send leaves the window MESSAGE_WINDOW_MS after it went
-  const wait = Math.ceil((MESSAGE_WINDOW_MS - MESSAGES_PER_PAIR * 1000) / 1000);
+  // the first send went 30 s ago and leaves the 10-minute window after 600 s
+  const wait = 570;
   expect(refused).toMatch(`rate_limited: `);
   expect(refused).toMatch(`try again in ${wait} seconds`);
   // the limit is per sender and recipient: other pairs still go
@@ -302,14 +297,15 @@ test("a retry with the same idempotency_key returns the first message and sends 
 test("text over 64 KiB of UTF-8 is refused naming the limit and the size sent, as is a NUL", async () => {
   const { alpha, beta } = await pair();
   // 3 bytes each in UTF-8: under the limit in characters, over it in bytes
-  const text = "€".repeat(MESSAGE_TEXT_MAX_BYTES / 3 + 1);
-  const bytes = Buffer.byteLength(text);
+  const text = "€".repeat(21_846);
+  const bytes = 65_538;
+  expect(Buffer.byteLength(text)).toBe(bytes);
   expect(
     await callError(alpha.client, "message_bot", { to: beta.actor.id, text }),
   ).toMatch(
-    `payload_too_large: text is ${bytes} bytes, over the limit of ${MESSAGE_TEXT_MAX_BYTES} bytes`,
+    `payload_too_large: text is ${bytes} bytes, over the limit of 65536 bytes`,
   );
-  const exact = "a".repeat(MESSAGE_TEXT_MAX_BYTES);
+  const exact = "a".repeat(65_536);
   const sent = await call(alpha.client, "message_bot", {
     to: beta.actor.id,
     text: exact,
@@ -358,13 +354,115 @@ test("the inbox pages newest first, and a cursor works only with the all it was 
       cursor: first.nextCursor,
     }),
   ).toMatch("cursor was issued for another list or filters");
+});
 
-  const thread = await call(beta.client, "get_thread", {
-    messageId: ids[0],
-    limit: 1,
+test("a thread pages oldest first to its end, found by its root or any reply, and a cursor works only in its own thread", async () => {
+  const { alpha, beta } = await pair();
+  const root = await call(alpha.client, "message_bot", {
+    to: beta.actor.id,
+    text: "t1",
   });
-  expect(thread.items).toHaveLength(1);
-  expect(thread.nextCursor).toBeNull();
+  const second = await call(beta.client, "message_bot", {
+    replyTo: root.message.id,
+    text: "t2",
+  });
+  const third = await call(alpha.client, "message_bot", {
+    replyTo: second.message.id,
+    text: "t3",
+  });
+  const other = await call(alpha.client, "message_bot", {
+    to: beta.actor.id,
+    text: "another thread",
+  });
+  const ids = [root, second, third].map((m) => m.message.id);
+
+  // the same thread by its root and by a reply, read by the recipient of the root
+  for (const id of [root.message.id, second.message.id, third.message.id]) {
+    const whole = await call(beta.client, "get_thread", { messageId: id });
+    expect(whole.threadId).toBe(root.message.id);
+    expect(whole.bots.map((b: Body) => b.id)).toEqual([
+      alpha.actor.id,
+      beta.actor.id,
+    ]);
+    expect(whole.items.map((m: Body) => m.id)).toEqual(ids);
+    expect(whole.nextCursor).toBeNull();
+  }
+
+  const first = await call(beta.client, "get_thread", {
+    messageId: second.message.id,
+    limit: 2,
+  });
+  expect(first.items.map((m: Body) => m.id)).toEqual(ids.slice(0, 2));
+  expect(first.nextCursor).not.toBeNull();
+  const last = await call(beta.client, "get_thread", {
+    messageId: second.message.id,
+    limit: 2,
+    cursor: first.nextCursor,
+  });
+  expect(last.items.map((m: Body) => m.id)).toEqual(ids.slice(2));
+  expect(last.nextCursor).toBeNull();
+
+  expect(
+    await callError(beta.client, "get_thread", {
+      messageId: other.message.id,
+      cursor: first.nextCursor,
+    }),
+  ).toMatch("cursor was issued for another list or filters");
+});
+
+test("mark_read reports what stays unread, counts a duplicated id once, and takes exactly 100 ids", async () => {
+  const { alpha, beta } = await pair();
+  const sent: string[] = [];
+  for (let i = 0; i < 3; i++) {
+    sent.push(
+      (
+        await call(alpha.client, "message_bot", {
+          to: beta.actor.id,
+          text: `r${i}`,
+        })
+      ).message.id,
+    );
+  }
+  const [one, two, three] = sent as [string, string, string];
+  const some = await call(beta.client, "mark_read", { messageIds: [one] });
+  expect(some.unreadMessages).toBe(2);
+  expect((await call(beta.client, "whoami")).unreadMessages).toBe(2);
+
+  const twice = await call(beta.client, "mark_read", {
+    messageIds: [two, two],
+  });
+  expect(twice.results).toEqual([
+    { id: two, result: "read", readAt: expect.any(String) },
+  ]);
+  expect(twice.unreadMessages).toBe(1);
+
+  const hundred = await call(beta.client, "mark_read", {
+    messageIds: [three, ...Array.from({ length: 99 }, (_, i) => `ghost${i}`)],
+  });
+  expect(hundred.results).toHaveLength(100);
+  expect(hundred.results[0]).toMatchObject({ id: three, result: "read" });
+  expect(hundred.unreadMessages).toBe(0);
+  await callError(beta.client, "mark_read", {
+    messageIds: Array.from({ length: 101 }, (_, i) => `ghost${i}`),
+  });
+});
+
+test("an empty or over-long idempotency_key is refused and sends nothing", async () => {
+  const { alpha, beta } = await pair();
+  for (const idempotency_key of ["", "k".repeat(256)]) {
+    await callError(alpha.client, "message_bot", {
+      to: beta.actor.id,
+      text: "x",
+      idempotency_key,
+    });
+  }
+  expect((await call(beta.client, "list_inbox")).items).toEqual([]);
+  await call(alpha.client, "message_bot", {
+    to: beta.actor.id,
+    text: "x",
+    idempotency_key: "k".repeat(255),
+  });
+  expect((await call(beta.client, "list_inbox")).items).toHaveLength(1);
 });
 
 test("create_webhook with kind inbox subscribes the bot's inbox, whatever the key's actions", async () => {

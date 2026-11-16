@@ -12,8 +12,6 @@ import { paths } from "@/lib/paths";
 import { conversationQuery } from "@/lib/queries";
 
 export const Route = createFileRoute("/_app/messages/$a/$b")({
-  // a fresh page per pair: no Load more state carries over to the next one
-  remountDeps: ({ params }) => `${params.a}/${params.b}`,
   component: ConversationRoute,
 });
 
@@ -47,6 +45,7 @@ function ConversationPage() {
             : statusOf(conversation)
         }
         messages={messages}
+        pairIds={[a, b]}
         onRetry={() => void conversation.refetch()}
         {...pagingOf(conversation)}
       />

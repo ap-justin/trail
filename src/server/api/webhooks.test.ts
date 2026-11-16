@@ -755,6 +755,37 @@ test("at the limit, a key that can't manage every webhook gets a message with no
   expect(full.body.error.message).toContain("20 webhooks");
 });
 
+test("at the limit, an inbox webhook is refused with advice an inbox webhook can take", async () => {
+  const full = createBot(db, "full inbox");
+  for (let i = 0; i < 20; i++) {
+    const made = await create(
+      { url: `https://bot.example.com/full/${i}` },
+      full.key,
+    );
+    expect(made.status).toBe(201);
+  }
+  const inbox = (key: string) =>
+    call("POST", "/webhooks", {
+      json: {
+        kind: "inbox",
+        url: "https://bot.example.com/full/inbox",
+        secret: SECRET,
+      },
+      key,
+    });
+  const over = await inbox(full.key);
+  expect(over.status).toBe(409);
+  expect(over.body.error.message).toBe(
+    "this bot already has 20 webhooks, the most allowed: delete one you no longer use to make room for the inbox webhook",
+  );
+  // a key without read can't see or delete the activity webhooks it would have to remove
+  const noRead = createKey(db, full.actor.id, { actions: ["issues"] }).key;
+  const hidden = await inbox(noRead);
+  expect(hidden.status).toBe(409);
+  expect(hidden.body.error.message).toContain("can't manage all of them");
+  expect(hidden.body.error.message).not.toMatch(/already has \d+/);
+});
+
 test("a key limited to the webhook's projects is told which webhook already has the URL", async () => {
   const bigBot = createBot(db, "scoped-twin-bot");
   const narrow = createKey(db, bigBot.actor.id, { projects: [a.key] }).key;

@@ -1,9 +1,12 @@
+import { eq } from "drizzle-orm";
 import { expect, test } from "vitest";
-import { MESSAGES_PER_PAIR } from "../service/messages.js";
+import { message, webhookDelivery } from "../db/schema.js";
 import { setupTestApp } from "../test-app.js";
 
 let clock = Date.now();
-const { request, addBot } = setupTestApp({ webhooks: { now: () => clock } });
+const { request, addBot, db, bus } = setupTestApp({
+  webhooks: { now: () => clock },
+});
 
 // biome-ignore lint/suspicious/noExplicitAny: loose response bodies for field reads
 type Body = Record<string, any>;
@@ -148,7 +151,8 @@ test("refusals carry their status and code: 404 unknown bot, 422 yourself, 409 n
 test("past the pair's limit a send is a 429 with Retry-After", async () => {
   const { alpha, beta } = bots();
   clock = Date.now();
-  for (let i = 0; i < MESSAGES_PER_PAIR; i++) {
+  const start = clock;
+  for (let i = 0; i < 30; i++) {
     expect(
       (
         await alpha.api("POST", "/messages", {
@@ -165,6 +169,22 @@ test("past the pair's limit a send is a 429 with Retry-After", async () => {
   expect(limited.status).toBe(429);
   expect(limited.body.error.code).toBe("rate_limited");
   expect(limited.headers.get("retry-after")).toBe("600");
+
+  // the window is 10 minutes, rolling: a second short of it still refuses, the full 600 s frees the slot
+  clock = start + 599_000;
+  const almost = await alpha.api("POST", "/messages", {
+    to: beta.actor.id,
+    text: "x",
+  });
+  expect([almost.status, almost.headers.get("retry-after")]).toEqual([
+    429,
+    "1",
+  ]);
+  clock = start + 600_000;
+  expect(
+    (await alpha.api("POST", "/messages", { to: beta.actor.id, text: "x" }))
+      .status,
+  ).toBe(201);
 });
 
 test("an Idempotency-Key replays the first send", async () => {
@@ -178,8 +198,130 @@ test("an Idempotency-Key replays the first send", async () => {
   expect((await beta.api("GET", "/messages")).body.items).toHaveLength(1);
 });
 
+const sentCount = (senderId: string) =>
+  db.select().from(message).where(eq(message.senderId, senderId)).all().length;
+
+/** Sends `n` messages from alpha to beta, the first one under `key`; returns the first's response. */
+async function sendMany(
+  alpha: ReturnType<typeof bots>["alpha"],
+  beta: ReturnType<typeof bots>["beta"],
+  n: number,
+  key: string,
+) {
+  const first = await alpha.api(
+    "POST",
+    "/messages",
+    { to: beta.actor.id, text: "first" },
+    { "idempotency-key": key },
+  );
+  for (let i = 1; i < n; i++) {
+    await alpha.api("POST", "/messages", { to: beta.actor.id, text: `${i}` });
+  }
+  return first;
+}
+
+test("a replayed send queues no second delivery and publishes no second notice", async () => {
+  const { alpha, beta } = bots();
+  await beta.api("POST", "/webhooks", {
+    kind: "inbox",
+    url: `https://beta.example.com/replay${n}`,
+    secret: "whsec_replay_0123456789abcdef",
+  });
+  const notices: string[] = [];
+  const unsubscribe = bus.subscribeMessages((notice) =>
+    notices.push(notice.id),
+  );
+  const headers = { "idempotency-key": "replay-delivery" };
+  const body = { to: beta.actor.id, text: "once" };
+  const first = await alpha.api("POST", "/messages", body, headers);
+  const again = await alpha.api("POST", "/messages", body, headers);
+  unsubscribe();
+  expect(again.body).toEqual(first.body);
+  expect(notices).toEqual([first.body.message.id]);
+  expect(db.select().from(webhookDelivery).all()).toHaveLength(1);
+  expect(sentCount(alpha.actor.id)).toBe(1);
+});
+
+test("a replay still returns the first message when the pair is at the limit, while a new send is a 429", async () => {
+  clock = Date.now();
+  const { alpha, beta } = bots();
+  const first = await sendMany(alpha, beta, 30, "replay-at-limit");
+  expect(first.status).toBe(201);
+  expect(
+    (await alpha.api("POST", "/messages", { to: beta.actor.id, text: "new" }))
+      .status,
+  ).toBe(429);
+  const again = await alpha.api(
+    "POST",
+    "/messages",
+    { to: beta.actor.id, text: "first" },
+    { "idempotency-key": "replay-at-limit" },
+  );
+  expect(again.status).toBe(201);
+  expect(again.body).toEqual(first.body);
+  expect(sentCount(alpha.actor.id)).toBe(30);
+});
+
+test("an Idempotency-Key belongs to the bot that sent it: the same key from another bot sends a new message", async () => {
+  const { alpha, beta, gamma } = bots();
+  const headers = { "idempotency-key": "shared-key" };
+  const body = { to: beta.actor.id, text: "same text" };
+  const fromAlpha = await alpha.api("POST", "/messages", body, headers);
+  const fromGamma = await gamma.api("POST", "/messages", body, headers);
+  expect(fromGamma.status).toBe(201);
+  expect(fromGamma.body.message.id).not.toBe(fromAlpha.body.message.id);
+  expect(fromGamma.body.message.from.id).toBe(gamma.actor.id);
+  expect((await beta.api("GET", "/messages")).body.items).toHaveLength(2);
+});
+
+test("an empty or over-long Idempotency-Key is refused and sends nothing", async () => {
+  const { alpha, beta } = bots();
+  for (const key of ["", "k".repeat(256)]) {
+    const refused = await alpha.api(
+      "POST",
+      "/messages",
+      { to: beta.actor.id, text: "x" },
+      { "idempotency-key": key },
+    );
+    expect([refused.status, refused.body.error.code]).toEqual([
+      422,
+      "validation_failed",
+    ]);
+  }
+  expect(
+    (
+      await alpha.api(
+        "POST",
+        "/messages",
+        { to: beta.actor.id, text: "x" },
+        { "idempotency-key": "k".repeat(255) },
+      )
+    ).status,
+  ).toBe(201);
+  expect(sentCount(alpha.actor.id)).toBe(1);
+});
+
+test("text of exactly 65,536 bytes is sent, one byte more is a 413", async () => {
+  const { alpha, beta } = bots();
+  const exact = await alpha.api("POST", "/messages", {
+    to: beta.actor.id,
+    text: "a".repeat(65_536),
+  });
+  expect(exact.status).toBe(201);
+  const over = await alpha.api("POST", "/messages", {
+    to: beta.actor.id,
+    text: "a".repeat(65_537),
+  });
+  expect(over.status).toBe(413);
+});
+
 test("mark read takes at most 100 ids, and no key is a 401", async () => {
   const { alpha } = bots();
+  const hundred = await alpha.api("POST", "/messages/read", {
+    messageIds: Array.from({ length: 100 }, (_, i) => `m${i}`),
+  });
+  expect(hundred.status).toBe(200);
+  expect(hundred.body.results).toHaveLength(100);
   const tooMany = await alpha.api("POST", "/messages/read", {
     messageIds: Array.from({ length: 101 }, (_, i) => `m${i}`),
   });

@@ -1,7 +1,8 @@
 import { beforeAll, describe, expect, test } from "vitest";
+import { message } from "../db/schema.js";
 import { projectKey, setupTestApp } from "../test-app.js";
 
-const { app, request, signIn, owner, addMember, addProject, addBot, bot } =
+const { app, db, request, signIn, owner, addMember, addProject, addBot, bot } =
   setupTestApp();
 
 const a = addProject("A");
@@ -226,6 +227,39 @@ test.each(["/api/v1/products", "/mcp"])(
       body: path === "/mcp" ? "{}" : undefined,
     });
     expect(res.status).toBe(401);
+  },
+);
+
+// the bot-key column of the matrix: a key with no session cookie is no viewer, so every route that
+// refuses an anonymous viewer refuses it too, and /me, which answers anyone, sees nobody signed in
+test.each(matrix.filter(([, , expected]) => expected.anonymous === 401))(
+  "a bot key without a session cookie is a 401 on %s",
+  async (_, call) => {
+    const res = await request(call.method, `/api/web${call.path()}`, {
+      key: bot.key,
+      json: call.json?.(),
+    });
+    await res.body?.cancel();
+    expect(res.status).toBe(401);
+  },
+);
+
+test("a bot key without a session cookie is no one on /me", async () => {
+  const res = await request("GET", "/api/web/me", { key: bot.key });
+  expect(((await res.json()) as { state: string }).state).toBe("anonymous");
+});
+
+test.each(["owner", "memberA"] as const)(
+  "a person's session cookie, as %s, can't send a message through POST /api/v1/messages",
+  async (viewer) => {
+    const before = db.select().from(message).all().length;
+    const res = await request("POST", "/api/v1/messages", {
+      key: null,
+      cookie: cookies[viewer],
+      json: { to: other.id, text: "from a person" },
+    });
+    expect(res.status).toBe(401);
+    expect(db.select().from(message).all()).toHaveLength(before);
   },
 );
 

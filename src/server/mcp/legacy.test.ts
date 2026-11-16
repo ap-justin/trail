@@ -415,7 +415,7 @@ test("an argument sent under its old name is refused naming the argument it beca
   );
 });
 
-test("create_issue and list_issues take project or product as aliases of projectId, one spelling at a time", async () => {
+test("create_issue and list_issues take project or product as aliases of projectId, refusing two spellings with different values", async () => {
   const client = await connect(bot.key);
   await call(client, "create_product", { key: "LGZ", name: "legacy aliases" });
   const viaProject = await call(client, "create_issue", {
@@ -434,12 +434,22 @@ test("create_issue and list_issues take project or product as aliases of project
       "LGZ-2",
     ]);
   }
+  const same = await call(client, "create_issue", {
+    projectId: "LGZ",
+    product: "LGZ",
+    title: "both",
+  });
+  expect(same.key).toBe("LGZ-3");
+  expect(
+    (await call(client, "list_issues", { project: "LGZ", product: "LGZ" }))
+      .items,
+  ).toHaveLength(3);
   for (const [tool, args] of [
-    ["create_issue", { projectId: "LGZ", product: "LGZ", title: "both" }],
-    ["list_issues", { project: "LGZ", product: "LGZ" }],
+    ["create_issue", { projectId: "LGZ", product: "OTHER", title: "both" }],
+    ["list_issues", { project: "LGZ", product: "OTHER" }],
   ] as const) {
     expect(await callError(client, tool, args), tool).toBe(
-      "validation_failed: send one of projectId, project or product: they name the same product, and two together is ambiguous",
+      "validation_failed: send one of projectId, project or product: they name the same product, and two different values are ambiguous",
     );
   }
   expect(await callError(client, "create_issue", { title: "nowhere" })).toBe(

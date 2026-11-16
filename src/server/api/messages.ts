@@ -65,6 +65,10 @@ const sendMessage = createRoute({
       errorSchema,
       "to names no bot (GET /bots lists them), or replyTo is not one of your messages",
     ),
+    422: jsonContent(
+      errorSchema,
+      "The request failed validation, or its recipient is refused: neither to nor replyTo was sent, to is a person's id (people can't receive messages), to is yourself, or to is not the replyTo message's other bot. Also an empty text or one with a NUL character, and an Idempotency-Key reused for a different message (code idempotency_key_reused)",
+    ),
     409: jsonContent(
       errorSchema,
       "replyTo was sent with expectsReply false: the sender asked for no reply (code no_reply_wanted); send a new message without replyTo if it really must be said",

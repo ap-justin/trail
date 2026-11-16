@@ -25,7 +25,7 @@ function descriptionOf(field: Field): string {
 const aliasTarget = (field: Field) =>
   ALIAS_DESCRIPTION.exec(descriptionOf(field))?.[1];
 
-/** Optional in the schema only because an alias may stand in: its description says "Required, unless …". */
+/** Optional in the schema only because an alias or another field may stand in: its description starts "Required unless …" or "Required, unless …". */
 const isRequired = (field: Field) =>
   !field.isOptional() || descriptionOf(field).startsWith("Required");
 
@@ -97,6 +97,20 @@ function editDistance(a: string, b: string): number {
   return previous[b.length] ?? 0;
 }
 
+/** The name fewest edits from `sent`, within two edits and short of rewriting the whole name. */
+function nearest(sent: string, names: string[]): string | undefined {
+  let best: { name: string; distance: number } | undefined;
+  for (const name of names) {
+    const known = squashed(name);
+    const distance = editDistance(known, sent);
+    if (distance > Math.min(2, known.length - 1)) continue;
+    if (best === undefined || distance < best.distance) {
+      best = { name, distance };
+    }
+  }
+  return best?.name;
+}
+
 /** The field an unknown key most likely meant, steered from an alias to the field it stands for. */
 function meant(key: string, shape: Record<string, Field>): string | undefined {
   const sent = squashed(key);
@@ -105,11 +119,13 @@ function meant(key: string, shape: Record<string, Field>): string | undefined {
     names.find((name) => squashed(name) === sent) ??
     names.find((name) => {
       const known = squashed(name);
+      // a two-letter prefix, sent or known, is too weak to guess from: topic is not to
       return (
-        sent.length > 2 && (sent.startsWith(known) || known.startsWith(sent))
+        Math.min(sent.length, known.length) > 2 &&
+        (sent.startsWith(known) || known.startsWith(sent))
       );
     }) ??
-    names.find((name) => editDistance(squashed(name), sent) <= 2);
+    nearest(sent, names);
   if (match === undefined) return undefined;
   const field = shape[match];
   return (field && aliasTarget(field)) ?? match;

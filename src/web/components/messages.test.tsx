@@ -27,6 +27,8 @@ function renderList(overrides: Partial<ConversationsViewProps> = {}) {
     conversations: [conversation()],
     conversationHref: (c) => `/messages/${c.bots[0].id}/${c.bots[1].id}`,
     onRetry: vi.fn(),
+    pageCount: 1,
+    lastPageStart: 0,
     hasMore: false,
     onLoadMore: vi.fn(),
     loadMore: "idle",
@@ -41,7 +43,10 @@ function renderThread(overrides: Partial<ConversationViewProps> = {}) {
   const props: ConversationViewProps = {
     status: "ready",
     messages: [message()],
+    pairIds: [alpha.id, beta.id],
     onRetry: vi.fn(),
+    pageCount: 1,
+    lastPageStart: 0,
     hasMore: false,
     onLoadMore: vi.fn(),
     loadMore: "idle",
@@ -49,6 +54,28 @@ function renderThread(overrides: Partial<ConversationViewProps> = {}) {
   };
   render(<ConversationView {...props} />);
   return props;
+}
+
+const first = conversation();
+const older = conversation({ bots: [beta, gamma] });
+const fresh = conversation({ bots: [alpha, gamma] });
+
+/** One page of the list, with a next page to load. */
+function renderPagedList() {
+  const props: ConversationsViewProps = {
+    status: "ready",
+    conversations: [first],
+    conversationHref: (c) => `/messages/${c.bots[0].id}/${c.bots[1].id}`,
+    onRetry: vi.fn(),
+    pageCount: 1,
+    lastPageStart: 0,
+    hasMore: true,
+    onLoadMore: vi.fn(),
+    loadMore: "idle",
+    now,
+  };
+  const { rerender } = render(<ConversationsView {...props} />);
+  return { rerender, props };
 }
 
 const rows = () => screen.getAllByRole("listitem");
@@ -168,7 +195,9 @@ describe("conversations list", () => {
 
   test("no Load more on the last page", () => {
     renderList({ hasMore: false });
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Load older conversations" }),
+    ).not.toBeInTheDocument();
   });
 });
 
@@ -195,31 +224,64 @@ describe("load more", () => {
 
   test("the first row of a new page takes focus after Load more", async () => {
     const user = userEvent.setup();
-    const first = conversation();
-    const onLoadMore = vi.fn();
-    const props: ConversationsViewProps = {
-      status: "ready",
-      conversations: [first],
-      conversationHref: () => "/messages/x/y",
-      onRetry: vi.fn(),
-      hasMore: true,
-      onLoadMore,
-      loadMore: "idle",
-      now,
-    };
-    const { rerender } = render(<ConversationsView {...props} />);
+    const { rerender, props } = renderPagedList();
     await user.click(
       screen.getByRole("button", { name: "Load older conversations" }),
     );
-    const older = conversation({ bots: [beta, gamma] });
+    rerender(<ConversationsView {...props} loadMore="pending" />);
     rerender(
       <ConversationsView
         {...props}
         conversations={[first, older]}
+        pageCount={2}
+        lastPageStart={1}
         hasMore={false}
       />,
     );
     expect(screen.getByRole("link", { name: "Beta and Gamma" })).toHaveFocus();
+  });
+
+  test("a row a refetch adds at the top doesn't take focus from Load more", async () => {
+    const user = userEvent.setup();
+    const { rerender, props } = renderPagedList();
+    const button = screen.getByRole("button", {
+      name: "Load older conversations",
+    });
+    await user.click(button);
+    rerender(<ConversationsView {...props} conversations={[fresh, first]} />);
+    expect(document.body.querySelector(":focus")).toBe(button);
+    rerender(
+      <ConversationsView
+        {...props}
+        conversations={[fresh, first, older]}
+        pageCount={2}
+        lastPageStart={2}
+        hasMore={false}
+      />,
+    );
+    expect(screen.getByRole("link", { name: "Beta and Gamma" })).toHaveFocus();
+  });
+
+  test("after a failed page, a later page arriving by refetch takes no focus", async () => {
+    const user = userEvent.setup();
+    const { rerender, props } = renderPagedList();
+    await user.click(
+      screen.getByRole("button", { name: "Load older conversations" }),
+    );
+    rerender(<ConversationsView {...props} loadMore="error" />);
+    const retry = screen.getByRole("button", { name: "Try again" });
+    retry.blur();
+    rerender(
+      <ConversationsView
+        {...props}
+        conversations={[first, older]}
+        pageCount={2}
+        lastPageStart={1}
+      />,
+    );
+    expect(
+      screen.getByRole("link", { name: "Beta and Gamma" }),
+    ).not.toHaveFocus();
   });
 });
 
@@ -244,6 +306,22 @@ describe("conversation thread", () => {
     expect(
       screen.getByRole("heading", { level: 1, name: "Alpha and Beta" }),
     ).toBeInTheDocument();
+  });
+
+  test("the header names the pair in the list's order, whichever bot wrote first", () => {
+    renderThread({
+      messages: [message({ sender: beta, recipient: alpha })],
+      pairIds: [beta.id, alpha.id],
+    });
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Alpha and Beta" }),
+    ).toBeInTheDocument();
+    const header = screen.getByRole("banner");
+    expect(
+      within(header)
+        .getAllByText(/^(Alpha|Beta)$/)
+        .map((el) => el.textContent),
+    ).toEqual(["Alpha", "Beta"]);
   });
 
   test("messages keep the order given: oldest first", () => {
@@ -320,12 +398,61 @@ describe("conversation thread", () => {
     expect(props.onLoadMore).toHaveBeenCalledTimes(1);
   });
 
-  test("empty says messages between these bots show up here", () => {
-    renderThread({ messages: [] });
+  test("the first newly loaded message takes focus after Load newer messages", async () => {
+    const user = userEvent.setup();
+    const props: ConversationViewProps = {
+      status: "ready",
+      messages: [message()],
+      pairIds: [alpha.id, beta.id],
+      onRetry: vi.fn(),
+      pageCount: 1,
+      lastPageStart: 0,
+      hasMore: true,
+      onLoadMore: vi.fn(),
+      loadMore: "idle",
+    };
+    const { rerender } = render(<ConversationView {...props} />);
+    await user.click(
+      screen.getByRole("button", { name: "Load newer messages" }),
+    );
+    rerender(
+      <ConversationView
+        {...props}
+        messages={[
+          message(),
+          message({ id: "m-2", sender: beta, recipient: alpha, text: "newer" }),
+        ]}
+        pageCount={2}
+        lastPageStart={1}
+        hasMore={false}
+      />,
+    );
+    const newer = rows()[1] as HTMLElement;
+    expect(newer).toHaveTextContent("newer");
+    expect(newer).toHaveFocus();
+    expect(newer).toHaveClass("focus-visible:ring-3");
+  });
+
+  test("empty says which two bots, by the ids the URL names, in the list's order", () => {
+    renderThread({ messages: [], pairIds: [beta.id, alpha.id] });
     expect(
       screen.getByRole("heading", { name: "No messages yet" }),
     ).toBeInTheDocument();
+    expect(screen.getByText(/^Messages between/)).toHaveTextContent(
+      "Messages between a-alpha and a-beta show up here.",
+    );
     expect(screen.queryByRole("listitem")).not.toBeInTheDocument();
+  });
+
+  test.each<[string, Partial<ConversationViewProps>]>([
+    ["loading", { status: "loading" }],
+    ["failed", { status: "error" }],
+    ["empty", { messages: [] }],
+  ])("a %s thread still has a page heading", (_, overrides) => {
+    renderThread(overrides);
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Messages" }),
+    ).toBeInTheDocument();
   });
 
   test("loading is announced and shows no messages", () => {
@@ -362,5 +489,26 @@ describe("conversation breadcrumb", () => {
       "/messages",
     );
     expect(screen.getByText("Alpha and Beta")).toBeInTheDocument();
+  });
+
+  test("names the pair in the list's order, whichever order it's handed", () => {
+    render(
+      <ConversationBreadcrumb listHref="/messages" bots={[beta, alpha]} />,
+    );
+    expect(screen.getByText("Alpha and Beta")).toBeInTheDocument();
+  });
+
+  test("before the pair is known, Messages shows at every width", () => {
+    render(<ConversationBreadcrumb listHref="/messages" />);
+    const link = screen.getByRole("link", { name: "Messages" });
+    expect(link.parentElement).not.toHaveClass("max-lg:hidden");
+  });
+
+  test("once the pair is known, Messages hides below the desktop layout", () => {
+    render(
+      <ConversationBreadcrumb listHref="/messages" bots={[alpha, beta]} />,
+    );
+    const link = screen.getByRole("link", { name: "Messages" });
+    expect(link.parentElement).toHaveClass("max-lg:hidden");
   });
 });

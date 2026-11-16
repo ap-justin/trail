@@ -419,7 +419,7 @@ test("GET /issues?status=open includes issues waiting in triage, as open meant b
   ]);
 });
 
-test("POST and GET /issues take project or product as aliases of projectId, one spelling at a time", async () => {
+test("POST and GET /issues take project or product as aliases of projectId, refusing two spellings with different values", async () => {
   await request("POST", "/api/v1/products", {
     json: { key: "LGR", name: "legacy rest aliases" },
   });
@@ -441,16 +441,23 @@ test("POST and GET /issues take project or product as aliases of projectId, one 
       "via project",
     ]);
   }
-  const both = [
+  const same = [
     await request("POST", "/api/v1/issues", {
       json: { projectId: "LGR", project: "LGR", title: "both" },
     }),
     await request("GET", "/api/v1/issues?projectId=LGR&product=LGR"),
   ];
-  for (const res of both) {
+  expect(same.map((res) => res.status)).toEqual([201, 200]);
+  const differing = [
+    await request("POST", "/api/v1/issues", {
+      json: { projectId: "LGR", project: "OTHER", title: "both" },
+    }),
+    await request("GET", "/api/v1/issues?projectId=LGR&product=OTHER"),
+  ];
+  for (const res of differing) {
     expect(res.status).toBe(422);
     expect((await json(res)).error.message).toBe(
-      "send one of projectId, project or product: they name the same product, and two together is ambiguous",
+      "send one of projectId, project or product: they name the same product, and two different values are ambiguous",
     );
   }
 });

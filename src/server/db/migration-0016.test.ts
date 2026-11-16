@@ -8,11 +8,12 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { count, desc, max } from "drizzle-orm";
-import { afterAll, beforeAll, expect, test } from "vitest";
+import { afterAll, beforeAll, expect, test, vi } from "vitest";
+import type { EventBus } from "../events/bus.js";
+import { createMessaging } from "../service/messages.js";
 import { type Db, migrate, openDatabase } from "./client.js";
 import { newId } from "./id.js";
-import { message, messagePair } from "./schema.js";
+import { message } from "./schema.js";
 
 const dir = mkdtempSync(join(tmpdir(), "trail-0016-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -333,18 +334,6 @@ const planOf = (sql: string, ...params: unknown[]) =>
 
 test.each([
   [
-    "a bot's inbox, newest first, from a cursor",
-    "select * from message where recipient_id = ? and seq < ? order by seq desc limit 20",
-    ["beta", 100],
-    "SEARCH message USING INDEX message_recipient_seq_idx (recipient_id=? AND seq<?)",
-  ],
-  [
-    "its unread inbox",
-    "select * from message where recipient_id = ? and read_at is null and seq < ? order by seq desc limit 20",
-    ["beta", 100],
-    "SEARCH message USING INDEX message_recipient_unread_seq_idx (recipient_id=? AND seq<?)",
-  ],
-  [
     "its unread count",
     "select count(*) from message where recipient_id = ? and read_at is null",
     ["beta"],
@@ -368,18 +357,102 @@ test.each([
   expect(plan).toBe(step);
 });
 
-test("the conversation list groups pairs off the pair index, sorting only the groups", () => {
-  // as the api seat builds it: the pair spelled with messagePair, so it matches the index
-  const [a, b] = messagePair(message);
-  const query = db
-    .select({ a, b, count: count(), last: max(message.seq) })
-    .from(message)
-    .groupBy(a, b)
-    .orderBy(desc(max(message.seq)))
-    .toSQL();
-  const plan = planOf(query.sql, ...query.params);
-  expect(plan).toContain(
-    "SCAN message USING COVERING INDEX message_pair_seq_idx",
-  );
-  expect(plan).not.toContain("USE TEMP B-TREE FOR GROUP BY");
+// The service's own queries, captured as the driver prepares them and planned with every parameter bound
+// to 0. Plans are read for the step that reads `message`, never compared whole: another SQLite may word
+// the rest differently.
+const alpha = { id: "alpha", kind: "bot" };
+const beta = { id: "beta", kind: "bot" };
+const noBus = { publishMessage() {} } as unknown as EventBus;
+const service = () => createMessaging({ db, bus: noBus, now: () => 1_000 });
+
+function plansOf(run: () => unknown) {
+  const prepared = vi.spyOn(db.$client, "prepare");
+  let issued: string[];
+  try {
+    run();
+  } finally {
+    issued = prepared.mock.calls.map(([sql]) => sql);
+    prepared.mockRestore();
+  }
+  return issued
+    .filter((sql) => /^select/i.test(sql))
+    .map((sql) => ({
+      sql,
+      steps: (
+        rows(
+          db,
+          `explain query plan ${sql}`,
+          ...Array((sql.match(/\?/g) ?? []).length).fill(0),
+        ) as { detail: string }[]
+      ).map((r) => r.detail),
+    }));
+}
+
+/** The steps that read the message table. */
+const messageSteps = (steps: string[]) =>
+  steps.filter((s) => /^(SEARCH|SCAN) message\b/.test(s));
+
+beforeAll(() => {
+  // three unread messages to beta, so a page of one has a cursor, and a reply going back
+  for (const text of ["one", "two", "three"]) {
+    service().sendMessage(alpha, { to: "beta", text });
+  }
+  service().sendMessage(beta, { to: "alpha", text: "back" });
+});
+
+test.each([
+  ["its unread inbox", false, "message_recipient_unread_seq_idx"],
+  ["its whole inbox", true, "message_recipient_seq_idx"],
+])(
+  "the service reads %s, first page and from a cursor, off one index with no sort",
+  (_, all, index) => {
+    const cursor = service().listInbox(beta, { all, limit: 1 }).nextCursor;
+    expect(cursor).not.toBeNull();
+    const reads = [
+      ...plansOf(() => service().listInbox(beta, { all, limit: 1 })),
+      ...plansOf(() =>
+        service().listInbox(beta, { all, limit: 1, cursor: cursor as string }),
+      ),
+    ];
+    expect(reads).toHaveLength(2);
+    for (const { steps } of reads) {
+      expect(messageSteps(steps)).toEqual([
+        expect.stringContaining(`SEARCH message USING INDEX ${index} (`),
+      ]);
+      expect(steps.join("\n")).not.toContain("TEMP B-TREE");
+    }
+  },
+);
+
+test("the service reads a two-bot conversation off the pair index, from either side, with no sort", () => {
+  const reads = [
+    ...plansOf(() => service().conversationMessages("alpha", "beta")),
+    ...plansOf(() => service().conversationMessages("beta", "alpha")),
+  ];
+  expect(reads).toHaveLength(2);
+  for (const { steps } of reads) {
+    expect(messageSteps(steps)).toEqual([
+      expect.stringContaining(
+        "SEARCH message USING INDEX message_pair_seq_idx (",
+      ),
+    ]);
+    expect(steps.join("\n")).not.toContain("TEMP B-TREE");
+  }
+});
+
+test("the operator's conversation list groups off the pair index and finds each newest message by its unique seq", () => {
+  const plans = plansOf(() => service().listConversations());
+  expect(plans).toHaveLength(2);
+  const grouping = plans.find(({ sql }) => /group by/i.test(sql));
+  const newest = plans.find(({ sql }) => /\bin \(/i.test(sql));
+  expect(messageSteps(grouping?.steps ?? [])).toEqual([
+    expect.stringContaining(
+      "SCAN message USING COVERING INDEX message_pair_seq_idx",
+    ),
+  ]);
+  // grouped in the index's own order, with no separate pass to group
+  expect(grouping?.steps.join("\n")).not.toContain("FOR GROUP BY");
+  expect(messageSteps(newest?.steps ?? [])).toEqual([
+    expect.stringContaining("USING INDEX message_seq_unique"),
+  ]);
 });

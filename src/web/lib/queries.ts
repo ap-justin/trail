@@ -132,12 +132,20 @@ export const projectItemsQuery = (slug: string, filters: ProjectItemQuery) =>
 
 const nextCursor = (page: { nextCursor: string | null }) => page.nextCursor;
 
+/**
+ * How long messages read stay fresh. A refetch of an infinite query re-reads every loaded
+ * page one after another, so without this each window focus costs a request per Load more.
+ * No maxPages: it would drop the earliest loaded rows from a list that only pages forward.
+ */
+export const MESSAGES_STALE_MS = 60_000;
+
 /** Every pair of bots that has exchanged messages, newest first, a page at a time. */
 export const conversationsQuery = infiniteQueryOptions({
   queryKey: keys.conversations,
   queryFn: ({ pageParam }) => api.conversations(pageParam),
   initialPageParam: null as string | null,
   getNextPageParam: nextCursor,
+  staleTime: MESSAGES_STALE_MS,
 });
 
 /** Bots `a` and `b`'s messages, oldest first, a page at a time. */
@@ -147,6 +155,7 @@ export const conversationQuery = (a: string, b: string) =>
     queryFn: ({ pageParam }) => api.conversation(a, b, pageParam),
     initialPageParam: null as string | null,
     getNextPageParam: nextCursor,
+    staleTime: MESSAGES_STALE_MS,
   });
 
 export const meQuery = queryOptions({

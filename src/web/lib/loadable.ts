@@ -33,6 +33,7 @@ export function loadableAfter<T>(
 }
 
 type InfiniteQueryLike = {
+  data: { pages: readonly { items: readonly unknown[] }[] } | undefined;
   hasNextPage: boolean;
   isFetchingNextPage: boolean;
   isFetchNextPageError: boolean;
@@ -41,7 +42,11 @@ type InfiniteQueryLike = {
 
 /** An infinite query's next page as a screen's Load more sees it. */
 export function pagingOf(query: InfiniteQueryLike) {
+  const pages = query.data?.pages ?? [];
+  const rows = pages.reduce((n, page) => n + page.items.length, 0);
   return {
+    pageCount: pages.length,
+    lastPageStart: rows - (pages.at(-1)?.items.length ?? 0),
     hasMore: query.hasNextPage,
     loadMore: query.isFetchingNextPage
       ? "pending"
