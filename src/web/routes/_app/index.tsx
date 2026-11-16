@@ -14,6 +14,7 @@ function FeedPage() {
     actor: null,
     product: null,
     project: null,
+    type: null,
   });
   const { session } = useChrome();
   const feed = useLiveFeed(filter, {
@@ -53,6 +54,7 @@ function FeedPage() {
         actorFilter={filter.actor}
         productFilter={filter.product}
         projectFilter={filter.project}
+        typeFilter={filter.type}
         onActorFilterChange={(actor) => setFilter((f) => ({ ...f, actor }))}
         onProductFilterChange={(product) =>
           setFilter((f) => ({ ...f, product }))
@@ -60,6 +62,7 @@ function FeedPage() {
         onProjectFilterChange={(project) =>
           setFilter((f) => ({ ...f, project }))
         }
+        onTypeFilterChange={(type) => setFilter((f) => ({ ...f, type }))}
         onRetry={feed.retry}
         noProducts={noProducts}
       />

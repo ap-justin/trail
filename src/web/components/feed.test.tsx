@@ -4,11 +4,11 @@ import { useState } from "react";
 import { describe, expect, test, vi } from "vitest";
 import { FeedView, type FeedViewProps, LiveIndicator } from "@/components/feed";
 import {
+  alpha,
+  alphaWithPhoto,
   commentEntry,
   humanUi,
   itemCreatedEntry,
-  kai,
-  kaiWithPhoto,
   maya,
   membershipEntry,
   productStatusUpdateEntry,
@@ -37,16 +37,18 @@ function feedProps(overrides: Partial<FeedViewProps> = {}): FeedViewProps {
     onShowPending: vi.fn(),
     onAtTopChange: vi.fn(),
     filters: {
-      actors: [kai],
+      actors: [alpha],
       products: [{ key: "TRL", name: "trail" }],
       projects: [humanUi],
     },
     actorFilter: null,
     productFilter: null,
     projectFilter: null,
+    typeFilter: null,
     onActorFilterChange: vi.fn(),
     onProductFilterChange: vi.fn(),
     onProjectFilterChange: vi.fn(),
+    onTypeFilterChange: vi.fn(),
     onRetry: vi.fn(),
     now,
     ...overrides,
@@ -67,23 +69,23 @@ const rowFor = (id: string) => {
 
 const filterControls = () =>
   screen.queryAllByRole("combobox", {
-    name: /^Filter by (bot|product|project)$/,
+    name: /^Filter by (bot|product|project|type)$/,
   });
 
 describe("actor photos", () => {
   test("an entry by an actor with a photo shows the photo; one without shows initials", () => {
     renderFeed({
       entries: [
-        commentEntry("e1", minutesAgo(1), { actor: kaiWithPhoto }),
+        commentEntry("e1", minutesAgo(1), { actor: alphaWithPhoto }),
         statusEntry("e2", minutesAgo(30)),
       ],
     });
     expect(rowFor("e1").querySelector("img")).toHaveAttribute(
       "src",
-      kaiWithPhoto.photoUrl,
+      alphaWithPhoto.photoUrl,
     );
     expect(rowFor("e2").querySelector("img")).toBeNull();
-    expect(within(rowFor("e2")).getByText("K")).toBeInTheDocument();
+    expect(within(rowFor("e2")).getByText("A")).toBeInTheDocument();
   });
 });
 
@@ -242,10 +244,20 @@ describe("feed states", () => {
     expect(p.onProductFilterChange).toHaveBeenCalledWith(null);
     expect(p.onProjectFilterChange).toHaveBeenCalledWith(null);
     expect(p.onActorFilterChange).not.toHaveBeenCalled();
+    expect(p.onTypeFilterChange).not.toHaveBeenCalled();
     // the button goes with the empty state; focus waits on the filters
     expect(
       screen.getByRole("group", { name: "Filter the feed" }),
     ).toHaveFocus();
+  });
+
+  test("a type filter alone that matches nothing offers Clear filters, which drops it", async () => {
+    const user = userEvent.setup();
+    const p = renderFeed({ entries: [], typeFilter: "todo" });
+    expect(screen.queryByText("No activity yet")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(p.onTypeFilterChange).toHaveBeenCalledWith(null);
+    expect(p.onProductFilterChange).not.toHaveBeenCalled();
   });
 
   test("a filter whose value has left the options reads All, not the raw value", () => {
@@ -261,7 +273,7 @@ describe("feed states", () => {
       screen.getByRole("heading", { name: "No products yet" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Ask the owner to add you to a product."),
+      screen.getByText("Ask the owner to give you access to a product."),
     ).toBeInTheDocument();
     expect(screen.queryByText("No activity yet")).not.toBeInTheDocument();
   });
@@ -280,7 +292,7 @@ describe("feed states", () => {
     expect(
       screen.queryByRole("heading", { name: "No products yet" }),
     ).not.toBeInTheDocument();
-    expect(filterControls()).toHaveLength(3);
+    expect(filterControls()).toHaveLength(4);
   });
 
   describe("an import row", () => {
@@ -383,15 +395,15 @@ describe("feed rows", () => {
           comment: {
             id: "c1",
             body: "Ported from Linear.",
-            sourceAuthor: "Justin Salas",
+            sourceAuthor: "Jordan Smith",
           },
         }),
       ],
     });
     const row = rowFor("e1");
-    expect(within(row).getByText("Kai")).toBeInTheDocument();
+    expect(within(row).getByText("Alpha")).toBeInTheDocument();
     expect(
-      within(row).getByText("originally by Justin Salas"),
+      within(row).getByText("originally by Jordan Smith"),
     ).toBeInTheDocument();
   });
 });
@@ -448,7 +460,7 @@ describe("item events", () => {
     ).toBeTruthy();
   });
 
-  test("a bot reports an issue and plans a todo; a person files an issue", () => {
+  test("bots and people file issues; bots plan todos", () => {
     renderFeed({
       entries: [
         itemCreatedEntry("bot-issue", minutesAgo(1)),
@@ -458,7 +470,7 @@ describe("item events", () => {
         itemCreatedEntry("person", minutesAgo(3), { actor: maya }),
       ],
     });
-    expect(within(rowFor("bot-issue")).getByText("reported")).toBeVisible();
+    expect(within(rowFor("bot-issue")).getByText("filed")).toBeVisible();
     expect(within(rowFor("bot-todo")).getByText("planned")).toBeVisible();
     expect(within(rowFor("person")).getByText("filed")).toBeVisible();
   });
@@ -539,19 +551,44 @@ describe("status update rows", () => {
 });
 
 describe("filters", () => {
-  test("three filters: bots, products and projects, each starting at All", () => {
+  test("four filters: bots, products, projects and types, each starting at All", () => {
     renderFeed();
-    const [bots, products, projects] = filterControls();
+    const [bots, products, projects, types] = filterControls();
     expect(bots).toHaveTextContent("All bots");
     expect(products).toHaveTextContent("All products");
     expect(projects).toHaveTextContent("All projects");
+    expect(types).toHaveTextContent("All types");
+  });
+
+  test("the type menu offers Issues and Todos and chooses by type", async () => {
+    const user = userEvent.setup();
+    const props = renderFeed();
+    await user.click(screen.getByRole("combobox", { name: "Filter by type" }));
+    const options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual([
+      "All types",
+      "Issues",
+      "Todos",
+    ]);
+    await user.click(screen.getByRole("option", { name: "Todos" }));
+    expect(props.onTypeFilterChange).toHaveBeenCalledWith(
+      "todo",
+      expect.anything(),
+    );
+  });
+
+  test("the chosen type shows on the trigger", () => {
+    renderFeed({ typeFilter: "issue" });
+    expect(
+      screen.getByRole("combobox", { name: "Filter by type" }),
+    ).toHaveTextContent("Issues");
   });
 
   test("the product menu lists only the products given, key then name", async () => {
     const user = userEvent.setup();
     const props = renderFeed({
       filters: {
-        actors: [kai],
+        actors: [alpha],
         products: [
           { key: "TRL", name: "trail" },
           { key: "OPB", name: "OpenBot" },
@@ -575,7 +612,11 @@ describe("filters", () => {
   test("the project menu lists only the projects given and chooses by slug", async () => {
     const user = userEvent.setup();
     const props = renderFeed({
-      filters: { actors: [kai], products: [], projects: [humanUi, teamAccess] },
+      filters: {
+        actors: [alpha],
+        products: [],
+        projects: [humanUi, teamAccess],
+      },
     });
     await user.click(
       screen.getByRole("combobox", { name: "Filter by project" }),

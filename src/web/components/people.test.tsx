@@ -51,8 +51,8 @@ describe("people list", () => {
       "src",
       photoUrlFor("a-maya", "77"),
     );
-    expect(avatar("justinsalas")).toHaveTextContent("JS");
-    expect(avatar("justinsalas")?.querySelector("img")).toBeNull();
+    expect(avatar("jordansmith")).toHaveTextContent("JS");
+    expect(avatar("jordansmith")?.querySelector("img")).toBeNull();
   });
 
   test("a pending invite shows a dashed ? circle; a signed-in person with no name still shows ?", () => {
@@ -62,12 +62,12 @@ describe("people list", () => {
       ),
     });
     const pending = document.querySelector(
-      '[data-person="kai-dev"] .border-dashed',
+      '[data-person="alpha-dev"] .border-dashed',
     );
     expect(pending).toHaveTextContent("?");
     expect(pending).toHaveClass("rounded-full");
     expect(
-      document.querySelector('[data-person="kai-dev"] [data-actor-kind]'),
+      document.querySelector('[data-person="alpha-dev"] [data-actor-kind]'),
     ).toBeNull();
 
     const unnamed = document.querySelector(
@@ -82,9 +82,9 @@ describe("people list", () => {
   test("the owner row comes first and has no actions", () => {
     renderPeople();
     const items = screen.getAllByRole("listitem");
-    expect(items[0]).toHaveAttribute("data-person", "justinsalas");
-    expect(row("justinsalas").queryAllByRole("button")).toEqual([]);
-    expect(row("justinsalas").getByText("Owner")).toBeInTheDocument();
+    expect(items[0]).toHaveAttribute("data-person", "jordansmith");
+    expect(row("jordansmith").queryAllByRole("button")).toEqual([]);
+    expect(row("jordansmith").getByText("Owner")).toBeInTheDocument();
   });
 
   test("other rows name the person on each control", () => {
@@ -102,7 +102,7 @@ describe("people list", () => {
   test('a pending invite says "Invited · hasn\'t signed in"', () => {
     renderPeople();
     expect(
-      row("kai-dev").getByText("Invited · hasn't signed in"),
+      row("alpha-dev").getByText("Invited · hasn't signed in"),
     ).toBeInTheDocument();
   });
 
@@ -110,28 +110,30 @@ describe("people list", () => {
     const user = userEvent.setup();
     const { props } = renderPeople();
     await user.click(
-      row("kai-dev").getByRole("button", { name: "Remove @kai-dev" }),
+      row("alpha-dev").getByRole("button", { name: "Remove @alpha-dev" }),
     );
-    expect(row("kai-dev").getByText("Remove @kai-dev?")).toBeInTheDocument();
-    const keep = row("kai-dev").getByRole("button", { name: "Keep" });
+    expect(
+      row("alpha-dev").getByText("Remove @alpha-dev?"),
+    ).toBeInTheDocument();
+    const keep = row("alpha-dev").getByRole("button", { name: "Keep" });
     expect(keep).toHaveFocus();
     await user.click(keep);
     expect(props.onRemove).not.toHaveBeenCalled();
     expect(
-      row("kai-dev").queryByText("Remove @kai-dev?"),
+      row("alpha-dev").queryByText("Remove @alpha-dev?"),
     ).not.toBeInTheDocument();
     expect(
-      row("kai-dev").getByRole("button", { name: "Remove @kai-dev" }),
+      row("alpha-dev").getByRole("button", { name: "Remove @alpha-dev" }),
     ).toHaveFocus();
 
     await user.click(
-      row("kai-dev").getByRole("button", { name: "Remove @kai-dev" }),
+      row("alpha-dev").getByRole("button", { name: "Remove @alpha-dev" }),
     );
-    const confirm = row("kai-dev").getByRole("group", {
-      name: "Remove @kai-dev",
+    const confirm = row("alpha-dev").getByRole("group", {
+      name: "Remove @alpha-dev",
     });
     await user.click(within(confirm).getByRole("button", { name: "Remove" }));
-    expect(props.onRemove).toHaveBeenCalledExactlyOnceWith("kai-dev");
+    expect(props.onRemove).toHaveBeenCalledExactlyOnceWith("alpha-dev");
   });
 
   test("Edit products ticks the current products and Save products sends the new set", async () => {
@@ -205,19 +207,19 @@ describe("after a row changes", () => {
       />,
     );
     expect(
-      row("kai-dev").getByRole("button", {
-        name: "Edit products for @kai-dev",
+      row("alpha-dev").getByRole("button", {
+        name: "Edit products for @alpha-dev",
       }),
     ).toHaveFocus();
   });
 
   test("removing the last person moves focus to the People heading", async () => {
     const { props, rerender } = renderPeople();
-    await confirmRemove("kai-dev");
+    await confirmRemove("alpha-dev");
     rerender(
       <PeopleView
         {...props}
-        people={people.filter((p) => p.username !== "kai-dev")}
+        people={people.filter((p) => p.username !== "alpha-dev")}
       />,
     );
     expect(screen.getByRole("heading", { name: /^People/ })).toHaveFocus();
@@ -225,41 +227,43 @@ describe("after a row changes", () => {
 
   test("a failed remove is announced through a status already in place", async () => {
     const { props, rerender } = renderPeople();
-    await confirmRemove("kai-dev");
-    const status = row("kai-dev").getByRole("status");
+    await confirmRemove("alpha-dev");
+    const status = row("alpha-dev").getByRole("status");
     expect(status).toHaveTextContent(/^$/);
     rerender(
       <PeopleView
         {...props}
         rowMutations={[
           {
-            id: "kai-dev",
+            id: "alpha-dev",
             action: "remove",
             pending: false,
-            error: "Couldn't remove @kai-dev. Try again.",
+            error: "Couldn't remove @alpha-dev. Try again.",
           },
         ]}
       />,
     );
-    expect(row("kai-dev").getByRole("status")).toBe(status);
-    expect(status).toHaveTextContent("Couldn't remove @kai-dev. Try again.");
+    expect(row("alpha-dev").getByRole("status")).toBe(status);
+    expect(status).toHaveTextContent("Couldn't remove @alpha-dev. Try again.");
   });
 
   test("a failed save is announced through a status already in place", async () => {
     const user = userEvent.setup();
     const { props, rerender } = renderPeople();
     await user.click(
-      row("kai-dev").getByRole("button", {
-        name: "Edit products for @kai-dev",
+      row("alpha-dev").getByRole("button", {
+        name: "Edit products for @alpha-dev",
       }),
     );
-    const status = row("kai-dev").getByRole("status");
+    const status = row("alpha-dev").getByRole("status");
     expect(status).toHaveTextContent(/^$/);
     await user.click(
-      row("kai-dev").getByRole("button", { name: "Save products" }),
+      row("alpha-dev").getByRole("button", { name: "Save products" }),
     );
-    rerender(<PeopleView {...props} rowMutations={[failedSave("kai-dev")]} />);
-    expect(row("kai-dev").getByRole("status")).toBe(status);
+    rerender(
+      <PeopleView {...props} rowMutations={[failedSave("alpha-dev")]} />,
+    );
+    expect(row("alpha-dev").getByRole("status")).toBe(status);
     expect(status).toHaveTextContent("Couldn't save. Try again.");
   });
 
@@ -285,14 +289,14 @@ describe("after a row changes", () => {
       pending: true,
       error: null,
     };
-    const removingKai: RowMutation = {
-      id: "kai-dev",
+    const removingAlpha: RowMutation = {
+      id: "alpha-dev",
       action: "remove",
       pending: true,
       error: null,
     };
     rerender(
-      <PeopleView {...props} rowMutations={[savingMaya, removingKai]} />,
+      <PeopleView {...props} rowMutations={[savingMaya, removingAlpha]} />,
     );
     rerender(<PeopleView {...props} rowMutations={[savingMaya]} />);
     expect(
@@ -305,7 +309,7 @@ describe("after a row changes", () => {
   test("one row's write in flight leaves the other rows free to save", async () => {
     const { props } = renderPeople({
       rowMutations: [
-        { id: "kai-dev", action: "save", pending: true, error: null },
+        { id: "alpha-dev", action: "save", pending: true, error: null },
       ],
     });
     await saveFor("mayachen");
@@ -317,54 +321,60 @@ describe("after a row changes", () => {
 
   test("a failed save doesn't show under Remove after Cancel", async () => {
     const { props, rerender } = renderPeople();
-    const user = await saveFor("kai-dev");
-    rerender(<PeopleView {...props} rowMutations={[failedSave("kai-dev")]} />);
-    await user.click(row("kai-dev").getByRole("button", { name: "Cancel" }));
-    await user.click(
-      row("kai-dev").getByRole("button", { name: "Remove @kai-dev" }),
+    const user = await saveFor("alpha-dev");
+    rerender(
+      <PeopleView {...props} rowMutations={[failedSave("alpha-dev")]} />,
     );
-    expect(row("kai-dev").getByText("Remove @kai-dev?")).toBeInTheDocument();
-    expect(row("kai-dev").getByRole("status")).toHaveTextContent(/^$/);
+    await user.click(row("alpha-dev").getByRole("button", { name: "Cancel" }));
+    await user.click(
+      row("alpha-dev").getByRole("button", { name: "Remove @alpha-dev" }),
+    );
+    expect(
+      row("alpha-dev").getByText("Remove @alpha-dev?"),
+    ).toBeInTheDocument();
+    expect(row("alpha-dev").getByRole("status")).toHaveTextContent(/^$/);
   });
 
   test("Edit products opened again starts without the last failure", async () => {
     const { props, rerender } = renderPeople();
-    const user = await saveFor("kai-dev");
-    rerender(<PeopleView {...props} rowMutations={[failedSave("kai-dev")]} />);
-    await user.click(row("kai-dev").getByRole("button", { name: "Cancel" }));
+    const user = await saveFor("alpha-dev");
+    rerender(
+      <PeopleView {...props} rowMutations={[failedSave("alpha-dev")]} />,
+    );
+    await user.click(row("alpha-dev").getByRole("button", { name: "Cancel" }));
     await user.click(
-      row("kai-dev").getByRole("button", {
-        name: "Edit products for @kai-dev",
+      row("alpha-dev").getByRole("button", {
+        name: "Edit products for @alpha-dev",
       }),
     );
-    expect(row("kai-dev").getByRole("status")).toHaveTextContent(/^$/);
+    expect(row("alpha-dev").getByRole("status")).toHaveTextContent(/^$/);
   });
 
   test("a remove that fails after Keep reports on the row", async () => {
     const user = userEvent.setup();
     const { props, rerender } = renderPeople();
-    await confirmRemove("kai-dev");
+    await confirmRemove("alpha-dev");
     const removing: RowMutation = {
-      id: "kai-dev",
+      id: "alpha-dev",
       action: "remove",
       pending: true,
       error: null,
     };
     rerender(<PeopleView {...props} rowMutations={[removing]} />);
-    await user.click(row("kai-dev").getByRole("button", { name: "Keep" }));
-    const status = row("kai-dev").getByRole("status");
+    await user.click(row("alpha-dev").getByRole("button", { name: "Keep" }));
+    const status = row("alpha-dev").getByRole("status");
     expect(status).toHaveTextContent(/^$/);
     rerender(
       <PeopleView
         {...props}
         rowMutations={[
-          { ...removing, pending: false, error: "Couldn't remove @kai-dev." },
+          { ...removing, pending: false, error: "Couldn't remove @alpha-dev." },
         ]}
       />,
     );
-    expect(status).toHaveTextContent("Couldn't remove @kai-dev.");
+    expect(status).toHaveTextContent("Couldn't remove @alpha-dev.");
     expect(
-      row("kai-dev").getByRole("button", { name: "Remove @kai-dev" }),
+      row("alpha-dev").getByRole("button", { name: "Remove @alpha-dev" }),
     ).toBeInTheDocument();
   });
 
@@ -390,14 +400,14 @@ describe("after a row changes", () => {
     const user = userEvent.setup();
     const { props } = renderPeople();
     await user.click(
-      row("kai-dev").getByRole("button", { name: "Remove @kai-dev" }),
+      row("alpha-dev").getByRole("button", { name: "Remove @alpha-dev" }),
     );
     await user.keyboard("{Escape}");
     expect(
-      row("kai-dev").queryByText("Remove @kai-dev?"),
+      row("alpha-dev").queryByText("Remove @alpha-dev?"),
     ).not.toBeInTheDocument();
     expect(
-      row("kai-dev").getByRole("button", { name: "Remove @kai-dev" }),
+      row("alpha-dev").getByRole("button", { name: "Remove @alpha-dev" }),
     ).toHaveFocus();
     expect(props.onRemove).not.toHaveBeenCalled();
   });
@@ -681,7 +691,7 @@ describe("products", () => {
 
   test("the owner's row reads All products", () => {
     renderPeople();
-    expect(row("justinsalas").getAllByText(/All products/)).not.toEqual([]);
+    expect(row("jordansmith").getAllByText(/All products/)).not.toEqual([]);
   });
 
   test("editing names the products the person can see", async () => {

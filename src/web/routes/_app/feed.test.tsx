@@ -441,13 +441,13 @@ describe("one of two filters taken away", () => {
 });
 
 describe("a filter change with arrivals in flight", () => {
-  const chooseKai = async () => {
+  const chooseAlpha = async () => {
     await userEvent.click(
       screen.getByRole("combobox", { name: "Filter by bot" }),
     );
-    await userEvent.click(await screen.findByRole("option", { name: "Kai" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Alpha" }));
     await waitFor(() =>
-      expect(FakeEventSource.current.url).toBe("/api/web/events?actor=a-kai"),
+      expect(FakeEventSource.current.url).toBe("/api/web/events?actor=a-alpha"),
     );
   };
 
@@ -455,7 +455,7 @@ describe("a filter change with arrivals in flight", () => {
     const { stream } = await openFeed();
     stream.send(commentEntry("e9", minutesAgo(0)));
     expect(order()).toEqual(["e9", "e2"]);
-    await chooseKai();
+    await chooseAlpha();
     await waitFor(() => expect(order()).toEqual(["e2"]));
     expect(document.querySelector(".row-fresh")).toBeNull();
     FakeEventSource.current.open();
@@ -469,7 +469,7 @@ describe("a filter change with arrivals in flight", () => {
     topInView(false);
     stream.send(commentEntry("e9", minutesAgo(0)));
     expect(screen.getByRole("button", { name: "1 new" })).toBeInTheDocument();
-    await chooseKai();
+    await chooseAlpha();
     await waitFor(() =>
       expect(
         screen.queryByRole("button", { name: /new$/ }),
@@ -488,10 +488,22 @@ describe("filters", () => {
     const options = (await screen.findAllByRole("option")).map(
       (o) => o.textContent,
     );
-    expect(options).toEqual(["All bots", "Kai"]);
-    await userEvent.click(await screen.findByRole("option", { name: "Kai" }));
-    await waitFor(() => expect(asked.at(-1)?.get("actor")).toBe("a-kai"));
-    expect(FakeEventSource.current.url).toBe("/api/web/events?actor=a-kai");
+    expect(options).toEqual(["All bots", "Alpha"]);
+    await userEvent.click(await screen.findByRole("option", { name: "Alpha" }));
+    await waitFor(() => expect(asked.at(-1)?.get("actor")).toBe("a-alpha"));
+    expect(FakeEventSource.current.url).toBe("/api/web/events?actor=a-alpha");
     expect(FakeEventSource.opened[0]?.readyState).toBe(FakeEventSource.CLOSED);
+  });
+});
+
+describe("the type filter", () => {
+  test("a type chosen reads and streams the feed by that type", async () => {
+    const { asked } = await openFeed();
+    await userEvent.click(
+      screen.getByRole("combobox", { name: "Filter by type" }),
+    );
+    await userEvent.click(await screen.findByRole("option", { name: "Todos" }));
+    await waitFor(() => expect(asked.at(-1)?.get("type")).toBe("todo"));
+    expect(FakeEventSource.current.url).toBe("/api/web/events?type=todo");
   });
 });

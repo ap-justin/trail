@@ -252,13 +252,13 @@ describe("not invited", () => {
     render(
       <NotInvitedView
         stranger={{ login: "devon-r" }}
-        ownerName="Justin Salas"
+        ownerName="Jordan Smith"
         onSignInAgain={vi.fn()}
       />,
     );
     expect(screen.getByText("@devon-r")).toHaveClass("font-mono");
     expect(screen.getByRole("main")).toHaveTextContent(
-      "@devon-r signed in with GitHub, but that account isn't on the list. Ask Justin Salas to invite your GitHub username or email address, then sign in again.",
+      "@devon-r signed in with GitHub, but that account isn't on the list. Ask Jordan Smith to invite your GitHub username or email address, then sign in again.",
     );
   });
 
@@ -268,13 +268,13 @@ describe("not invited", () => {
     render(
       <NotInvitedView
         stranger={{ email: "dana@example.com" }}
-        ownerName="Justin Salas"
+        ownerName="Jordan Smith"
         onSignInAgain={onSignInAgain}
       />,
     );
     expect(screen.getByText("dana@example.com")).toHaveClass("font-mono");
     expect(screen.getByRole("main")).toHaveTextContent(
-      "dana@example.com signed in by email, but that address isn't on the list. Ask Justin Salas to invite your GitHub username or email address, then sign in again.",
+      "dana@example.com signed in by email, but that address isn't on the list. Ask Jordan Smith to invite your GitHub username or email address, then sign in again.",
     );
     await user.click(
       screen.getByRole("button", { name: "Sign in with a different account" }),

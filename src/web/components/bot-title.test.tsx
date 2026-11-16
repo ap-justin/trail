@@ -8,20 +8,20 @@ import { ProductView } from "@/components/product";
 import { ProductsView } from "@/components/products";
 import type { WebActorView } from "@/lib/api-types";
 import {
+  alpha,
+  beta,
   commentEntry,
   issue,
   issueList,
   issueRow,
-  kai,
   maya,
   product,
   statusUpdate,
-  tara,
   trail,
 } from "@/test/fixtures";
 
-const kaiTitled: WebActorView = { ...kai, title: "Platform Engineer" };
-const taraTitled: WebActorView = { ...tara, title: "Release manager" };
+const alphaTitled: WebActorView = { ...alpha, title: "Platform Engineer" };
+const betaTitled: WebActorView = { ...beta, title: "Release manager" };
 const now = new Date("2026-11-11T12:00:00.000Z");
 
 const pillsIn = (scope: HTMLElement, title: string) =>
@@ -50,7 +50,7 @@ function renderFeed(overrides: Partial<FeedViewProps> = {}) {
     <FeedView
       status="ready"
       entries={[
-        commentEntry("e1", "2026-11-11T11:59:00.000Z", { actor: kaiTitled }),
+        commentEntry("e1", "2026-11-11T11:59:00.000Z", { actor: alphaTitled }),
         commentEntry("e2", "2026-11-11T11:50:00.000Z", { actor: maya }),
       ]}
       freshIds={new Set()}
@@ -58,13 +58,15 @@ function renderFeed(overrides: Partial<FeedViewProps> = {}) {
       pendingCount={0}
       onShowPending={vi.fn()}
       onAtTopChange={vi.fn()}
-      filters={{ actors: [kaiTitled, tara], products: [trail], projects: [] }}
+      filters={{ actors: [alphaTitled, beta], products: [trail], projects: [] }}
       actorFilter={null}
       productFilter={null}
       projectFilter={null}
+      typeFilter={null}
       onActorFilterChange={vi.fn()}
       onProductFilterChange={vi.fn()}
       onProjectFilterChange={vi.fn()}
+      onTypeFilterChange={vi.fn()}
       onRetry={vi.fn()}
       now={now}
       {...overrides}
@@ -80,7 +82,7 @@ const rowFor = (id: string) => {
 
 describe("BotTitle", () => {
   test("shows a bot's title in a pill, the whole title in its tooltip", () => {
-    render(<BotTitle actor={kaiTitled} />);
+    render(<BotTitle actor={alphaTitled} />);
     const pill = screen.getByTitle("Platform Engineer");
     expect(pill).toHaveTextContent("Platform Engineer");
     expect(pill).toHaveClass("bg-muted");
@@ -89,8 +91,8 @@ describe("BotTitle", () => {
   test("renders nothing for a bot without a title, an empty one, or a person", () => {
     const { container } = render(
       <>
-        <BotTitle actor={kai} />
-        <BotTitle actor={{ ...kai, title: "" }} />
+        <BotTitle actor={alpha} />
+        <BotTitle actor={{ ...alpha, title: "" }} />
         {/* never for a person, whatever the data says */}
         <BotTitle actor={{ ...maya, title: "Owner" }} />
       </>,
@@ -104,31 +106,31 @@ describe("feed", () => {
     renderFeed();
     const row = rowFor("e1");
     expect(pillsIn(row, "Platform Engineer")).toHaveLength(1);
-    expectNamePillBadge(row, "Kai", "Platform Engineer");
+    expectNamePillBadge(row, "Alpha", "Platform Engineer");
     expect(row.querySelector("[title]:not(time)")).not.toBeNull();
     expect(rowFor("e2").querySelector("[title]:not(time)")).toBeNull();
   });
 
   test("the bot filter menu shows each bot's title; the trigger shows the name alone", async () => {
     const user = userEvent.setup();
-    renderFeed({ actorFilter: kaiTitled.id });
+    renderFeed({ actorFilter: alphaTitled.id });
     const trigger = screen.getByRole("combobox", { name: "Filter by bot" });
-    expect(trigger).toHaveTextContent("Kai");
+    expect(trigger).toHaveTextContent("Alpha");
     expect(trigger).not.toHaveTextContent("Platform Engineer");
     expect(pillsIn(trigger, "Platform Engineer")).toHaveLength(0);
     await user.click(trigger);
-    const kaiOption = await screen.findByRole("option", { name: /Kai/ });
-    expect(pillsIn(kaiOption, "Platform Engineer")).toHaveLength(1);
-    const taraOption = screen.getByRole("option", { name: "Tara" });
-    expect(taraOption.querySelector("[title]")).toBeNull();
+    const alphaOption = await screen.findByRole("option", { name: /Alpha/ });
+    expect(pillsIn(alphaOption, "Platform Engineer")).toHaveLength(1);
+    const betaOption = screen.getByRole("option", { name: "Beta" });
+    expect(betaOption.querySelector("[title]")).toBeNull();
   });
 
   test("in the filter menu the pill's own shrink is replaced, so a long name truncates beside a whole pill", async () => {
     const user = userEvent.setup();
     renderFeed();
     await user.click(screen.getByRole("combobox", { name: "Filter by bot" }));
-    const kaiOption = await screen.findByRole("option", { name: /Kai/ });
-    const [pill] = pillsIn(kaiOption, "Platform Engineer");
+    const alphaOption = await screen.findByRole("option", { name: /Alpha/ });
+    const [pill] = pillsIn(alphaOption, "Platform Engineer");
     // BotTitle shrinks by default (shrink-4); the menu's className must win the merge
     expect(pill).toHaveClass("shrink-0");
     expect(pill).not.toHaveClass("shrink-4");
@@ -138,8 +140,8 @@ describe("feed", () => {
     const user = userEvent.setup();
     renderFeed();
     await user.click(screen.getByRole("combobox", { name: "Filter by bot" }));
-    const kaiOption = await screen.findByRole("option", { name: /Kai/ });
-    const [pill] = pillsIn(kaiOption, "Platform Engineer");
+    const alphaOption = await screen.findByRole("option", { name: /Alpha/ });
+    const [pill] = pillsIn(alphaOption, "Platform Engineer");
     // the highlight is bg-accent, the same fill as bg-muted in light theme
     expect(pill).toHaveClass("bg-background");
     expect(pill).not.toHaveClass("bg-muted");
@@ -147,7 +149,7 @@ describe("feed", () => {
 });
 
 describe("issue", () => {
-  function renderIssue(assignee: WebActorView = kaiTitled) {
+  function renderIssue(assignee: WebActorView = alphaTitled) {
     const on = {
       product: trail,
       project: null,
@@ -159,7 +161,7 @@ describe("issue", () => {
         issue={{
           status: "ready",
           data: issue({
-            creator: taraTitled,
+            creator: betaTitled,
             assignee,
             timeline: [
               {
@@ -167,7 +169,7 @@ describe("issue", () => {
                 kind: "priority_changed",
                 id: "t1",
                 createdAt: "2026-11-09T14:05:00.000Z",
-                actor: kaiTitled,
+                actor: alphaTitled,
                 from: 0,
                 to: 2,
               },
@@ -176,7 +178,7 @@ describe("issue", () => {
                 kind: "comment",
                 id: "t2",
                 createdAt: "2026-11-10T17:12:00.000Z",
-                actor: kaiTitled,
+                actor: alphaTitled,
                 comment: { id: "c1", body: "Looks right.", sourceAuthor: null },
               },
               {
@@ -203,7 +205,7 @@ describe("issue", () => {
     renderIssue();
     const byLine = screen.getByRole("banner");
     expect(pillsIn(byLine, "Release manager")).toHaveLength(1);
-    expectNamePillBadge(byLine, "Tara", "Release manager");
+    expectNamePillBadge(byLine, "Beta", "Release manager");
   });
 
   test("the Assignee property carries the assignee's title", () => {
@@ -212,7 +214,7 @@ describe("issue", () => {
     if (!(assignee instanceof HTMLElement))
       throw new Error("no assignee value");
     expect(pillsIn(assignee, "Platform Engineer")).toHaveLength(1);
-    expectNamePillBadge(assignee, "Kai", "Platform Engineer");
+    expectNamePillBadge(assignee, "Alpha", "Platform Engineer");
   });
 
   test.each([
@@ -222,7 +224,7 @@ describe("issue", () => {
     "a long assignee name, %s, keeps its Bot badge, and its title only when it has one",
     (_, title) => {
       const name = "release-coordinator-staging-east";
-      renderIssue({ ...kai, name, title });
+      renderIssue({ ...alpha, name, title });
       const assignee = screen.getByText("Assignee").nextElementSibling;
       if (!(assignee instanceof HTMLElement))
         throw new Error("no assignee value");
@@ -255,9 +257,9 @@ describe("products", () => {
       <ProductsView
         status="ready"
         products={[
-          product({ latestStatusUpdate: statusUpdate({ author: taraTitled }) }),
+          product({ latestStatusUpdate: statusUpdate({ author: betaTitled }) }),
         ]}
-        ownerName="Justin Salas"
+        ownerName="Jordan Smith"
         isOwner={false}
         onRetry={vi.fn()}
         now={now}
@@ -265,7 +267,7 @@ describe("products", () => {
     );
     const table = screen.getByRole("table");
     expect(pillsIn(table, "Release manager")).toHaveLength(1);
-    expectNamePillBadge(table, "Tara", "Release manager");
+    expectNamePillBadge(table, "Beta", "Release manager");
     expect(
       pillsIn(screen.getByRole("listitem"), "Release manager"),
     ).toHaveLength(1);
@@ -280,14 +282,14 @@ describe("product", () => {
         detail={null}
         items={{
           status: "ready",
-          data: issueList([issueRow({ assignee: taraTitled })]),
+          data: issueList([issueRow({ assignee: betaTitled })]),
         }}
         statusUpdates={{
           status: "ready",
           data: {
             items: [
-              statusUpdate({ author: taraTitled }),
-              statusUpdate({ id: "su-2", author: tara }),
+              statusUpdate({ author: betaTitled }),
+              statusUpdate({ id: "su-2", author: beta }),
             ],
             nextCursor: null,
           },
@@ -310,7 +312,7 @@ describe("product", () => {
     const pill = pills[0] as HTMLElement;
     const update = pill.closest("li");
     if (!update) throw new Error("no status update");
-    const name = within(update).getByText("Tara");
+    const name = within(update).getByText("Beta");
     const badge = within(update).getByText("Bot");
     const health = within(update).getByText("On track");
     // row 1: name, badge, health; the name truncates rather than pushing the row wider

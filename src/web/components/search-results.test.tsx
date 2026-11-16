@@ -8,7 +8,7 @@ const results = {
   items: [
     {
       key: "TRL-14",
-      sourceKey: "JUS-187",
+      sourceKey: "OLD-187",
       title: "Team access: invite people",
       type: "issue" as const,
       status: "in_progress" as const,
@@ -38,7 +38,7 @@ describe("SearchResults", () => {
     expect(project?.querySelector("svg")).toHaveClass("lucide-folder");
     expect(issue).toHaveAttribute("href", "/products/TRL/14");
     expect(issue).toHaveAccessibleName(
-      "TRL-14 Team access: invite people JUS-187",
+      "TRL-14 Team access: invite people OLD-187",
     );
   });
 

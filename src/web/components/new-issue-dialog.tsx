@@ -62,7 +62,7 @@ const TITLE_MAX = 300;
 
 function titleError(title: string) {
   const trimmed = title.trim();
-  if (!trimmed) return "Add a title.";
+  if (!trimmed) return "Required";
   if (trimmed.length > TITLE_MAX) return `Keep it to ${TITLE_MAX} characters.`;
   return undefined;
 }
@@ -70,7 +70,7 @@ function titleError(title: string) {
 function validate(productKey: string | null, title: string): Errors {
   const titleMessage = titleError(title);
   return {
-    ...(productKey ? {} : { product: "Pick a product." }),
+    ...(productKey ? {} : { product: "Required" }),
     ...(titleMessage ? { title: titleMessage } : {}),
   };
 }

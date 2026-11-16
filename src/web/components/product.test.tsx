@@ -154,7 +154,7 @@ describe("items", () => {
       name: "TRL-17 Human UI: feed, projects, issue page",
     });
     expect(link).toHaveAccessibleDescription(
-      /^Issue Open .*ui design Assigned to Tara, Bot$/,
+      /^Issue Open .*ui design Assigned to Beta, Bot$/,
     );
   });
 
@@ -346,6 +346,11 @@ describe("type toggle and status tabs", () => {
     expect(
       screen.getByRole("heading", { name: "No items in TRL yet" }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Bots plan todos and file issues here. You can file an issue too.",
+      ),
+    ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "New issue" }));
     expect(p.onNewIssue).toHaveBeenCalledOnce();
   });
@@ -353,7 +358,7 @@ describe("type toggle and status tabs", () => {
   test("a failed list says so and retries", async () => {
     const user = userEvent.setup();
     const p = renderProduct({ items: { status: "error" } });
-    expect(screen.getByRole("alert")).toHaveTextContent("Couldn't load issues");
+    expect(screen.getByRole("alert")).toHaveTextContent("Couldn't load items");
     await user.click(screen.getByRole("button", { name: "Try again" }));
     expect(p.onRetryItems).toHaveBeenCalledOnce();
   });
@@ -363,8 +368,8 @@ describe("aside", () => {
   test("Repository shows the repo and opens GitHub; with no repo there is no section", () => {
     const { unmount } = render(<ProductView {...props()} />);
     const repo = within(aside("Repository")).getByRole("link");
-    expect(repo).toHaveAttribute("href", "https://github.com/ap-justin/trail");
-    expect(repo).toHaveTextContent("github.com/ap-justin/trail");
+    expect(repo).toHaveAttribute("href", "https://github.com/example/trail");
+    expect(repo).toHaveTextContent("github.com/example/trail");
     unmount();
     renderProduct({ detail: productDetail({ repoUrl: null }) });
     expect(screen.queryByRole("region", { name: "Repository" })).toBeNull();
@@ -383,7 +388,9 @@ describe("aside", () => {
     expect(human).toHaveTextContent(
       /Human UI launch.*At risk.*Ada.*Target Dec 4/,
     );
-    expect(team).toHaveTextContent(/Team access.*On track.*Kai.*Target Nov 30/);
+    expect(team).toHaveTextContent(
+      /Team access.*On track.*Alpha.*Target Nov 30/,
+    );
     unmount();
     renderProduct({ detail: productDetail({ projects: [], projectCount: 0 }) });
     expect(screen.queryByRole("region", { name: /^Projects/ })).toBeNull();
@@ -415,7 +422,7 @@ describe("aside", () => {
   test("status updates: author, badge, health and absolute time; none says so", () => {
     const { unmount } = render(<ProductView {...props()} />);
     const section = aside("Status updates");
-    expect(within(section).getByText("Tara")).toBeInTheDocument();
+    expect(within(section).getByText("Beta")).toBeInTheDocument();
     expect(within(section).getByText("On track")).toBeInTheDocument();
     expect(
       within(section).getByText(/^Nov 11, \d{2}:\d{2}$/),
@@ -455,6 +462,16 @@ describe("aside", () => {
     expect(pane("Items")).toHaveAttribute("data-hidden");
     expect(pane("Status updates")).toHaveAttribute("data-hidden");
     expect(pane("Status updates")).toContainElement(aside("Status updates"));
+  });
+
+  test("the footer sits at the end of the Items pane, so another pane hides it", async () => {
+    const user = userEvent.setup();
+    renderProduct({ footer: <p>Only the first 500 items are shown.</p> });
+    const footer = screen.getByText("Only the first 500 items are shown.");
+    expect(pane("Items")).toContainElement(footer);
+    await user.click(paneTab("Status updates"));
+    expect(pane("Items")).toHaveAttribute("data-hidden");
+    expect(pane("Status updates")).not.toContainElement(footer);
   });
 
   test("every pane stays rendered and reachable for 1024px, where the breakpoint alone hides one", () => {

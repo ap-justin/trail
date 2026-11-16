@@ -307,6 +307,16 @@ describe("375 panes", () => {
     expect(pane("Items")).toContainElement(table());
   });
 
+  test("the footer sits at the end of the Items pane, so Status updates hides it", async () => {
+    const user = userEvent.setup();
+    renderProject({ footer: <p>Only the first 500 items are shown.</p> });
+    const footer = screen.getByText("Only the first 500 items are shown.");
+    expect(pane("Items")).toContainElement(footer);
+    await user.click(paneTab("Status updates"));
+    expect(pane("Items")).toHaveAttribute("data-hidden");
+    expect(pane("Status updates")).not.toContainElement(footer);
+  });
+
   test("both panes stay rendered and reachable for 1024px, where the breakpoint alone hides one", () => {
     renderProject();
     for (const name of ["Items", "Status updates"]) {

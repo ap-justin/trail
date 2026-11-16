@@ -44,8 +44,8 @@ const mainNavs = () => screen.getAllByRole("navigation", { name: "Main" });
 describe("People nav", () => {
   test("the owner sees People in the sidebar and the tab bar", () => {
     renderShell({
-      name: "Justin Salas",
-      handle: "@justin",
+      name: "Jordan Smith",
+      handle: "@jordan",
       isOwner: true,
       photoUrl: null,
     });
@@ -129,7 +129,7 @@ test("the shell's viewer carries the photo URL `/me` gives the signed-in actor",
       title: null,
     },
     products: [],
-    ownerName: "Justin Salas",
+    ownerName: "Jordan Smith",
     emailSignIn: true,
   };
   expect(sessionOf(me)?.viewer).toEqual({
@@ -153,7 +153,7 @@ test("a person who signs in by email is let into the shell, shown by their addre
       title: null,
     },
     products: [],
-    ownerName: "Justin Salas",
+    ownerName: "Jordan Smith",
     emailSignIn: true,
   };
   expect(sessionOf(me)?.viewer).toEqual({
@@ -165,8 +165,8 @@ test("a person who signs in by email is let into the shell, shown by their addre
 });
 
 const owner: ShellViewer = {
-  name: "Justin Salas",
-  handle: "@justin",
+  name: "Jordan Smith",
+  handle: "@jordan",
   isOwner: true,
   photoUrl: null,
 };

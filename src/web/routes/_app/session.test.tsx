@@ -42,7 +42,7 @@ describe("session", () => {
     renderApp("/");
     expect(await screen.findByText("No products yet")).toBeInTheDocument();
     expect(
-      screen.getByText("Ask the owner to add you to a product."),
+      screen.getByText("Ask the owner to give you access to a product."),
     ).toBeInTheDocument();
     expect(screen.queryByText("No activity yet")).not.toBeInTheDocument();
     expect(
@@ -120,7 +120,7 @@ describe("session", () => {
     expect(screen.queryByText("No products yet")).not.toBeInTheDocument();
     expect(
       screen.getAllByRole("combobox", { name: /^Filter by/ }),
-    ).toHaveLength(3);
+    ).toHaveLength(4);
   });
 
   test("a member with products sees Live once the stream opens", async () => {

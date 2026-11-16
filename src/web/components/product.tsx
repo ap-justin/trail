@@ -1,5 +1,5 @@
 import { ExternalLinkIcon } from "lucide-react";
-import { useId, useRef, useState } from "react";
+import { type ReactNode, useId, useRef, useState } from "react";
 import { ActorAvatar } from "@/components/actor";
 import { AppLink, RowLink } from "@/components/app-link";
 import {
@@ -15,8 +15,8 @@ import {
 } from "@/components/item-list";
 import { Pane, PaneTabs } from "@/components/pane-tabs";
 import {
-  IssueListError,
   ItemListEmpty,
+  ItemListError,
   ListSkeleton,
 } from "@/components/states";
 import {
@@ -54,6 +54,8 @@ export type ProductViewProps = {
   onNewIssue: () => void;
   onRetryItems: () => void;
   onRetryStatusUpdates: () => void;
+  /** Closes the Items pane, under the list; hidden with the pane below lg. */
+  footer?: ReactNode;
   /** The clock relative times are read against; ticks each minute when omitted. */
   now?: Date;
 };
@@ -144,7 +146,7 @@ function ItemsBody({
     return <ListSkeleton className="px-4 lg:px-2" />;
   if (items.status === "error")
     return (
-      <IssueListError
+      <ItemListError
         onRetry={() => {
           focusList();
           onRetryItems();
@@ -270,6 +272,7 @@ export function ProductView(props: ProductViewProps) {
             />
           </TabsContent>
         </Tabs>
+        {props.footer}
       </Pane>
       <aside className="flex flex-col gap-5 lg:w-70 lg:shrink-0">
         {detail?.repoUrl && (

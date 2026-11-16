@@ -4,7 +4,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { RECONNECT_MS } from "@/lib/use-live-feed";
 import { meView, renderApp, serveFeed } from "@/test/app";
 import { FakeEventSource } from "@/test/event-source";
-import { issue, kai, statusEntry } from "@/test/fixtures";
+import { alpha, issue, statusEntry } from "@/test/fixtures";
 import { server } from "@/test/server";
 
 const issueTitle = "Team access: invite people by GitHub username";
@@ -96,7 +96,7 @@ describe("the shell's actor stream", () => {
     const { reads, stream } = await openIssue();
     stream.open();
     await waitFor(() => expect(reads.me).toBe(2));
-    stream.actor({ actorId: kai.id, photoUrl: null, title: null });
+    stream.actor({ actorId: alpha.id, photoUrl: null, title: null });
     await settle();
     expect(reads).toEqual({ me: 2, issue: 1 });
   });

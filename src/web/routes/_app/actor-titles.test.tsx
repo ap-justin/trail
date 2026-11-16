@@ -5,15 +5,15 @@ import { describe, expect, test } from "vitest";
 import { renderApp, serveFeed, signedInAs } from "@/test/app";
 import { FakeEventSource } from "@/test/event-source";
 import {
+  alpha,
+  beta,
   commentEntry,
   issue,
   issueList,
   issueRow,
-  kai,
   maya,
   productDetail,
   statusUpdate,
-  tara,
 } from "@/test/fixtures";
 import { server } from "@/test/server";
 
@@ -46,14 +46,14 @@ describe("a bot's title changing live", () => {
     stream.open();
     const row = () => within(rowFor("e1") as HTMLElement);
 
-    stream.actor(titled(kai.id, "Platform Engineer"));
+    stream.actor(titled(alpha.id, "Platform Engineer"));
     expect(row().getByTitle("Platform Engineer")).toHaveTextContent(
       "Platform Engineer",
     );
-    stream.actor(titled(kai.id, "Release manager"));
+    stream.actor(titled(alpha.id, "Release manager"));
     expect(row().getByTitle("Release manager")).toBeInTheDocument();
     expect(pills("Platform Engineer")).toHaveLength(0);
-    stream.actor(titled(kai.id, null));
+    stream.actor(titled(alpha.id, null));
     expect(row().queryByTitle("Release manager")).toBeNull();
     expect(rowFor("e2")?.querySelector("[title]:not(time)")).toBeNull();
     expect(asked).toHaveLength(1);
@@ -67,9 +67,9 @@ describe("a bot's title changing live", () => {
     await waitFor(() => expect(rowFor("e1")).not.toBeNull());
     const stream = FakeEventSource.current;
     stream.open();
-    stream.actor(titled(kai.id, "Platform Engineer"));
+    stream.actor(titled(alpha.id, "Platform Engineer"));
     await user.click(screen.getByRole("combobox", { name: "Filter by bot" }));
-    const option = await screen.findByRole("option", { name: /Kai/ });
+    const option = await screen.findByRole("option", { name: /Alpha/ });
     await waitFor(() =>
       expect(within(option).getByTitle("Platform Engineer")).toHaveTextContent(
         "Platform Engineer",
@@ -77,7 +77,7 @@ describe("a bot's title changing live", () => {
     );
   });
 
-  test("on an issue page: assignee and the lines Kai wrote, without reading it again", async () => {
+  test("on an issue page: assignee and the lines Alpha wrote, without reading it again", async () => {
     signedInAs("member");
     let reads = 0;
     server.use(
@@ -92,8 +92,8 @@ describe("a bot's title changing live", () => {
     ).toBeInTheDocument();
     const stream = FakeEventSource.current;
     stream.open();
-    stream.actor(titled(kai.id, "Platform Engineer"));
-    // the assignee, and Kai's lines in the timeline
+    stream.actor(titled(alpha.id, "Platform Engineer"));
+    // the assignee, and Alpha's lines in the timeline
     const assignee = () =>
       screen.getByText("Assignee", { selector: "dt" }).nextElementSibling;
     await waitFor(() =>
@@ -101,12 +101,12 @@ describe("a bot's title changing live", () => {
         within(assignee() as HTMLElement).getByTitle("Platform Engineer"),
       ).toBeInTheDocument(),
     );
-    const kaiLines = document.querySelectorAll<HTMLElement>(
+    const alphaLines = document.querySelectorAll<HTMLElement>(
       "[data-entry-id]:has([title='Platform Engineer'])",
     );
-    expect(kaiLines.length).toBeGreaterThan(0);
-    for (const line of kaiLines) expect(line).toHaveTextContent("Kai");
-    stream.actor(titled(kai.id, null));
+    expect(alphaLines.length).toBeGreaterThan(0);
+    for (const line of alphaLines) expect(line).toHaveTextContent("Alpha");
+    stream.actor(titled(alpha.id, null));
     await waitFor(() => expect(pills("Platform Engineer")).toHaveLength(0));
     expect(reads).toBe(1);
   });
@@ -118,11 +118,11 @@ describe("a bot's title changing live", () => {
         HttpResponse.json(productDetail()),
       ),
       http.get("/api/web/products/TRL/items", () =>
-        HttpResponse.json(issueList([issueRow({ assignee: tara })])),
+        HttpResponse.json(issueList([issueRow({ assignee: beta })])),
       ),
       http.get("/api/web/products/TRL/status-updates", () =>
         HttpResponse.json({
-          items: [statusUpdate({ author: tara })],
+          items: [statusUpdate({ author: beta })],
           nextCursor: null,
         }),
       ),
@@ -132,7 +132,7 @@ describe("a bot's title changing live", () => {
     await screen.findByText(statusUpdate().body);
     const stream = FakeEventSource.current;
     stream.open();
-    stream.actor(titled(tara.id, "Release manager"));
+    stream.actor(titled(beta.id, "Release manager"));
     await waitFor(() => expect(pills("Release manager")).toHaveLength(1));
     expect(
       within(screen.getByRole("table")).queryByTitle("Release manager"),

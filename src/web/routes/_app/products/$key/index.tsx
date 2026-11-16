@@ -72,8 +72,13 @@ function ProductPage() {
         onNewIssue={() => openNewIssue(key)}
         onRetryItems={() => void items.refetch()}
         onRetryStatusUpdates={() => void updates.refetch()}
+        footer={
+          <RowsMissing
+            list={items.data}
+            shown={items.data?.items.length ?? 0}
+          />
+        }
       />
-      <RowsMissing list={items.data} shown={items.data?.items.length ?? 0} />
     </AppPage>
   );
 }

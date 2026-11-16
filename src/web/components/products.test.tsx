@@ -11,7 +11,7 @@ function renderProducts(overrides: Partial<ProductsViewProps> = {}) {
     <ProductsView
       status="ready"
       products={[product()]}
-      ownerName="Justin Salas"
+      ownerName="Jordan Smith"
       isOwner={false}
       onRetry={vi.fn()}
       now={now}
@@ -51,7 +51,7 @@ describe("products", () => {
   test("a product with a status update shows its health and the update's author", () => {
     renderProducts();
     expect(within(table()).getByText("On track")).toBeInTheDocument();
-    expect(within(table()).getByText("Tara")).toBeInTheDocument();
+    expect(within(table()).getByText("Beta")).toBeInTheDocument();
     expect(within(table()).getByText("Bot")).toBeInTheDocument();
     expect(within(table()).getByText("41m ago")).toBeInTheDocument();
   });
@@ -82,18 +82,15 @@ describe("products", () => {
   test("the repo line shows owner/name and opens GitHub, only for a product with a repo", () => {
     renderProducts({
       products: [
-        product({ repoUrl: "https://github.com/ap-justin/trail" }),
+        product({ repoUrl: "https://github.com/example/trail" }),
         product({ key: "DOC", name: "Docs site", repoUrl: null }),
       ],
     });
-    const repoLinks = screen.getAllByRole("link", { name: /ap-justin\/trail/ });
+    const repoLinks = screen.getAllByRole("link", { name: /example\/trail/ });
     // one in the table, one on the card
     expect(repoLinks).toHaveLength(2);
     for (const link of repoLinks) {
-      expect(link).toHaveAttribute(
-        "href",
-        "https://github.com/ap-justin/trail",
-      );
+      expect(link).toHaveAttribute("href", "https://github.com/example/trail");
       expect(link).toHaveAttribute("target", "_blank");
       expect(link).not.toHaveTextContent("github.com");
     }
@@ -108,7 +105,7 @@ describe("products", () => {
     const order = [
       within(item).getByRole("link", { name: "TRL trail" }),
       within(item).getByText(/^SSE feed shipped/),
-      within(item).getByText("Tara"),
+      within(item).getByText("Beta"),
       within(item).getByText("41m ago"),
       within(item).getByText("7 issues · 2 todos open · 0 projects"),
     ];
@@ -154,7 +151,7 @@ describe("products", () => {
       screen.getByRole("heading", { name: "No products yet" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Ask Justin Salas to give you access to a product."),
+      screen.getByText("Ask Jordan Smith to give you access to a product."),
     ).toBeInTheDocument();
   });
 

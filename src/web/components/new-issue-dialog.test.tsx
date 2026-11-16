@@ -14,7 +14,7 @@ function renderDialog(overrides: Partial<NewIssueDialogProps> = {}) {
     products: allProducts,
     defaultProductKey: "DOC",
     viewer: { name: "Maya Chen", isOwner: false },
-    ownerName: "Justin Salas",
+    ownerName: "Jordan Smith",
     onSubmit: vi.fn(),
     pending: false,
     error: null,
@@ -27,7 +27,7 @@ function renderDialog(overrides: Partial<NewIssueDialogProps> = {}) {
 const dialog = () => screen.getByRole("dialog", { name: "New issue" });
 
 describe("new issue dialog", () => {
-  test("an empty title submit says Add a title., keeps focus on Title and sends nothing", async () => {
+  test("an empty title submit says Required, keeps focus on Title and sends nothing", async () => {
     const user = userEvent.setup();
     const props = renderDialog();
     await user.type(within(dialog()).getByLabelText("Title"), "   ");
@@ -35,7 +35,7 @@ describe("new issue dialog", () => {
       within(dialog()).getByRole("button", { name: "Create issue" }),
     );
     const title = within(dialog()).getByLabelText("Title");
-    expect(within(dialog()).getByText("Add a title.")).toBeInTheDocument();
+    expect(within(dialog()).getByText("Required")).toBeInTheDocument();
     expect(title).toHaveFocus();
     expect(title).toHaveAttribute("aria-invalid", "true");
     expect(props.onSubmit).not.toHaveBeenCalled();
@@ -48,9 +48,7 @@ describe("new issue dialog", () => {
       within(dialog()).getByRole("button", { name: "Create issue" }),
     );
     await user.type(within(dialog()).getByLabelText("Title"), "S");
-    expect(
-      within(dialog()).queryByText("Add a title."),
-    ).not.toBeInTheDocument();
+    expect(within(dialog()).queryByText("Required")).not.toBeInTheDocument();
   });
 
   test("the product defaults to the current one and the issue goes out trimmed", async () => {
@@ -65,7 +63,7 @@ describe("new issue dialog", () => {
     );
     await user.type(
       within(dialog()).getByLabelText(/^Description/),
-      "Vera picks a direction.",
+      "The owner picks a direction.",
     );
     await user.click(
       within(dialog()).getByRole("button", { name: "Create issue" }),
@@ -73,7 +71,7 @@ describe("new issue dialog", () => {
     expect(props.onSubmit).toHaveBeenCalledWith({
       product: "DOC",
       title: "Fix the logo",
-      description: "Vera picks a direction.",
+      description: "The owner picks a direction.",
     });
   });
 
@@ -164,7 +162,7 @@ describe("new issue dialog", () => {
     ).toBeInTheDocument();
     expect(
       within(dialog()).getByText(
-        "Ask Justin Salas to give you access to a product.",
+        "Ask Jordan Smith to give you access to a product.",
       ),
     ).toBeInTheDocument();
     expect(within(dialog()).queryByLabelText("Title")).not.toBeInTheDocument();

@@ -1,5 +1,5 @@
 import { PackageIcon } from "lucide-react";
-import { useId, useRef, useState } from "react";
+import { type ReactNode, useId, useRef, useState } from "react";
 import { ActorAvatar, ActorBadge, BotTitle } from "@/components/actor";
 import { AppLink } from "@/components/app-link";
 import { ProductSelect } from "@/components/filter-select";
@@ -18,7 +18,7 @@ import { Pane, PaneTabs } from "@/components/pane-tabs";
 import {
   EmptyState,
   ErrorState,
-  IssueListError,
+  ItemListError,
   ListSkeleton,
 } from "@/components/states";
 import {
@@ -60,6 +60,8 @@ export type ProjectViewProps = {
   onRetryProject: () => void;
   onRetryItems: () => void;
   onRetryStatusUpdates: () => void;
+  /** Closes the Items pane, under the list; hidden with the pane below lg. */
+  footer?: ReactNode;
   /** The clock relative times are read against; ticks each minute when omitted. */
   now?: Date;
 };
@@ -189,7 +191,7 @@ function ItemsBody({
     return <ListSkeleton className="px-4 lg:px-2" />;
   if (items.status === "error")
     return (
-      <IssueListError
+      <ItemListError
         onRetry={() => {
           focusList();
           onRetryItems();
@@ -327,6 +329,7 @@ function ProjectBody(
               </TabsContent>
             </Tabs>
           )}
+          {props.footer}
         </Pane>
       </div>
       <aside className="flex flex-col gap-5 lg:w-70 lg:shrink-0">

@@ -119,10 +119,14 @@ function ProjectPage() {
             : items.refetch())
         }
         onRetryStatusUpdates={() => void updates.refetch()}
-      />
-      <RowsMissing
-        list={project.data && items.data}
-        shown={items.data?.groups.reduce((n, g) => n + g.items.length, 0) ?? 0}
+        footer={
+          <RowsMissing
+            list={items.data}
+            shown={
+              items.data?.groups.reduce((n, g) => n + g.items.length, 0) ?? 0
+            }
+          />
+        }
       />
     </AppPage>
   );

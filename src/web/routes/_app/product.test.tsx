@@ -293,7 +293,7 @@ describe("links", () => {
     });
     // the 375 list's row; the 1440 table names its row by cells instead
     const row = links.find((link) => link.closest("ul"));
-    expect(row).toHaveAccessibleDescription(/Tara/);
+    expect(row).toHaveAccessibleDescription(/Beta/);
   });
 
   test("a link to the page you're on carries only the component's own aria-current", async () => {

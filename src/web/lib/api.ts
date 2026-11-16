@@ -88,6 +88,7 @@ export type FeedFilter = {
   product: string | null;
   /** A project slug. */
   project: string | null;
+  type: WebItemType | null;
 };
 
 /** A product's or project's item list filters; null is All. */

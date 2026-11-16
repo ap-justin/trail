@@ -131,7 +131,7 @@ describe("owner only", () => {
     signedInAs("owner");
     servePeople();
     renderApp("/people");
-    expect(await screen.findByText("@kai-dev")).toBeInTheDocument();
+    expect(await screen.findByText("@alpha-dev")).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: "People" })).not.toHaveLength(0);
   });
 });
@@ -141,7 +141,7 @@ describe("managing people", () => {
     signedInAs("owner");
     const writes = servePeople();
     renderApp("/people");
-    await screen.findByText("@kai-dev");
+    await screen.findByText("@alpha-dev");
     await userEvent.type(
       screen.getByLabelText("GitHub username or email"),
       "newbie",
@@ -161,7 +161,7 @@ describe("managing people", () => {
     signedInAs("owner");
     const writes = servePeople();
     renderApp("/people");
-    await screen.findByText("@kai-dev");
+    await screen.findByText("@alpha-dev");
     await userEvent.click(
       screen.getByRole("button", { name: "Edit products for @mayachen" }),
     );
@@ -183,7 +183,7 @@ describe("managing people", () => {
     signedInAs("owner");
     const writes = servePeople();
     renderApp("/people");
-    await screen.findByText("@kai-dev");
+    await screen.findByText("@alpha-dev");
     await userEvent.click(
       screen.getByRole("button", { name: "Edit products for @mayachen" }),
     );
@@ -205,7 +205,7 @@ describe("managing people", () => {
     signedInAs("owner");
     const writes = servePeople();
     renderApp("/people");
-    await screen.findByText("@kai-dev");
+    await screen.findByText("@alpha-dev");
     await userEvent.click(
       screen.getByRole("button", { name: "Remove @mayachen" }),
     );
@@ -225,17 +225,17 @@ describe("managing people", () => {
     const writes = servePeople();
     const puts = holdWrites("put");
     renderApp("/people");
-    await screen.findByText("@kai-dev");
+    await screen.findByText("@alpha-dev");
     await startSave("mayachen");
-    await startSave("kai-dev");
+    await startSave("alpha-dev");
     expect(
-      row("kai-dev").getByRole("button", { name: "Saving…" }),
+      row("alpha-dev").getByRole("button", { name: "Saving…" }),
     ).toBeInTheDocument();
 
-    await puts.release("kai-dev");
+    await puts.release("alpha-dev");
     expect(
-      await row("kai-dev").findByRole("button", {
-        name: "Edit products for @kai-dev",
+      await row("alpha-dev").findByRole("button", {
+        name: "Edit products for @alpha-dev",
       }),
     ).toBeInTheDocument();
     expect(
@@ -249,7 +249,7 @@ describe("managing people", () => {
       }),
     ).toBeInTheDocument();
     expect(writes.map((write) => write.path)).toEqual([
-      "/api/web/people/kai-dev",
+      "/api/web/people/alpha-dev",
       "/api/web/people/mayachen",
     ]);
   });
@@ -259,17 +259,17 @@ describe("managing people", () => {
     servePeople();
     const puts = holdWrites("put");
     renderApp("/people");
-    await screen.findByText("@kai-dev");
+    await screen.findByText("@alpha-dev");
     await startSave("mayachen");
     await userEvent.click(
-      screen.getByRole("button", { name: "Remove @kai-dev" }),
+      screen.getByRole("button", { name: "Remove @alpha-dev" }),
     );
     await userEvent.click(
-      row("kai-dev").getByRole("button", { name: "Remove" }),
+      row("alpha-dev").getByRole("button", { name: "Remove" }),
     );
     await waitFor(() =>
       expect(
-        document.querySelector('li[data-person="kai-dev"]'),
+        document.querySelector('li[data-person="alpha-dev"]'),
       ).not.toBeInTheDocument(),
     );
     expect(
@@ -290,8 +290,8 @@ describe("managing people", () => {
     servePeople();
     const deletes = holdWrites("delete");
     renderApp("/people");
-    await screen.findByText("@kai-dev");
-    for (const username of ["mayachen", "kai-dev"]) {
+    await screen.findByText("@alpha-dev");
+    for (const username of ["mayachen", "alpha-dev"]) {
       await userEvent.click(
         screen.getByRole("button", { name: `Remove @${username}` }),
       );
@@ -300,12 +300,12 @@ describe("managing people", () => {
       );
     }
     expect(
-      row("kai-dev").getByRole("button", { name: "Removing…" }),
+      row("alpha-dev").getByRole("button", { name: "Removing…" }),
     ).toBeInTheDocument();
 
-    await deletes.fail("kai-dev", "Couldn't remove @kai-dev");
+    await deletes.fail("alpha-dev", "Couldn't remove @alpha-dev");
     expect(
-      await row("kai-dev").findByText("Couldn't remove @kai-dev"),
+      await row("alpha-dev").findByText("Couldn't remove @alpha-dev"),
     ).toBeInTheDocument();
     expect(
       row("mayachen").getByRole("button", { name: "Removing…" }),
@@ -318,7 +318,7 @@ describe("managing people", () => {
       ).not.toBeInTheDocument(),
     );
     expect(
-      row("kai-dev").getByText("Couldn't remove @kai-dev"),
+      row("alpha-dev").getByText("Couldn't remove @alpha-dev"),
     ).toBeInTheDocument();
   });
 
@@ -340,7 +340,7 @@ describe("managing people", () => {
       ),
     );
     renderApp("/people");
-    await screen.findByText("@kai-dev");
+    await screen.findByText("@alpha-dev");
     await userEvent.type(
       screen.getByLabelText("GitHub username or email"),
       "mayachen",
@@ -359,7 +359,7 @@ describe("managing people", () => {
     signedInAs("owner");
     const writes = servePeople();
     renderApp("/people");
-    await screen.findByText("@kai-dev");
+    await screen.findByText("@alpha-dev");
     await userEvent.type(
       screen.getByLabelText("GitHub username or email"),
       "@Newbie",
@@ -393,7 +393,7 @@ describe("managing people", () => {
     signedInAs("owner");
     const writes = servePeople();
     renderApp("/people");
-    await screen.findByText("@kai-dev");
+    await screen.findByText("@alpha-dev");
     await userEvent.type(
       screen.getByLabelText("GitHub username or email"),
       "Sam@Studio.example",

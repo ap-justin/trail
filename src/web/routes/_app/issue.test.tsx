@@ -58,14 +58,14 @@ describe("old links", () => {
     expect(router.state.location.pathname).toBe("/products/TRL/14");
   });
 
-  test("/issues/JUS-187, an imported item's source key, lands on the item's own key in place", async () => {
+  test("/issues/OLD-187, an imported item's source key, lands on the item's own key in place", async () => {
     signedInAs("member");
-    const imported = issue({ key: "TRL-5", sourceKey: "JUS-187" });
+    const imported = issue({ key: "TRL-5", sourceKey: "OLD-187" });
     server.use(
-      http.get("/api/web/items/JUS-187", () => HttpResponse.json(imported)),
+      http.get("/api/web/items/OLD-187", () => HttpResponse.json(imported)),
       http.get("/api/web/items/TRL-5", () => HttpResponse.json(imported)),
     );
-    const { router } = renderApp("/issues/JUS-187");
+    const { router } = renderApp("/issues/OLD-187");
     await waitFor(() =>
       expect(router.state.location.pathname).toBe("/products/TRL/5"),
     );

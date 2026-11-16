@@ -168,7 +168,7 @@ export function FeedNoProducts() {
     <EmptyState
       icon={PackageIcon}
       title="No products yet"
-      description="Ask the owner to add you to a product."
+      description="Ask the owner to give you access to a product."
     />
   );
 }
@@ -220,7 +220,7 @@ export function ItemListEmpty({
     <EmptyState
       icon={FolderIcon}
       title={`No items in ${productKey} yet`}
-      description="Bots file issues here. You can file one too."
+      description="Bots plan todos and file issues here. You can file an issue too."
       action={
         <Button size="sm" className={panelAction} onClick={onNewIssue}>
           <PlusIcon data-icon="inline-start" aria-hidden="true" />
@@ -231,10 +231,10 @@ export function ItemListEmpty({
   );
 }
 
-export function IssueListError({ onRetry }: { onRetry: () => void }) {
+export function ItemListError({ onRetry }: { onRetry: () => void }) {
   return (
     <ErrorState
-      title="Couldn't load issues"
+      title="Couldn't load items"
       description="Check your connection, then try again."
       onRetry={onRetry}
     />

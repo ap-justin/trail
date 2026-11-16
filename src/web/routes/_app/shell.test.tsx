@@ -79,7 +79,7 @@ describe("search", () => {
       screen.queryByRole("list", { name: "Search results" }),
     ).not.toBeInTheDocument();
     expect(
-      await screen.findAllByRole("link", { name: /ap-justin\/trail/ }),
+      await screen.findAllByRole("link", { name: /example\/trail/ }),
     ).not.toHaveLength(0);
   });
 

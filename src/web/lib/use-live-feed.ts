@@ -97,9 +97,9 @@ export function useLiveFeed(
   filter: FeedFilter,
   { onFilterGone }: { onFilterGone: (gone: FilterGone) => void },
 ) {
-  const { actor, product, project } = filter;
+  const { actor, product, project, type } = filter;
   // rebuilt from the parts, so the effects below depend on values, not the caller's object
-  const current = { actor, product, project };
+  const current = { actor, product, project, type };
   const queryClient = useQueryClient();
   const feed = useQuery({
     queryKey: keys.feed(current),
@@ -122,7 +122,7 @@ export function useLiveFeed(
   // once anything is held, later entries wait behind it so the order holds
   const hold = !atTop || state.pending.length > 0;
 
-  const filterKey = `${actor}\u0000${product}\u0000${project}`;
+  const filterKey = `${actor}\u0000${product}\u0000${project}\u0000${type}`;
   const [shownFor, setShownFor] = useState(filterKey);
   const filterChanged = shownFor !== filterKey;
   if (filterChanged) {
@@ -202,8 +202,8 @@ export function useLiveFeed(
     // with both set, the 404 doesn't say which: each alone answers for itself
     if (product !== null && project !== null) {
       const [productGone, projectGone] = await Promise.all([
-        feedGone({ actor, product, project: null }),
-        feedGone({ actor, product: null, project }),
+        feedGone({ actor, product, project: null, type }),
+        feedGone({ actor, product: null, project, type }),
       ]);
       if (productGone || projectGone) {
         onFilterGone({ product: productGone, project: projectGone });
@@ -214,7 +214,9 @@ export function useLiveFeed(
   });
 
   useEffect(() => {
-    const source = new EventSource(api.eventsUrl({ actor, product, project }));
+    const source = new EventSource(
+      api.eventsUrl({ actor, product, project, type }),
+    );
     let retry: ReturnType<typeof setTimeout> | undefined;
     source.addEventListener("open", () => {
       setConnection("open");
@@ -248,7 +250,7 @@ export function useLiveFeed(
       source.close();
       clearTimeout(retry);
     };
-  }, [actor, product, project, attempt]);
+  }, [actor, product, project, type, attempt]);
 
   // the shell's own stream stays closed while this one carries the actor changes
   useEffect(() => holdFeedStream(), []);

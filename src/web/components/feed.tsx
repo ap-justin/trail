@@ -1,4 +1,4 @@
-import { BotIcon, FolderIcon } from "lucide-react";
+import { BotIcon, FolderIcon, ShapesIcon } from "lucide-react";
 import {
   type ReactNode,
   type Ref,
@@ -31,6 +31,7 @@ import type {
   EntryView,
   FeedView as FeedPage,
   WebItemRefView,
+  WebItemType,
   WebProductRefView,
   WebProjectRefView,
 } from "@/lib/api-types";
@@ -67,9 +68,12 @@ export type FeedViewProps = {
   productFilter: string | null;
   /** A project slug, or null for all projects. */
   projectFilter: string | null;
+  /** Issues or todos only, or null for every kind of entry. */
+  typeFilter: WebItemType | null;
   onActorFilterChange: (actorId: string | null) => void;
   onProductFilterChange: (productKey: string | null) => void;
   onProjectFilterChange: (projectSlug: string | null) => void;
+  onTypeFilterChange: (type: WebItemType | null) => void;
   onRetry: () => void;
   /** The viewer is a member with no product, so an empty feed is about access, not quiet. */
   noProducts?: boolean;
@@ -121,6 +125,7 @@ export function FeedView(props: FeedViewProps) {
     if (props.actorFilter !== null) props.onActorFilterChange(null);
     if (props.productFilter !== null) props.onProductFilterChange(null);
     if (props.projectFilter !== null) props.onProjectFilterChange(null);
+    if (props.typeFilter !== null) props.onTypeFilterChange(null);
   };
 
   const showPending = () => {
@@ -189,6 +194,7 @@ function FeedBody({
   actorFilter,
   productFilter,
   projectFilter,
+  typeFilter,
   onClearFilters,
 }: FeedViewProps & {
   now: Date;
@@ -200,7 +206,10 @@ function FeedBody({
   if (entries.length === 0) {
     if (noProducts) return <FeedNoProducts />;
     const filtered =
-      actorFilter !== null || productFilter !== null || projectFilter !== null;
+      actorFilter !== null ||
+      productFilter !== null ||
+      projectFilter !== null ||
+      typeFilter !== null;
     return filtered ? (
       <FeedFilterEmpty onClear={onClearFilters} />
     ) : (
@@ -260,9 +269,11 @@ function FeedFilters({
   actorFilter,
   productFilter,
   projectFilter,
+  typeFilter,
   onActorFilterChange,
   onProductFilterChange,
   onProjectFilterChange,
+  onTypeFilterChange,
   ref,
 }: FeedViewProps & { ref: Ref<HTMLFieldSetElement> }) {
   return (
@@ -303,9 +314,22 @@ function FeedFilters({
         value={projectFilter}
         onChange={onProjectFilterChange}
       />
+      <FilterSelect
+        label="Filter by type"
+        allLabel="All types"
+        icon={ShapesIcon}
+        options={TYPE_OPTIONS}
+        value={typeFilter}
+        onChange={onTypeFilterChange}
+      />
     </fieldset>
   );
 }
+
+const TYPE_OPTIONS: { value: WebItemType; label: string }[] = [
+  { value: "issue", label: "Issues" },
+  { value: "todo", label: "Todos" },
+];
 
 function FeedSkeleton() {
   const widths = [
@@ -387,8 +411,7 @@ const statusUpdateVerb = (on: "product" | "project") => (
 );
 
 function createdVerb(entry: Extract<EntryView, { kind: "item_created" }>) {
-  if (entry.actor.kind === "human") return "filed";
-  return entry.item.type === "todo" ? "planned" : "reported";
+  return entry.item.type === "todo" ? "planned" : "filed";
 }
 
 function sentenceFor(entry: EntryView): Sentence | null {

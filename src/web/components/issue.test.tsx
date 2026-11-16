@@ -49,7 +49,7 @@ describe("properties", () => {
     expect(within(props).getByText("In progress")).toBeInTheDocument();
     expect(within(props).getByText("High")).toBeInTheDocument();
     expect(within(props).getByText("6 h")).toBeInTheDocument();
-    expect(within(props).getByText("Kai")).toBeInTheDocument();
+    expect(within(props).getByText("Alpha")).toBeInTheDocument();
     expect(within(props).getByText("Bot")).toBeInTheDocument();
     expect(within(props).getByText("auth")).toBeInTheDocument();
     expect(
@@ -63,11 +63,11 @@ describe("properties", () => {
     const link = within(links).getByRole("link");
     expect(link).toHaveAttribute(
       "href",
-      "https://github.com/ap-justin/trail/pull/31",
+      "https://github.com/example/trail/pull/31",
     );
     expect(link).toHaveAttribute("rel", "noopener noreferrer");
     expect(
-      within(link).getByText("github.com/ap-justin/trail/pull/31"),
+      within(link).getByText("github.com/example/trail/pull/31"),
     ).toHaveClass("font-mono");
   });
 });
@@ -80,7 +80,7 @@ describe("links", () => {
         data: issue({
           links: [
             { url: "javascript:alert(1)", title: "Totally a PR" },
-            { url: "https://github.com/ap-justin/trail/pull/31", title: "PR" },
+            { url: "https://github.com/example/trail/pull/31", title: "PR" },
           ],
         }),
       },
@@ -93,7 +93,7 @@ describe("links", () => {
       within(links)
         .getAllByRole("link")
         .map((a) => a.getAttribute("href")),
-    ).toEqual(["https://github.com/ap-justin/trail/pull/31"]);
+    ).toEqual(["https://github.com/example/trail/pull/31"]);
     expect(links.querySelector('[href^="javascript:"]')).toBeNull();
   });
 });
@@ -126,7 +126,7 @@ describe("timeline", () => {
   test("comments are cards and changes are one line with the change in words", () => {
     renderIssue();
     const [created, priority, comment, status] = entries();
-    expect(created).toHaveTextContent("reported this issue");
+    expect(created).toHaveTextContent("filed this issue");
     expect(priority).toHaveTextContent("set priority to High");
     expect(comment).toHaveClass("rounded-xl", "border");
     expect(comment).toHaveTextContent("Owner only for invites.");
@@ -270,7 +270,7 @@ describe("item type", () => {
     ]);
   });
 
-  test("an issue: the Issue badge with the inbox glyph in the byline and Type, reported by its creator", () => {
+  test("an issue: the Issue badge with the inbox glyph in the byline and Type, filed by its creator", () => {
     renderIssue();
     const line = byline();
     for (const badge of [
@@ -280,7 +280,7 @@ describe("item type", () => {
       expect(badge).toHaveAttribute("data-item-type", "issue");
       expect(badge.querySelector("svg")).toHaveClass("lucide-inbox");
     }
-    expect(line).toHaveTextContent(/Issue\s*TRL-14\s*reported by.*Tara/);
+    expect(line).toHaveTextContent(/Issue\s*TRL-14\s*filed by.*Beta/);
     expect(within(line).getByText("Bot")).toBeInTheDocument();
   });
 
@@ -294,13 +294,13 @@ describe("item type", () => {
     expect(badge).toHaveAttribute("data-item-type", "todo");
     expect(badge.querySelector("svg")).toHaveClass("lucide-list-todo");
     expect(within(propertyValue("Type")).getByText("Todo")).toBeInTheDocument();
-    expect(line).toHaveTextContent(/Todo\s*TRL-15\s*planned by.*Kai/);
+    expect(line).toHaveTextContent(/Todo\s*TRL-15\s*planned by.*Alpha/);
   });
 
-  test("a person's issue is reported by a Human", () => {
+  test("a person's issue is filed by a Human", () => {
     renderIssue({ issue: { status: "ready", data: issue({ creator: maya }) } });
     const line = byline();
-    expect(line).toHaveTextContent(/reported by.*Maya Chen/);
+    expect(line).toHaveTextContent(/filed by.*Maya Chen/);
     expect(within(line).getByText("Human")).toBeInTheDocument();
   });
 
@@ -322,7 +322,7 @@ describe("item type", () => {
       issueKey: "TRL-15",
       issue: { status: "ready", data: todo() },
     });
-    expect(propertyValue("Assignee")).toHaveTextContent("Kai");
+    expect(propertyValue("Assignee")).toHaveTextContent("Alpha");
     expect(screen.queryByText("Unassigned")).not.toBeInTheDocument();
   });
 });

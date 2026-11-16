@@ -18,17 +18,17 @@ import type {
 export const photoUrlFor = (actorId: string, hexByte: string) =>
   `/api/photos/${actorId}/${hexByte.repeat(32)}`;
 
-export const kai: WebActorView = {
-  id: "a-kai",
-  name: "Kai",
+export const alpha: WebActorView = {
+  id: "a-alpha",
+  name: "Alpha",
   kind: "bot",
   photoUrl: null,
   title: null,
 };
-/** Kai with a photo on file. */
-export const kaiWithPhoto: WebActorView = {
-  ...kai,
-  photoUrl: photoUrlFor("a-kai", "3f"),
+/** Alpha with a photo on file. */
+export const alphaWithPhoto: WebActorView = {
+  ...alpha,
+  photoUrl: photoUrlFor("a-alpha", "3f"),
 };
 export const maya: WebActorView = {
   id: "a-maya",
@@ -49,7 +49,7 @@ export function commentEntry(
     kind: "comment",
     id,
     createdAt,
-    actor: kai,
+    actor: alpha,
     product: trail,
     project: null,
     item: { key: "TRL-14", title: "Team access: invite people", type: "issue" },
@@ -67,7 +67,7 @@ export function statusEntry(id: string, createdAt: string): EntryView {
     kind: "status_changed",
     id,
     createdAt,
-    actor: kai,
+    actor: alpha,
     product: trail,
     project: null,
     item: { key: "TRL-12", title: "Stream the feed over SSE", type: "issue" },
@@ -85,7 +85,7 @@ export function projectImportedEntry(
     kind: "product_imported",
     id,
     createdAt,
-    actor: kai,
+    actor: alpha,
     product: trail,
     project: null,
     item: null,
@@ -93,9 +93,9 @@ export function projectImportedEntry(
   };
 }
 
-export const tara: WebActorView = {
-  id: "a-tara",
-  name: "Tara",
+export const beta: WebActorView = {
+  id: "a-beta",
+  name: "Beta",
   kind: "bot",
   photoUrl: null,
   title: null,
@@ -108,7 +108,7 @@ export function statusUpdate(
     id: "su-1",
     body: "SSE feed shipped. Human UI design is in review.",
     health: "on_track",
-    author: tara,
+    author: beta,
     sourceAuthor: null,
     createdAt: "2026-11-11T09:12:00.000Z",
     ...overrides,
@@ -143,7 +143,7 @@ export function issueRow(
     status: "open",
     priority: 2,
     labels: ["ui", "design"],
-    assignee: tara,
+    assignee: beta,
     updatedAt: "2026-11-11T11:00:00.000Z",
     ...overrides,
   };
@@ -185,12 +185,12 @@ export function issue(overrides: Partial<WebItemView> = {}): WebItemView {
     labels: ["auth", "ui"],
     links: [
       {
-        url: "https://github.com/ap-justin/trail/pull/31",
+        url: "https://github.com/example/trail/pull/31",
         title: "Add project_member table and invite API #31",
       },
     ],
-    assignee: kai,
-    creator: tara,
+    assignee: alpha,
+    creator: beta,
     sourceAuthor: null,
     createdAt: "2026-11-09T14:02:00.000Z",
     updatedAt: "2026-11-11T09:44:00.000Z",
@@ -201,7 +201,7 @@ export function issue(overrides: Partial<WebItemView> = {}): WebItemView {
         kind: "item_created",
         id: "t1",
         createdAt: "2026-11-09T14:02:00.000Z",
-        actor: tara,
+        actor: beta,
         sourceAuthor: null,
       },
       {
@@ -209,7 +209,7 @@ export function issue(overrides: Partial<WebItemView> = {}): WebItemView {
         kind: "priority_changed",
         id: "t2",
         createdAt: "2026-11-09T14:05:00.000Z",
-        actor: kai,
+        actor: alpha,
         from: 0,
         to: 2,
       },
@@ -230,7 +230,7 @@ export function issue(overrides: Partial<WebItemView> = {}): WebItemView {
         kind: "status_changed",
         id: "t4",
         createdAt: "2026-11-11T09:44:00.000Z",
-        actor: kai,
+        actor: alpha,
         from: "open",
         to: "in_progress",
       },
@@ -241,11 +241,11 @@ export function issue(overrides: Partial<WebItemView> = {}): WebItemView {
 
 export const people: PersonView[] = [
   {
-    username: "justinsalas",
+    username: "jordansmith",
     email: null,
     owner: true,
     pending: false,
-    name: "Justin Salas",
+    name: "Jordan Smith",
     photoUrl: null,
     products: [],
     invitedAt: null,
@@ -261,7 +261,7 @@ export const people: PersonView[] = [
     invitedAt: "2026-11-09T10:00:00.000Z",
   },
   {
-    username: "kai-dev",
+    username: "alpha-dev",
     email: null,
     owner: false,
     pending: true,
@@ -281,7 +281,7 @@ export const allProducts = [
 export const humanUi = { slug: "human-ui", name: "Human UI launch" };
 export const teamAccess = { slug: "team-access", name: "Team access" };
 
-/** TRL-15, a todo Kai planned and owns, in the Human UI launch project. */
+/** TRL-15, a todo Alpha planned and owns, in the Human UI launch project. */
 export function todo(overrides: Partial<WebItemView> = {}): WebItemView {
   const on = {
     product: trail,
@@ -296,15 +296,15 @@ export function todo(overrides: Partial<WebItemView> = {}): WebItemView {
     description: "Stream the SQLite WAL off the Fly volume.",
     labels: ["infra"],
     links: [],
-    assignee: kai,
-    creator: kai,
+    assignee: alpha,
+    creator: alpha,
     timeline: [
       {
         ...on,
         kind: "item_created",
         id: "t1",
         createdAt: "2026-11-11T10:15:00.000Z",
-        actor: kai,
+        actor: alpha,
         sourceAuthor: null,
       },
       {
@@ -313,7 +313,7 @@ export function todo(overrides: Partial<WebItemView> = {}): WebItemView {
         kind: "added_to_project",
         id: "t2",
         createdAt: "2026-11-11T10:16:00.000Z",
-        actor: kai,
+        actor: alpha,
       },
     ],
     ...overrides,
@@ -331,7 +331,7 @@ export function itemCreatedEntry(
   id: string,
   createdAt: string,
   {
-    actor = kai,
+    actor = alpha,
     item = teamAccessIssue,
   }: { actor?: WebActorView; item?: Item } = {},
 ): EntryView {
@@ -352,7 +352,7 @@ export function typeChangedEntry(id: string, createdAt: string): EntryView {
     kind: "type_changed",
     id,
     createdAt,
-    actor: kai,
+    actor: alpha,
     product: trail,
     project: null,
     item: { ...teamAccessIssue, type: "todo" },
@@ -370,7 +370,7 @@ export function membershipEntry(
     kind,
     id,
     createdAt,
-    actor: kai,
+    actor: alpha,
     product: trail,
     project: humanUi,
     item: teamAccessIssue,
@@ -385,7 +385,7 @@ export function productStatusUpdateEntry(
     kind: "product_status_update",
     id,
     createdAt,
-    actor: kai,
+    actor: alpha,
     product: { key: "OPB", name: "OpenBot" },
     project: null,
     item: null,
@@ -406,7 +406,7 @@ export function projectStatusUpdateEntry(
     kind: "project_status_update",
     id,
     createdAt,
-    actor: kai,
+    actor: alpha,
     product: null,
     project: humanUi,
     item: null,
@@ -427,7 +427,7 @@ export function projectEntry(
   const base = {
     id,
     createdAt,
-    actor: kai,
+    actor: alpha,
     product: null,
     project: humanUi,
     item: null,
@@ -448,7 +448,7 @@ export const ada: WebActorView = {
 export const openBot = { key: "OPB", name: "OpenBot" };
 export const docsSite = { key: "DOC", name: "Docs site" };
 
-/** TRL-22, a todo Tara owns. */
+/** TRL-22, a todo Beta owns. */
 export function todoRow(
   overrides: Partial<WebItemRowView> = {},
 ): WebItemRowView {
@@ -518,14 +518,14 @@ export function projectDetail(
   return { ...projectRow(), hiddenProducts: false, ...overrides };
 }
 
-/** Team access: one product, Kai leads, on track. */
+/** Team access: one product, Alpha leads, on track. */
 export const teamAccessRow = (): WebProjectView =>
   projectRow({
     ...teamAccess,
     goal: "Invite people to the products they should see",
     health: "on_track",
-    latestStatusUpdate: statusUpdate({ id: "su-t", author: kai }),
-    lead: kai,
+    latestStatusUpdate: statusUpdate({ id: "su-t", author: alpha }),
+    lead: alpha,
     targetDate: "2026-11-30",
     products: [trail],
     openCount: 5,
@@ -537,10 +537,10 @@ export function productDetail(
 ): WebProductDetailView {
   return {
     ...product({
-      repoUrl: "https://github.com/ap-justin/trail",
+      repoUrl: "https://github.com/example/trail",
       projectCount: 2,
     }),
-    owner: kai,
+    owner: alpha,
     projects: [projectRow(), teamAccessRow()],
     ...overrides,
   };
