@@ -2,6 +2,7 @@ import { createRoute } from "@hono/zod-openapi";
 import {
   commentCreateSchema,
   commentSchema,
+  createdItemSchema,
   issueSchema,
   itemCreateSchema,
   itemListQuerySchema,
@@ -23,7 +24,7 @@ import {
   readErrors,
   writeErrors,
 } from "./routes.js";
-import { toComment, toIssue, toPage } from "./serialize.js";
+import { toComment, toIssue, toPage, withSkippedLabels } from "./serialize.js";
 
 const tags = ["items"];
 
@@ -41,7 +42,7 @@ const createItem = createRoute({
     body: jsonBody(itemCreateSchema),
   },
   responses: {
-    201: jsonContent(issueSchema, "The created item"),
+    201: jsonContent(createdItemSchema, "The created item"),
     ...forbiddenError("issues", { owner: OWNER_ONLY }),
     ...writeErrors,
     ...notFoundError,
@@ -138,7 +139,7 @@ export function itemRoutes(service: Service) {
         type === "todo"
           ? service.addTodo(c.var.actor, input, options)
           : service.fileIssue(c.var.actor, input, options);
-      return c.json(toIssue(created), 201);
+      return c.json(withSkippedLabels(toIssue(created), created), 201);
     })
     .openapi(listItems, (c) =>
       c.json(

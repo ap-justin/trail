@@ -78,12 +78,14 @@ const updateProduct = createRoute({
   path: "/products/{key}",
   summary: "Change a product's name, description, repoUrl or owner",
   description:
-    "Needs the admin action. Fields left out stay as they are; null clears repoUrl or owner.",
+    "Needs the admin action. Fields left out stay as they are; null clears repoUrl or owner. A product's owner changes only when it has none or the caller is its owner, who may hand it to another bot or clear it; anyone else gets a 403 (forbidden) naming the owner, and the operator reassigns it with `trail products set-owner`.",
   tags,
   request: { params: productParam, body: jsonBody(productUpdateSchema) },
   responses: {
     200: jsonContent(productSchema, "The updated product"),
-    ...forbiddenError("admin"),
+    ...forbiddenError("admin", {
+      owner: "owner changes the owner of a product another bot owns",
+    }),
     ...writeErrors,
     ...notFoundError,
   },

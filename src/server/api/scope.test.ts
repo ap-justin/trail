@@ -606,7 +606,7 @@ test("the spec documents each gated operation's 403 with the action it needs", a
     "PUT /me/title": null,
     "PATCH /items/{key}": orOwner("issues"),
     "PATCH /issues/{id}": orOwner("issues"),
-    "PATCH /products/{key}": needs("admin"),
+    "PATCH /products/{key}": `${needs("admin")}, or owner changes the owner of a product another bot owns (code forbidden)`,
     "PATCH /projects/{ref}":
       "The key lacks the issues action, or for a product key the admin action (code forbidden_action)",
     "POST /import": orScope("admin"),

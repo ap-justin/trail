@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { atFakeTimeAsync, projectKey, setupTestApp } from "../test-app.js";
 
-const { app, bot, request } = setupTestApp();
+const { app, bot, addBot, request } = setupTestApp();
 
 const isoTimestamp = expect.stringMatching(/^\d{4}-\d\d-\d\dT[\d:.]+Z$/);
 
@@ -28,7 +28,7 @@ async function createProduct(name: string) {
   const res = await request("POST", "/api/v1/products", {
     json: { key: projectKey(), name },
   });
-  return (await res.json()) as { id: string; name: string };
+  return (await res.json()) as { id: string; key: string; name: string };
 }
 
 test("GET /products/:id returns the project; an unknown id is a 404", async () => {
@@ -186,4 +186,54 @@ test("GET /products accepts the limit bounds 1 and 200", async () => {
     expect(page.items.length).toBeGreaterThanOrEqual(1);
     expect(page.items.length).toBeLessThanOrEqual(limit);
   }
+});
+
+test("PATCH /products/:key with owner by an admin key that isn't the owner is a 403 naming the owner and the operator command", async () => {
+  const product = await createProduct("owned elsewhere");
+  const outsider = addBot("owner grabber");
+  const res = await request("PATCH", `/api/v1/products/${product.key}`, {
+    json: { owner: "owner grabber" },
+    key: outsider.key,
+  });
+  expect(res.status).toBe(403);
+  expect(await res.json()).toEqual({
+    error: {
+      code: "forbidden",
+      message: `${product.key} is owned by tester: only tester may hand it to another bot or clear its owner over the API. The operator reassigns it with \`trail products set-owner ${product.key} <bot>\``,
+    },
+  });
+  const after = await request("GET", `/api/v1/products/${product.key}`);
+  expect(((await after.json()) as { owner: { id: string } }).owner.id).toBe(
+    bot.actor.id,
+  );
+  // its other fields stay open to any admin key
+  const renamed = await request("PATCH", `/api/v1/products/${product.key}`, {
+    json: { name: "renamed by another admin" },
+    key: outsider.key,
+  });
+  expect(renamed.status).toBe(200);
+});
+
+test("the owner hands a product to another bot or clears its owner, and a product with no owner may be claimed", async () => {
+  const product = await createProduct("handed over");
+  const heir = addBot("product heir");
+  const handed = await request("PATCH", `/api/v1/products/${product.key}`, {
+    json: { owner: "product heir" },
+  });
+  expect(handed.status).toBe(200);
+  expect(await handed.json()).toMatchObject({
+    owner: { id: heir.actor.id, name: "product heir" },
+  });
+  const cleared = await request("PATCH", `/api/v1/products/${product.key}`, {
+    json: { owner: null },
+    key: heir.key,
+  });
+  expect(await cleared.json()).toMatchObject({ owner: null });
+  const claimed = await request("PATCH", `/api/v1/products/${product.key}`, {
+    json: { owner: "tester" },
+  });
+  expect(claimed.status).toBe(200);
+  expect(await claimed.json()).toMatchObject({
+    owner: { id: bot.actor.id },
+  });
 });

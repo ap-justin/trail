@@ -414,3 +414,55 @@ test("update_item says to name an assignee when accepting an issue, since status
     /To accept an issue from your product's triage send status open with assignee/,
   );
 });
+
+test("update_product can't make a bot owner of another bot's product, so it can't then add todos there", async () => {
+  const owner = await productBot("Orla");
+  const grabber = await productBot("Grabber");
+  const key = owner.product.key;
+  expect(
+    await callError(grabber.client, "update_product", {
+      product: key,
+      owner: "Grabber",
+    }),
+  ).toBe(
+    `forbidden: ${key} is owned by Orla: only Orla may hand it to another bot or clear its owner over the API. The operator reassigns it with \`trail products set-owner ${key} <bot>\``,
+  );
+  expect(
+    await callError(grabber.client, "add_todo", { product: key, title: "x" }),
+  ).toMatch(/^forbidden: .* is owned by Orla/);
+  expect(
+    await call(owner.client, "update_product", {
+      product: key,
+      owner: "Grabber",
+    }),
+  ).toMatchObject({ owner: { name: "Grabber" } });
+  expect(
+    await call(grabber.client, "add_todo", { product: key, title: "mine now" }),
+  ).toMatchObject({ type: "todo", assignee: { name: "Grabber" } });
+});
+
+test("file_issue on another bot's product attaches only labels the product has, and lists the rest in skippedLabels", async () => {
+  const owner = await productBot("Lena labels");
+  const key = owner.product.key;
+  await call(owner.client, "create_label", { product: key, name: "Bug" });
+  const filer = await connect(createBot(db, "Label filer").key);
+  const args = {
+    product: key,
+    title: "labelled from outside",
+    labels: ["bug", "spam", "Spam"],
+    idempotency_key: "outside labels",
+  };
+  const filed = await call(filer, "file_issue", args);
+  expect(filed).toMatchObject({ labels: ["Bug"], skippedLabels: ["spam"] });
+  expect(await call(filer, "file_issue", args)).toEqual(filed);
+  const labels = await call(owner.client, "list_labels", { product: key });
+  expect(labels.items.map((l: Body) => l.name)).toEqual(["Bug"]);
+
+  const own = await call(owner.client, "file_issue", {
+    product: key,
+    title: "labelled by the owner",
+    labels: ["Spam"],
+  });
+  expect(own.labels).toEqual(["Spam"]);
+  expect(own).not.toHaveProperty("skippedLabels");
+});

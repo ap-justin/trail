@@ -3,6 +3,7 @@ import {
   issueCreateSchema,
   issueListQuerySchema,
   issueUpdateSchema,
+  legacyCreatedItemSchema,
   legacyIssueSchema,
   pageSchema,
 } from "../../shared/schemas.js";
@@ -21,7 +22,12 @@ import {
   readErrors,
   writeErrors,
 } from "./routes.js";
-import { deprecated, toLegacyIssue, toPage } from "./serialize.js";
+import {
+  deprecated,
+  toLegacyIssue,
+  toPage,
+  withSkippedLabels,
+} from "./serialize.js";
 
 // The routes items had before todos: kept for one release, each answer carrying `deprecated`.
 const tags = ["issues (deprecated)"];
@@ -45,7 +51,7 @@ const createIssue = createRoute({
     body: jsonBody(issueCreateSchema),
   },
   responses: {
-    201: jsonContent(legacyIssueSchema, "The created item"),
+    201: jsonContent(legacyCreatedItemSchema, "The created item"),
     ...forbiddenError("issues"),
     ...writeErrors,
     ...notFoundError,
@@ -104,19 +110,18 @@ const updateIssue = createRoute({
 
 export function issueRoutes(service: Service) {
   return createRouter()
-    .openapi(createIssue, (c) =>
-      c.json(
+    .openapi(createIssue, (c) => {
+      const created = service.createIssue(c.var.actor, c.req.valid("json"), {
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+      });
+      return c.json(
         deprecated(
-          toLegacyIssue(
-            service.createIssue(c.var.actor, c.req.valid("json"), {
-              idempotencyKey: c.req.valid("header")["idempotency-key"],
-            }),
-          ),
+          withSkippedLabels(toLegacyIssue(created), created),
           deprecations.createIssue,
         ),
         201,
-      ),
-    )
+      );
+    })
     .openapi(listIssues, (c) => {
       const { projectId, assigneeId, ...query } = c.req.valid("query");
       return c.json(

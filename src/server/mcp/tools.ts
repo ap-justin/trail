@@ -44,6 +44,7 @@ import {
   toStatusUpdate,
   toWebhook,
   toWhoami,
+  withSkippedLabels,
 } from "../api/serialize.js";
 import { actorPhotoContentTypes } from "../db/schema.js";
 import {
@@ -314,16 +315,17 @@ export function registerTools(
   server.registerTool(
     "file_issue",
     {
-      description: `File an issue: a bug report or request to a product's bot, on any product this key reaches. ${TODO_OR_ISSUE} Use add_todo instead for planned work in your own product. Leave assignee out: the product's bot assigns it when it accepts the issue (status open with assignee). Returns the item with its key, like TRL-12, in status triage.`,
+      description: `File an issue: a bug report or request to a product's bot, on any product this key reaches. ${TODO_OR_ISSUE} Use add_todo instead for planned work in your own product. Leave assignee out: the product's bot assigns it when it accepts the issue (status open with assignee). On a product another bot owns, labels attach only the product's existing labels (list_labels lists them) and create none; the result lists the names it left off in skippedLabels. Returns the item with its key, like TRL-12, in status triage.`,
       inputSchema: issueFileSchema.extend(idempotencyKey),
       annotations: create,
     },
     ({ idempotency_key, ...input }) =>
-      run("file_issue", () =>
-        toIssue(
-          service.fileIssue(actor, input, { idempotencyKey: idempotency_key }),
-        ),
-      ),
+      run("file_issue", () => {
+        const filed = service.fileIssue(actor, input, {
+          idempotencyKey: idempotency_key,
+        });
+        return withSkippedLabels(toIssue(filed), filed);
+      }),
   );
 
   server.registerTool(
@@ -599,7 +601,7 @@ export function registerTools(
     "update_product",
     {
       description:
-        "Change a product's name, description, repoUrl (https://github.com/<owner>/<name>, null clears) or owner (a bot's name or id, null clears). Fields left out stay as they are. Needs the admin action.",
+        "Change a product's name, description, repoUrl (https://github.com/<owner>/<name>, null clears) or owner (a bot's name or id, null clears). Fields left out stay as they are. Needs the admin action. A product's owner changes only when it has none or the caller is its owner, who may hand it to another bot or clear it; anyone else gets a 403 (forbidden) naming the owner, and the operator reassigns it with `trail products set-owner`.",
       inputSchema: productUpdateSchema.extend({ product }),
       annotations: update,
     },
@@ -784,16 +786,15 @@ export function registerTools(
       annotations: create,
     },
     ({ idempotency_key, ...input }) =>
-      run("create_issue", () =>
-        deprecated(
-          toLegacyIssue(
-            service.createIssue(actor, input, {
-              idempotencyKey: idempotency_key,
-            }),
-          ),
+      run("create_issue", () => {
+        const created = service.createIssue(actor, input, {
+          idempotencyKey: idempotency_key,
+        });
+        return deprecated(
+          withSkippedLabels(toLegacyIssue(created), created),
           deprecations.createIssue,
-        ),
-      ),
+        );
+      }),
   );
 
   server.registerTool(

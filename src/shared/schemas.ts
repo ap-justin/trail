@@ -161,6 +161,16 @@ export const issueSchema = z
   })
   .openapi("Item");
 
+const skippedLabels = z.array(z.string()).optional().meta({
+  description:
+    "On an issue filed on a product another bot owns: the label names sent that the product has no label for. Only the product's own labels are attached, and none is created; left out when every name matched.",
+});
+
+/** The answer to a create: the item, with skippedLabels when some were left off. */
+export const createdItemSchema = issueSchema
+  .extend({ skippedLabels })
+  .openapi("CreatedItem");
+
 export const legacyIssueSchema = issueSchema
   .extend({
     status: z
@@ -173,6 +183,10 @@ export const legacyIssueSchema = issueSchema
     deprecated: deprecatedNote,
   })
   .openapi("LegacyItem");
+
+export const legacyCreatedItemSchema = legacyIssueSchema
+  .extend({ skippedLabels })
+  .openapi("LegacyCreatedItem");
 
 export const commentSchema = z
   .object({
@@ -639,7 +653,7 @@ export const productUpdateSchema = z
       .meta({ description: "null clears it." }),
     owner: ownerRef.nullable().optional().meta({
       description:
-        "The product's own bot, by name (any case) or id; null leaves the product without one.",
+        "The product's own bot, by name (any case) or id; null leaves the product without one. Only a product with no owner, or its owner, may change it; the operator reassigns one with `trail products set-owner`.",
     }),
   })
   .openapi("ProductUpdate");
@@ -744,6 +758,10 @@ export const projectItemsSchema = z
   })
   .openapi("ProjectItems");
 
+const outsideLabels = labelNames.optional().meta({
+  description:
+    "Label names. A name matches the product's label ignoring the case of A-Z. A new name creates the label, except on an issue filed on a product another bot owns: there only the product's labels attach, and the others are listed in skippedLabels.",
+});
 const itemFields = {
   title,
   description: text.optional(),
@@ -814,6 +832,7 @@ export const issueFileSchema = z
           "The key (like TRL) of the product the issue is for; any product this key reaches. list_products lists them.",
       }),
       ...itemFields,
+      labels: outsideLabels,
       assignee: assigneeRef.nullable().optional().meta({
         description:
           "Usually left out: the product's bot assigns it when it accepts the issue from triage (status open with an assignee).",
@@ -836,6 +855,7 @@ export const itemCreateSchema = z
           "The product's key (like TRL). Required for an issue; a todo goes to the one product you own when left out.",
       }),
       ...itemFields,
+      labels: outsideLabels,
       assignee: assigneeRef.nullable().optional(),
     },
     itemCreateRenames,

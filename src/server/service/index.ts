@@ -1636,8 +1636,11 @@ export function createService({
     projectId: string;
   };
 
+  /** A created item, with the label names an issue filed on another bot's product left off. */
+  type CreatedItem = Issue & { skippedLabels?: string[] };
+
   /** A stored replay from before items carried their product key and projects, brought to today's shape. */
-  function currentShape(item: Issue | LegacyStoredItem): Issue {
+  function currentShape(item: CreatedItem | LegacyStoredItem): CreatedItem {
     if ("productKey" in item) return item;
     const { projectId, ...stored } = item;
     // the stored item has no type: the one migration 0015 gave the row
@@ -1672,7 +1675,7 @@ export function createService({
       fallback?: (tx: Tx) => Product;
       typeOf: (target: Product) => IssueType;
     },
-  ): Issue {
+  ): CreatedItem {
     if (actor.kind === "human" && input.assignee != null) {
       throw new ForbiddenError(
         "a person files an issue unassigned: drop the assignee, and the product's bot assigns it",
@@ -1773,10 +1776,29 @@ export function createService({
               })
               .returning()
               .get();
-            setLabels(tx, row, labelsNamed(tx, product.id, labelNames));
+            // a filer outside the product attaches the owner's labels, never adds its own to the set
+            const outsider =
+              type === "issue" &&
+              product.ownerId !== null &&
+              product.ownerId !== actor.id;
+            const found = outsider
+              ? labelNames.map((name) => findLabel(tx, product.id, name))
+              : labelsNamed(tx, product.id, labelNames);
+            const skipped = labelNames.filter((_, i) => found[i] === undefined);
+            setLabels(
+              tx,
+              row,
+              found.filter((l) => l !== undefined),
+            );
             setLinks(tx, row.id, links);
             const created = hydrateOne(tx, row);
-            return { result: created, event: itemCreated(actor, created) };
+            return {
+              result:
+                skipped.length === 0
+                  ? created
+                  : { ...created, skippedLabels: skipped },
+              event: itemCreated(actor, created),
+            };
           },
         };
       }),
@@ -1983,7 +2005,10 @@ export function createService({
       );
     },
 
-    /** A patch that changes nothing writes nothing and emits no event. */
+    /**
+     * A patch that changes nothing writes nothing and emits no event. A
+     * product's owner changes only when it has none or the caller is it.
+     */
     updateProduct(
       actor: ActingActor,
       ref: string,
@@ -2002,6 +2027,16 @@ export function createService({
           description: patch.description,
           ...productFields(tx, patch),
         };
+        // the CLI's products set-owner (service/product-admin.ts) reassigns without this check
+        if (next.ownerId !== undefined && next.ownerId !== current.ownerId) {
+          requireOwner(
+            tx,
+            actor,
+            current.id,
+            (owner, key) =>
+              `${key} is owned by ${owner}: only ${owner} may hand it to another bot or clear its owner over the API. The operator reassigns it with \`trail products set-owner ${key} <bot>\``,
+          );
+        }
         const changes = changesOf(current, next);
         if (isEmpty(changes)) {
           return { result: productView(tx, current), event: null };
@@ -2063,7 +2098,7 @@ export function createService({
       actor: ActingActor,
       input: ItemInput,
       options: WriteOptions = {},
-    ): Issue {
+    ): CreatedItem {
       requireAction(actor, "issues", "add a todo", () =>
         input.product === undefined
           ? undefined
@@ -2081,7 +2116,7 @@ export function createService({
       actor: ActingActor,
       input: ItemInput,
       options: WriteOptions = {},
-    ): Issue {
+    ): CreatedItem {
       const ref = input.product;
       if (ref === undefined || ref.trim() === "") {
         throw new ValidationError(
@@ -2102,7 +2137,7 @@ export function createService({
       actor: ActingActor,
       input: IssueInput,
       options: WriteOptions = {},
-    ): Issue {
+    ): CreatedItem {
       requireAction(actor, "issues", "create an issue", () =>
         resolveProduct(db, input.projectId, actor),
       );

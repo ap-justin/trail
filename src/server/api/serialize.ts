@@ -110,6 +110,15 @@ export function toLegacyIssue(row: Issue) {
   };
 }
 
+/** A created item's view with the label names left off it, when a filer outside the product sent some the product lacks. */
+export const withSkippedLabels = <T extends object>(
+  view: T,
+  row: { skippedLabels?: string[] },
+) =>
+  row.skippedLabels === undefined
+    ? view
+    : { ...view, skippedLabels: row.skippedLabels };
+
 /** `view` with the note naming what replaces the deprecated call that produced it. */
 export const deprecated = <T extends object>(view: T, note: string) => ({
   ...view,

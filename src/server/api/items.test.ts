@@ -426,3 +426,25 @@ test("a field sent under its old name is a 422 naming the field it became", asyn
     'Unrecognized key: "colour"',
   );
 });
+
+test("POST /items filing an issue on another bot's product creates no label, and says which it skipped", async () => {
+  const other = addBot("rest label filer");
+  const res = await request("POST", "/api/v1/items", {
+    json: {
+      type: "issue",
+      product: own.key,
+      title: "outside labels",
+      labels: ["never-made-here"],
+    },
+    key: other.key,
+  });
+  expect(res.status).toBe(201);
+  expect(await res.json()).toMatchObject({
+    labels: [],
+    skippedLabels: ["never-made-here"],
+  });
+  const labels = await request("GET", `/api/v1/products/${own.key}/labels`);
+  expect(
+    ((await labels.json()) as Body).items.map((l: Body) => l.name),
+  ).not.toContain("never-made-here");
+});
