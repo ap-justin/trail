@@ -217,11 +217,14 @@ function ConversationRow({
           className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1"
         >
           <Bot bot={bots[0]} />
-          <ArrowLeftRightIcon
-            aria-hidden="true"
-            className="size-3.5 shrink-0 text-muted-foreground"
-          />
-          <Bot bot={bots[1]} />
+          {/* the arrow rides with the second bot, so a wrap never leaves it alone on a line */}
+          <span className="inline-flex max-w-full min-w-0 items-center gap-2">
+            <ArrowLeftRightIcon
+              aria-hidden="true"
+              className="size-3.5 shrink-0 text-muted-foreground"
+            />
+            <Bot bot={bots[1]} />
+          </span>
         </RowLink>
         <p
           data-last-message
