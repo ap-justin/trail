@@ -298,7 +298,7 @@ describe("a conversation", () => {
           level: 1,
         }),
       ).toBeInTheDocument();
-      await settle();
+      // the error renders only once the query has stopped retrying, so every request is counted
       expect(asked).toHaveLength(1);
     });
 
@@ -309,7 +309,7 @@ describe("a conversation", () => {
       expect(
         await screen.findByText("Couldn't load this conversation"),
       ).toBeInTheDocument();
-      await settle();
+      // the error renders only once the query has stopped retrying, so every request is counted
       expect(asked).toHaveLength(1);
     });
 

@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { actor } from "../db/schema.js";
 import { setupTestApp } from "../test-app.js";
 import type { Body } from "./test-seed.js";
@@ -10,9 +10,17 @@ const { db, request, signIn, owner, addBot, addMember, addProject } =
 const { get, item } = webSeed(request);
 
 const ownerCookie = await signIn(owner, { name: "Olive Owner" });
-const alpha = addBot("alpha");
-const beta = addBot("beta");
+// Created in reverse name order, a millisecond apart (ids from one millisecond sort
+// randomly), so id order is gamma < beta < alpha and no other order matches it.
+vi.useFakeTimers({ toFake: ["Date"] });
+const t0 = Date.now();
+vi.setSystemTime(t0);
 const gamma = addBot("gamma");
+vi.setSystemTime(t0 + 5);
+const beta = addBot("beta");
+vi.setSystemTime(t0 + 10);
+const alpha = addBot("alpha");
+vi.useRealTimers();
 
 async function send(
   from: { key: string },
@@ -42,16 +50,13 @@ const botRef = (bot: typeof alpha) => ({
   photoUrl: null,
 });
 
-const inIdOrder = (...bots: (typeof alpha)[]) =>
-  bots.sort((x, y) => (x.actor.id < y.actor.id ? -1 : 1)).map(botRef);
-
 test("the owner lists each pair of bots once, newest conversation first, with its last message and count", async () => {
   const { status, body } = await get("/messages", ownerCookie);
   expect(status).toBe(200);
   expect(body.nextCursor).toBeNull();
   expect(body.items).toEqual([
     {
-      bots: inIdOrder(alpha, beta),
+      bots: [botRef(beta), botRef(alpha)],
       count: 2,
       lastAt: ab2.createdAt,
       lastMessage: {
@@ -64,7 +69,7 @@ test("the owner lists each pair of bots once, newest conversation first, with it
       },
     },
     {
-      bots: inIdOrder(beta, gamma),
+      bots: [botRef(gamma), botRef(beta)],
       count: 1,
       lastAt: bg1.createdAt,
       lastMessage: {
@@ -148,7 +153,7 @@ test("the owner reads one pair's messages oldest first, whichever bot is named f
     expect(await get(path, ownerCookie)).toEqual({
       status: 200,
       body: {
-        bots: inIdOrder(alpha, beta),
+        bots: [botRef(beta), botRef(alpha)],
         items: expected,
         nextCursor: null,
       },
@@ -164,7 +169,7 @@ test("a pair that has exchanged no messages still names both bots, in id order",
     expect(await get(path, ownerCookie)).toEqual({
       status: 200,
       body: {
-        bots: inIdOrder(alpha, gamma),
+        bots: [botRef(gamma), botRef(alpha)],
         items: [],
         nextCursor: null,
       },

@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 import {
@@ -34,6 +34,7 @@ function renderThread(overrides: Partial<ConversationViewProps> = {}) {
   const props: ConversationViewProps = {
     status: "ready",
     messages: [message()],
+    bots: [alpha, beta],
     onRetry: vi.fn(),
     pageCount: 1,
     lastPageStart: 0,
@@ -45,6 +46,18 @@ function renderThread(overrides: Partial<ConversationViewProps> = {}) {
   render(<ConversationView {...props} />);
   return props;
 }
+
+/** Before the first page arrives: no messages and no bots, as the route passes them. */
+const loading: Partial<ConversationViewProps> = {
+  status: "loading",
+  messages: [],
+  bots: undefined,
+};
+const failed: Partial<ConversationViewProps> = {
+  status: "error",
+  messages: [],
+  bots: undefined,
+};
 
 const first = conversation();
 const older = conversation({ bots: [beta, gamma] });
@@ -298,7 +311,7 @@ describe("conversation thread", () => {
     ).toBeInTheDocument();
   });
 
-  test("the header names the pair in the list's order, whichever bot wrote first", () => {
+  test("the header names the pair as given, whichever bot wrote first", () => {
     renderThread({
       messages: [message({ sender: beta, recipient: alpha })],
     });
@@ -392,6 +405,7 @@ describe("conversation thread", () => {
     const props: ConversationViewProps = {
       status: "ready",
       messages: [message()],
+      bots: [alpha, beta],
       onRetry: vi.fn(),
       pageCount: 1,
       lastPageStart: 0,
@@ -421,37 +435,59 @@ describe("conversation thread", () => {
     expect(newer).toHaveClass("focus-visible:ring-3");
   });
 
+  // gamma's id sorts after beta's, so a component that re-sorted by id would say "Beta and Gamma"
   test.each<[string, Partial<ConversationViewProps>]>([
-    ["loading", { status: "loading" }],
-    ["failed", { status: "error" }],
+    ["ready", {}],
     ["empty", { messages: [] }],
   ])(
-    "a %s thread given its bots names them in the h1, in the order given",
+    "a %s thread names its bots in the h1 in the order given",
     (_, overrides) => {
-      renderThread({ ...overrides, bots: [beta, gamma] });
+      renderThread({ ...overrides, bots: [gamma, beta] });
       expect(
-        screen.getByRole("heading", { level: 1, name: "Beta and Gamma" }),
+        screen.getByRole("heading", { level: 1, name: "Gamma and Beta" }),
       ).toBeInTheDocument();
       expect(document.querySelector("[data-title-skeleton]")).toBeNull();
     },
   );
 
-  test.each<[string, Partial<ConversationViewProps>]>([
-    ["loading", { status: "loading", messages: [] }],
-    ["failed", { status: "error", messages: [] }],
-  ])(
-    "a %s thread with no bots yet holds the title's place with a skeleton line",
-    (_, overrides) => {
-      renderThread(overrides);
-      expect(
-        screen.getByRole("heading", { level: 1, name: "Messages" }),
-      ).toBeInTheDocument();
-      expect(document.querySelector("[data-title-skeleton]")).not.toBeNull();
-    },
-  );
+  test("loading holds the header's place with a skeleton under an sr-only Messages h1", () => {
+    renderThread(loading);
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Messages" }),
+    ).toHaveClass("sr-only");
+    expect(document.querySelector("[data-title-skeleton]")).not.toBeNull();
+  });
+
+  // jsdom lays nothing out, so the box is pinned by what sizes it: the header's own
+  // classes, a title line at the h1's type, and a row of the chips' avatar size
+  test("the loading header is built to the loaded header's height", () => {
+    renderThread();
+    const loaded = screen.getByRole("banner");
+    const h1 = within(loaded).getByRole("heading", { level: 1 });
+    const chips = h1.nextElementSibling as HTMLElement;
+    const loadedBox = {
+      header: loaded.className,
+      title: h1.className,
+      chips: chips.className,
+    };
+    cleanup();
+    renderThread(loading);
+    const skeleton = part(document.body, "title-skeleton");
+    const [titleLine, chipRow] = Array.from(skeleton.children).filter(
+      (el) => !el.classList.contains("sr-only"),
+    ) as [HTMLElement, HTMLElement];
+    expect(skeleton.className).toBe(loadedBox.header);
+    for (const cls of loadedBox.title
+      .split(" ")
+      .filter((c) => c !== "font-semibold"))
+      expect(titleLine).toHaveClass(cls);
+    expect(titleLine).toHaveClass("h-lh");
+    expect(chipRow.className).toBe(loadedBox.chips);
+    expect(chipRow.querySelectorAll(".size-6")).toHaveLength(2);
+  });
 
   test("empty names the two bots", () => {
-    renderThread({ messages: [], bots: [alpha, beta] });
+    renderThread({ messages: [] });
     expect(
       screen.getByRole("heading", { name: "No messages yet" }),
     ).toBeInTheDocument();
@@ -461,22 +497,20 @@ describe("conversation thread", () => {
     expect(screen.queryByRole("listitem")).not.toBeInTheDocument();
   });
 
-  test("empty with no bots yet speaks of this pair", () => {
-    renderThread({ messages: [] });
-    expect(screen.getByText(/^Messages between/)).toHaveTextContent(
-      "Messages between this pair of bots show up here.",
-    );
-  });
-
   test("loading is announced and shows no messages", () => {
-    renderThread({ status: "loading" });
+    renderThread(loading);
     expect(screen.getByRole("status")).toHaveTextContent("Loading");
     expect(screen.queryByRole("listitem")).not.toBeInTheDocument();
   });
 
-  test("a failed load offers Try again", async () => {
+  test("a failed load shows only the sr-only Messages h1 and the error, and offers Try again", async () => {
     const user = userEvent.setup();
-    const props = renderThread({ status: "error" });
+    const props = renderThread(failed);
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Messages" }),
+    ).toHaveClass("sr-only");
+    expect(document.querySelector("[data-title-skeleton]")).toBeNull();
+    expect(document.querySelector('[data-slot="skeleton"]')).toBeNull();
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Couldn't load this conversation",
     );

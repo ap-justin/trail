@@ -840,6 +840,15 @@ test("a key without read whose URL collides with an activity webhook isn't sent 
   expect(moved.text).not.toContain(activity.body.id);
   expect(moved.body.error.message).toContain("this key can't manage");
 
+  // an inbox twin is messaging, open to every key: the id is named even without read
+  const inboxUrl = "https://bot.example.com/unread-inbox-twin";
+  const inboxTwin = await inbox(bot.key, inboxUrl);
+  expect(inboxTwin.status).toBe(201);
+  const named = await inbox(noRead, inboxUrl);
+  expect(named.status).toBe(409);
+  expect(named.body.error.message).toContain(inboxTwin.body.id);
+  expect(named.body.error.message).not.toContain("can't manage");
+
   // a key with read still gets the id and the advice
   const seen = await inbox(bot.key);
   expect(seen.status).toBe(409);

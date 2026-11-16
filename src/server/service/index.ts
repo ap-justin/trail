@@ -633,13 +633,12 @@ export function createService({
   /**
    * `requireAction` for a call on webhook `id`: the read action, except on an
    * inbox webhook, which is messaging and open to every key. One the caller
-   * can't see is a 404 first.
+   * can't see is a 404 first. Returns `ownWebhook`'s result.
    */
   function requireWebhookAction(actor: ActingActor, id: string, doing: string) {
-    const actions = actor.scope?.actions;
-    if (actions == null || actions.includes("read")) return;
-    if (ownWebhook(actor, id).view.kind === "inbox") return;
-    requireAction(actor, "read", doing);
+    const own = ownWebhook(actor, id);
+    if (!canManage(actor, own.view)) requireAction(actor, "read", doing);
+    return own;
   }
 
   /** The calling bot's webhook, or a 404: another bot's and one the key's scope doesn't cover read as missing. */
@@ -3733,8 +3732,7 @@ export function createService({
 
     getWebhook(actor: ActingActor, id: string): Webhook {
       requireBot(actor, "read a webhook");
-      requireWebhookAction(actor, id, "read a webhook");
-      return ownWebhook(actor, id).view;
+      return requireWebhookAction(actor, id, "read a webhook").view;
     },
 
     /** Changes the URL or the followed products; any update, an empty one too, ends a pause. */
@@ -3744,8 +3742,7 @@ export function createService({
       patch: { url?: string } & FollowedProducts,
     ): Promise<Webhook> {
       requireBot(actor, "update a webhook");
-      requireWebhookAction(actor, id, "update a webhook");
-      const { kind } = ownWebhook(actor, id).view;
+      const { kind } = requireWebhookAction(actor, id, "update a webhook").view;
       const followed = followedRefs(patch);
       if (kind === "inbox" && followed !== undefined) {
         throw new ValidationError(
@@ -3808,7 +3805,6 @@ export function createService({
     ): Webhook {
       requireBot(actor, "rotate a webhook's secret");
       requireWebhookAction(actor, id, "rotate a webhook's secret");
-      ownWebhook(actor, id);
       validSecret(secret);
       return db.transaction(
         (tx) => {
@@ -3830,7 +3826,6 @@ export function createService({
     deleteWebhook(actor: ActingActor, id: string): { deleted: true } {
       requireBot(actor, "delete a webhook");
       requireWebhookAction(actor, id, "delete a webhook");
-      ownWebhook(actor, id);
       db.delete(webhookSubscription)
         .where(eq(webhookSubscription.id, id))
         .run();
@@ -3843,8 +3838,11 @@ export function createService({
       id: string,
     ): Promise<WebhookTestResult> {
       requireBot(actor, "test a webhook");
-      requireWebhookAction(actor, id, "test a webhook");
-      const { view, cipher } = ownWebhook(actor, id);
+      const { view, cipher } = requireWebhookAction(
+        actor,
+        id,
+        "test a webhook",
+      );
       const wait = pings.take(id);
       if (wait !== null) {
         throw new RateLimitedError(

@@ -99,7 +99,7 @@ export function ConversationBreadcrumb({
   bots,
 }: {
   listHref: string;
-  /** In either order. Absent until the messages have loaded, and on an empty conversation. */
+  /** In either order. Absent until the first page has loaded; an empty conversation's page carries them too. */
   bots?: readonly [WebActorView, WebActorView];
 }) {
   return (
@@ -413,17 +413,21 @@ function MessageCard({ message }: { message: WebMessageView }) {
   );
 }
 
+// shared by the header and its skeleton, so the page doesn't shift when the pair arrives
+const headerBox =
+  "flex flex-col gap-2 border-b px-4 pt-3.5 pb-3 lg:gap-1.5 lg:border-0 lg:px-0 lg:pt-0";
+const titleType = "text-lg leading-tight lg:text-xl";
+const botRow = "flex flex-wrap items-center gap-x-3 gap-y-1.5";
+
 function ConversationHeader({
   bots,
 }: {
   bots: readonly [WebActorView, WebActorView];
 }) {
   return (
-    <header className="flex flex-col gap-2 border-b px-4 pt-3.5 pb-3 lg:gap-1.5 lg:border-0 lg:px-0 lg:pt-0">
-      <h1 className="text-lg leading-tight font-semibold lg:text-xl">
-        {pairName(bots)}
-      </h1>
-      <p className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+    <header className={headerBox}>
+      <h1 className={cn(titleType, "font-semibold")}>{pairName(bots)}</h1>
+      <p className={botRow}>
         <Bot bot={bots[0]} />
         <Bot bot={bots[1]} />
       </p>
@@ -431,15 +435,28 @@ function ConversationHeader({
   );
 }
 
-/** The header's place until the pair arrives; the breadcrumb's `Messages` titles the page meanwhile. */
+/** The `Messages` h1 the page has before the pair is known; the breadcrumb shows it to sight. */
+const untitled = <h1 className="sr-only">Messages</h1>;
+
+/**
+ * The header's place until the pair arrives, at its height: a line at the h1's type and
+ * a row of the bots' avatars.
+ */
 function TitleSkeleton() {
   return (
-    <header
-      data-title-skeleton
-      className="border-b px-4 pt-3.5 pb-3 lg:border-0 lg:px-0 lg:pt-0"
-    >
-      <h1 className="sr-only">Messages</h1>
-      <SkeletonBlock className="h-4 w-2/5" />
+    <header data-title-skeleton className={headerBox}>
+      {untitled}
+      <div className={cn(titleType, "flex h-lh items-center")}>
+        <SkeletonBlock className="h-4 w-2/5" />
+      </div>
+      <div className={botRow}>
+        {["w-16", "w-20"].map((width) => (
+          <span key={width} className="flex items-center gap-1.5">
+            <SkeletonBlock className="size-6 rounded-md" />
+            <SkeletonBlock className={width} />
+          </span>
+        ))}
+      </div>
     </header>
   );
 }
@@ -456,12 +473,11 @@ export function ConversationView(props: ConversationViewProps) {
     (index) => listRef.current?.children[index] as HTMLElement | undefined,
   );
   if (props.status === "not_found") return <NotFoundPanel />;
-  const [first] = props.messages;
-  const bots = props.bots ?? (first && byId(first.sender, first.recipient));
-  const title = bots ? <ConversationHeader bots={bots} /> : <TitleSkeleton />;
+  const { bots } = props;
+  let title: ReactNode;
   let body: ReactNode;
-  if (props.status === "loading") body = <MessagesSkeleton />;
-  else if (props.status === "error") {
+  if (props.status === "error") {
+    title = untitled;
     body = (
       <ErrorState
         title="Couldn't load this conversation"
@@ -469,15 +485,20 @@ export function ConversationView(props: ConversationViewProps) {
         onRetry={props.onRetry}
       />
     );
+  } else if (props.status === "loading" || !bots) {
+    title = <TitleSkeleton />;
+    body = <MessagesSkeleton />;
   } else if (props.messages.length === 0) {
+    title = <ConversationHeader bots={bots} />;
     body = (
       <EmptyState
         icon={MessagesSquareIcon}
         title="No messages yet"
-        description={`Messages between ${bots ? pairName(bots) : "this pair of bots"} show up here.`}
+        description={`Messages between ${pairName(bots)} show up here.`}
       />
     );
   } else {
+    title = <ConversationHeader bots={bots} />;
     body = (
       <>
         <ol

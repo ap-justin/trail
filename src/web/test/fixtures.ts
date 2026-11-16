@@ -449,7 +449,7 @@ export function projectEntry(
     : { ...base, kind, changed: ["goal", "targetDate"] };
 }
 
-/** A bot with a title, the lead of the Human UI launch project. */
+/** A third bot, with a title; leads the Human UI launch project and is the third party in conversations. */
 export const gamma: WebActorView = {
   id: "a-gamma",
   name: "Gamma",
