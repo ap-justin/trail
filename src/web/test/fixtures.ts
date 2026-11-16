@@ -450,12 +450,12 @@ export function projectEntry(
 }
 
 /** A bot with a title, the lead of the Human UI launch project. */
-export const ada: WebActorView = {
-  id: "a-ada",
-  name: "Ada",
+export const gamma: WebActorView = {
+  id: "a-gamma",
+  name: "Gamma",
   kind: "bot",
   photoUrl: null,
-  title: "Better Giving Engineer",
+  title: "Release engineer",
 };
 export const openBot = { key: "OPB", name: "OpenBot" };
 export const docsSite = { key: "DOC", name: "Docs site" };
@@ -513,9 +513,9 @@ export function projectRow(
       id: "su-h",
       body: "Feed and product pages are drawn. Docs site pages wait on the new logo.",
       health: "at_risk",
-      author: ada,
+      author: gamma,
     }),
-    lead: ada,
+    lead: gamma,
     targetDate: "2026-12-04",
     products: [docsSite, openBot, trail],
     openCount: 14,

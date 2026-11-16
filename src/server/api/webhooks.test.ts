@@ -810,6 +810,44 @@ test("a key limited to the webhook's projects is told which webhook already has 
   expect(moved.body.error.message).toContain(twin.body.id);
 });
 
+test("a key without read whose URL collides with an activity webhook isn't sent to update_webhook", async () => {
+  const bot = createBot(db, "unread-twin-bot");
+  const url = "https://bot.example.com/unread-twin";
+  const activity = await create({ url, projects: [a.key] }, bot.key);
+  expect(activity.status).toBe(201);
+  const noRead = createKey(db, bot.actor.id, { actions: ["issues"] }).key;
+  const inbox = (key: string, at = url) =>
+    call("POST", "/webhooks", {
+      json: { kind: "inbox", url: at, secret: SECRET },
+      key,
+    });
+  const refused = await inbox(noRead);
+  expect(refused.status).toBe(409);
+  expect(refused.text).not.toContain(activity.body.id);
+  expect(refused.body.error.message).not.toContain("update_webhook");
+  expect(refused.body.error.message).toContain("this key can't manage");
+  expect(refused.body.error.message).toContain(
+    "a key that can read every product that webhook follows",
+  );
+
+  const own = await inbox(noRead, "https://bot.example.com/unread-twin-2");
+  expect(own.status).toBe(201);
+  const moved = await call("PATCH", `/webhooks/${own.body.id}`, {
+    json: { url },
+    key: noRead,
+  });
+  expect(moved.status).toBe(409);
+  expect(moved.text).not.toContain(activity.body.id);
+  expect(moved.body.error.message).toContain("this key can't manage");
+
+  // a key with read still gets the id and the advice
+  const seen = await inbox(bot.key);
+  expect(seen.status).toBe(409);
+  expect(seen.body.error.message).toContain(
+    `webhook ${activity.body.id} already sends to this URL: change it with update_webhook`,
+  );
+});
+
 test("projects, the deprecated alias of products, carries a deprecated note on create and update; products carries none", async () => {
   const note =
     "projects is deprecated: send products with the products' keys (like TRL)";

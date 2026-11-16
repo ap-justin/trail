@@ -65,7 +65,7 @@ describe("projects", () => {
     );
     expect(cells[1]).toHaveTextContent(/^At risk$/);
     expect(cells[2]).toHaveTextContent(/^DOC OPB TRL\s*$/);
-    expect(cells[3]).toHaveTextContent(/Ada.*Bot/);
+    expect(cells[3]).toHaveTextContent(/Gamma.*Bot/);
     expect(cells[4]).toHaveTextContent(/^Dec 4$/);
     expect(cells[5]).toHaveTextContent(/Feed and product pages are drawn/);
     expect(cells[6]).toHaveTextContent(/^14$/);

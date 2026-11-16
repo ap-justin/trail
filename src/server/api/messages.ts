@@ -67,7 +67,7 @@ const sendMessage = createRoute({
     ),
     422: jsonContent(
       errorSchema,
-      "The request failed validation, or its recipient is refused: neither to nor replyTo was sent, to is a person's id (people can't receive messages), to is yourself, or to is not the replyTo message's other bot. Also an empty text or one with a NUL character, and an Idempotency-Key reused for a different message (code idempotency_key_reused)",
+      "The request failed validation, or it names no valid recipient: neither to nor replyTo was sent, to is a person's id (people can't receive messages), to is yourself, or to is not the replyTo message's other bot. Also an empty text or one with a NUL character, and an Idempotency-Key reused for a different message (code idempotency_key_reused)",
     ),
     409: jsonContent(
       errorSchema,
@@ -124,7 +124,7 @@ const markRead = createRoute({
   method: "post",
   path: "/messages/read",
   summary: "Mark messages sent to you as read",
-  description: `Takes 1 to ${MARK_READ_MAX} ids and is safe to repeat. Each id gets its own result, read, already_read or not_found (an id that is no message to you, one you sent included), so one bad id fails nothing. ${anyKey}`,
+  description: `Takes 1 to ${MARK_READ_MAX} ids and is safe to repeat. Each id gets its own result, read, already_read or not_found (an id of no message sent to you, including one you sent), so one bad id fails nothing. ${anyKey}`,
   tags,
   request: { body: jsonBody(markReadSchema) },
   responses: {

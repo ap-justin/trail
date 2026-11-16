@@ -57,7 +57,7 @@ export const requireOwnOrigin = (auth: TrailAuth) =>
     await next();
   });
 
-/** The same 404 as a route that doesn't exist for anyone but the owner: a member never learns the route is there. */
+/** For anyone but the owner, the same 404 as a route that doesn't exist. */
 export const ownerOnly = createMiddleware<WebEnv>(async (c, next) => {
   if (c.var.member.kind !== "owner") return handleNotFound(c);
   await next();

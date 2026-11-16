@@ -601,6 +601,12 @@ export function createService({
     return hook.products.every((key) => scoped.some((p) => p.key === key));
   }
 
+  /** True when the key can read, update and delete the webhook: an activity one needs the read action too. */
+  function canManage(actor: ActingActor, hook: Webhook): boolean {
+    const reads = actor.scope?.actions?.includes("read") ?? true;
+    return withinScope(actor, hook) && (reads || hook.kind === "inbox");
+  }
+
   /** The 409 for a URL the bot already uses: names the webhook only when this key can manage it. */
   function twinConflict(
     actor: ActingActor,
@@ -608,13 +614,16 @@ export function createService({
     from: Db | Tx,
     advice: string,
   ) {
+    const unmanaged = new ConflictError(
+      "this bot already has a webhook to that URL that this key can't manage: use a different URL, or ask for a key that can read every product that webhook follows",
+    );
     try {
-      ownWebhook(actor, twinId, from);
+      if (!canManage(actor, ownWebhook(actor, twinId, from).view)) {
+        return unmanaged;
+      }
     } catch (error) {
       if (!(error instanceof NotFoundError)) throw error;
-      return new ConflictError(
-        "this bot already has a webhook to that URL that this key can't manage: use a different URL, or ask for a key that reaches that webhook's products",
-      );
+      return unmanaged;
     }
     return new ConflictError(
       `webhook ${twinId} already sends to this URL: ${advice}`,
@@ -3648,10 +3657,7 @@ export function createService({
             .from(webhookSubscription)
             .where(eq(webhookSubscription.actorId, actor.id))
             .all();
-          const reads = actor.scope?.actions?.includes("read") ?? true;
-          const manages = (w: Webhook) =>
-            withinScope(actor, w) && (reads || w.kind === "inbox");
-          if (!webhooksOf(from, own).every(manages)) {
+          if (!webhooksOf(from, own).every((w) => canManage(actor, w))) {
             throw new ConflictError(
               `this bot has reached its limit of ${WEBHOOKS_PER_BOT_MAX} webhooks, and this key can't manage all of them: a key that can read every product the bot follows can delete one to make room`,
             );

@@ -40,7 +40,7 @@ const readConversation = createRoute({
   responses: {
     200: jsonContent(
       webMessagePageSchema,
-      "The messages between the two bots, oldest first; reading marks none read",
+      "The two bots and the messages between them, oldest first; reading marks none read",
     ),
     404: jsonContent(
       errorSchema,
@@ -95,6 +95,7 @@ export function messageRoutes(db: Db, service: Service) {
       );
       return c.json(
         {
+          bots: [a, b].sort().map(actorOf) as [WebActorView, WebActorView],
           items: page.items.map((m) => ({
             id: m.id,
             sender: actorOf(m.from.id),

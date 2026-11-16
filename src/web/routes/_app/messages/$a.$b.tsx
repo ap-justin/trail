@@ -25,16 +25,11 @@ function ConversationPage() {
   const { a, b } = Route.useParams();
   const conversation = useInfiniteQuery(conversationQuery(a, b));
   const messages = conversation.data?.pages.flatMap((page) => page.items) ?? [];
-  const [first] = messages;
+  const bots = conversation.data?.pages[0]?.bots;
   return (
     <AppPage
       section="messages"
-      heading={
-        <ConversationBreadcrumb
-          listHref={paths.messages}
-          bots={first && [first.sender, first.recipient]}
-        />
-      }
+      heading={<ConversationBreadcrumb listHref={paths.messages} bots={bots} />}
       headingKind="breadcrumb"
       back={{ href: paths.messages, label: "Back to Messages" }}
     >
@@ -45,7 +40,7 @@ function ConversationPage() {
             : statusOf(conversation)
         }
         messages={messages}
-        pairIds={[a, b]}
+        bots={bots}
         onRetry={() => void conversation.refetch()}
         {...pagingOf(conversation)}
       />

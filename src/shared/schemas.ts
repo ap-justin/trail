@@ -647,7 +647,7 @@ export const messageCreateSchema = z
   .strictObject({
     to: z.string().min(1).optional().meta({
       description:
-        "Required unless replyTo is set, which answers that message's other bot. The bot to message: its name in any case, or its id.",
+        "Required unless replyTo is set; the reply then goes to that message's other bot. The bot to message: its name in any case, or its id.",
       example: "beta",
     }),
     text: messageText,
@@ -1816,10 +1816,12 @@ const webMessagePreview = {
   }),
 };
 
+const webBotPair = z.tuple([webActorSchema, webActorSchema]).meta({
+  description: "The pair's two bots, in id order.",
+});
+
 export const webConversationSchema = z.object({
-  bots: z.tuple([webActorSchema, webActorSchema]).meta({
-    description: "The pair's two bots, in id order.",
-  }),
+  bots: webBotPair,
   lastMessage: z.object({
     id,
     senderId: id,
@@ -1855,7 +1857,9 @@ export const webMessageSchema = z.object({
   }),
 });
 
-export const webMessagePageSchema = pageSchema(webMessageSchema);
+export const webMessagePageSchema = pageSchema(webMessageSchema).extend({
+  bots: webBotPair,
+});
 
 const productKeys = z
   .array(z.string().min(1).max(10))

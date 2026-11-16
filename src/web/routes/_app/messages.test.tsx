@@ -7,9 +7,9 @@ import type {
   WebConversationPageView,
   WebMessagePageView,
 } from "@/lib/api-types";
-import { MESSAGES_STALE_MS } from "@/lib/queries";
+import { createQueryClient, MESSAGES_STALE_MS } from "@/lib/queries";
 import { notFound, renderApp, serveFeed, signedInAs } from "@/test/app";
-import { ada, alpha, beta, conversation, message } from "@/test/fixtures";
+import { alpha, beta, conversation, gamma, message } from "@/test/fixtures";
 import { server } from "@/test/server";
 
 /** Answers the conversation list with `pages` in turn by cursor, recording each request's query. */
@@ -90,7 +90,9 @@ describe("owner only", () => {
 
   test("a member opening a pair sees Not found, and its messages are never read", async () => {
     signedInAs("member");
-    const asked = serveConversation([{ items: [message()], nextCursor: null }]);
+    const asked = serveConversation([
+      { bots: [alpha, beta], items: [message()], nextCursor: null },
+    ]);
     renderApp("/messages/a-alpha/a-beta");
     expect(
       await screen.findByRole("heading", { name: "Page not found", level: 1 }),
@@ -101,7 +103,7 @@ describe("owner only", () => {
   test("the owner opening a pair reads its messages", async () => {
     signedInAs("owner");
     const asked = serveConversation([
-      { items: [message(), reply], nextCursor: null },
+      { bots: [alpha, beta], items: [message(), reply], nextCursor: null },
     ]);
     renderApp("/messages/a-alpha/a-beta");
     expect(
@@ -142,7 +144,7 @@ describe("the conversation list", () => {
     signedInAs("owner");
     const asked = serveConversations([
       { items: [conversation()], nextCursor: "1" },
-      { items: [conversation({ bots: [alpha, ada] })], nextCursor: null },
+      { items: [conversation({ bots: [alpha, gamma] })], nextCursor: null },
     ]);
     renderApp("/messages");
     await screen.findByRole("link", { name: "Alpha and Beta" });
@@ -150,7 +152,7 @@ describe("the conversation list", () => {
       screen.getByRole("button", { name: "Load older conversations" }),
     );
     expect(
-      await screen.findByRole("link", { name: "Alpha and Ada" }),
+      await screen.findByRole("link", { name: "Alpha and Gamma" }),
     ).toBeInTheDocument();
     expect(
       screen
@@ -158,7 +160,7 @@ describe("the conversation list", () => {
         .map((a) => a.textContent),
     ).toEqual([
       expect.stringContaining("Beta"),
-      expect.stringContaining("Ada"),
+      expect.stringContaining("Gamma"),
     ]);
     expect(asked.map((query) => query.get("cursor"))).toEqual([null, "1"]);
     expect(
@@ -181,7 +183,9 @@ describe("the conversation list", () => {
   test("a row opens its pair's conversation", async () => {
     signedInAs("owner");
     serveConversations([{ items: [conversation()], nextCursor: null }]);
-    serveConversation([{ items: [message(), reply], nextCursor: null }]);
+    serveConversation([
+      { bots: [alpha, beta], items: [message(), reply], nextCursor: null },
+    ]);
     renderApp("/messages");
     const row = await screen.findByRole("link", { name: "Alpha and Beta" });
     expect(row).toHaveAttribute("href", "/messages/a-alpha/a-beta");
@@ -196,8 +200,8 @@ describe("a conversation", () => {
   test("Load newer messages appends the next page after the first", async () => {
     signedInAs("owner");
     const asked = serveConversation([
-      { items: [message()], nextCursor: "1" },
-      { items: [reply], nextCursor: null },
+      { bots: [alpha, beta], items: [message()], nextCursor: "1" },
+      { bots: [alpha, beta], items: [reply], nextCursor: null },
     ]);
     renderApp("/messages/a-alpha/a-beta");
     const list = await screen.findByRole("list", { name: "Messages" });
@@ -215,8 +219,8 @@ describe("a conversation", () => {
   test("coming back to the window re-reads the loaded pages only once they've gone stale", async () => {
     signedInAs("owner");
     const asked = serveConversation([
-      { items: [message()], nextCursor: "1" },
-      { items: [reply], nextCursor: null },
+      { bots: [alpha, beta], items: [message()], nextCursor: "1" },
+      { bots: [alpha, beta], items: [reply], nextCursor: null },
     ]);
     renderApp("/messages/a-alpha/a-beta");
     const list = await screen.findByRole("list", { name: "Messages" });
@@ -245,9 +249,86 @@ describe("a conversation", () => {
     ]);
   });
 
+  test("a pair with no messages yet is named in the heading, the breadcrumb and the empty state", async () => {
+    signedInAs("owner");
+    serveConversation([{ bots: [alpha, beta], items: [], nextCursor: null }]);
+    renderApp("/messages/a-alpha/a-beta");
+    expect(
+      await screen.findByRole("heading", { name: "Alpha and Beta", level: 1 }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("No messages yet")).toBeInTheDocument();
+    expect(
+      screen.getByText("Messages between Alpha and Beta show up here."),
+    ).toBeInTheDocument();
+    const [breadcrumb] = screen.getAllByRole("navigation", {
+      name: "Breadcrumb",
+    });
+    expect(breadcrumb).toHaveTextContent("Messages/Alpha and Beta");
+  });
+
+  describe("on the app's own retry policy", () => {
+    /** Counts every request for the pair's messages, answering each with `status`. */
+    function failConversation(status: number) {
+      const asked: URL[] = [];
+      server.use(
+        http.get("/api/web/messages/:a/:b", ({ request }) => {
+          asked.push(new URL(request.url));
+          return HttpResponse.json(
+            { error: { code: "failed", message: "Failed." } },
+            { status },
+          );
+        }),
+      );
+      return asked;
+    }
+
+    const renderRetrying = (path: string) =>
+      renderApp(
+        path,
+        createQueryClient({ defaultOptions: { queries: { retryDelay: 0 } } }),
+      );
+
+    test("a 404 shows Not found after a single request", async () => {
+      signedInAs("owner");
+      const asked = failConversation(404);
+      renderRetrying("/messages/a-alpha/a-nobody");
+      expect(
+        await screen.findByRole("heading", {
+          name: "Page not found",
+          level: 1,
+        }),
+      ).toBeInTheDocument();
+      await settle();
+      expect(asked).toHaveLength(1);
+    });
+
+    test("a 403 shows the error after a single request", async () => {
+      signedInAs("owner");
+      const asked = failConversation(403);
+      renderRetrying("/messages/a-alpha/a-beta");
+      expect(
+        await screen.findByText("Couldn't load this conversation"),
+      ).toBeInTheDocument();
+      await settle();
+      expect(asked).toHaveLength(1);
+    });
+
+    test("a 500 is retried before the error shows", async () => {
+      signedInAs("owner");
+      const asked = failConversation(500);
+      renderRetrying("/messages/a-alpha/a-beta");
+      expect(
+        await screen.findByText("Couldn't load this conversation"),
+      ).toBeInTheDocument();
+      expect(asked).toHaveLength(3);
+    });
+  });
+
   test("the shell names the pair in a breadcrumb back to the list", async () => {
     signedInAs("owner");
-    serveConversation([{ items: [message()], nextCursor: null }]);
+    serveConversation([
+      { bots: [alpha, beta], items: [message()], nextCursor: null },
+    ]);
     renderApp("/messages/a-alpha/a-beta");
     await screen.findByRole("heading", { name: "Alpha and Beta", level: 1 });
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);

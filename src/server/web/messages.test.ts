@@ -42,15 +42,16 @@ const botRef = (bot: typeof alpha) => ({
   photoUrl: null,
 });
 
+const inIdOrder = (...bots: (typeof alpha)[]) =>
+  bots.sort((x, y) => (x.actor.id < y.actor.id ? -1 : 1)).map(botRef);
+
 test("the owner lists each pair of bots once, newest conversation first, with its last message and count", async () => {
   const { status, body } = await get("/messages", ownerCookie);
   expect(status).toBe(200);
   expect(body.nextCursor).toBeNull();
   expect(body.items).toEqual([
     {
-      bots: [alpha, beta]
-        .sort((x, y) => (x.actor.id < y.actor.id ? -1 : 1))
-        .map(botRef),
+      bots: inIdOrder(alpha, beta),
       count: 2,
       lastAt: ab2.createdAt,
       lastMessage: {
@@ -63,9 +64,7 @@ test("the owner lists each pair of bots once, newest conversation first, with it
       },
     },
     {
-      bots: [beta, gamma]
-        .sort((x, y) => (x.actor.id < y.actor.id ? -1 : 1))
-        .map(botRef),
+      bots: inIdOrder(beta, gamma),
       count: 1,
       lastAt: bg1.createdAt,
       lastMessage: {
@@ -148,7 +147,27 @@ test("the owner reads one pair's messages oldest first, whichever bot is named f
   ]) {
     expect(await get(path, ownerCookie)).toEqual({
       status: 200,
-      body: { items: expected, nextCursor: null },
+      body: {
+        bots: inIdOrder(alpha, beta),
+        items: expected,
+        nextCursor: null,
+      },
+    });
+  }
+});
+
+test("a pair that has exchanged no messages still names both bots, in id order", async () => {
+  for (const path of [
+    `/messages/${alpha.actor.id}/${gamma.actor.id}`,
+    `/messages/${gamma.actor.id}/${alpha.actor.id}`,
+  ]) {
+    expect(await get(path, ownerCookie)).toEqual({
+      status: 200,
+      body: {
+        bots: inIdOrder(alpha, gamma),
+        items: [],
+        nextCursor: null,
+      },
     });
   }
 });

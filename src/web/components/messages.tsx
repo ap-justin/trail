@@ -55,8 +55,8 @@ export type ConversationViewProps = Paging & {
   status: "loading" | "error" | "not_found" | "ready";
   /** Every page loaded so far, in the server's order: oldest first, so a next page is newer. */
   messages: WebMessageView[];
-  /** The two bot ids the URL names: an empty conversation has no messages to name them. */
-  pairIds: readonly [string, string];
+  /** The pair in id order, as every page of the server's response carries it; absent until the first page arrives. */
+  bots?: [WebActorView, WebActorView];
   onRetry: () => void;
   className?: string;
 };
@@ -293,7 +293,7 @@ export function ConversationsView(props: ConversationsViewProps) {
       <EmptyState
         icon={MessagesSquareIcon}
         title="No messages yet"
-        description="When bots message each other, their conversations show up here. People can read them, not send."
+        description="When bots message each other, their conversations show up here. You can read them here, but not reply."
       />
     );
   } else {
@@ -367,7 +367,7 @@ function ReplyQuote({
   return (
     <p
       data-reply-quote
-      className="line-clamp-2 border-l-2 pl-2 break-words text-muted-foreground"
+      className="line-clamp-2 border-l-2 border-muted-foreground pl-2 break-words text-muted-foreground"
     >
       Replying to{" "}
       <span className="font-medium text-foreground">{quote.senderName}</span>:{" "}
@@ -413,11 +413,6 @@ function MessageCard({ message }: { message: WebMessageView }) {
   );
 }
 
-/** A bot named only by the id in the URL: a key, so mono, and free to break mid-id at 375. */
-function BotId({ id }: { id: string }) {
-  return <span className="font-mono break-all">{id}</span>;
-}
-
 function ConversationHeader({
   bots,
 }: {
@@ -436,6 +431,19 @@ function ConversationHeader({
   );
 }
 
+/** The header's place until the pair arrives; the breadcrumb's `Messages` titles the page meanwhile. */
+function TitleSkeleton() {
+  return (
+    <header
+      data-title-skeleton
+      className="border-b px-4 pt-3.5 pb-3 lg:border-0 lg:px-0 lg:pt-0"
+    >
+      <h1 className="sr-only">Messages</h1>
+      <SkeletonBlock className="h-4 w-2/5" />
+    </header>
+  );
+}
+
 /**
  * One pair's messages, oldest first, for the person who runs trail: each with its
  * sender, time, Markdown text, the message it replies to and whether the sender asked
@@ -448,33 +456,30 @@ export function ConversationView(props: ConversationViewProps) {
     (index) => listRef.current?.children[index] as HTMLElement | undefined,
   );
   if (props.status === "not_found") return <NotFoundPanel />;
-  // until the pair's names arrive the breadcrumb's `Messages` titles the page
-  const hiddenTitle = <h1 className="sr-only">Messages</h1>;
+  const [first] = props.messages;
+  const bots = props.bots ?? (first && byId(first.sender, first.recipient));
+  const title = bots ? <ConversationHeader bots={bots} /> : <TitleSkeleton />;
   let body: ReactNode;
-  if (props.status === "loading") {
+  if (props.status === "loading") body = <MessagesSkeleton />;
+  else if (props.status === "error") {
     body = (
-      <>
-        {hiddenTitle}
-        <MessagesSkeleton />
-      </>
+      <ErrorState
+        title="Couldn't load this conversation"
+        description="Check your connection, then try again."
+        onRetry={props.onRetry}
+      />
     );
-  } else if (props.status === "error") {
+  } else if (props.messages.length === 0) {
     body = (
-      <>
-        {hiddenTitle}
-        <ErrorState
-          title="Couldn't load this conversation"
-          description="Check your connection, then try again."
-          onRetry={props.onRetry}
-        />
-      </>
+      <EmptyState
+        icon={MessagesSquareIcon}
+        title="No messages yet"
+        description={`Messages between ${bots ? pairName(bots) : "this pair of bots"} show up here.`}
+      />
     );
   } else {
-    const [first] = props.messages;
-    const [a, b] = byId(...props.pairIds);
-    body = first ? (
+    body = (
       <>
-        <ConversationHeader bots={byId(first.sender, first.recipient)} />
         <ol
           ref={listRef}
           aria-label="Messages"
@@ -493,25 +498,14 @@ export function ConversationView(props: ConversationViewProps) {
           />
         )}
       </>
-    ) : (
-      <>
-        {hiddenTitle}
-        <EmptyState
-          icon={MessagesSquareIcon}
-          title="No messages yet"
-          description={
-            <>
-              Messages between <BotId id={a} /> and <BotId id={b} /> show up
-              here.
-            </>
-          }
-        />
-      </>
     );
   }
   return (
     <div className={cn(page, props.className)}>
-      <div className={column}>{body}</div>
+      <div className={column}>
+        {title}
+        {body}
+      </div>
     </div>
   );
 }

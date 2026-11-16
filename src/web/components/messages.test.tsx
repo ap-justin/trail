@@ -8,18 +8,9 @@ import {
   ConversationView,
   type ConversationViewProps,
 } from "@/components/messages";
-import type { WebActorView } from "@/lib/api-types";
-import { alpha, beta, conversation, message } from "@/test/fixtures";
+import { alpha, beta, conversation, gamma, message } from "@/test/fixtures";
 
 const now = new Date("2026-11-11T09:53:00.000Z");
-
-const gamma: WebActorView = {
-  id: "a-gamma",
-  name: "Gamma",
-  kind: "bot",
-  photoUrl: null,
-  title: "Release captain",
-};
 
 function renderList(overrides: Partial<ConversationsViewProps> = {}) {
   const props: ConversationsViewProps = {
@@ -43,7 +34,6 @@ function renderThread(overrides: Partial<ConversationViewProps> = {}) {
   const props: ConversationViewProps = {
     status: "ready",
     messages: [message()],
-    pairIds: [alpha.id, beta.id],
     onRetry: vi.fn(),
     pageCount: 1,
     lastPageStart: 0,
@@ -96,7 +86,7 @@ describe("conversations list", () => {
     const inRow = within(row);
     expect(inRow.getByText("Beta")).toBeInTheDocument();
     expect(inRow.getByText("Gamma")).toBeInTheDocument();
-    expect(inRow.getByText("Release captain")).toBeInTheDocument();
+    expect(inRow.getByText("Release engineer")).toBeInTheDocument();
     expect(inRow.getAllByText("Bot")).toHaveLength(2);
     expect(part(row, "last-message")).toHaveTextContent(
       /^Beta: Deploy finished\. The volume backup runs nightly now\.$/,
@@ -163,7 +153,7 @@ describe("conversations list", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "When bots message each other, their conversations show up here. People can read them, not send.",
+        "When bots message each other, their conversations show up here. You can read them here, but not reply.",
       ),
     ).toBeInTheDocument();
   });
@@ -292,7 +282,7 @@ describe("conversation thread", () => {
     });
     const item = within(rows()[0] as HTMLElement);
     expect(item.getByText("Gamma")).toBeInTheDocument();
-    expect(item.getByText("Release captain")).toBeInTheDocument();
+    expect(item.getByText("Release engineer")).toBeInTheDocument();
     expect(item.getByText("Bot")).toBeInTheDocument();
     expect(item.getByText("status").tagName).toBe("STRONG");
     // one time in the header at 1440, one under the text below; CSS shows one
@@ -311,7 +301,6 @@ describe("conversation thread", () => {
   test("the header names the pair in the list's order, whichever bot wrote first", () => {
     renderThread({
       messages: [message({ sender: beta, recipient: alpha })],
-      pairIds: [beta.id, alpha.id],
     });
     expect(
       screen.getByRole("heading", { level: 1, name: "Alpha and Beta" }),
@@ -403,7 +392,6 @@ describe("conversation thread", () => {
     const props: ConversationViewProps = {
       status: "ready",
       messages: [message()],
-      pairIds: [alpha.id, beta.id],
       onRetry: vi.fn(),
       pageCount: 1,
       lastPageStart: 0,
@@ -433,26 +421,51 @@ describe("conversation thread", () => {
     expect(newer).toHaveClass("focus-visible:ring-3");
   });
 
-  test("empty says which two bots, by the ids the URL names, in the list's order", () => {
-    renderThread({ messages: [], pairIds: [beta.id, alpha.id] });
-    expect(
-      screen.getByRole("heading", { name: "No messages yet" }),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/^Messages between/)).toHaveTextContent(
-      "Messages between a-alpha and a-beta show up here.",
-    );
-    expect(screen.queryByRole("listitem")).not.toBeInTheDocument();
-  });
-
   test.each<[string, Partial<ConversationViewProps>]>([
     ["loading", { status: "loading" }],
     ["failed", { status: "error" }],
     ["empty", { messages: [] }],
-  ])("a %s thread still has a page heading", (_, overrides) => {
-    renderThread(overrides);
+  ])(
+    "a %s thread given its bots names them in the h1, in the order given",
+    (_, overrides) => {
+      renderThread({ ...overrides, bots: [beta, gamma] });
+      expect(
+        screen.getByRole("heading", { level: 1, name: "Beta and Gamma" }),
+      ).toBeInTheDocument();
+      expect(document.querySelector("[data-title-skeleton]")).toBeNull();
+    },
+  );
+
+  test.each<[string, Partial<ConversationViewProps>]>([
+    ["loading", { status: "loading", messages: [] }],
+    ["failed", { status: "error", messages: [] }],
+  ])(
+    "a %s thread with no bots yet holds the title's place with a skeleton line",
+    (_, overrides) => {
+      renderThread(overrides);
+      expect(
+        screen.getByRole("heading", { level: 1, name: "Messages" }),
+      ).toBeInTheDocument();
+      expect(document.querySelector("[data-title-skeleton]")).not.toBeNull();
+    },
+  );
+
+  test("empty names the two bots", () => {
+    renderThread({ messages: [], bots: [alpha, beta] });
     expect(
-      screen.getByRole("heading", { level: 1, name: "Messages" }),
+      screen.getByRole("heading", { name: "No messages yet" }),
     ).toBeInTheDocument();
+    expect(screen.getByText(/^Messages between/)).toHaveTextContent(
+      "Messages between Alpha and Beta show up here.",
+    );
+    expect(screen.queryByRole("listitem")).not.toBeInTheDocument();
+  });
+
+  test("empty with no bots yet speaks of this pair", () => {
+    renderThread({ messages: [] });
+    expect(screen.getByText(/^Messages between/)).toHaveTextContent(
+      "Messages between this pair of bots show up here.",
+    );
   });
 
   test("loading is announced and shows no messages", () => {
