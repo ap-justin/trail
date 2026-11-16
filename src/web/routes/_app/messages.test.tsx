@@ -1,0 +1,197 @@
+import { screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { HttpResponse, http } from "msw";
+import { describe, expect, test } from "vitest";
+import type {
+  WebConversationPageView,
+  WebMessagePageView,
+} from "@/lib/api-types";
+import { notFound, renderApp, serveFeed, signedInAs } from "@/test/app";
+import { ada, alpha, beta, conversation, message } from "@/test/fixtures";
+import { server } from "@/test/server";
+
+/** Answers the conversation list with `pages` in turn by cursor, recording each request's query. */
+function serveConversations(pages: WebConversationPageView[]) {
+  const asked: URLSearchParams[] = [];
+  server.use(
+    http.get("/api/web/messages", ({ request }) => {
+      const query = new URL(request.url).searchParams;
+      asked.push(query);
+      const index = Number(query.get("cursor") ?? "0");
+      return HttpResponse.json(pages[index]);
+    }),
+  );
+  return asked;
+}
+
+/** Answers every pair's messages with `pages` in turn by cursor, recording each request's path and query. */
+function serveConversation(pages: WebMessagePageView[]) {
+  const asked: URL[] = [];
+  server.use(
+    http.get("/api/web/messages/:a/:b", ({ request }) => {
+      const url = new URL(request.url);
+      asked.push(url);
+      return HttpResponse.json(
+        pages[Number(url.searchParams.get("cursor") ?? "0")],
+      );
+    }),
+  );
+  return asked;
+}
+
+const reply = message({
+  id: "m-2",
+  sender: beta,
+  recipient: message().sender,
+  replyTo: {
+    id: "m-1",
+    senderName: "Alpha",
+    preview: "What's the status of the deploy?",
+    truncated: false,
+  },
+  text: "Deploy is **running**.",
+  createdAt: "2026-11-11T09:20:00.000Z",
+});
+
+describe("owner only", () => {
+  test("a member has no Messages nav item", async () => {
+    signedInAs("member");
+    serveFeed();
+    renderApp("/");
+    await screen.findByText("No activity yet");
+    expect(
+      screen.queryByRole("link", { name: "Messages" }),
+    ).not.toBeInTheDocument();
+  });
+
+  test("a member opening a pair sees Not found, and its messages are never read", async () => {
+    signedInAs("member");
+    const asked = serveConversation([{ items: [message()], nextCursor: null }]);
+    renderApp("/messages/a-alpha/a-beta");
+    expect(
+      await screen.findByRole("heading", { name: "Page not found", level: 1 }),
+    ).toBeInTheDocument();
+    expect(asked).toHaveLength(0);
+  });
+
+  test("the owner opening a pair reads its messages", async () => {
+    signedInAs("owner");
+    const asked = serveConversation([
+      { items: [message(), reply], nextCursor: null },
+    ]);
+    renderApp("/messages/a-alpha/a-beta");
+    expect(
+      await screen.findByRole("heading", { name: "Alpha and Beta", level: 1 }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("running")).toBeInTheDocument();
+    expect(asked.map((url) => url.pathname)).toEqual([
+      "/api/web/messages/a-alpha/a-beta",
+    ]);
+  });
+
+  test("a pair the server doesn't know is Not found", async () => {
+    signedInAs("owner");
+    server.use(http.get("/api/web/messages/:a/:b", notFound));
+    renderApp("/messages/a-alpha/a-nobody");
+    expect(
+      await screen.findByRole("heading", { name: "Page not found", level: 1 }),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("the conversation list", () => {
+  test("the owner has the Messages nav item and the list", async () => {
+    signedInAs("owner");
+    serveConversations([{ items: [conversation()], nextCursor: null }]);
+    renderApp("/messages");
+    expect(
+      await screen.findByRole("link", { name: "Alpha and Beta" }),
+    ).toBeInTheDocument();
+    const sidebar = screen.getAllByRole("navigation", { name: "Main" })[0];
+    if (!sidebar) throw new Error("no main nav");
+    expect(
+      within(sidebar).getByRole("link", { name: "Messages" }),
+    ).toHaveAttribute("aria-current", "page");
+  });
+
+  test("Load older conversations appends the next page under the first", async () => {
+    signedInAs("owner");
+    const asked = serveConversations([
+      { items: [conversation()], nextCursor: "1" },
+      { items: [conversation({ bots: [alpha, ada] })], nextCursor: null },
+    ]);
+    renderApp("/messages");
+    await screen.findByRole("link", { name: "Alpha and Beta" });
+    await userEvent.click(
+      screen.getByRole("button", { name: "Load older conversations" }),
+    );
+    expect(
+      await screen.findByRole("link", { name: "Alpha and Ada" }),
+    ).toBeInTheDocument();
+    expect(
+      screen
+        .getAllByRole("link", { name: /^Alpha and / })
+        .map((a) => a.textContent),
+    ).toEqual([
+      expect.stringContaining("Beta"),
+      expect.stringContaining("Ada"),
+    ]);
+    expect(asked.map((query) => query.get("cursor"))).toEqual([null, "1"]);
+    expect(
+      screen.queryByRole("button", { name: "Load older conversations" }),
+    ).not.toBeInTheDocument();
+  });
+
+  test("a row opens its pair's conversation", async () => {
+    signedInAs("owner");
+    serveConversations([{ items: [conversation()], nextCursor: null }]);
+    serveConversation([{ items: [message(), reply], nextCursor: null }]);
+    renderApp("/messages");
+    const row = await screen.findByRole("link", { name: "Alpha and Beta" });
+    expect(row).toHaveAttribute("href", "/messages/a-alpha/a-beta");
+    await userEvent.click(row);
+    expect(
+      await screen.findByRole("heading", { name: "Alpha and Beta", level: 1 }),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("a conversation", () => {
+  test("Load newer messages appends the next page after the first", async () => {
+    signedInAs("owner");
+    const asked = serveConversation([
+      { items: [message()], nextCursor: "1" },
+      { items: [reply], nextCursor: null },
+    ]);
+    renderApp("/messages/a-alpha/a-beta");
+    const list = await screen.findByRole("list", { name: "Messages" });
+    await userEvent.click(
+      screen.getByRole("button", { name: "Load newer messages" }),
+    );
+    expect(await within(list).findByText("running")).toBeInTheDocument();
+    expect(within(list).getAllByRole("listitem")).toHaveLength(2);
+    expect(asked.map((url) => url.searchParams.get("cursor"))).toEqual([
+      null,
+      "1",
+    ]);
+  });
+
+  test("the shell names the pair in a breadcrumb back to the list", async () => {
+    signedInAs("owner");
+    serveConversation([{ items: [message()], nextCursor: null }]);
+    renderApp("/messages/a-alpha/a-beta");
+    await screen.findByRole("heading", { name: "Alpha and Beta", level: 1 });
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    const [breadcrumb] = screen.getAllByRole("navigation", {
+      name: "Breadcrumb",
+    });
+    if (!breadcrumb) throw new Error("no breadcrumb");
+    expect(breadcrumb).toHaveTextContent("Messages/Alpha and Beta");
+    expect(
+      within(breadcrumb).getByRole("link", { name: "Messages" }),
+    ).toHaveAttribute("href", "/messages");
+    expect(
+      screen.getByRole("link", { name: "Back to Messages" }),
+    ).toHaveAttribute("href", "/messages");
+  });
+});

@@ -1,4 +1,5 @@
 import {
+  infiniteQueryOptions,
   MutationCache,
   QueryCache,
   QueryClient,
@@ -37,6 +38,8 @@ export const keys = {
   feed: (filter: FeedFilter) => ["feed", filter] as const,
   search: (q: string) => ["search", q] as const,
   people: ["people"] as const,
+  conversations: ["conversations"] as const,
+  conversation: (a: string, b: string) => ["conversation", a, b] as const,
 };
 
 /** Reads pages in order until one has no `nextCursor` or `max` pages are in; never empty. */
@@ -125,6 +128,25 @@ export const projectItemsQuery = (slug: string, filters: ProjectItemQuery) =>
         groups: joinGroups(read.groups, page.groups),
       })),
     // no placeholder: a group's count follows every filter, so any other list's would miscount
+  });
+
+const nextCursor = (page: { nextCursor: string | null }) => page.nextCursor;
+
+/** Every pair of bots that has exchanged messages, newest first, a page at a time. */
+export const conversationsQuery = infiniteQueryOptions({
+  queryKey: keys.conversations,
+  queryFn: ({ pageParam }) => api.conversations(pageParam),
+  initialPageParam: null as string | null,
+  getNextPageParam: nextCursor,
+});
+
+/** Bots `a` and `b`'s messages, oldest first, a page at a time. */
+export const conversationQuery = (a: string, b: string) =>
+  infiniteQueryOptions({
+    queryKey: keys.conversation(a, b),
+    queryFn: ({ pageParam }) => api.conversation(a, b, pageParam),
+    initialPageParam: null as string | null,
+    getNextPageParam: nextCursor,
   });
 
 export const meQuery = queryOptions({

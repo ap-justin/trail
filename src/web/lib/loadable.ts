@@ -31,3 +31,24 @@ export function loadableAfter<T>(
     return { status: "error" };
   return loadableOf(query);
 }
+
+type InfiniteQueryLike = {
+  hasNextPage: boolean;
+  isFetchingNextPage: boolean;
+  isFetchNextPageError: boolean;
+  fetchNextPage: (options: { cancelRefetch: boolean }) => Promise<unknown>;
+};
+
+/** An infinite query's next page as a screen's Load more sees it. */
+export function pagingOf(query: InfiniteQueryLike) {
+  return {
+    hasMore: query.hasNextPage,
+    loadMore: query.isFetchingNextPage
+      ? "pending"
+      : query.isFetchNextPageError
+        ? "error"
+        : "idle",
+    // a second press while one page is in flight waits on it rather than restarting it
+    onLoadMore: () => void query.fetchNextPage({ cancelRefetch: false }),
+  } as const;
+}

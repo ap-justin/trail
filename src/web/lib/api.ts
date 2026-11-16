@@ -5,10 +5,12 @@ import type {
   PeopleView,
   PersonView,
   SearchView,
+  WebConversationPageView,
   WebItemListView,
   WebItemRowView,
   WebItemType,
   WebItemView,
+  WebMessagePageView,
   WebProductDetailView,
   WebProductListView,
   WebProjectDetailView,
@@ -106,6 +108,9 @@ export type ProjectItemQuery = ItemQuery & {
 /** The server's page-size ceiling (`pageQuerySchema` in src/shared/schemas.ts). */
 export const MAX_PAGE = 200;
 
+/** A page of conversations or messages: the screens read on with Load more. */
+export const MESSAGES_PAGE = 50;
+
 export const api = {
   me: () => request<MeView>(web("/me")),
   products: () => request<WebProductListView>(web("/products")),
@@ -165,6 +170,17 @@ export const api = {
     ),
   remove: (username: string) =>
     request<void>(web(`/people/${seg(username)}`), { method: "DELETE" }),
+  conversations: (cursor: string | null) =>
+    request<WebConversationPageView>(
+      web(`/messages${query({ cursor, limit: MESSAGES_PAGE })}`),
+    ),
+  /** Bots `a` and `b`'s messages, oldest first. */
+  conversation: (a: string, b: string, cursor: string | null) =>
+    request<WebMessagePageView>(
+      web(
+        `/messages/${seg(a)}/${seg(b)}${query({ cursor, limit: MESSAGES_PAGE })}`,
+      ),
+    ),
   /**
    * better-auth answers with the GitHub URL to send the browser to. GitHub returns to
    * `callbackURL`, or on a failure to `/sign-in?error=<code>`.
