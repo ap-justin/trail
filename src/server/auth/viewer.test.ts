@@ -4,8 +4,8 @@ import { expect, test } from "vitest";
 import {
   actor,
   invite as inviteTable,
-  project,
-  projectMember,
+  product,
+  productMember,
 } from "../db/schema.js";
 import { projectKey, setupTestApp, TEST_OWNER_ID } from "../test-app.js";
 
@@ -13,7 +13,7 @@ const { db, bot, owner, signIn, viewerOf } = setupTestApp();
 
 const addProject = () =>
   db
-    .insert(project)
+    .insert(product)
     .values({ key: projectKey(), name: "p", createdBy: bot.actor.id })
     .returning()
     .get();
@@ -43,7 +43,7 @@ const invite = (username: string, ...projectIds: string[]) => {
     .returning()
     .get();
   for (const projectId of projectIds) {
-    db.insert(projectMember).values({ inviteId, projectId }).run();
+    db.insert(productMember).values({ inviteId, productId: projectId }).run();
   }
   return inviteId;
 };
@@ -122,7 +122,7 @@ test("a project added to a member shows on its next request", async () => {
   const cookie = await signIn("barbara");
   expect(await viewerOf(cookie)).toMatchObject({ projects: [] });
   const added = addProject();
-  db.insert(projectMember).values({ inviteId, projectId: added.id }).run();
+  db.insert(productMember).values({ inviteId, productId: added.id }).run();
   expect(await viewerOf(cookie)).toMatchObject({
     projects: [{ id: added.id }],
   });

@@ -47,14 +47,15 @@ describe("each REST write yields exactly one activity_event and one bus event", 
       "POST",
       () => "/api/v1/projects",
       () => ({ key: projectKey(), name: "p" }),
-      "project.created",
+      // the stored row; the API serves it as project.created
+      "product.created",
     ],
     [
       "PATCH /projects/:id",
       "PATCH",
       () => `/api/v1/projects/${projectId}`,
       () => ({ name: "renamed" }),
-      "project.updated",
+      "product.updated",
     ],
     [
       "POST /issues",
@@ -240,7 +241,7 @@ test("an update is attributed to the bot that PATCHed, not the one that created 
       .sort((x, y) => x.localeCompare(y)),
   ).toEqual([
     `issue.updated:${editor.actor.id}`,
-    `project.updated:${editor.actor.id}`,
+    `product.updated:${editor.actor.id}`,
   ]);
   expect(project.createdBy).toBe(author.actor.id);
 });
@@ -296,7 +297,7 @@ describe("GET /activity?after= resumes the feed oldest first", () => {
     const scope = `projectId=${projectId}`;
     const { nextCursor } = await feed(`${scope}&after=`);
     const cursorAt = eventRows()
-      .filter((e) => e.projectId === projectId)
+      .filter((e) => e.productId === projectId)
       .map((e) => e.createdAt.getTime())[0] as number;
 
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -310,7 +311,7 @@ describe("GET /activity?after= resumes the feed oldest first", () => {
     }
 
     const late = eventRows().filter(
-      (e) => e.action === "issue.created" && e.projectId === projectId,
+      (e) => e.action === "issue.created" && e.productId === projectId,
     );
     expect(late.map((e) => e.createdAt.getTime() < cursorAt)).toEqual([true]);
     const resumed = await feed(`${scope}&after=${nextCursor}`);

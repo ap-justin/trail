@@ -56,10 +56,10 @@ export function feedFilters(
 /** The events these filters show among the projects with these ids, the ids checked inside the query. */
 export function feedWhere(projectIds: string[], filters: FeedFilters) {
   return [
-    amongVisible(activityEvent.projectId, projectIds),
+    amongVisible(activityEvent.productId, projectIds),
     filters.projectId === null
       ? undefined
-      : eq(activityEvent.projectId, filters.projectId),
+      : eq(activityEvent.productId, filters.projectId),
     filters.actorId === null
       ? undefined
       : eq(activityEvent.actorId, filters.actorId),
@@ -126,7 +126,7 @@ function botsActingIn(db: Db, projectIds: string[]) {
     .where(
       and(
         eq(actor.kind, "bot"),
-        // per bot, so the (actor_id, project_id) index answers it without walking the projects' history
+        // per bot, so the (actor_id, product_id) index answers it without walking the projects' history
         exists(
           db
             .select({ one: sql`1` })
@@ -134,7 +134,7 @@ function botsActingIn(db: Db, projectIds: string[]) {
             .where(
               and(
                 eq(activityEvent.actorId, actor.id),
-                amongVisible(activityEvent.projectId, projectIds),
+                amongVisible(activityEvent.productId, projectIds),
               ),
             ),
         ),

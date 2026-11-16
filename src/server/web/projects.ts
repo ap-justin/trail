@@ -11,7 +11,7 @@ import {
 } from "../../shared/schemas.js";
 import { jsonContent } from "../api/routes.js";
 import type { Db } from "../db/client.js";
-import { issue, project, projectStatusUpdate } from "../db/schema.js";
+import { issue, product, productStatusUpdate } from "../db/schema.js";
 import { page } from "../service/paging.js";
 import { createWebRouter } from "./env.js";
 import { actorsById, visibleIds, visibleProject } from "./visible.js";
@@ -43,7 +43,7 @@ const listStatusUpdates = createRoute({
   },
 });
 
-type StatusUpdateRow = typeof projectStatusUpdate.$inferSelect;
+type StatusUpdateRow = typeof productStatusUpdate.$inferSelect;
 
 function toStatusUpdates(
   db: Db,
@@ -68,37 +68,37 @@ export function projectSummaries(db: Db, ids: string[]): WebProjectView[] {
   if (ids.length === 0) return [];
   const rows = db
     .select()
-    .from(project)
-    .where(inArray(project.id, ids))
-    .orderBy(asc(project.key))
+    .from(product)
+    .where(inArray(product.id, ids))
+    .orderBy(asc(product.key))
     .all();
   const counts = db
     .select({
-      projectId: issue.projectId,
+      projectId: issue.productId,
       status: issue.status,
       n: count(),
       updatedAt: max(issue.updatedAt),
     })
     .from(issue)
-    .where(inArray(issue.projectId, ids))
-    .groupBy(issue.projectId, issue.status)
+    .where(inArray(issue.productId, ids))
+    .groupBy(issue.productId, issue.status)
     .all();
   const latest = db
     .select()
-    .from(projectStatusUpdate)
+    .from(productStatusUpdate)
     .where(
       and(
-        inArray(projectStatusUpdate.projectId, ids),
+        inArray(productStatusUpdate.productId, ids),
         // the project's newest by (created_at, id), the order its list pages in
         eq(
-          projectStatusUpdate.id,
-          sql`(select s.id from ${projectStatusUpdate} s where s.project_id = ${projectStatusUpdate.projectId} order by s.created_at desc, s.id desc limit 1)`,
+          productStatusUpdate.id,
+          sql`(select s.id from ${productStatusUpdate} s where s.product_id = ${productStatusUpdate.productId} order by s.created_at desc, s.id desc limit 1)`,
         ),
       ),
     )
     .all();
   const views = toStatusUpdates(db, latest);
-  const updates = new Map(latest.map((row, i) => [row.projectId, views[i]]));
+  const updates = new Map(latest.map((row, i) => [row.productId, views[i]]));
   return rows.map((p) => {
     const mine = counts.filter((c) => c.projectId === p.id);
     const countOf = (status: string) =>
@@ -137,14 +137,14 @@ export function projectRoutes(db: Db) {
     .openapi(listStatusUpdates, (c) => {
       const target = visibleProject(c.var.member, c.req.valid("param").key);
       const rows = page(
-        projectStatusUpdate,
+        productStatusUpdate,
         "desc",
         c.req.valid("query"),
-        [eq(projectStatusUpdate.projectId, target.id)],
+        [eq(productStatusUpdate.productId, target.id)],
         (where, orderBy, limit) =>
           db
             .select()
-            .from(projectStatusUpdate)
+            .from(productStatusUpdate)
             .where(where)
             .orderBy(...orderBy)
             .limit(limit)

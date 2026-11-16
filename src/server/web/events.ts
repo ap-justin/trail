@@ -7,7 +7,7 @@ import { jsonContent } from "../api/routes.js";
 import type { TrailAuth } from "../auth/auth.js";
 import { inviteOf } from "../auth/identity.js";
 import type { Db } from "../db/client.js";
-import { activityEvent, actor, invite, projectMember } from "../db/schema.js";
+import { activityEvent, actor, invite, productMember } from "../db/schema.js";
 import type { ActivityEvent, ActorUpdate, EventBus } from "../events/bus.js";
 import type { FeedFilters } from "../service/paging.js";
 import { entriesByEvent } from "./entries.js";
@@ -111,9 +111,9 @@ function resumeSeq(header: string | undefined): number | undefined {
 function projectsNow(db: Db, member: Member): Set<string> | "all" {
   if (member.kind === "owner") return "all";
   const rows = db
-    .select({ projectId: projectMember.projectId })
-    .from(projectMember)
-    .innerJoin(invite, eq(invite.id, projectMember.inviteId))
+    .select({ projectId: productMember.productId })
+    .from(productMember)
+    .innerJoin(invite, eq(invite.id, productMember.inviteId))
     .where(inviteOf(member.actor))
     .all();
   return new Set(rows.map((r) => r.projectId));
@@ -140,7 +140,7 @@ function mayHearOf(db: Db, member: Member, actorId: string): boolean {
         .where(
           and(
             eq(activityEvent.actorId, actorId),
-            inArray(activityEvent.projectId, [...visible]),
+            inArray(activityEvent.productId, [...visible]),
           ),
         )
         .limit(1)
@@ -149,9 +149,9 @@ function mayHearOf(db: Db, member: Member, actorId: string): boolean {
   }
   if (row.isOwner) return true;
   const theirs = db
-    .select({ projectId: projectMember.projectId })
-    .from(projectMember)
-    .innerJoin(invite, eq(invite.id, projectMember.inviteId))
+    .select({ projectId: productMember.productId })
+    .from(productMember)
+    .innerJoin(invite, eq(invite.id, productMember.inviteId))
     .where(
       row.githubId === null
         ? eq(invite.email, row.email ?? "")
@@ -162,7 +162,7 @@ function mayHearOf(db: Db, member: Member, actorId: string): boolean {
 }
 
 const matches = (filters: FeedFilters, event: ActivityEvent) =>
-  (filters.projectId === null || event.projectId === filters.projectId) &&
+  (filters.projectId === null || event.productId === filters.projectId) &&
   (filters.actorId === null || event.actorId === filters.actorId);
 
 const newestSeq = (db: Db) =>
@@ -259,9 +259,9 @@ export function eventRoutes(
           const visible = projectsNow(db, member);
           const shown = fresh.filter(
             (e) =>
-              e.projectId !== null &&
+              e.productId !== null &&
               matches(filters, e) &&
-              (visible === "all" || visible.has(e.projectId)),
+              (visible === "all" || visible.has(e.productId)),
           );
           for (const [i, entries] of entriesByEvent(db, shown).entries()) {
             for (const entry of entries) {

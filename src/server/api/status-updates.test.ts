@@ -40,7 +40,7 @@ test("POST /projects/:id/status-updates posts as the calling bot with one event"
       action: "status_update.created",
       subjectType: "status_update",
       subjectId: update.id,
-      projectId: project.id,
+      productId: project.id,
       actorId: bot.actor.id,
       payload: { body: "on schedule", health: "on_track", externalRef: null },
     }),

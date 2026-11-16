@@ -5,7 +5,7 @@ import { join, relative } from "node:path";
 import { afterAll, expect, test } from "vitest";
 import { runCli } from "./cli.js";
 import { migrate, openDatabase } from "./db/client.js";
-import { actor, project } from "./db/schema.js";
+import { actor, product } from "./db/schema.js";
 import {
   createBot,
   createHuman,
@@ -136,7 +136,7 @@ test.each([
 // the projects a scoped key can name
 withDb((db) => {
   const { actor } = createBot(db, "project owner");
-  db.insert(project)
+  db.insert(product)
     .values(
       ["BGP", "ATL"].map((key) => ({ key, name: key, createdBy: actor.id })),
     )

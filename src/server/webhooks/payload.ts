@@ -5,10 +5,11 @@ import {
   comment,
   issue,
   label,
-  project,
-  projectStatusUpdate,
+  product,
+  productStatusUpdate,
 } from "../db/schema.js";
 import type { ActivityEvent } from "../events/bus.js";
+import { legacyAction, legacySubjectType } from "../events/legacy.js";
 
 /** How much of an event's payload a webhook carries, in characters of its JSON. */
 export const PAYLOAD_MAX_CHARS = 2000;
@@ -39,10 +40,10 @@ function issueSubject(db: Db, issueId: string) {
     .select({
       number: issue.number,
       title: issue.title,
-      projectKey: project.key,
+      projectKey: product.key,
     })
     .from(issue)
-    .innerJoin(project, eq(project.id, issue.projectId))
+    .innerJoin(product, eq(product.id, issue.productId))
     .where(eq(issue.id, issueId))
     .get();
 }
@@ -53,7 +54,10 @@ function subjectOf(
   projectKey: string | null,
   projectName: string | null,
 ): { subject: Subject; path: string } {
-  const base = { type: event.subjectType, id: event.subjectId };
+  const base = {
+    type: legacySubjectType(event.subjectType),
+    id: event.subjectId,
+  };
   const projectPath = projectKey === null ? "/" : `/projects/${projectKey}`;
   switch (event.subjectType) {
     case "issue": {
@@ -92,14 +96,14 @@ function subjectOf(
     }
     case "status_update": {
       const row = db
-        .select({ health: projectStatusUpdate.health })
-        .from(projectStatusUpdate)
+        .select({ health: productStatusUpdate.health })
+        .from(productStatusUpdate)
         .where(
           and(
-            eq(projectStatusUpdate.id, event.subjectId),
-            event.projectId === null
+            eq(productStatusUpdate.id, event.subjectId),
+            event.productId === null
               ? undefined
-              : eq(projectStatusUpdate.projectId, event.projectId),
+              : eq(productStatusUpdate.productId, event.productId),
           ),
         )
         .get();
@@ -128,12 +132,12 @@ export function buildEnvelope(
   publicUrl: string | undefined,
 ): Envelope {
   const proj =
-    event.projectId === null
+    event.productId === null
       ? undefined
       : db
-          .select({ key: project.key, name: project.name })
-          .from(project)
-          .where(eq(project.id, event.projectId))
+          .select({ key: product.key, name: product.name })
+          .from(product)
+          .where(eq(product.id, event.productId))
           .get();
   const by = db
     .select({ name: actor.displayName, kind: actor.kind })
@@ -147,7 +151,7 @@ export function buildEnvelope(
     proj?.name ?? null,
   );
   return {
-    type: `trail.${event.action}`,
+    type: `trail.${legacyAction(event.action)}`,
     occurredAt: event.createdAt.toISOString(),
     data: {
       eventId: event.id,

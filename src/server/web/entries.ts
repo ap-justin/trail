@@ -8,20 +8,20 @@ import type { Db } from "../db/client.js";
 import {
   activityEvent,
   comment,
-  type IssueStatus,
   issue,
-  project,
-  projectStatusUpdate,
+  product,
+  productStatusUpdate,
 } from "../db/schema.js";
 import type { ActivityEvent } from "../events/bus.js";
 import { importedEventPayload, type Link } from "../service/index.js";
+import type { SettableStatus } from "../service/validate.js";
 import { actorsById } from "./visible.js";
 
 type Change<T> = { from: T; to: T };
 
 /** The part of an `issue.updated` payload (field → from/to) the feed shows. */
 type IssueChanges = {
-  status?: Change<IssueStatus>;
+  status?: Change<SettableStatus>;
   priority?: Change<number>;
   labels?: Change<string[]>;
   links?: Change<Link[]>;
@@ -30,8 +30,8 @@ type IssueChanges = {
 };
 
 const shownActions = [
-  "project.created",
-  "project.imported",
+  "product.created",
+  "product.imported",
   "issue.created",
   "comment.created",
   "status_update.created",
@@ -156,12 +156,12 @@ export function entriesByEvent(db: Db, events: ActivityEvent[]): EntryView[][] {
       : db
           .select({
             id: issue.id,
-            key: sql<string>`${project.key} || '-' || ${issue.number}`,
+            key: sql<string>`${product.key} || '-' || ${issue.number}`,
             title: issue.title,
             sourceAuthor: issue.sourceAuthor,
           })
           .from(issue)
-          .innerJoin(project, eq(project.id, issue.projectId))
+          .innerJoin(product, eq(product.id, issue.productId))
           .where(inArray(issue.id, issueIds))
           .all()
     ).map((i) => [i.id, i]),
@@ -174,14 +174,14 @@ export function entriesByEvent(db: Db, events: ActivityEvent[]): EntryView[][] {
       ? []
       : db
           .select()
-          .from(projectStatusUpdate)
-          .where(inArray(projectStatusUpdate.id, updateIds))
+          .from(productStatusUpdate)
+          .where(inArray(productStatusUpdate.id, updateIds))
           .all()
     ).map((u) => [u.id, u]),
   );
   const projects = projectRefs(
     db,
-    events.map((e) => e.projectId as string),
+    events.map((e) => e.productId as string),
   );
   const actorOf = actorsById(db, [
     ...events.map((e) => e.actorId),
@@ -192,7 +192,7 @@ export function entriesByEvent(db: Db, events: ActivityEvent[]): EntryView[][] {
     const base = {
       createdAt: event.createdAt.toISOString(),
       actor: actorOf(event.actorId),
-      project: projects(event.projectId as string),
+      project: projects(event.productId as string),
     };
     const ref = (id: string | undefined) => {
       const found = id === undefined ? undefined : issues.get(id);
@@ -207,9 +207,9 @@ export function entriesByEvent(db: Db, events: ActivityEvent[]): EntryView[][] {
 
     function partsOf(e: ActivityEvent) {
       switch (e.action) {
-        case "project.created":
+        case "product.created":
           return [{ kind: "project_created" as const, issue: null }];
-        case "project.imported": {
+        case "product.imported": {
           const counts = importedEventPayload.safeParse(e.payload);
           if (!counts.success) return [];
           const { created, updated } = counts.data;
@@ -291,9 +291,9 @@ export function projectRefs(
     wanted.length === 0
       ? []
       : db
-          .select({ id: project.id, key: project.key, name: project.name })
-          .from(project)
-          .where(inArray(project.id, wanted))
+          .select({ id: product.id, key: product.key, name: product.name })
+          .from(product)
+          .where(inArray(product.id, wanted))
           .all();
   const byId = new Map(rows.map((r) => [r.id, { key: r.key, name: r.name }]));
   return (id) => byId.get(id) as WebProjectRefView;

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, test } from "vitest";
 import { migrate, openDatabase } from "../db/client.js";
-import { actor, apiKey, project } from "../db/schema.js";
+import { actor, apiKey, product } from "../db/schema.js";
 import { NotFoundError, ValidationError } from "./errors.js";
 import {
   authenticateKey,
@@ -88,7 +88,7 @@ describe("a key's scope", () => {
   const owner = createBot(db, "scope owner").actor;
   const addProject = (key: string) =>
     db
-      .insert(project)
+      .insert(product)
       .values({ key, name: key, createdBy: owner.id })
       .returning()
       .get();

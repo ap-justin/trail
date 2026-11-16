@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { readMigrationFiles } from "drizzle-orm/migrator";
+import { resolveProductOwners } from "./product-owners.js";
 import * as schema from "./schema.js";
 
 export function openDatabase(path: string) {
@@ -108,6 +109,36 @@ function refuseBotNamesClashingByCase(sqlite: Db["$client"]): void {
   );
 }
 
+// journal `when` of 0015_products_projects, which copies every item as type 'issue'
+const productsMigration = 1794806529483;
+
+/**
+ * 0015's data step: sets each product's owner from the seed mapping, then makes the items its
+ * owner created todos, assigned to the owner when unassigned. A product with no resolved owner
+ * keeps every item an issue. Statuses and updated_at stay as they were.
+ */
+function typeItemsByOwner(sqlite: Db["$client"]): void {
+  const setOwner = sqlite.prepare(
+    "update product set owner_id = ? where key = ?",
+  );
+  const makeTodos = sqlite.prepare(
+    "update issue set type = 'todo', assignee_id = coalesce(assignee_id, @owner) where created_by = @owner and product_id = (select id from product where key = @product)",
+  );
+  for (const { product, ownerId } of resolveProductOwners(sqlite)) {
+    if (ownerId === null) continue;
+    setOwner.run(ownerId, product);
+    makeTodos.run({ owner: ownerId, product });
+  }
+  // a replayed create returns its stored row as the service returned it, so stored rows take
+  // the renamed column and an item its type
+  sqlite.exec(`
+    update idempotency_key set response = json_set(json_remove(response, '$.projectId'), '$.productId', response ->> '$.projectId')
+      where scope in ('issue.create', 'label.create', 'status_update.create') and json_type(response, '$.projectId') is not null;
+    update idempotency_key set response = json_set(response, '$.type', (select type from issue where id = response ->> '$.id'))
+      where scope = 'issue.create' and exists (select 1 from issue where id = response ->> '$.id');
+  `);
+}
+
 /**
  * Applies pending drizzle-kit migrations. Throws, leaving the file untouched,
  * when the file was migrated by a newer build than this one, or holds bots
@@ -163,6 +194,7 @@ export function migrate(db: Db, folder = migrationsFolder): void {
             refuseBotNamesClashingByCase(sqlite);
           }
           for (const statement of m.sql) sqlite.exec(statement);
+          if (m.folderMillis === productsMigration) typeItemsByOwner(sqlite);
           record.run(m.hash, m.folderMillis);
         }
         const violations = sqlite.pragma("foreign_key_check") as unknown[];

@@ -6,7 +6,7 @@ import { createApp } from "./app.js";
 import { type AuthConfig, createAuth } from "./auth/auth.js";
 import type { MailMessage } from "./auth/mail.js";
 import { migrate, openDatabase } from "./db/client.js";
-import { invite, project, projectMember } from "./db/schema.js";
+import { invite, product, productMember } from "./db/schema.js";
 import { type ActivityEvent, createEventBus } from "./events/bus.js";
 import { createBot } from "./service/keys.js";
 import { type WebhookSettings, webhookSettings } from "./service/webhooks.js";
@@ -376,7 +376,7 @@ export function setupTestApp({
       .returning()
       .get();
     for (const projectId of projectIds) {
-      db.insert(projectMember).values({ inviteId, projectId }).run();
+      db.insert(productMember).values({ inviteId, productId: projectId }).run();
     }
     return inviteId;
   }
@@ -387,7 +387,7 @@ export function setupTestApp({
   /** A project written straight to the database, created by the bot, with no activity event. */
   const addProject = (name = "p") =>
     db
-      .insert(project)
+      .insert(product)
       .values({ key: projectKey(), name, createdBy: bot.actor.id })
       .returning()
       .get();
@@ -404,7 +404,7 @@ export function setupTestApp({
       .returning()
       .get();
     for (const projectId of projectIds) {
-      db.insert(projectMember).values({ inviteId, projectId }).run();
+      db.insert(productMember).values({ inviteId, productId: projectId }).run();
     }
     return signIn(login, account);
   }

@@ -21,13 +21,14 @@ import {
   actor as actorTable,
   comment,
   type IssueStatus,
+  type IssueType,
   issue,
   issueLabel,
   issueLink,
   label,
   type ProjectHealth,
-  project,
-  projectStatusUpdate,
+  product,
+  productStatusUpdate,
   webhookSubscription,
 } from "../db/schema.js";
 import type { ActivityEvent, EventBus } from "../events/bus.js";
@@ -130,13 +131,17 @@ export type { Link, LinkInput } from "./validate.js";
 export type ActingActor = Pick<Actor, "id" | "kind"> & { scope?: KeyScope };
 /** An actor with the URL of its photo, null without one. */
 export type ActorWithPhoto = Actor & { photoUrl: string | null };
-export type Project = typeof project.$inferSelect;
+export type Project = typeof product.$inferSelect;
 type IssueRow = typeof issue.$inferSelect;
 /** An issue with its key (as in TRL-12), label names A–Z, and links in the order set. */
 export type Issue = IssueRow & { key: string; labels: string[]; links: Link[] };
+
+/** An item the product's own bot creates is a todo; anyone else's is an issue. */
+const legacyTypeOf = (target: Project, creatorId: string): IssueType =>
+  target.ownerId === creatorId ? "todo" : "issue";
 export type Comment = typeof comment.$inferSelect;
 export type Label = typeof label.$inferSelect;
-export type StatusUpdate = typeof projectStatusUpdate.$inferSelect;
+export type StatusUpdate = typeof productStatusUpdate.$inferSelect;
 
 /** Every create takes these; a repeat with the same key returns the first result. */
 export type WriteOptions = { idempotencyKey?: string };
@@ -493,17 +498,17 @@ export function createService({
     ref: string,
     actor: ActingActor,
   ): Project {
-    const visible = amongVisible(project.id, visibleIdsOf(actor));
+    const visible = amongVisible(product.id, visibleIdsOf(actor));
     const found =
       tx
         .select()
-        .from(project)
-        .where(and(eq(project.id, ref), visible))
+        .from(product)
+        .where(and(eq(product.id, ref), visible))
         .get() ??
       tx
         .select()
-        .from(project)
-        .where(and(eq(project.key, ref.toUpperCase()), visible))
+        .from(product)
+        .where(and(eq(product.key, ref.toUpperCase()), visible))
         .get();
     if (!found) {
       throw noProject(
@@ -525,7 +530,7 @@ export function createService({
     ref: string,
     actor: ActingActor,
   ): IssueRow {
-    const visible = amongVisible(issue.projectId, visibleIdsOf(actor));
+    const visible = amongVisible(issue.productId, visibleIdsOf(actor));
     const byId = tx
       .select()
       .from(issue)
@@ -538,10 +543,10 @@ export function createService({
       tx
         .select({ issue })
         .from(issue)
-        .innerJoin(project, eq(project.id, issue.projectId))
+        .innerJoin(product, eq(product.id, issue.productId))
         .where(
           and(
-            eq(project.key, (match[1] as string).toUpperCase()),
+            eq(product.key, (match[1] as string).toUpperCase()),
             eq(issue.number, Number(match[2])),
             visible,
           ),
@@ -568,9 +573,9 @@ export function createService({
     const ids = rows.map((r) => r.id);
     const keys = new Map(
       tx
-        .select({ id: project.id, key: project.key })
-        .from(project)
-        .where(inArray(project.id, [...new Set(rows.map((r) => r.projectId))]))
+        .select({ id: product.id, key: product.key })
+        .from(product)
+        .where(inArray(product.id, [...new Set(rows.map((r) => r.productId))]))
         .all()
         .map((p) => [p.id, p.key]),
     );
@@ -594,7 +599,7 @@ export function createService({
       .all();
     return rows.map((row) => ({
       ...row,
-      key: `${keys.get(row.projectId)}-${row.number}`,
+      key: `${keys.get(row.productId)}-${row.number}`,
       labels: labels.filter((l) => l.issueId === row.id).map((l) => l.name),
       links: links
         .filter((l) => l.issueId === row.id)
@@ -622,7 +627,7 @@ export function createService({
       .from(label)
       .where(
         and(
-          eq(label.projectId, projectId),
+          eq(label.productId, projectId),
           sql`${label.name} = ${name} collate nocase`,
         ),
       )
@@ -634,7 +639,11 @@ export function createService({
     return names.map(
       (name) =>
         findLabel(tx, projectId, name) ??
-        tx.insert(label).values({ projectId, name }).returning().get(),
+        tx
+          .insert(label)
+          .values({ productId: projectId, name })
+          .returning()
+          .get(),
     );
   }
 
@@ -646,7 +655,7 @@ export function createService({
         labels.map((l) => ({
           issueId: target.id,
           labelId: l.id,
-          projectId: target.projectId,
+          productId: target.productId,
         })),
       )
       .run();
@@ -663,14 +672,14 @@ export function createService({
   /** The project's next issue number, handed out in this transaction. */
   function nextIssueNumber(tx: Tx, projectId: string): number {
     const { issueSeq } = tx
-      .update(project)
+      .update(product)
       .set({
-        issueSeq: sql`${project.issueSeq} + 1`,
+        issueSeq: sql`${product.issueSeq} + 1`,
         // numbering an issue is not an edit to the project
-        updatedAt: sql`${project.updatedAt}`,
+        updatedAt: sql`${product.updatedAt}`,
       })
-      .where(eq(project.id, projectId))
-      .returning({ issueSeq: project.issueSeq })
+      .where(eq(product.id, projectId))
+      .returning({ issueSeq: product.issueSeq })
       .get() as { issueSeq: number };
     return issueSeq;
   }
@@ -711,7 +720,7 @@ export function createService({
       const holder = tx
         .select()
         .from(issue)
-        .where(and(eq(issue.projectId, target.id), eq(issue.number, number)))
+        .where(and(eq(issue.productId, target.id), eq(issue.number, number)))
         .get();
       if (holder) {
         taken.add(row.externalRef);
@@ -721,12 +730,12 @@ export function createService({
       numbers.set(row.externalRef, number);
     }
     if (numbers.size > 0) {
-      tx.update(project)
+      tx.update(product)
         .set({
-          issueSeq: sql`max(${project.issueSeq}, ${Math.max(...numbers.values())})`,
-          updatedAt: sql`${project.updatedAt}`,
+          issueSeq: sql`max(${product.issueSeq}, ${Math.max(...numbers.values())})`,
+          updatedAt: sql`${product.updatedAt}`,
         })
-        .where(eq(project.id, target.id))
+        .where(eq(product.id, target.id))
         .run();
     }
     sequenced.sort(
@@ -760,8 +769,8 @@ export function createService({
   ): Project {
     const existing = tx
       .select()
-      .from(project)
-      .where(eq(project.externalRef, input.externalRef))
+      .from(product)
+      .where(eq(product.externalRef, input.externalRef))
       .get();
     // before any key is checked for a clash, so a hidden project and a new one are refused alike
     const limited = actor.scope?.projects;
@@ -773,8 +782,8 @@ export function createService({
     if (!existing) {
       const taken = tx
         .select()
-        .from(project)
-        .where(eq(project.key, input.key))
+        .from(product)
+        .where(eq(product.key, input.key))
         .get();
       if (taken) {
         throw new ConflictError(
@@ -783,7 +792,7 @@ export function createService({
       }
       tally.created.projects++;
       return tx
-        .insert(project)
+        .insert(product)
         .values({
           externalRef: input.externalRef,
           key: input.key,
@@ -811,9 +820,9 @@ export function createService({
     }
     tally.updated.projects++;
     return tx
-      .update(project)
+      .update(product)
       .set(changed)
-      .where(eq(project.id, existing.id))
+      .where(eq(product.id, existing.id))
       .returning()
       .get() as Project;
   }
@@ -830,7 +839,11 @@ export function createService({
       let found = findLabel(tx, projectId, name);
       if (!found) {
         tally.created.labels++;
-        found = tx.insert(label).values({ projectId, name }).returning().get();
+        found = tx
+          .insert(label)
+          .values({ productId: projectId, name })
+          .returning()
+          .get();
       } else if (found.name !== name) {
         // the payload's spelling wins, as it does for every other field
         tally.updated.labels++;
@@ -879,7 +892,7 @@ export function createService({
         // source keys are unique across projects, so the 409 itself still tells a scoped key the
         // key is taken somewhere; only a holder the key can see is named
         const who =
-          visible === null || visible.includes(holder.projectId)
+          visible === null || visible.includes(holder.productId)
             ? `issue ${holder.id} (externalRef ${holder.externalRef ?? "none"})`
             : "another issue";
         throw new ConflictError(
@@ -891,8 +904,9 @@ export function createService({
       const inserted = tx
         .insert(issue)
         .values({
-          projectId: target.id,
+          productId: target.id,
           number: number as number,
+          type: legacyTypeOf(target, actor.id),
           externalRef: row.externalRef,
           title: row.title,
           description: row.description ?? "",
@@ -1015,11 +1029,11 @@ export function createService({
     const existing = new Map(
       tx
         .select()
-        .from(projectStatusUpdate)
+        .from(productStatusUpdate)
         .where(
           and(
-            eq(projectStatusUpdate.projectId, projectId),
-            isNotNull(projectStatusUpdate.externalRef),
+            eq(productStatusUpdate.productId, projectId),
+            isNotNull(productStatusUpdate.externalRef),
           ),
         )
         .all()
@@ -1028,9 +1042,9 @@ export function createService({
     for (const row of rows) {
       const current = existing.get(row.externalRef);
       if (!current) {
-        tx.insert(projectStatusUpdate)
+        tx.insert(productStatusUpdate)
           .values({
-            projectId,
+            productId: projectId,
             externalRef: row.externalRef,
             body: row.body,
             health: row.health,
@@ -1052,9 +1066,9 @@ export function createService({
         tally.unchanged.statusUpdates++;
         continue;
       }
-      tx.update(projectStatusUpdate)
+      tx.update(productStatusUpdate)
         .set(changed)
-        .where(eq(projectStatusUpdate.id, current.id))
+        .where(eq(productStatusUpdate.id, current.id))
         .run();
       tally.updated.statusUpdates++;
     }
@@ -1089,8 +1103,8 @@ export function createService({
         write: () => {
           const taken = tx
             .select()
-            .from(project)
-            .where(eq(project.key, fields.key))
+            .from(product)
+            .where(eq(product.key, fields.key))
             .get();
           if (taken) {
             throw new ConflictError(
@@ -1100,8 +1114,8 @@ export function createService({
           if (fields.externalRef !== null) {
             const twin = tx
               .select()
-              .from(project)
-              .where(eq(project.externalRef, fields.externalRef))
+              .from(product)
+              .where(eq(product.externalRef, fields.externalRef))
               .get();
             if (twin) {
               throw new ConflictError(
@@ -1110,7 +1124,7 @@ export function createService({
             }
           }
           const created = tx
-            .insert(project)
+            .insert(product)
             .values({ ...fields, createdBy: actor.id })
             .returning()
             .get();
@@ -1118,10 +1132,10 @@ export function createService({
             result: created,
             event: {
               actorId: actor.id,
-              subjectType: "project",
+              subjectType: "product",
               subjectId: created.id,
-              projectId: created.id,
-              action: "project.created",
+              productId: created.id,
+              action: "product.created",
               payload: {
                 name: created.name,
                 key: created.key,
@@ -1156,19 +1170,19 @@ export function createService({
           return { result: current, event: null };
         }
         const updated = tx
-          .update(project)
+          .update(product)
           .set(next)
-          .where(eq(project.id, current.id))
+          .where(eq(product.id, current.id))
           .returning()
           .get() as Project;
         return {
           result: updated,
           event: {
             actorId: actor.id,
-            subjectType: "project",
+            subjectType: "product",
             subjectId: current.id,
-            projectId: current.id,
-            action: "project.updated",
+            productId: current.id,
+            action: "product.updated",
             payload: changes,
           },
         };
@@ -1216,7 +1230,7 @@ export function createService({
                 .from(issue)
                 .where(
                   and(
-                    eq(issue.projectId, target.id),
+                    eq(issue.productId, target.id),
                     eq(issue.externalRef, externalRef),
                   ),
                 )
@@ -1227,10 +1241,13 @@ export function createService({
                 );
               }
             }
+            const { projectId: productId, ...rest } = fields;
             const row = tx
               .insert(issue)
               .values({
-                ...fields,
+                ...rest,
+                productId,
+                type: legacyTypeOf(target, actor.id),
                 number: nextIssueNumber(tx, target.id),
                 createdBy: actor.id,
               })
@@ -1245,7 +1262,7 @@ export function createService({
                 actorId: actor.id,
                 subjectType: "issue",
                 subjectId: created.id,
-                projectId: created.projectId,
+                productId: created.productId,
                 action: "issue.created",
                 payload: {
                   key: created.key,
@@ -1341,7 +1358,7 @@ export function createService({
               ));
         let labels: Label[] | undefined;
         if (wantedLabels !== undefined) {
-          labels = labelsNamed(tx, row.projectId, wantedLabels);
+          labels = labelsNamed(tx, row.productId, wantedLabels);
           const to = sortedNames(labels);
           if (!sameJson(current.labels, to)) {
             changes.labels = { from: current.labels, to };
@@ -1391,7 +1408,7 @@ export function createService({
             actorId: actor.id,
             subjectType: "issue",
             subjectId: row.id,
-            projectId: row.projectId,
+            productId: row.productId,
             action: "issue.updated",
             payload: changes,
           },
@@ -1449,7 +1466,7 @@ export function createService({
                 actorId: actor.id,
                 subjectType: "comment",
                 subjectId: created.id,
-                projectId: target.projectId,
+                productId: target.productId,
                 action: "comment.created",
                 payload: {
                   issueId: target.id,
@@ -1486,12 +1503,12 @@ export function createService({
           write: () => {
             if (externalRef !== null) {
               const twin = tx
-                .select({ id: projectStatusUpdate.id })
-                .from(projectStatusUpdate)
+                .select({ id: productStatusUpdate.id })
+                .from(productStatusUpdate)
                 .where(
                   and(
-                    eq(projectStatusUpdate.projectId, target.id),
-                    eq(projectStatusUpdate.externalRef, externalRef),
+                    eq(productStatusUpdate.productId, target.id),
+                    eq(productStatusUpdate.externalRef, externalRef),
                   ),
                 )
                 .get();
@@ -1502,8 +1519,14 @@ export function createService({
               }
             }
             const created = tx
-              .insert(projectStatusUpdate)
-              .values({ ...fields, authorId: actor.id })
+              .insert(productStatusUpdate)
+              .values({
+                productId: target.id,
+                body,
+                health,
+                externalRef,
+                authorId: actor.id,
+              })
               .returning()
               .get();
             return {
@@ -1512,7 +1535,7 @@ export function createService({
                 actorId: actor.id,
                 subjectType: "status_update",
                 subjectId: created.id,
-                projectId: target.id,
+                productId: target.id,
                 action: "status_update.created",
                 payload: { body, health, externalRef },
               },
@@ -1545,7 +1568,7 @@ export function createService({
             }
             const created = tx
               .insert(label)
-              .values({ projectId: target.id, name })
+              .values({ productId: target.id, name })
               .returning()
               .get();
             return {
@@ -1554,7 +1577,7 @@ export function createService({
                 actorId: actor.id,
                 subjectType: "label",
                 subjectId: created.id,
-                projectId: target.id,
+                productId: target.id,
                 action: "label.created",
                 payload: { name },
               },
@@ -1592,7 +1615,7 @@ export function createService({
               .from(issue)
               .where(
                 and(
-                  eq(issue.projectId, target.id),
+                  eq(issue.productId, target.id),
                   isNotNull(issue.externalRef),
                 ),
               )
@@ -1623,8 +1646,8 @@ export function createService({
         const result: ImportResult = {
           project: tx
             .select()
-            .from(project)
-            .where(eq(project.id, target.id))
+            .from(product)
+            .where(eq(product.id, target.id))
             .get() as Project,
           renumbered,
           ...tally,
@@ -1643,10 +1666,10 @@ export function createService({
           result,
           event: {
             actorId: actor.id,
-            subjectType: "project",
+            subjectType: "product",
             subjectId: target.id,
-            projectId: target.id,
-            action: "project.imported",
+            productId: target.id,
+            action: "product.imported",
             payload,
           },
         };
@@ -1663,11 +1686,11 @@ export function createService({
     /** Newest first. */
     listProjects(actor: ActingActor, query: PageQuery = {}): Page<Project> {
       requireAction(actor, "read", "list projects");
-      const visible = [amongVisible(project.id, visibleIdsOf(actor))];
-      return page(project, "desc", query, visible, (where, orderBy, limit) =>
+      const visible = [amongVisible(product.id, visibleIdsOf(actor))];
+      return page(product, "desc", query, visible, (where, orderBy, limit) =>
         db
           .select()
-          .from(project)
+          .from(product)
           .where(where)
           .orderBy(...orderBy)
           .limit(limit)
@@ -1690,10 +1713,10 @@ export function createService({
           : resolveProject(db, query.projectId, actor),
       );
       const filters = [
-        amongVisible(issue.projectId, visibleIdsOf(actor)),
+        amongVisible(issue.productId, visibleIdsOf(actor)),
         query.projectId === undefined
           ? undefined
-          : eq(issue.projectId, resolveProject(db, query.projectId, actor).id),
+          : eq(issue.productId, resolveProject(db, query.projectId, actor).id),
         query.status === undefined
           ? undefined
           : eq(issue.status, validStatus(query.status)),
@@ -1755,14 +1778,14 @@ export function createService({
       );
       const target = resolveProject(db, projectRef, actor);
       return page(
-        projectStatusUpdate,
+        productStatusUpdate,
         "desc",
         query,
-        [eq(projectStatusUpdate.projectId, target.id)],
+        [eq(productStatusUpdate.productId, target.id)],
         (where, orderBy, limit) =>
           db
             .select()
-            .from(projectStatusUpdate)
+            .from(productStatusUpdate)
             .where(where)
             .orderBy(...orderBy)
             .limit(limit)
@@ -1784,7 +1807,7 @@ export function createService({
         label,
         "asc",
         query,
-        [eq(label.projectId, target.id)],
+        [eq(label.productId, target.id)],
         (where, orderBy, limit) =>
           db
             .select()
@@ -1883,10 +1906,10 @@ export function createService({
         actorId: query.actorId ?? null,
       };
       const where: (SQL | undefined)[] = [
-        amongVisible(activityEvent.projectId, visibleIdsOf(actor)),
+        amongVisible(activityEvent.productId, visibleIdsOf(actor)),
         filters.projectId === null
           ? undefined
-          : eq(activityEvent.projectId, filters.projectId),
+          : eq(activityEvent.productId, filters.projectId),
         filters.actorId === null
           ? undefined
           : eq(activityEvent.actorId, filters.actorId),

@@ -65,10 +65,10 @@ test("creating a project commits one project.created event and publishes it", ()
   });
   expect(event).toMatchObject({
     actorId: bot.id,
-    subjectType: "project",
+    subjectType: "product",
     subjectId: id,
-    projectId: id,
-    action: "project.created",
+    productId: id,
+    action: "product.created",
     payload: { name: "trail", description: "" },
   });
   expect(service.getProject(bot, id).name).toBe("trail");
@@ -148,12 +148,33 @@ const proj = service.createProject(bot, {
   name: "fixtures",
 });
 
+test("a created issue is a todo when its product's owner files it, else an issue, and starts open", () => {
+  const owned = service.createProject(bot, {
+    key: projectKey(),
+    name: "owned",
+  });
+  // nothing in the service sets an owner yet; migration 0015 does
+  db.$client
+    .prepare("update product set owner_id = ? where id = ?")
+    .run(bot.id, owned.id);
+  const other = createBot(db, "outsider").actor;
+  const filed = (actor: typeof bot | typeof human) =>
+    service.createIssue(actor, { projectId: owned.id, title: "t" });
+  expect(filed(bot)).toMatchObject({ type: "todo", status: "open" });
+  expect(filed(other)).toMatchObject({ type: "issue", status: "open" });
+  expect(filed(human)).toMatchObject({ type: "issue", status: "open" });
+  // a product with no owner: even its creator files issues
+  expect(
+    service.createIssue(bot, { projectId: proj.id, title: "t" }),
+  ).toMatchObject({ type: "issue", status: "open" });
+});
+
 test("updating a project records each changed field from and to", () => {
   const event = onlyEventOf(() =>
     service.updateProject(bot, proj.id, { name: "renamed", description: "" }),
   );
   expect(event).toMatchObject({
-    action: "project.updated",
+    action: "product.updated",
     subjectId: proj.id,
     payload: { name: { from: "fixtures", to: "renamed" } },
   });
@@ -193,7 +214,7 @@ test("a human can file an issue and comment on it", () => {
     action: "issue.created",
     subjectType: "issue",
     subjectId: issueId,
-    projectId: proj.id,
+    productId: proj.id,
     payload: { title: "Bug from a human", status: "open", assigneeId: null },
   });
   published = [];
@@ -206,7 +227,7 @@ test("a human can file an issue and comment on it", () => {
     action: "comment.created",
     subjectType: "comment",
     subjectId: commentId,
-    projectId: proj.id,
+    productId: proj.id,
     payload: { issueId, body: "repro steps" },
   });
   expect(service.listComments(human, issueId).items).toMatchObject([
@@ -265,7 +286,7 @@ test("a status change is issue.updated with status from and to", () => {
   expect(event).toMatchObject({
     action: "issue.updated",
     subjectId: issue.id,
-    projectId: proj.id,
+    productId: proj.id,
     payload: {
       status: { from: "open", to: "done" },
       assigneeId: { from: null, to: bot.id },
@@ -418,7 +439,7 @@ test("an update is attributed to the acting bot, not the row's creator", () => {
   );
 
   expect(projectEvent).toMatchObject({
-    action: "project.updated",
+    action: "product.updated",
     actorId: editor.id,
   });
   expect(issueEvent).toMatchObject({
@@ -644,7 +665,7 @@ describe("paging and filters", () => {
       "issue.updated",
       "issue.updated",
       ...titles.map(() => "issue.created"),
-      "project.created",
+      "product.created",
     ]);
     const pages = walk((cursor) =>
       service.listActivity(bot, { projectId: paged.id, cursor, limit: 3 }),
@@ -670,7 +691,7 @@ describe("paging and filters", () => {
         .listActivity(bot, { projectId: shared.id, actorId })
         .items.map((e) => e.action);
     expect(mine(human.id)).toEqual(["issue.created"]);
-    expect(mine(bot.id)).toEqual(["project.created"]);
+    expect(mine(bot.id)).toEqual(["product.created"]);
     expect(filed?.createdBy).toBe(human.id);
   });
 

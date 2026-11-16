@@ -19,8 +19,8 @@ import {
   actor,
   actorPhoto,
   invite,
-  project,
-  projectMember,
+  product,
+  productMember,
 } from "../db/schema.js";
 import {
   ConflictError,
@@ -105,9 +105,9 @@ function projectIdsOf(tx: Tx, keys: string[]): string[] {
   const wanted = [...new Set(keys.map((k) => k.toUpperCase()))];
   if (wanted.length === 0) return [];
   const rows = tx
-    .select({ id: project.id, key: project.key })
-    .from(project)
-    .where(inArray(project.key, wanted))
+    .select({ id: product.id, key: product.key })
+    .from(product)
+    .where(inArray(product.key, wanted))
     .all();
   const missing = wanted.filter((k) => !rows.some((r) => r.key === k));
   if (missing.length > 0) {
@@ -119,10 +119,10 @@ function projectIdsOf(tx: Tx, keys: string[]): string[] {
 }
 
 function setMemberships(tx: Tx, inviteId: number, projectIds: string[]) {
-  tx.delete(projectMember).where(eq(projectMember.inviteId, inviteId)).run();
+  tx.delete(productMember).where(eq(productMember.inviteId, inviteId)).run();
   if (projectIds.length === 0) return;
-  tx.insert(projectMember)
-    .values(projectIds.map((projectId) => ({ inviteId, projectId })))
+  tx.insert(productMember)
+    .values(projectIds.map((projectId) => ({ inviteId, productId: projectId })))
     .run();
 }
 
@@ -137,19 +137,19 @@ function invitees(db: Db | Tx, ids?: number[]): PersonView[] {
   if (invites.length === 0) return [];
   const memberships = db
     .select({
-      inviteId: projectMember.inviteId,
-      key: project.key,
-      name: project.name,
+      inviteId: productMember.inviteId,
+      key: product.key,
+      name: product.name,
     })
-    .from(projectMember)
-    .innerJoin(project, eq(project.id, projectMember.projectId))
+    .from(productMember)
+    .innerJoin(product, eq(product.id, productMember.productId))
     .where(
       inArray(
-        projectMember.inviteId,
+        productMember.inviteId,
         invites.map((i) => i.id),
       ),
     )
-    .orderBy(asc(project.key))
+    .orderBy(asc(product.key))
     .all();
   const claimedIds = invites.flatMap((i) =>
     i.githubId === null ? [] : [i.githubId],

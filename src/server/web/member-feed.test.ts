@@ -185,8 +185,8 @@ describe("a member's feed of an import", () => {
       .from(activityEvent)
       .where(
         and(
-          eq(activityEvent.projectId, id),
-          eq(activityEvent.action, "project.imported"),
+          eq(activityEvent.productId, id),
+          eq(activityEvent.action, "product.imported"),
         ),
       )
       .orderBy(asc(activityEvent.seq))

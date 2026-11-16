@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { activityEvent, comment, issue, project } from "../db/schema.js";
+import { activityEvent, comment, issue, product } from "../db/schema.js";
 import { createBot, createKey, revokeKey } from "../service/keys.js";
 import { projectKey, setupTestApp } from "../test-app.js";
 
@@ -135,7 +135,7 @@ test("a revoked key cannot write: POST project, PATCH issue and POST comment are
 
   revokeKey(db, retired.key.split("_")[1] as string);
   const tables = () => ({
-    projects: db.select().from(project).all(),
+    projects: db.select().from(product).all(),
     issues: db.select().from(issue).all(),
     comments: db.select().from(comment).all(),
     events: db.select().from(activityEvent).all(),

@@ -1,6 +1,5 @@
 import {
   type IssueStatus,
-  issueStatuses,
   type ProjectHealth,
   projectHealths,
 } from "../db/schema.js";
@@ -73,10 +72,28 @@ export function validBotTitle(raw: string): string {
   return title;
 }
 
+/** The statuses a caller may set or filter by: nothing files into triage yet. */
+export const settableStatuses = [
+  "open",
+  "in_progress",
+  "done",
+  "canceled",
+] as const satisfies readonly IssueStatus[];
+
+export type SettableStatus = (typeof settableStatuses)[number];
+
+/** A stored status as the API serves it. Throws on triage, which nothing writes yet. */
+export function servedStatus(status: IssueStatus): SettableStatus {
+  if (status === "triage") {
+    throw new Error("an item in triage can't be served before the triage flow");
+  }
+  return status;
+}
+
 export function validStatus(status: string): IssueStatus {
-  if (!(issueStatuses as readonly string[]).includes(status)) {
+  if (!(settableStatuses as readonly string[]).includes(status)) {
     throw new ValidationError(
-      `status must be one of ${issueStatuses.join(", ")}`,
+      `status must be one of ${settableStatuses.join(", ")}`,
     );
   }
   return status as IssueStatus;

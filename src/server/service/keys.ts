@@ -6,8 +6,8 @@ import {
   actor,
   apiKey,
   apiKeyActions,
-  apiKeyProject,
-  project,
+  apiKeyProduct,
+  product,
 } from "../db/schema.js";
 import { ConflictError, NotFoundError, ValidationError } from "./errors.js";
 import type { Tx } from "./tx.js";
@@ -91,9 +91,9 @@ function projectIdsOf(tx: Tx, keys: string[] | undefined): string[] | null {
   }
   const wanted = [...new Set(keys.map((k) => k.trim().toUpperCase()))];
   const found = tx
-    .select({ id: project.id, key: project.key })
-    .from(project)
-    .where(inArray(project.key, wanted))
+    .select({ id: product.id, key: product.key })
+    .from(product)
+    .where(inArray(product.key, wanted))
     .all();
   const unknown = wanted.filter((k) => !found.some((p) => p.key === k));
   if (unknown.length > 0) {
@@ -115,8 +115,10 @@ function mintKey(tx: Tx, actorId: string, scope: KeyScopeInput): string {
     .returning({ id: apiKey.id })
     .get();
   if (projectIds !== null) {
-    tx.insert(apiKeyProject)
-      .values(projectIds.map((projectId) => ({ apiKeyId: id, projectId })))
+    tx.insert(apiKeyProduct)
+      .values(
+        projectIds.map((projectId) => ({ apiKeyId: id, productId: projectId })),
+      )
       .run();
   }
   return key;
@@ -333,14 +335,14 @@ function allowlists(
       ? []
       : db
           .select({
-            keyId: apiKeyProject.apiKeyId,
-            id: project.id,
-            key: project.key,
+            keyId: apiKeyProduct.apiKeyId,
+            id: product.id,
+            key: product.key,
           })
-          .from(apiKeyProject)
-          .innerJoin(project, eq(project.id, apiKeyProject.projectId))
-          .where(inArray(apiKeyProject.apiKeyId, keyIds))
-          .orderBy(asc(project.key))
+          .from(apiKeyProduct)
+          .innerJoin(product, eq(product.id, apiKeyProduct.productId))
+          .where(inArray(apiKeyProduct.apiKeyId, keyIds))
+          .orderBy(asc(product.key))
           .all();
   const byKey = new Map<string, { id: string; key: string }[]>();
   for (const { keyId, id, key } of rows) {

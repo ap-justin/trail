@@ -3,11 +3,12 @@ import type { Db } from "../db/client.js";
 import { newId } from "../db/id.js";
 import {
   activityEvent,
-  project,
+  product,
   webhookDelivery,
   webhookSubscription,
-  webhookSubscriptionProject,
+  webhookSubscriptionProduct,
 } from "../db/schema.js";
+import { legacyAction } from "../events/legacy.js";
 import type { Resolve } from "../webhooks/address.js";
 import { type SecretKey, sealSecret } from "../webhooks/secret.js";
 import {
@@ -117,18 +118,18 @@ export function webhooksOf(db: Db | Tx, rows: SubscriptionRow[]): Webhook[] {
   if (rows.length === 0) return [];
   const links = db
     .select({
-      subscriptionId: webhookSubscriptionProject.subscriptionId,
-      key: project.key,
+      subscriptionId: webhookSubscriptionProduct.subscriptionId,
+      key: product.key,
     })
-    .from(webhookSubscriptionProject)
-    .innerJoin(project, eq(project.id, webhookSubscriptionProject.projectId))
+    .from(webhookSubscriptionProduct)
+    .innerJoin(product, eq(product.id, webhookSubscriptionProduct.productId))
     .where(
       inArray(
-        webhookSubscriptionProject.subscriptionId,
+        webhookSubscriptionProduct.subscriptionId,
         rows.map((r) => r.id),
       ),
     )
-    .orderBy(asc(project.key))
+    .orderBy(asc(product.key))
     .all();
   return rows.map((r) => ({
     id: r.id,
@@ -185,7 +186,7 @@ export const unfollowedDeliveries = (
       and(
         eq(webhookDelivery.subscriptionId, subscriptionId),
         isPending,
-        notInArray(activityEvent.projectId, projectIds),
+        notInArray(activityEvent.productId, projectIds),
       ),
     );
 
@@ -200,11 +201,13 @@ export function setProjects(
   subscriptionId: string,
   projectIds: string[],
 ) {
-  tx.delete(webhookSubscriptionProject)
-    .where(eq(webhookSubscriptionProject.subscriptionId, subscriptionId))
+  tx.delete(webhookSubscriptionProduct)
+    .where(eq(webhookSubscriptionProduct.subscriptionId, subscriptionId))
     .run();
-  tx.insert(webhookSubscriptionProject)
-    .values(projectIds.map((projectId) => ({ subscriptionId, projectId })))
+  tx.insert(webhookSubscriptionProduct)
+    .values(
+      projectIds.map((projectId) => ({ subscriptionId, productId: projectId })),
+    )
     .run();
   tx.delete(webhookDelivery)
     .where(
@@ -255,11 +258,11 @@ export function enqueueDeliveries(
   event: typeof activityEvent.$inferSelect,
   now: number,
 ) {
-  if (event.projectId === null) return;
+  if (event.productId === null) return;
   const followers = tx
-    .select({ id: webhookSubscriptionProject.subscriptionId })
-    .from(webhookSubscriptionProject)
-    .where(eq(webhookSubscriptionProject.projectId, event.projectId))
+    .select({ id: webhookSubscriptionProduct.subscriptionId })
+    .from(webhookSubscriptionProduct)
+    .where(eq(webhookSubscriptionProduct.productId, event.productId))
     .all();
   if (followers.length === 0) return;
   tx.insert(webhookDelivery)
@@ -268,7 +271,7 @@ export function enqueueDeliveries(
         subscriptionId: f.id,
         eventId: event.id,
         seq: event.seq,
-        type: `trail.${event.action}`,
+        type: `trail.${legacyAction(event.action)}`,
         nextAttemptAt: new Date(now),
       })),
     )

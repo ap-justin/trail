@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { beforeEach, expect, test } from "vitest";
 import {
   activityEvent,
-  project,
+  product,
   webhookDelivery,
   webhookSubscription,
 } from "../db/schema.js";
@@ -193,6 +193,26 @@ test("a label, a status update and a project change each describe their project"
   ]);
 });
 
+test("a product event is sent as trail.project.*, though it is stored as product.*", async () => {
+  const key = await newProject();
+  await subscribe([key], "https://bot.example.com/product-events");
+  const since = published.length;
+  await api("PATCH", `/projects/${key}`, { name: "Renamed again" });
+  const [event] = published.slice(since);
+  if (!event) throw new Error("the PATCH published no event");
+  expect(event.action).toBe("product.updated");
+  expect(buildEnvelope(db, event, undefined).type).toBe(
+    "trail.project.updated",
+  );
+  expect(
+    db
+      .select({ type: webhookDelivery.type })
+      .from(webhookDelivery)
+      .where(eq(webhookDelivery.eventId, event.id))
+      .all(),
+  ).toEqual([{ type: "trail.project.updated" }]);
+});
+
 test("a webhook on two projects gets their events in the order they happened, around another bot's writes", async () => {
   answer = 200;
   const p = await newProject();
@@ -250,10 +270,10 @@ test("a ping to a webhook whose stored secret can't be read says to rotate it, a
 /** Each delivery's project key and status, in event order. */
 const deliveriesByProject = () =>
   db
-    .select({ key: project.key, status: webhookDelivery.status })
+    .select({ key: product.key, status: webhookDelivery.status })
     .from(webhookDelivery)
     .innerJoin(activityEvent, eq(activityEvent.id, webhookDelivery.eventId))
-    .innerJoin(project, eq(project.id, activityEvent.projectId))
+    .innerJoin(product, eq(product.id, activityEvent.productId))
     .orderBy(webhookDelivery.seq)
     .all()
     .map((d) => `${d.key}:${d.status}`);
@@ -320,7 +340,7 @@ test("an event and its deliveries are written in one transaction: a failed queue
   expect(
     db.$client
       .prepare(
-        "select count(*) from activity_event where action = 'issue.created' and project_id = (select id from project where key = ?)",
+        "select count(*) from activity_event where action = 'issue.created' and product_id = (select id from product where key = ?)",
       )
       .pluck()
       .get(key),

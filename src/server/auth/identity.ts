@@ -3,8 +3,8 @@ import type { Db } from "../db/client.js";
 import {
   actor,
   invite,
-  project,
-  projectMember,
+  product,
+  productMember,
   session,
   user,
 } from "../db/schema.js";
@@ -344,15 +344,15 @@ const emailHuman = (row: ActorRow): EmailHuman => ({
 
 /** Every project for the owner; for a member, those listed under its invite. */
 export function visibleProjects(db: Db, access: Access): VisibleProject[] {
-  const columns = { id: project.id, key: project.key, name: project.name };
+  const columns = { id: product.id, key: product.key, name: product.name };
   if (access.isOwner) {
-    return db.select(columns).from(project).orderBy(asc(project.key)).all();
+    return db.select(columns).from(product).orderBy(asc(product.key)).all();
   }
   return db
     .select(columns)
-    .from(projectMember)
-    .innerJoin(project, eq(project.id, projectMember.projectId))
-    .where(eq(projectMember.inviteId, access.inviteId))
-    .orderBy(asc(project.key))
+    .from(productMember)
+    .innerJoin(product, eq(product.id, productMember.productId))
+    .where(eq(productMember.inviteId, access.inviteId))
+    .orderBy(asc(product.key))
     .all();
 }

@@ -72,7 +72,7 @@ test("a database holding 0008 keys keeps every key, unscoped, and still authenti
 
   // the allowlist table takes a row on the migrated file, and then scopes that same key
   db.$client.exec(
-    "insert into api_key_project (api_key_id, project_id) values ('k1', 'p1')",
+    "insert into api_key_product (api_key_id, product_id) values ('k1', 'p1')",
   );
   expect(authenticateKey(db, live)?.scope).toEqual({
     projects: [{ id: "p1", key: "TRL" }],

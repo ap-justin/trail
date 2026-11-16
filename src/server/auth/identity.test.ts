@@ -8,8 +8,8 @@ import {
   actor,
   actorPhoto,
   invite,
-  project,
-  projectMember,
+  product,
+  productMember,
 } from "../db/schema.js";
 import { accessOfEmail, syncEmailActor, visibleProjects } from "./identity.js";
 
@@ -27,11 +27,11 @@ const owner = db
   .returning()
   .get();
 const docs = db
-  .insert(project)
+  .insert(product)
   .values({ key: "DOC", name: "docs", createdBy: owner.id })
   .returning()
   .get();
-db.insert(project)
+db.insert(product)
   .values({ key: "TRL", name: "trail", createdBy: owner.id })
   .run();
 
@@ -42,7 +42,9 @@ const inviteEmail = (email: string, ...projectIds: string[]) => {
     .returning()
     .get();
   for (const projectId of projectIds) {
-    db.insert(projectMember).values({ inviteId: row.id, projectId }).run();
+    db.insert(productMember)
+      .values({ inviteId: row.id, productId: projectId })
+      .run();
   }
   return row;
 };

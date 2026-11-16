@@ -350,7 +350,7 @@ test("POST /projects/:id/labels creates a label; a name taken in any case is a 4
     action: "label.created",
     subjectType: "label",
     subjectId: label.id,
-    projectId: project.id,
+    productId: project.id,
   });
   const dup = await send("POST", `/projects/${project.id}/labels`, {
     name: "feature",

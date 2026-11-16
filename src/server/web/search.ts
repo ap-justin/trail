@@ -3,7 +3,8 @@ import { and, asc, desc, eq, or, type SQLWrapper, sql } from "drizzle-orm";
 import { searchQuerySchema, searchSchema } from "../../shared/schemas.js";
 import { jsonContent } from "../api/routes.js";
 import type { Db } from "../db/client.js";
-import { issue, project } from "../db/schema.js";
+import { issue, product } from "../db/schema.js";
+import { servedStatus } from "../service/validate.js";
 import { amongVisible } from "../service/visible.js";
 import { createWebRouter } from "./env.js";
 import { visibleIds } from "./visible.js";
@@ -30,21 +31,21 @@ export function searchRoutes(db: Db) {
   return createWebRouter().openapi(search, (c) => {
     const { q } = c.req.valid("query");
     const ids = visibleIds(c.var.member);
-    const issueKey = sql`${project.key} || '-' || ${issue.number}`;
+    const issueKey = sql`${product.key} || '-' || ${issue.number}`;
     const issues = db
       .select({
         key: sql<string>`${issueKey}`,
         sourceKey: issue.sourceKey,
         title: issue.title,
         status: issue.status,
-        projectKey: project.key,
-        projectName: project.name,
+        projectKey: product.key,
+        projectName: product.name,
       })
       .from(issue)
-      .innerJoin(project, eq(project.id, issue.projectId))
+      .innerJoin(product, eq(product.id, issue.productId))
       .where(
         and(
-          amongVisible(issue.projectId, ids),
+          amongVisible(issue.productId, ids),
           or(
             contains(issue.title, q),
             contains(issueKey, q),
@@ -56,21 +57,22 @@ export function searchRoutes(db: Db) {
       .limit(SEARCH_LIMIT)
       .all();
     const projects = db
-      .select({ key: project.key, name: project.name })
-      .from(project)
+      .select({ key: product.key, name: product.name })
+      .from(product)
       .where(
         and(
-          amongVisible(project.id, ids),
-          or(contains(project.key, q), contains(project.name, q)),
+          amongVisible(product.id, ids),
+          or(contains(product.key, q), contains(product.name, q)),
         ),
       )
-      .orderBy(asc(project.key))
+      .orderBy(asc(product.key))
       .limit(SEARCH_LIMIT)
       .all();
     return c.json(
       {
-        issues: issues.map(({ projectKey, projectName, ...rest }) => ({
+        issues: issues.map(({ projectKey, projectName, status, ...rest }) => ({
           ...rest,
+          status: servedStatus(status),
           project: { key: projectKey, name: projectName },
         })),
         projects,

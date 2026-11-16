@@ -276,9 +276,9 @@ test("an import writes one project.imported event with the counts; a run that ch
   const first = service.importProject(bot, payload);
   expect(projectEvents(first.project.id)).toMatchObject([
     {
-      action: "project.imported",
+      action: "product.imported",
       actorId: bot.id,
-      subjectType: "project",
+      subjectType: "product",
       subjectId: first.project.id,
       payload: {
         externalRef: payload.externalRef,
@@ -343,7 +343,7 @@ test("a second bot re-importing updates rows in place: the first stays their cre
     projectId: result.project.id,
   }).items;
   expect(latest).toMatchObject({
-    action: "project.imported",
+    action: "product.imported",
     actorId: second.id,
   });
 });

@@ -13,6 +13,7 @@ import type {
   WhoamiView,
 } from "../../shared/schemas.js";
 import type { ActivityEvent } from "../events/bus.js";
+import { legacyAction, legacySubjectType } from "../events/legacy.js";
 import type {
   Actor,
   ActorWithPhoto,
@@ -26,6 +27,7 @@ import type {
   Webhook,
 } from "../service/index.js";
 import { type KeyScope, scopeView } from "../service/keys.js";
+import { servedStatus } from "../service/validate.js";
 
 // One function per resource, each listing its wire keys, so a new column reaches the wire only on purpose.
 
@@ -48,10 +50,10 @@ export function toIssue(row: Issue): IssueView {
     key: row.key,
     number: row.number,
     sourceKey: row.sourceKey,
-    projectId: row.projectId,
+    projectId: row.productId,
     title: row.title,
     description: row.description,
-    status: row.status,
+    status: servedStatus(row.status),
     priority: row.priority,
     estimate: row.estimate,
     labels: row.labels,
@@ -82,7 +84,7 @@ export function toComment(row: Comment): CommentView {
 export function toStatusUpdate(row: StatusUpdate): StatusUpdateView {
   return {
     id: row.id,
-    projectId: row.projectId,
+    projectId: row.productId,
     authorId: row.authorId,
     body: row.body,
     health: row.health,
@@ -95,7 +97,7 @@ export function toStatusUpdate(row: StatusUpdate): StatusUpdateView {
 export function toLabel(row: Label): LabelView {
   return {
     id: row.id,
-    projectId: row.projectId,
+    projectId: row.productId,
     name: row.name,
     createdAt: row.createdAt.toISOString(),
   };
@@ -105,10 +107,10 @@ export function toActivityEvent(row: ActivityEvent): ActivityEventView {
   return {
     id: row.id,
     actorId: row.actorId,
-    subjectType: row.subjectType,
+    subjectType: legacySubjectType(row.subjectType),
     subjectId: row.subjectId,
-    projectId: row.projectId,
-    action: row.action,
+    projectId: row.productId,
+    action: legacyAction(row.action),
     payload: row.payload,
     createdAt: row.createdAt.toISOString(),
   };

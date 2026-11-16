@@ -361,10 +361,10 @@ test("a resume more than 500 events back gets one reset event at the newest seq 
       tx.insert(activityEvent)
         .values({
           actorId: bot.actor.id,
-          subjectType: "project",
+          subjectType: "product",
           subjectId: p.id,
-          projectId: p.id,
-          action: "project.created",
+          productId: p.id,
+          action: "product.created",
         })
         .run();
     }
@@ -392,10 +392,10 @@ const writeEvents = (projectId: string, count: number) =>
           .insert(activityEvent)
           .values({
             actorId: bot.actor.id,
-            subjectType: "project",
+            subjectType: "product",
             subjectId: projectId,
-            projectId,
-            action: "project.created",
+            productId: projectId,
+            action: "product.created",
           })
           .returning()
           .get(),
@@ -473,7 +473,7 @@ test("a client that falls 1000 events behind gets a reset event and the stream e
   const event = db
     .select()
     .from(activityEvent)
-    .where(eq(activityEvent.projectId, p.id))
+    .where(eq(activityEvent.productId, p.id))
     .orderBy(desc(activityEvent.seq))
     .get();
   if (!event) throw new Error("no event");

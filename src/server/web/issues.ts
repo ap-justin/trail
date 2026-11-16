@@ -13,10 +13,11 @@ import {
 } from "../../shared/schemas.js";
 import { jsonBody, jsonContent } from "../api/routes.js";
 import type { Db } from "../db/client.js";
-import { issue, issueLabel, issueLink, label, project } from "../db/schema.js";
+import { issue, issueLabel, issueLink, label, product } from "../db/schema.js";
 import type { ActingActor, Service } from "../service/index.js";
 import { page } from "../service/paging.js";
 import { photoUrlOf } from "../service/photos.js";
+import { servedStatus } from "../service/validate.js";
 import { amongVisible, noIssue } from "../service/visible.js";
 import { timelineOf } from "./entries.js";
 import { createWebRouter, type Member } from "./env.js";
@@ -75,10 +76,10 @@ const issueKeyPattern = /^([A-Za-z0-9]{2,10})-(\d+)$/;
  */
 export function visibleIssue(db: Db, member: Member, ref: string) {
   const ids = visibleIds(member);
-  const columns = { issue, projectKey: project.key, projectName: project.name };
+  const columns = { issue, projectKey: product.key, projectName: product.name };
   const visible = and(
-    amongVisible(issue.projectId, ids),
-    eq(project.id, issue.projectId),
+    amongVisible(issue.productId, ids),
+    eq(product.id, issue.productId),
   );
   const match = issueKeyPattern.exec(ref);
   const byKey =
@@ -86,10 +87,10 @@ export function visibleIssue(db: Db, member: Member, ref: string) {
     db
       .select(columns)
       .from(issue)
-      .innerJoin(project, visible)
+      .innerJoin(product, visible)
       .where(
         and(
-          eq(project.key, (match[1] as string).toUpperCase()),
+          eq(product.key, (match[1] as string).toUpperCase()),
           eq(issue.number, Number(match[2])),
         ),
       )
@@ -99,7 +100,7 @@ export function visibleIssue(db: Db, member: Member, ref: string) {
     db
       .select(columns)
       .from(issue)
-      .innerJoin(project, visible)
+      .innerJoin(product, visible)
       .where(eq(issue.sourceKey, ref.trim().toUpperCase()))
       .get();
   if (!found) throw noIssue(ref);
@@ -129,7 +130,7 @@ export function issueView(
     project: projectRef,
     title: row.title,
     description: row.description,
-    status: row.status,
+    status: servedStatus(row.status),
     priority: row.priority,
     estimate: row.estimate,
     labels: labelsOf(db, [row.id])(row.id),
@@ -175,7 +176,7 @@ function toRows(
   return rows.map((r) => ({
     key: `${projectKey}-${r.number}`,
     title: r.title,
-    status: r.status,
+    status: servedStatus(r.status),
     priority: r.priority,
     labels: labels(r.id),
     assignee: r.assigneeId === null ? null : actorOf(r.assigneeId),
@@ -187,13 +188,14 @@ function statusCounts(db: Db, projectId: string) {
   const rows = db
     .select({ status: issue.status, n: count() })
     .from(issue)
-    .where(eq(issue.projectId, projectId))
+    .where(eq(issue.productId, projectId))
     .groupBy(issue.status)
     .all();
   const counts = { all: 0, open: 0, in_progress: 0, done: 0, canceled: 0 };
   for (const row of rows) {
-    counts[row.status] = row.n;
     counts.all += row.n;
+    // nothing files into triage yet; its count joins the shape when something does
+    if (row.status !== "triage") counts[row.status] = row.n;
   }
   return counts;
 }
@@ -256,7 +258,7 @@ export function issueRoutes(db: Db, service: Service) {
         "desc",
         query,
         [
-          eq(issue.projectId, target.id),
+          eq(issue.productId, target.id),
           status === undefined ? undefined : eq(issue.status, status),
         ],
         (where, orderBy, limit) =>

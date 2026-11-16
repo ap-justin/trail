@@ -1,11 +1,10 @@
 import { z } from "@hono/zod-openapi";
 import {
-  activitySubjectTypes,
   actorKinds,
   apiKeyActions,
-  issueStatuses,
   projectHealths,
 } from "../server/db/schema.js";
+import { legacySubjectTypes } from "../server/events/legacy.js";
 import {
   IMPORT_LINKS_MAX,
   IMPORT_TEXT_MAX,
@@ -16,6 +15,7 @@ import {
   botTitleCharacterProblem,
   ISSUE_LABELS_MAX,
   ISSUE_LINKS_MAX,
+  settableStatuses,
 } from "../server/service/validate.js";
 import {
   WEBHOOK_PROJECTS_MAX,
@@ -25,7 +25,7 @@ import {
 
 // Field docs go in .meta(), which both the OpenAPI spec and the MCP tools' JSON
 // Schema read; .openapi({ description }) reaches only the spec.
-const issueStatusSchema = z.enum(issueStatuses).openapi("IssueStatus");
+const issueStatusSchema = z.enum(settableStatuses).openapi("IssueStatus");
 const healthSchema = z.enum(projectHealths).openapi("ProjectHealth");
 const priority = z.int().min(0).max(4).meta({
   description: "0 none, 1 urgent, 2 high, 3 medium, 4 low.",
@@ -144,7 +144,7 @@ export const activityEventSchema = z
   .object({
     id,
     actorId: id,
-    subjectType: z.enum(activitySubjectTypes),
+    subjectType: z.enum(legacySubjectTypes),
     subjectId: id,
     projectId: id.nullable(),
     action: z.string().meta({ example: "issue.updated" }),
