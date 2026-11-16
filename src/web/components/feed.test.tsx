@@ -334,7 +334,7 @@ describe("feed rows", () => {
       within(rowFor("e1")).getByRole("link", {
         name: "TRL-14 Team access: invite people",
       }),
-    ).toHaveAttribute("href", "/issues/TRL-14");
+    ).toHaveAttribute("href", "/products/TRL/14");
   });
 
   test("rows sit under day headers", () => {

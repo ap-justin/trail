@@ -17,7 +17,7 @@ describe("issue page shell", () => {
   test("links back to its product and marks that product's row as where it sits", async () => {
     signedInAs("member");
     serveIssue();
-    renderApp("/issues/TRL-14");
+    renderApp("/products/TRL/14");
     expect(
       await screen.findByRole("link", { name: "Back to trail" }),
     ).toHaveAttribute("href", "/products/TRL");
@@ -30,7 +30,7 @@ describe("issue page shell", () => {
   test("the breadcrumb is a nav, so the title is the page's one h1", async () => {
     signedInAs("member");
     serveIssue();
-    renderApp("/issues/TRL-14");
+    renderApp("/products/TRL/14");
     expect(
       await screen.findByRole("heading", {
         level: 1,
@@ -44,8 +44,23 @@ describe("issue page shell", () => {
   });
 });
 
+describe("old links", () => {
+  test("/issues/TRL-14 goes to the item's own URL", async () => {
+    signedInAs("member");
+    serveIssue();
+    const { router } = renderApp("/issues/TRL-14");
+    expect(
+      await screen.findByRole("heading", {
+        level: 1,
+        name: "Team access: invite people by GitHub username",
+      }),
+    ).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/products/TRL/14");
+  });
+});
+
 describe("filing an issue", () => {
-  test("New issue on a project page files in that project and goes to the new issue", async () => {
+  test("New issue on a product page files in that product and goes to the new issue", async () => {
     signedInAs("member");
     server.use(
       http.get("/api/web/products/DOC", () =>
@@ -72,7 +87,7 @@ describe("filing an issue", () => {
       }),
       http.get("/api/web/items/DOC-3", () => HttpResponse.json(filed())),
     );
-    const { router } = renderApp("/projects/DOC");
+    const { router } = renderApp("/products/DOC");
     const [newIssue] = await screen.findAllByRole("button", {
       name: "New issue",
     });
@@ -87,7 +102,7 @@ describe("filing an issue", () => {
       within(dialog).getByRole("button", { name: "Create issue" }),
     );
     await waitFor(() =>
-      expect(router.state.location.pathname).toBe("/issues/DOC-3"),
+      expect(router.state.location.pathname).toBe("/products/DOC/3"),
     );
     expect(sent).toEqual([
       { product: "DOC", title: "Write the guide", description: "" },
@@ -109,7 +124,7 @@ describe("filing an issue", () => {
         ),
       ),
     );
-    renderApp("/issues/TRL-14");
+    renderApp("/products/TRL/14");
     await screen.findByRole("heading", { name: issue().title });
     const [newIssue] = screen.getAllByRole("button", { name: "New issue" });
     if (!newIssue) throw new Error("no New issue button");
@@ -146,7 +161,7 @@ describe("commenting", () => {
         return HttpResponse.json(entry, { status: 201 });
       }),
     );
-    renderApp("/issues/TRL-14");
+    renderApp("/products/TRL/14");
     const button = await screen.findByRole("button", { name: "Comment" });
     expect(button).toBeDisabled();
     await userEvent.type(
@@ -193,13 +208,16 @@ describe("commenting", () => {
         return HttpResponse.json(entry, { status: 201 });
       }),
     );
-    const { router, queryClient } = renderApp("/issues/TRL-14");
+    const { router, queryClient } = renderApp("/products/TRL/14");
     await userEvent.type(
       await screen.findByPlaceholderText("Leave a comment. Markdown works."),
       "Ship it.",
     );
     await userEvent.click(screen.getByRole("button", { name: "Comment" }));
-    await router.navigate({ to: "/issues/$key", params: { key: "TRL-15" } });
+    await router.navigate({
+      to: "/products/$key/$n",
+      params: { key: "TRL", n: "15" },
+    });
     expect(await screen.findByText("Search")).toBeInTheDocument();
     // the new issue starts with an empty draft and no write in flight
     const box = screen.getByPlaceholderText("Leave a comment. Markdown works.");
@@ -231,7 +249,7 @@ describe("commenting", () => {
         ),
       ),
     );
-    renderApp("/issues/TRL-14");
+    renderApp("/products/TRL/14");
     const box = await screen.findByPlaceholderText(
       "Leave a comment. Markdown works.",
     );

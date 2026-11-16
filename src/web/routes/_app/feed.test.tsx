@@ -10,7 +10,7 @@ import {
   signedInAs,
 } from "@/test/app";
 import { FakeEventSource } from "@/test/event-source";
-import { commentEntry, statusEntry } from "@/test/fixtures";
+import { commentEntry, humanUi, statusEntry } from "@/test/fixtures";
 import { server } from "@/test/server";
 
 afterEach(() => {
@@ -327,6 +327,51 @@ describe("the project filter", () => {
     expect(FakeEventSource.current.url).toBe(
       "/api/web/events?project=human-ui",
     );
+  });
+
+  test("a project taken away while filtered to it clears the project filter", async () => {
+    signedInAs("member");
+    const asked: URLSearchParams[] = [];
+    const page = feedPage([statusEntry("e2", minutesAgo(30))]);
+    server.use(
+      http.get("/api/web/feed", ({ request }) => {
+        asked.push(new URL(request.url).searchParams);
+        return HttpResponse.json({
+          ...page,
+          filters: { ...page.filters, projects: [humanUi] },
+        });
+      }),
+    );
+    renderApp("/");
+    await waitFor(() => expect(rowFor("e2")).not.toBeNull());
+    await userEvent.click(
+      screen.getByRole("combobox", { name: "Filter by project" }),
+    );
+    await userEvent.click(
+      await screen.findByRole("option", { name: "Human UI launch" }),
+    );
+    await waitFor(() =>
+      expect(FakeEventSource.current.url).toBe(
+        "/api/web/events?project=human-ui",
+      ),
+    );
+    const filtered = FakeEventSource.current;
+
+    server.use(
+      http.get("/api/web/feed", ({ request }) => {
+        const query = new URL(request.url).searchParams;
+        asked.push(query);
+        return query.has("project") ? notFound() : HttpResponse.json(page);
+      }),
+    );
+    filtered.fail({ closed: true });
+    await waitFor(() =>
+      expect(FakeEventSource.current.url).toBe("/api/web/events"),
+    );
+    await waitFor(() => expect(asked.at(-1)?.has("project")).toBe(false));
+    expect(
+      screen.getByRole("combobox", { name: "Filter by project" }),
+    ).toHaveTextContent("All projects");
   });
 });
 

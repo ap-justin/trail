@@ -261,7 +261,7 @@ describe("session", () => {
     const { router } = await onFeed();
     signedInAs("anonymous");
     server.use(
-      http.get("/api/web/products", () =>
+      http.get("/api/web/projects", () =>
         HttpResponse.json(
           { error: { code: "unauthorized", message: "Sign in first" } },
           { status: 401 },
@@ -282,7 +282,7 @@ describe("session", () => {
     await onFeed();
     signedInAs("not_invited");
     server.use(
-      http.get("/api/web/products", () =>
+      http.get("/api/web/projects", () =>
         HttpResponse.json(
           { error: { code: "forbidden", message: "Not invited" } },
           { status: 403 },

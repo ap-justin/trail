@@ -11,6 +11,7 @@ import { SearchResults } from "@/components/search-results";
 import { api } from "@/lib/api";
 import type { MeView, WebProductRefView } from "@/lib/api-types";
 import { statusOf } from "@/lib/loadable";
+import { itemParams } from "@/lib/paths";
 import { isMember, keys } from "@/lib/queries";
 import { useAction } from "@/lib/use-action";
 import { useActorStream } from "@/lib/use-actor-stream";
@@ -70,12 +71,13 @@ export function AppChrome({
 
   const create = useAction(api.createIssue, async (issue) => {
     queryClient.setQueryData(keys.issue(issue.key), issue);
-    void queryClient.invalidateQueries({ queryKey: keys.projects });
+    void queryClient.invalidateQueries({ queryKey: keys.products });
+    // the product's detail, its item lists under every filter, and their counts
     void queryClient.invalidateQueries({
-      queryKey: keys.project(issue.product.key),
+      queryKey: keys.product(issue.product.key),
     });
     setDialog(null);
-    await navigate({ to: "/issues/$key", params: { key: issue.key } });
+    await navigate({ to: "/products/$key/$n", params: itemParams(issue.key) });
   });
 
   const signOut = useMutation({

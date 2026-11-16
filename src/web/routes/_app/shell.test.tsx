@@ -4,7 +4,7 @@ import { HttpResponse, http } from "msw";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { SearchView } from "@/lib/api-types";
 import { renderApp, serveFeed, signedInAs } from "@/test/app";
-import { trail } from "@/test/fixtures";
+import { itemList, productDetail, trail } from "@/test/fixtures";
 import { server } from "@/test/server";
 
 afterEach(() => {
@@ -55,6 +55,17 @@ describe("search", () => {
     signedInAs("member");
     serveFeed();
     serveSearch({ items: [], products: [trail], projects: [] });
+    server.use(
+      http.get("/api/web/products/TRL", () =>
+        HttpResponse.json(productDetail()),
+      ),
+      http.get("/api/web/products/TRL/items", () =>
+        HttpResponse.json(itemList([])),
+      ),
+      http.get("/api/web/products/TRL/status-updates", () =>
+        HttpResponse.json({ items: [], nextCursor: null }),
+      ),
+    );
     const { router } = renderApp("/");
     await screen.findByText("No activity yet");
     await userEvent.type(searchBox(), "tra");
@@ -67,6 +78,9 @@ describe("search", () => {
     expect(
       screen.queryByRole("list", { name: "Search results" }),
     ).not.toBeInTheDocument();
+    expect(
+      await screen.findAllByRole("link", { name: /ap-justin\/trail/ }),
+    ).not.toHaveLength(0);
   });
 
   test("a failed search says so in the panel", async () => {

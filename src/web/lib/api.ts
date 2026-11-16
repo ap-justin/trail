@@ -7,9 +7,13 @@ import type {
   SearchView,
   WebItemListView,
   WebItemRowView,
+  WebItemType,
   WebItemView,
   WebProductDetailView,
   WebProductListView,
+  WebProjectDetailView,
+  WebProjectItemsView,
+  WebProjectPageView,
   WebStatusUpdatePageView,
 } from "@/lib/api-types";
 
@@ -86,21 +90,51 @@ export type FeedFilter = {
   project: string | null;
 };
 
+/** A product's or project's item list filters; null is All. */
+export type ItemQuery = {
+  type: WebItemType | null;
+  /** `open` matches triage too. */
+  status: Exclude<WebItemRowView["status"], "triage"> | null;
+};
+
+export type ProjectItemQuery = ItemQuery & {
+  /** One of the project's product keys. */
+  product: string | null;
+};
+
 /** The server's page-size ceiling (`pageQuerySchema` in src/shared/schemas.ts). */
 export const MAX_PAGE = 200;
 
 export const api = {
   me: () => request<MeView>(web("/me")),
-  projects: () => request<WebProductListView>(web("/products")),
-  project: (key: string) =>
+  products: () => request<WebProductListView>(web("/products")),
+  product: (key: string) =>
     request<WebProductDetailView>(web(`/products/${seg(key)}`)),
-  issues: (key: string, status: WebItemRowView["status"] | null) =>
+  productItems: (key: string, filters: ItemQuery) =>
     request<WebItemListView>(
-      web(`/products/${seg(key)}/items${query({ status, limit: MAX_PAGE })}`),
+      web(
+        `/products/${seg(key)}/items${query({ ...filters, limit: MAX_PAGE })}`,
+      ),
     ),
-  statusUpdates: (key: string) =>
+  productStatusUpdates: (key: string) =>
     request<WebStatusUpdatePageView>(
       web(`/products/${seg(key)}/status-updates${query({ limit: MAX_PAGE })}`),
+    ),
+  projects: (cursor: string | null) =>
+    request<WebProjectPageView>(
+      web(`/projects${query({ cursor, limit: MAX_PAGE })}`),
+    ),
+  project: (slug: string) =>
+    request<WebProjectDetailView>(web(`/projects/${seg(slug)}`)),
+  projectItems: (slug: string, filters: ProjectItemQuery) =>
+    request<WebProjectItemsView>(
+      web(
+        `/projects/${seg(slug)}/items${query({ ...filters, limit: MAX_PAGE })}`,
+      ),
+    ),
+  projectStatusUpdates: (slug: string) =>
+    request<WebStatusUpdatePageView>(
+      web(`/projects/${seg(slug)}/status-updates${query({ limit: MAX_PAGE })}`),
     ),
   issue: (key: string) => request<WebItemView>(web(`/items/${seg(key)}`)),
   feed: (filter: FeedFilter) =>

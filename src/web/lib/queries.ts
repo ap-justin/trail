@@ -5,21 +5,53 @@ import {
   type QueryClientConfig,
   queryOptions,
 } from "@tanstack/react-query";
-import { ApiError, api, type FeedFilter } from "@/lib/api";
-import type { MeView, WebItemRowView } from "@/lib/api-types";
+import {
+  ApiError,
+  api,
+  type FeedFilter,
+  type ItemQuery,
+  type ProjectItemQuery,
+} from "@/lib/api";
+import type { MeView, WebProjectView } from "@/lib/api-types";
 
 export const keys = {
   me: ["me"] as const,
+  products: ["products"] as const,
+  product: (key: string) => ["product", key] as const,
+  productItems: (key: string, { type, status }: ItemQuery) =>
+    ["product", key, "items", type, status] as const,
+  productStatusUpdates: (key: string) =>
+    ["product", key, "status-updates"] as const,
   projects: ["projects"] as const,
-  project: (key: string) => ["project", key] as const,
-  issues: (key: string, status: WebItemRowView["status"] | null) =>
-    ["project", key, "issues", status] as const,
-  statusUpdates: (key: string) => ["project", key, "status-updates"] as const,
+  project: (slug: string) => ["project", slug] as const,
+  projectItems: (slug: string, { product, type, status }: ProjectItemQuery) =>
+    ["project", slug, "items", product, type, status] as const,
+  projectStatusUpdates: (slug: string) =>
+    ["project", slug, "status-updates"] as const,
   issue: (key: string) => ["issue", key] as const,
   feed: (filter: FeedFilter) => ["feed", filter] as const,
   search: (q: string) => ["search", q] as const,
   people: ["people"] as const,
 };
+
+/** Pages of projects the list reads before it stops: the list screen has no Load more. */
+export const PROJECT_PAGES_MAX = 10;
+
+/** Every project the viewer can see, newest first, up to `PROJECT_PAGES_MAX` pages. */
+export const projectsQuery = queryOptions({
+  queryKey: keys.projects,
+  queryFn: async (): Promise<WebProjectView[]> => {
+    const projects: WebProjectView[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < PROJECT_PAGES_MAX; page++) {
+      const answer = await api.projects(cursor);
+      projects.push(...answer.items);
+      cursor = answer.nextCursor;
+      if (cursor === null) break;
+    }
+    return projects;
+  },
+});
 
 export const meQuery = queryOptions({
   queryKey: keys.me,

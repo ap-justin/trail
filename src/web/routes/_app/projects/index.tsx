@@ -1,25 +1,21 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { AppPage, useChrome } from "@/app/chrome";
-import { ProductsView } from "@/components/products";
-import { api } from "@/lib/api";
+import { AppPage } from "@/app/chrome";
+import { ProjectsView } from "@/components/projects";
 import { statusOf } from "@/lib/loadable";
-import { keys } from "@/lib/queries";
+import { projectsQuery } from "@/lib/queries";
 
 export const Route = createFileRoute("/_app/projects/")({
   component: ProjectsPage,
 });
 
 function ProjectsPage() {
-  const { session } = useChrome();
-  const projects = useQuery({ queryKey: keys.projects, queryFn: api.projects });
+  const projects = useQuery(projectsQuery);
   return (
     <AppPage section="projects" heading="Projects">
-      <ProductsView
+      <ProjectsView
         status={statusOf(projects)}
-        products={projects.data?.items ?? []}
-        ownerName={session.ownerName}
-        isOwner={session.viewer.isOwner}
+        projects={projects.data ?? []}
         onRetry={() => void projects.refetch()}
       />
     </AppPage>

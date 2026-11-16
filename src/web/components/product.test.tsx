@@ -139,7 +139,7 @@ describe("items", () => {
     for (const link of screen.getAllByRole("link", {
       name: "TRL-17 Human UI: feed, projects, issue page",
     })) {
-      expect(link).toHaveAttribute("href", "/issues/TRL-17");
+      expect(link).toHaveAttribute("href", "/products/TRL/17");
     }
   });
 

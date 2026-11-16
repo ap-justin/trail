@@ -71,7 +71,7 @@ function serveIssue() {
 async function openIssue() {
   signedInAs("member");
   const reads = serveIssue();
-  const app = renderApp("/issues/TRL-14");
+  const app = renderApp("/products/TRL/14");
   expect(await screen.findByText(issueTitle)).toBeInTheDocument();
   const stream = FakeEventSource.current;
   stream.open();
@@ -218,7 +218,10 @@ describe("the shell's stream", () => {
       expect(account.querySelector("img")).toHaveAttribute("src", mayaPhoto),
     );
 
-    await router.navigate({ to: "/issues/$key", params: { key: "TRL-14" } });
+    await router.navigate({
+      to: "/products/$key/$n",
+      params: { key: "TRL", n: "14" },
+    });
     expect(await screen.findByText(issueTitle)).toBeInTheDocument();
     expect(feed?.readyState).toBe(FakeEventSource.CLOSED);
     const [reopened, ...more] = liveStreams();

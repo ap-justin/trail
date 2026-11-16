@@ -36,7 +36,7 @@ describe("SearchResults", () => {
     expect(project).toHaveAttribute("href", "/projects/human-ui");
     expect(project).toHaveAccessibleName("Human UI launch");
     expect(project?.querySelector("svg")).toHaveClass("lucide-folder");
-    expect(issue).toHaveAttribute("href", "/issues/TRL-14");
+    expect(issue).toHaveAttribute("href", "/products/TRL/14");
     expect(issue).toHaveAccessibleName(
       "TRL-14 Team access: invite people JUS-187",
     );

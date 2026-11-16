@@ -1,0 +1,68 @@
+import { useQuery } from "@tanstack/react-query";
+import { createFileRoute } from "@tanstack/react-router";
+import { AppPage, useChrome } from "@/app/chrome";
+import { NotFoundPage } from "@/app/not-found-page";
+import {
+  ProductHeading,
+  ProductHealth,
+  ProductView,
+} from "@/components/product";
+import { api, isNotFound } from "@/lib/api";
+import { itemSearchOf, validateItemSearch } from "@/lib/item-search";
+import { loadableOf } from "@/lib/loadable";
+import { keys } from "@/lib/queries";
+
+export const Route = createFileRoute("/_app/products/$key/")({
+  validateSearch: validateItemSearch,
+  component: ProductPage,
+});
+
+function ProductPage() {
+  const { key } = Route.useParams();
+  const { status = null, type = null } = Route.useSearch();
+  const filters = { status, type };
+  const navigate = Route.useNavigate();
+  const { session, openNewIssue } = useChrome();
+  const product = useQuery({
+    queryKey: keys.product(key),
+    queryFn: () => api.product(key),
+  });
+  const items = useQuery({
+    queryKey: keys.productItems(key, filters),
+    queryFn: () => api.productItems(key, filters),
+  });
+  const updates = useQuery({
+    queryKey: keys.productStatusUpdates(key),
+    queryFn: () => api.productStatusUpdates(key),
+  });
+
+  if (isNotFound(product.error)) return <NotFoundPage />;
+  // named from the session's list until the product itself has loaded
+  const ref = product.data ??
+    session.products.find((p) => p.key === key) ?? { key, name: "" };
+
+  return (
+    <AppPage
+      section="products"
+      productKey={key}
+      heading={<ProductHeading product={ref} />}
+      headingAccessory={
+        product.data && <ProductHealth product={product.data} />
+      }
+    >
+      <ProductView
+        product={ref}
+        detail={product.data ?? null}
+        items={loadableOf(items)}
+        statusUpdates={loadableOf(updates)}
+        filters={filters}
+        onFiltersChange={(next) =>
+          void navigate({ search: itemSearchOf(next) })
+        }
+        onNewIssue={() => openNewIssue(key)}
+        onRetryItems={() => void items.refetch()}
+        onRetryStatusUpdates={() => void updates.refetch()}
+      />
+    </AppPage>
+  );
+}

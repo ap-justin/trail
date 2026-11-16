@@ -86,7 +86,7 @@ describe("a bot's title changing live", () => {
         return HttpResponse.json(issue());
       }),
     );
-    renderApp("/issues/TRL-14");
+    renderApp("/products/TRL/14");
     expect(
       await screen.findByText("Team access: invite people by GitHub username"),
     ).toBeInTheDocument();
@@ -111,7 +111,7 @@ describe("a bot's title changing live", () => {
     expect(reads).toBe(1);
   });
 
-  test("on a project page: the status update's author, not the issue list's assignee", async () => {
+  test("on a product page: the status update's author, not the issue list's assignee", async () => {
     signedInAs("member");
     server.use(
       http.get("/api/web/products/TRL", () =>
@@ -127,7 +127,7 @@ describe("a bot's title changing live", () => {
         }),
       ),
     );
-    renderApp("/projects/TRL");
+    renderApp("/products/TRL");
     expect(await screen.findByRole("table")).toBeInTheDocument();
     await screen.findByText(statusUpdate().body);
     const stream = FakeEventSource.current;

@@ -33,8 +33,8 @@ test("coming back to a feed Query still holds shows its rows, even when the refe
   const { router } = renderApp("/");
   await waitFor(() => expect(rowFor("e2")).not.toBeNull());
 
-  await router.navigate({ to: "/projects" });
-  await waitFor(() => expect(router.state.location.pathname).toBe("/projects"));
+  await router.navigate({ to: "/products" });
+  await waitFor(() => expect(router.state.location.pathname).toBe("/products"));
   await router.navigate({ to: "/" });
 
   await waitFor(() => expect(rowFor("e1")).not.toBeNull());
@@ -58,8 +58,8 @@ test("coming back to a cached feed shows its rows while the refresh is still in 
   const { router } = renderApp("/");
   await waitFor(() => expect(rowFor("e2")).not.toBeNull());
 
-  await router.navigate({ to: "/projects" });
-  await waitFor(() => expect(router.state.location.pathname).toBe("/projects"));
+  await router.navigate({ to: "/products" });
+  await waitFor(() => expect(router.state.location.pathname).toBe("/products"));
 
   // the refresh never answers until released, so only the cache can supply rows
   let release!: () => void;
