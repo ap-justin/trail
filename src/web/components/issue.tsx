@@ -187,7 +187,7 @@ function Properties({ issue }: { issue: WebItemView }) {
       >
         Properties
       </h2>
-      <dl className="grid grid-cols-[auto_minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 lg:grid-cols-[auto_minmax(0,1fr)]">
+      <dl className="grid grid-cols-[auto_minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 lg:grid-cols-[--spacing(21)_minmax(0,1fr)]">
         <Property label="Type" className="max-lg:hidden">
           <TypeBadge type={issue.type} />
         </Property>

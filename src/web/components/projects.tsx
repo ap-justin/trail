@@ -104,7 +104,8 @@ function ProjectsTable({
                 <ActorBadge kind={project.lead.kind} />
               </span>
             </TableCell>
-            <TableCell className={cell}>
+            {/* a date in another year carries it and is wider than the 72px column: its year wraps under */}
+            <TableCell className={cn(cell, "whitespace-normal")}>
               {project.targetDate ? (
                 <TargetDate date={project.targetDate} now={now} />
               ) : (

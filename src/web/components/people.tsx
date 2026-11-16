@@ -294,6 +294,7 @@ function InviteForm({
             id={ids.username}
             ref={inputRef}
             value={username}
+            placeholder="priya@studio.example"
             autoComplete="off"
             spellCheck={false}
             onChange={(event) => {
@@ -622,58 +623,61 @@ export function PeopleView(props: PeopleViewProps) {
     (nextEdit ?? headingRef.current)?.focus();
   }, [props.people]);
   return (
-    <div className="mx-auto flex w-full max-w-220 flex-col gap-6 pt-3 lg:px-6 lg:py-6">
-      <div className="px-4 lg:px-0">
-        <InviteForm
-          products={props.products}
-          onInvite={props.onInvite}
-          pending={props.invitePending}
-          error={props.inviteError}
-        />
-      </div>
-      <section aria-labelledby={listHeading}>
-        <h2
-          id={listHeading}
-          ref={headingRef}
-          tabIndex={-1}
-          className="mb-1 font-medium outline-none max-lg:sr-only"
-        >
-          People
-          {props.status === "ready" && (
-            <span className="ml-1 font-normal text-muted-foreground">
-              {props.people.length}
-            </span>
-          )}
-        </h2>
-        {props.status === "loading" && (
-          <ListSkeleton className="px-4 lg:px-0" />
-        )}
-        {props.status === "error" && (
-          <ErrorState
-            title="Couldn't load people"
-            description="Check your connection, then try again."
-            onRetry={props.onRetry}
+    // the 880px column sits inside the page padding, so the padding never narrows it
+    <div className="w-full pt-3 lg:px-6 lg:py-6">
+      <div className="mx-auto flex max-w-220 flex-col gap-6">
+        <div className="px-4 lg:px-0">
+          <InviteForm
+            products={props.products}
+            onInvite={props.onInvite}
+            pending={props.invitePending}
+            error={props.inviteError}
           />
-        )}
-        {props.status === "ready" && (
-          <ul ref={listRef} className="border-t">
-            {props.people.map((person) => (
-              <PersonRow
-                key={personId(person)}
-                person={person}
-                products={props.products}
-                onSaveProducts={props.onSaveProducts}
-                onRemove={props.onRemove}
-                mutation={
-                  props.rowMutations.find(
-                    (write) => write.id === personId(person),
-                  ) ?? null
-                }
-              />
-            ))}
-          </ul>
-        )}
-      </section>
+        </div>
+        <section aria-labelledby={listHeading}>
+          <h2
+            id={listHeading}
+            ref={headingRef}
+            tabIndex={-1}
+            className="mb-1 font-medium outline-none max-lg:sr-only"
+          >
+            People
+            {props.status === "ready" && (
+              <span className="ml-1 font-normal text-muted-foreground">
+                {props.people.length}
+              </span>
+            )}
+          </h2>
+          {props.status === "loading" && (
+            <ListSkeleton className="px-4 lg:px-0" />
+          )}
+          {props.status === "error" && (
+            <ErrorState
+              title="Couldn't load people"
+              description="Check your connection, then try again."
+              onRetry={props.onRetry}
+            />
+          )}
+          {props.status === "ready" && (
+            <ul ref={listRef} className="border-t">
+              {props.people.map((person) => (
+                <PersonRow
+                  key={personId(person)}
+                  person={person}
+                  products={props.products}
+                  onSaveProducts={props.onSaveProducts}
+                  onRemove={props.onRemove}
+                  mutation={
+                    props.rowMutations.find(
+                      (write) => write.id === personId(person),
+                    ) ?? null
+                  }
+                />
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
     </div>
   );
 }

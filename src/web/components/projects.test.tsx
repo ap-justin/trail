@@ -79,6 +79,13 @@ describe("projects", () => {
     expect(cardFor("human-ui")).toHaveTextContent("· 14 open");
   });
 
+  test("a target in another year keeps its year and may wrap, so it never runs into the next column", () => {
+    renderProjects({ projects: [projectRow({ targetDate: "2027-01-15" })] });
+    const target = cellsOf(rowFor("human-ui"))[4];
+    expect(target).toHaveTextContent(/^Jan 15, 2027$/);
+    expect(target).toHaveClass("whitespace-normal");
+  });
+
   test("a card ends on the keys, the target and the open count", () => {
     renderProjects({ projects: [teamAccessRow()] });
     expect(cardFor("team-access")).toHaveTextContent(

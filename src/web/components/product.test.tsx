@@ -155,6 +155,15 @@ describe("items", () => {
     );
   });
 
+  test("a row's labels stay on one line in the table", () => {
+    renderProduct();
+    const labels = tableRow("TRL-17").querySelector(
+      '[data-slot="badge"]',
+    )?.parentElement;
+    expect(labels).toHaveClass("overflow-hidden");
+    expect(labels).not.toHaveClass("flex-wrap");
+  });
+
   test("a canceled row's title is muted and None priority is a dash", () => {
     renderProduct();
     const [title] = screen.getAllByRole("link", { name: /^TRL-11 / });

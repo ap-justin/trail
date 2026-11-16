@@ -302,9 +302,21 @@ function Assignee({ item }: { item: WebItemRowView }) {
   );
 }
 
-function Labels({ labels }: { labels: string[] }) {
+/** `oneLine` keeps a table row at its height: labels past the cell's width clip. */
+function Labels({
+  labels,
+  oneLine = false,
+}: {
+  labels: string[];
+  oneLine?: boolean;
+}) {
   return (
-    <span className="flex min-w-0 flex-wrap items-center gap-1">
+    <span
+      className={cn(
+        "flex min-w-0 items-center gap-1",
+        oneLine ? "overflow-hidden" : "flex-wrap",
+      )}
+    >
       {labels.map((label) => (
         // the space keeps the names apart when read as text; flex drops it visually
         <Fragment key={label}>
@@ -431,8 +443,8 @@ export function ItemTable({
                 <PriorityLabel priority={item.priority} />
               </TableCell>
               {labels && (
-                <TableCell className="px-0 py-2 pr-2.5 whitespace-normal">
-                  <Labels labels={item.labels} />
+                <TableCell className="px-0 py-2 pr-2.5">
+                  <Labels labels={item.labels} oneLine />
                 </TableCell>
               )}
               <TableCell className="px-0 py-2 pr-2.5">
