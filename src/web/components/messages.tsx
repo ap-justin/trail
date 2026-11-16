@@ -378,10 +378,11 @@ function ReplyQuote({
 
 function MessageCard({ message }: { message: WebMessageView }) {
   return (
-    // a focus target for the first message of a newly loaded page, never in the tab order
+    // a focus target for the first message of a newly loaded page, never in the tab order;
+    // its scroll margins keep focus() scrolling it clear of the 48px top bar and, below lg, the 56px tab bar
     <li
       tabIndex={-1}
-      className="rounded-xl border outline-none focus-visible:ring-3 focus-visible:ring-ring/25"
+      className="scroll-mt-12 rounded-xl border outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/25 max-lg:scroll-mb-14"
     >
       <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 rounded-t-xl border-b bg-muted px-3 py-2">
         <ActorAvatar actor={message.sender} size="xs" />
