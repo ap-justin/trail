@@ -279,17 +279,24 @@ export function toSentMessage(row: SentMessage): SentMessageView {
   };
 }
 
-export function toInboxEntry(row: Message): InboxEntryView {
+/** A message text's first characters, and whether there is more. */
+export function previewOf(text: string) {
   // by code point, so a preview never ends on half a surrogate pair
-  const chars = [...row.text];
+  const chars = [...text];
+  return {
+    preview: chars.slice(0, MESSAGE_PREVIEW_CHARS).join(""),
+    truncated: chars.length > MESSAGE_PREVIEW_CHARS,
+  };
+}
+
+export function toInboxEntry(row: Message): InboxEntryView {
   return {
     id: row.id,
     from: { id: row.from.id, name: row.from.name },
     threadId: row.threadId,
     replyTo: row.replyToId,
     expectsReply: row.expectsReply,
-    preview: chars.slice(0, MESSAGE_PREVIEW_CHARS).join(""),
-    truncated: chars.length > MESSAGE_PREVIEW_CHARS,
+    ...previewOf(row.text),
     createdAt: row.createdAt.toISOString(),
     readAt: row.readAt?.toISOString() ?? null,
   };

@@ -1797,6 +1797,56 @@ export const personSchema = z.object({
 
 export const peopleSchema = z.object({ items: z.array(personSchema) });
 
+const webMessagePreview = {
+  preview: z.string().meta({
+    description: `The text's first ${MESSAGE_PREVIEW_CHARS} characters.`,
+  }),
+  truncated: z.boolean().meta({
+    description: "True when preview is shorter than the text.",
+  }),
+};
+
+export const webConversationSchema = z.object({
+  bots: z.tuple([webActorSchema, webActorSchema]).meta({
+    description: "The pair's two bots, in id order.",
+  }),
+  lastMessage: z.object({
+    id,
+    senderId: id,
+    ...webMessagePreview,
+    createdAt: timestamp,
+    expectsReply: z.boolean(),
+  }),
+  count: z.int().meta({ description: "Messages between the two bots." }),
+  lastAt: timestamp.meta({ description: "When the last message was sent." }),
+});
+
+export const webConversationPageSchema = pageSchema(webConversationSchema);
+
+export const webMessageSchema = z.object({
+  id,
+  sender: webActorSchema,
+  recipient: webActorSchema,
+  threadId: id.meta({ description: "The id of the thread's first message." }),
+  replyTo: z
+    .object({ id, senderName: z.string(), ...webMessagePreview })
+    .nullable()
+    .meta({
+      description:
+        "The message this one answers, as a quote; null on a thread's first message.",
+    }),
+  text: z.string().meta({ description: "Markdown." }),
+  expectsReply: z.boolean().meta({
+    description: "False when the sender asked for no reply.",
+  }),
+  createdAt: timestamp,
+  readAt: timestamp.nullable().meta({
+    description: "When the recipient marked it read; null while unread.",
+  }),
+});
+
+export const webMessagePageSchema = pageSchema(webMessageSchema);
+
 const productKeys = z
   .array(z.string().min(1).max(10))
   .max(1000)
@@ -1916,6 +1966,10 @@ export type FeedView = z.infer<typeof feedSchema>;
 export type SearchView = z.infer<typeof searchSchema>;
 export type PersonView = z.infer<typeof personSchema>;
 export type PeopleView = z.infer<typeof peopleSchema>;
+export type WebConversationView = z.infer<typeof webConversationSchema>;
+export type WebConversationPageView = z.infer<typeof webConversationPageSchema>;
+export type WebMessageView = z.infer<typeof webMessageSchema>;
+export type WebMessagePageView = z.infer<typeof webMessagePageSchema>;
 export type PersonCreate = z.input<typeof personCreateSchema>;
 export type PersonUpdate = z.input<typeof personUpdateSchema>;
 export type WebIssueCreate = z.input<typeof webIssueCreateSchema>;

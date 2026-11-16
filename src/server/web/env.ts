@@ -1,6 +1,6 @@
 import { createMiddleware } from "hono/factory";
 import { createRouter } from "../api/env.js";
-import { errorResponse } from "../api/errors.js";
+import { errorResponse, handleNotFound } from "../api/errors.js";
 import type { TrailAuth } from "../auth/auth.js";
 import type { Viewer } from "../auth/viewer.js";
 
@@ -56,3 +56,9 @@ export const requireOwnOrigin = (auth: TrailAuth) =>
     }
     await next();
   });
+
+/** The same 404 as a route that doesn't exist for anyone but the owner: a member never learns the route is there. */
+export const ownerOnly = createMiddleware<WebEnv>(async (c, next) => {
+  if (c.var.member.kind !== "owner") return handleNotFound(c);
+  await next();
+});

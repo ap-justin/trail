@@ -1,9 +1,11 @@
 import { beforeAll, describe, expect, test } from "vitest";
 import { projectKey, setupTestApp } from "../test-app.js";
 
-const { app, request, signIn, owner, addMember, addProject } = setupTestApp();
+const { app, request, signIn, owner, addMember, addProject, addBot, bot } =
+  setupTestApp();
 
 const a = addProject("A");
+const other = addBot("other").actor;
 let issueKey = "";
 const cookies: Record<Viewer, string | undefined> = {
   owner: undefined,
@@ -192,6 +194,16 @@ const matrix: [string, Call, Record<Viewer, number>][] = [
       path: () => "/people/deletable",
     },
     members(204, 404, 404),
+  ],
+  [
+    "GET /messages",
+    { method: "GET", path: () => "/messages" },
+    members(200, 404, 404),
+  ],
+  [
+    "GET /messages/:a/:b",
+    { method: "GET", path: () => `/messages/${bot.actor.id}/${other.id}` },
+    members(200, 404, 404),
   ],
 ];
 
