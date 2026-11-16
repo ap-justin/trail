@@ -41,7 +41,7 @@ const rows = (db: Db, sql: string) => db.$client.prepare(sql).all();
 
 const actors = `
   insert into actor (id, kind, display_name, created_at) values ('b', 'bot', 'builder', 0);
-  insert into actor (id, kind, display_name, github_id, created_at) values ('h', 'human', 'Justin', 1, 0);
+  insert into actor (id, kind, display_name, github_id, created_at) values ('h', 'human', 'Maya Chen', 1, 0);
 `;
 
 test("existing projects get unique keys and their issues numbers from 1 in creation order", () => {

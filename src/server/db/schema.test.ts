@@ -56,7 +56,7 @@ const bot = db
   .get();
 const human = db
   .insert(actor)
-  .values({ kind: "human", displayName: "Justin", githubId: 89639563 })
+  .values({ kind: "human", displayName: "Maya Chen", githubId: 1001 })
   .returning()
   .get();
 const proj = db
@@ -372,7 +372,7 @@ test("a comment's external ref is unique within its issue only", () => {
         authorId: bot.id,
         body: "imported",
         externalRef: "c-1",
-        sourceAuthor: "Justin",
+        sourceAuthor: "Maya Chen",
       })
       .run();
   commentOn(first.id)();
@@ -509,7 +509,7 @@ test("a status update needs a body and a known health", () => {
     ),
   ).toBe("SQLITE_CONSTRAINT_CHECK");
   expect(errorCode(update({ body: "" }))).toBe("SQLITE_CONSTRAINT_CHECK");
-  update({ externalRef: "su-1", sourceAuthor: "Justin" })();
+  update({ externalRef: "su-1", sourceAuthor: "Maya Chen" })();
   expect(errorCode(update({ externalRef: "su-1" }))).toBe(
     "SQLITE_CONSTRAINT_UNIQUE",
   );
@@ -685,7 +685,7 @@ test("a human carries a lowercased GitHub login, unique among actors; a bot carr
       db.insert(actor).values({ kind, displayName: "p", githubLogin }).run();
   withLogin("octo-cat9")();
   expect(errorCode(withLogin("octo-cat9"))).toBe("SQLITE_CONSTRAINT_UNIQUE");
-  expect(errorCode(withLogin("tara-bot", "bot"))).toBe(
+  expect(errorCode(withLogin("builder-bot", "bot"))).toBe(
     "SQLITE_CONSTRAINT_CHECK",
   );
   expect(errorCode(withLogin("a".repeat(39)))).toBe("no error");
@@ -1096,13 +1096,13 @@ test("a project target date is a calendar day, or none", () => {
 });
 
 test.each([
-  "http://github.com/kru/trail",
-  "https://github.com/kru",
-  "https://github.com/kru/",
+  "http://github.com/acme/trail",
+  "https://github.com/acme",
+  "https://github.com/acme/",
   "https://github.com//trail",
-  "https://github.com/kru/trail/issues",
-  "https://github.com/kru/tr ail",
-  "https://gitlab.com/kru/trail",
+  "https://github.com/acme/trail/issues",
+  "https://github.com/acme/tr ail",
+  "https://gitlab.com/acme/trail",
 ])("a product repo url %j is rejected", (repoUrl) => {
   expect(
     errorCode(() =>
@@ -1112,7 +1112,7 @@ test.each([
 });
 
 test("a product repo url is a GitHub repository, or none", () => {
-  for (const repoUrl of ["https://github.com/kru-ai/trail.web", null]) {
+  for (const repoUrl of ["https://github.com/acme/trail.web", null]) {
     expect(
       errorCode(() =>
         db

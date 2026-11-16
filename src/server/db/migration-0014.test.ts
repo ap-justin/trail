@@ -56,7 +56,7 @@ function legacyDb(file: string): Db {
   migrate(legacy, through(13));
   legacy.$client.exec(`
     insert into actor (id, kind, display_name, label, created_at) values
-      ('b1', 'bot', 'builder', 'agt_1', 0);
+      ('b1', 'bot', 'builder', 'bot_1', 0);
     insert into actor (id, kind, display_name, github_id, github_login, is_owner, created_at) values
       ('h1', 'human', 'Ada', 7, 'ada', 1, 0);
     insert into project (id, key, name, created_by, created_at, updated_at) values ('p1', 'TRL', 'trail', 'b1', 0, 0);
@@ -96,7 +96,7 @@ test("actors from before 0014 keep their data and carry no title", () => {
       id: "b1",
       kind: "bot",
       display_name: "builder",
-      label: "agt_1",
+      label: "bot_1",
       github_id: null,
       github_login: null,
       is_owner: 0,

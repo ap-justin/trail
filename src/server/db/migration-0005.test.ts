@@ -51,13 +51,13 @@ test("a live database keeps every row, and its humans start with no GitHub login
   migrate(db, through(4));
   db.$client.exec(`
     insert into actor (id, kind, display_name, github_id, label, created_at) values
-      ('b1', 'bot', 'Tara', null, 'agt_1', 0), ('h1', 'human', 'Justin', 89639563, null, 0);
+      ('b1', 'bot', 'Builder', null, 'bot_1', 0), ('h1', 'human', 'Maya Chen', 1001, null, 0);
     insert into api_key (id, actor_id, actor_kind, prefix, hash, created_at) values
       ('k1', 'b1', 'bot', 'trl_ab', '${"a".repeat(64)}', 0);
     insert into project (id, key, name, created_by, created_at, updated_at, issue_seq) values
       ('p', 'TRL', 'trail', 'b1', 0, 0, 1);
     insert into issue (id, project_id, number, title, created_by, source_key, created_at, updated_at) values
-      ('i1', 'p', 1, 'first', 'b1', 'JUS-1', 1, 1);
+      ('i1', 'p', 1, 'first', 'b1', 'ABC-1', 1, 1);
     insert into label (id, project_id, name, created_at) values ('l1', 'p', 'bug', 0);
     insert into issue_label (issue_id, label_id, project_id) values ('i1', 'l1', 'p');
     insert into issue_link (id, issue_id, url, title, created_at) values ('u1', 'i1', 'https://x', 'x', 0);
@@ -97,12 +97,12 @@ test("an existing bot cannot be given a GitHub login after the migration", () =>
   const db = openDatabase(join(dir, "live-bot.db"));
   migrate(db, through(4));
   db.$client.exec(
-    "insert into actor (id, kind, display_name, created_at) values ('b1', 'bot', 'Tara', 0)",
+    "insert into actor (id, kind, display_name, created_at) values ('b1', 'bot', 'Builder', 0)",
   );
   migrate(db, through(5));
   expect(() =>
     db.$client
-      .prepare("update actor set github_login = 'tara' where id = 'b1'")
+      .prepare("update actor set github_login = 'builder' where id = 'b1'")
       .run(),
   ).toThrow(expect.objectContaining({ code: "SQLITE_CONSTRAINT_CHECK" }));
   db.$client.close();

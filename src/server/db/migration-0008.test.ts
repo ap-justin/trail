@@ -50,7 +50,7 @@ function seededAt7(): Db {
   migrate(db, through(7));
   db.$client.exec(`
     insert into actor (id, kind, display_name, label, created_at) values
-      ('b1', 'bot', 'Tara', 'agt_1', 0), ('b2', 'bot', 'Uma', 'agt_2', 0);
+      ('b1', 'bot', 'Builder', 'bot_1', 0), ('b2', 'bot', 'Reviewer', 'bot_2', 0);
     insert into project (id, key, name, created_by, created_at, updated_at) values
       ('p1', 'TRL', 'trail', 'b1', 0, 0), ('p2', 'OPS', 'ops', 'b2', 0, 0);
     insert into issue (id, project_id, number, title, created_by, created_at, updated_at) values

@@ -37,7 +37,7 @@ test("a database holding 0006 data keeps every row; no actor is the owner and no
   migrate(db, through(6));
   db.$client.exec(`
     insert into actor (id, kind, display_name, github_id, github_login, label, created_at) values
-      ('b1', 'bot', 'Tara', null, null, 'agt_1', 0), ('h1', 'human', 'Justin', 89639563, 'justin', null, 0);
+      ('b1', 'bot', 'Builder', null, null, 'bot_1', 0), ('h1', 'human', 'Maya Chen', 1001, 'mayachen', null, 0);
     insert into api_key (id, actor_id, actor_kind, prefix, hash, created_at) values
       ('k1', 'b1', 'bot', 'trl_ab', '${"a".repeat(64)}', 0);
     insert into project (id, key, name, created_by, created_at, updated_at) values
@@ -47,9 +47,9 @@ test("a database holding 0006 data keeps every row; no actor is the owner and no
     insert into comment (id, issue_id, author_id, body, created_at) values ('c1', 'i1', 'h1', 'hi', 0);
     insert into invite (username, invited_by, created_at) values ('ada', 'h1', 0);
     insert into project_member (username, project_id, created_at) values ('ada', 'p', 0);
-    insert into "user" (id, name, email, github_id, github_login) values ('u1', 'Justin', 'j@x', 89639563, 'justin');
+    insert into "user" (id, name, email, github_id, github_login) values ('u1', 'Maya Chen', 'maya@x', 1001, 'mayachen');
     insert into session (id, expires_at, token, updated_at, user_id) values ('s1', 0, 't', 0, 'u1');
-    insert into account (id, account_id, provider_id, user_id, updated_at) values ('a1', '89639563', 'github', 'u1', 0);
+    insert into account (id, account_id, provider_id, user_id, updated_at) values ('a1', '1001', 'github', 'u1', 0);
   `);
   const tables = [
     "actor",
