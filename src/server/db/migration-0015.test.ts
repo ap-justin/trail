@@ -150,6 +150,54 @@ test("each product's owner resolves by label, else by name ignoring case, else s
   ]);
 });
 
+// The brief's Migration list, typed out here and not read from product-owners.ts.
+const BRIEF_OWNERS = [
+  ["TRL", "Tara"],
+  ["KRU", "Kai"],
+  ["SKY", "Skye"],
+  ["DOOP", "Nia"],
+  ["LIA", "Quinn"],
+  ["ECARDS", "Holly"],
+  ["BRAND", "Wren"],
+  ["STAND", "Nora"],
+  ["NPAPI", "Rhea"],
+  ["OFR", "Faye"],
+  ["ERRORS", "Remy"],
+  ["BGCONN", "Juno"],
+  ["BGP", "Ivy"],
+  ["DS", "Pia"],
+  ["CAD", "Lena"],
+  ["BOT", "Vera"],
+] as const;
+
+test("every product of the brief's list resolves to its own bot, TRL's by agent id", () => {
+  const db = open();
+  migrate(db, through(14));
+  // each bot is named for its owner, except Tara: her name differs, only her agent label matches
+  for (const [key, bot] of BRIEF_OWNERS) {
+    const id = `bot-${key.toLowerCase()}`;
+    const [name, label] =
+      key === "TRL" ? ["Tara Lane", TARA_AGENT] : [bot.toUpperCase(), null];
+    db.$client
+      .prepare(
+        "insert into actor (id, kind, display_name, label, created_at) values (?, 'bot', ?, ?, 0)",
+      )
+      .run(id, name, label);
+    db.$client
+      .prepare(
+        "insert into project (id, key, name, issue_seq, created_by, created_at, updated_at) values (?, ?, ?, 0, ?, 0, 0)",
+      )
+      .run(`p-${key.toLowerCase()}`, key, key, id);
+  }
+  migrate(db);
+  expect(rows(db, "select key, owner_id from product order by key")).toEqual(
+    BRIEF_OWNERS.map(([key]) => ({
+      key,
+      owner_id: `bot-${key.toLowerCase()}`,
+    })).sort((x, y) => (x.key < y.key ? -1 : 1)),
+  );
+});
+
 test("a seeded label no bot carries falls back to the bot's name", () => {
   const db = legacyDb();
   expect(

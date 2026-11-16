@@ -15,6 +15,8 @@ export const deprecations = {
     "create_project with key (POST /projects with key) is deprecated: use create_product (POST /products) to create a product",
   product:
     "this names a product by its key, as project did before projects: use get_product, update_product, list_status_updates or post_status_update with product (or /products/{key})",
+  listProjects:
+    "list_projects lists projects (groups of items across products) since this release, no longer products: call list_products (GET /products) for those",
   labels: "/projects/{key}/labels is deprecated: use /products/{key}/labels",
   projectId: "projectId is deprecated: send product with the product's key",
 } as const;

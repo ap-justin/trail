@@ -139,7 +139,49 @@ test("a slug wins over the legacy meaning and its answers carry no deprecated no
 });
 
 test("GET /projects lists projects, never products", async () => {
+  await request("POST", "/api/v1/products", {
+    json: { key: "LGL", name: "legacy list" },
+  });
+  const made = await request("POST", "/api/v1/projects", {
+    json: { name: "lgl list", slug: "lgl-list", products: ["LGL"] },
+  });
+  expect(made.status).toBe(201);
   const page = await json(await request("GET", "/api/v1/projects?limit=200"));
+  // the list is live: it holds the project this test just made
+  expect(page.items.map((p: Body) => p.slug)).toContain("lgl-list");
   expect(page.items.every((p: Body) => typeof p.slug === "string")).toBe(true);
   expect(page.items.some((p: Body) => "key" in p)).toBe(false);
+});
+
+test("GET /issues?status=open includes issues waiting in triage, as open meant before triage; GET /items keeps exact status", async () => {
+  await request("POST", "/api/v1/products", {
+    json: { key: "LGO", name: "legacy open" },
+  });
+  const create = async (title: string, key = bot.key) =>
+    json(
+      await request("POST", "/api/v1/issues", {
+        json: { projectId: "LGO", title },
+        key,
+      }),
+    );
+  const filed = await create("filed by another bot", addBot("lgo filer").key);
+  const todo = await create("planned");
+  const started = await create("started");
+  await request("PATCH", `/api/v1/items/${started.key}`, {
+    json: { status: "in_progress" },
+  });
+  expect([filed.status, todo.status]).toEqual(["triage", "open"]);
+  const keys = async (path: string) =>
+    (await json(await request("GET", path))).items.map((i: Body) => i.key);
+
+  expect(await keys("/api/v1/issues?projectId=LGO&status=open")).toEqual([
+    todo.key,
+    filed.key,
+  ]);
+  expect(await keys("/api/v1/issues?projectId=LGO&status=in_progress")).toEqual(
+    [started.key],
+  );
+  expect(await keys("/api/v1/items?product=LGO&status=open")).toEqual([
+    todo.key,
+  ]);
 });

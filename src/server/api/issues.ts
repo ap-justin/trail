@@ -56,7 +56,7 @@ const listIssues = createRoute({
   path: "/issues",
   summary: "Deprecated: list items (use GET /items)",
   description:
-    "Deprecated alias of GET /items, removed after the next release; projectId takes the product's key.",
+    "Deprecated alias of GET /items, removed after the next release; projectId takes the product's key, and status=open also lists issues waiting in triage (GET /items matches status exactly).",
   deprecated: true,
   tags,
   request: { query: issueListQuerySchema },
@@ -120,7 +120,7 @@ export function issueRoutes(service: Service) {
       return c.json(
         deprecated(
           toPage(
-            service.listItems(c.var.actor, {
+            service.listIssues(c.var.actor, {
               ...query,
               product: projectId,
               assignee: assigneeId,

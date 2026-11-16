@@ -110,10 +110,10 @@ export const api = {
   products: () => request<WebProductListView>(web("/products")),
   product: (key: string) =>
     request<WebProductDetailView>(web(`/products/${seg(key)}`)),
-  productItems: (key: string, filters: ItemQuery) =>
+  productItems: (key: string, filters: ItemQuery, cursor: string | null) =>
     request<WebItemListView>(
       web(
-        `/products/${seg(key)}/items${query({ ...filters, limit: MAX_PAGE })}`,
+        `/products/${seg(key)}/items${query({ ...filters, cursor, limit: MAX_PAGE })}`,
       ),
     ),
   productStatusUpdates: (key: string) =>
@@ -126,10 +126,14 @@ export const api = {
     ),
   project: (slug: string) =>
     request<WebProjectDetailView>(web(`/projects/${seg(slug)}`)),
-  projectItems: (slug: string, filters: ProjectItemQuery) =>
+  projectItems: (
+    slug: string,
+    filters: ProjectItemQuery,
+    cursor: string | null,
+  ) =>
     request<WebProjectItemsView>(
       web(
-        `/projects/${seg(slug)}/items${query({ ...filters, limit: MAX_PAGE })}`,
+        `/projects/${seg(slug)}/items${query({ ...filters, cursor, limit: MAX_PAGE })}`,
       ),
     ),
   projectStatusUpdates: (slug: string) =>

@@ -2,7 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { afterAll, expect, test } from "vitest";
 import { createBot, revokeKey } from "../service/keys.js";
-import { atFakeTime, setupTestApp } from "../test-app.js";
+import { atFakeTime, projectKey, setupTestApp } from "../test-app.js";
 
 const { app, db, bot } = setupTestApp();
 
@@ -511,12 +511,38 @@ test("add_todo after import_project numbers past the highest kept Linear number"
   expect(created.key).toBe("MKN-188");
 });
 
+test("whoami lists the products the key's bot owns, and every product it reaches", async () => {
+  const owner = createBot(db, "mcp whoami owner");
+  const client = await connect(owner.key);
+  const mine = projectKey();
+  const theirs = projectKey();
+  await call(client, "create_product", { key: mine, name: "whoami mine" });
+  await call(client, "create_product", {
+    key: theirs,
+    name: "whoami theirs",
+    owner: null,
+  });
+  const me = await call(client, "whoami");
+  expect(me.ownProducts).toEqual([{ key: mine, name: "whoami mine" }]);
+  expect(me.products).toEqual(
+    expect.arrayContaining([
+      { key: mine, name: "whoami mine" },
+      { key: theirs, name: "whoami theirs" },
+    ]),
+  );
+});
+
 test("whoami answers the key's bot and list_bots pages every bot with id, name, label, photoUrl and title", async () => {
   const [first, labelled] = atFakeTime([
     () => createBot(db, "mcp listed first"),
     () => createBot(db, "mcp whoami", { label: "agent-mcp" }),
   ]) as [ReturnType<typeof createBot>, ReturnType<typeof createBot>];
   const client = await connect(labelled.key);
+  const seen = projectKey();
+  await call(await connect(first.key), "create_product", {
+    key: seen,
+    name: "whoami seen",
+  });
   expect(await call(client, "whoami")).toEqual({
     id: labelled.actor.id,
     kind: "bot",
@@ -524,7 +550,7 @@ test("whoami answers the key's bot and list_bots pages every bot with id, name, 
     label: "agent-mcp",
     scope: { products: null, projects: null, actions: null },
     ownProducts: [],
-    products: expect.arrayContaining([{ key: "MCP", name: "renamed" }]),
+    products: expect.arrayContaining([{ key: seen, name: "whoami seen" }]),
     photoUrl: null,
     title: null,
   });

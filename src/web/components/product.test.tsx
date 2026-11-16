@@ -87,6 +87,9 @@ const tableRow = (key: string) => {
 const tabs = () => screen.getByRole("tablist", { name: "Filter by status" });
 const typeToggle = () => screen.getByRole("group", { name: "Filter by type" });
 const aside = (name: string) => screen.getByRole("region", { name });
+const panes = () => screen.getByRole("tablist", { name: "Show" });
+const paneTab = (name: string) => within(panes()).getByRole("tab", { name });
+const pane = (name: string) => screen.getByRole("tabpanel", { name });
 
 describe("items", () => {
   test("the columns read status, Key, Type, Title, Priority, Labels, Assignee, Updated", () => {
@@ -351,8 +354,8 @@ describe("aside", () => {
     renderProduct({ detail: productDetail({ projects: [], projectCount: 0 }) });
     expect(screen.queryByRole("region", { name: /^Projects/ })).toBeNull();
     expect(
-      within(screen.getByRole("group", { name: "Show" }))
-        .getAllByRole("button")
+      within(panes())
+        .getAllByRole("tab")
         .map((b) => b.textContent),
     ).toEqual(["Items", "Status updates"]);
   });
@@ -390,13 +393,65 @@ describe("aside", () => {
     expect(aside("Status updates")).toHaveTextContent("No status update yet");
   });
 
-  test("the 375 switch shows Items, Projects or Status updates", async () => {
+  test("the 375 tabs show Items, Projects or Status updates, each a panel named by its tab", async () => {
     const user = userEvent.setup();
     renderProduct();
-    const views = screen.getByRole("group", { name: "Show" });
-    await user.click(within(views).getByRole("button", { name: "Projects" }));
-    expect(aside("Projects 2")).not.toHaveClass("max-lg:hidden");
-    expect(aside("Status updates")).toHaveClass("max-lg:hidden");
+    expect(paneTab("Items")).toHaveAttribute("aria-selected", "true");
+    await user.click(paneTab("Projects"));
+    expect(paneTab("Projects")).toHaveAttribute("aria-selected", "true");
+    expect(paneTab("Items")).toHaveAttribute("aria-selected", "false");
+    const projects = pane("Projects");
+    expect(paneTab("Projects")).toHaveAttribute("aria-controls", projects.id);
+    expect(projects).toContainElement(aside("Projects 2"));
+    expect(projects).not.toHaveAttribute("data-hidden");
+    expect(pane("Items")).toHaveAttribute("data-hidden");
+    expect(pane("Status updates")).toHaveAttribute("data-hidden");
+    expect(pane("Status updates")).toContainElement(aside("Status updates"));
+  });
+
+  test("every pane stays rendered and reachable for 1024px, where the breakpoint alone hides one", () => {
+    renderProduct();
+    for (const name of ["Items", "Projects", "Status updates"]) {
+      const panel = pane(name);
+      expect(panel).not.toHaveAttribute("hidden");
+      expect(panel).not.toHaveAttribute("inert");
+      expect(panel).toHaveClass("max-lg:data-hidden:hidden");
+    }
+  });
+
+  test("the 375 tabs work from the keyboard", async () => {
+    const user = userEvent.setup();
+    renderProduct();
+    paneTab("Items").focus();
+    await user.keyboard("{ArrowRight}");
+    expect(paneTab("Projects")).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(paneTab("Projects")).toHaveAttribute("aria-selected", "true");
+    expect(pane("Projects")).not.toHaveAttribute("data-hidden");
+  });
+
+  test("switching from the Projects pane to a product with no projects shows Items, selected", async () => {
+    const user = userEvent.setup();
+    const p = props();
+    const { rerender } = render(<ProductView {...p} />);
+    await user.click(paneTab("Projects"));
+    const other = { key: "OPB", name: "OpenBot" };
+    // the route reuses the view: the next product arrives as props, its detail still loading
+    rerender(<ProductView {...p} product={other} detail={null} />);
+    expect(paneTab("Items")).toHaveAttribute("aria-selected", "true");
+    expect(pane("Items")).not.toHaveAttribute("data-hidden");
+    rerender(
+      <ProductView
+        {...p}
+        product={other}
+        detail={productDetail({ projects: [], projectCount: 0 })}
+      />,
+    );
+    expect(paneTab("Items")).toHaveAttribute("aria-selected", "true");
+    expect(pane("Items")).not.toHaveAttribute("data-hidden");
+    // its projects arriving later leave the person on Items
+    rerender(<ProductView {...p} product={other} />);
+    expect(paneTab("Items")).toHaveAttribute("aria-selected", "true");
   });
 
   test("while the detail loads, the list still shows and the aside has no repo or projects", () => {

@@ -12,7 +12,12 @@ import {
   type ItemQuery,
   type ProjectItemQuery,
 } from "@/lib/api";
-import type { MeView, WebProjectView } from "@/lib/api-types";
+import type {
+  MeView,
+  WebItemListView,
+  WebProjectItemsView,
+  WebProjectView,
+} from "@/lib/api-types";
 
 export const keys = {
   me: ["me"] as const,
@@ -34,24 +39,87 @@ export const keys = {
   people: ["people"] as const,
 };
 
+/** Reads pages in order until one has no `nextCursor` or `max` pages are in; never empty. */
+async function readPages<Page extends { nextCursor: string | null }>(
+  read: (cursor: string | null) => Promise<Page>,
+  max: number,
+): Promise<Page[]> {
+  const pages: Page[] = [];
+  let cursor: string | null = null;
+  do {
+    const page = await read(cursor);
+    pages.push(page);
+    cursor = page.nextCursor;
+  } while (cursor !== null && pages.length < max);
+  return pages;
+}
+
 /** Pages of projects the list reads before it stops: the list screen has no Load more. */
 export const PROJECT_PAGES_MAX = 10;
 
 /** Every project the viewer can see, newest first, up to `PROJECT_PAGES_MAX` pages. */
 export const projectsQuery = queryOptions({
   queryKey: keys.projects,
-  queryFn: async (): Promise<WebProjectView[]> => {
-    const projects: WebProjectView[] = [];
-    let cursor: string | null = null;
-    for (let page = 0; page < PROJECT_PAGES_MAX; page++) {
-      const answer = await api.projects(cursor);
-      projects.push(...answer.items);
-      cursor = answer.nextCursor;
-      if (cursor === null) break;
-    }
-    return projects;
-  },
+  queryFn: async (): Promise<WebProjectView[]> =>
+    (await readPages(api.projects, PROJECT_PAGES_MAX)).flatMap((p) => p.items),
 });
+
+/** Pages of a product's or project's items the page reads before it stops: neither has Load more. */
+export const ITEM_PAGES_MAX = 10;
+
+/**
+ * A product's items under `filters`, every page up to `ITEM_PAGES_MAX`, as one list. A
+ * `nextCursor` left set means the cap cut the list short.
+ */
+export const productItemsQuery = (key: string, filters: ItemQuery) =>
+  queryOptions({
+    queryKey: keys.productItems(key, filters),
+    queryFn: async (): Promise<WebItemListView> =>
+      (
+        await readPages(
+          (cursor) => api.productItems(key, filters, cursor),
+          ITEM_PAGES_MAX,
+        )
+      ).reduce((read, page) => ({
+        ...page,
+        items: [...read.items, ...page.items],
+      })),
+  });
+
+type ItemGroup = WebProjectItemsView["groups"][number];
+
+/** The next page continues the last group, so a product split across two pages is one group again. */
+function joinGroups(read: ItemGroup[], page: ItemGroup[]): ItemGroup[] {
+  const last = read.at(-1);
+  const [first, ...rest] = page;
+  if (!last || !first || last.product.key !== first.product.key) {
+    return [...read, ...page];
+  }
+  return [
+    ...read.slice(0, -1),
+    { ...first, items: [...last.items, ...first.items] },
+    ...rest,
+  ];
+}
+
+/**
+ * A project's item groups under `filters`, every page up to `ITEM_PAGES_MAX`, as one set of
+ * groups. A `nextCursor` left set means the cap cut the groups short.
+ */
+export const projectItemsQuery = (slug: string, filters: ProjectItemQuery) =>
+  queryOptions({
+    queryKey: keys.projectItems(slug, filters),
+    queryFn: async (): Promise<WebProjectItemsView> =>
+      (
+        await readPages(
+          (cursor) => api.projectItems(slug, filters, cursor),
+          ITEM_PAGES_MAX,
+        )
+      ).reduce((read, page) => ({
+        ...page,
+        groups: joinGroups(read.groups, page.groups),
+      })),
+  });
 
 export const meQuery = queryOptions({
   queryKey: keys.me,

@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { AppPage } from "@/app/chrome";
 import { NotFoundPage } from "@/app/not-found-page";
+import { RowsMissing } from "@/app/rows-missing";
 import {
   ProjectHeading,
   ProjectHealth,
@@ -14,8 +15,8 @@ import {
   itemSearchOf,
   validateItemSearch,
 } from "@/lib/item-search";
-import { loadableOf } from "@/lib/loadable";
-import { keys } from "@/lib/queries";
+import { loadableAfter, loadableOf } from "@/lib/loadable";
+import { keys, projectItemsQuery } from "@/lib/queries";
 
 // slugs are lowercase, so a segment with a capital and no lowercase is a product key
 // from before projects: /projects/TRL was the TRL product's page
@@ -60,11 +61,11 @@ function ProjectPage() {
     type: search.type ?? null,
     status: search.status ?? null,
   };
+  // with ?product=, only the project's own products say whether it applies
+  const itemsWaitOnProject = search.product !== undefined;
   const items = useQuery({
-    queryKey: keys.projectItems(slug, filters),
-    queryFn: () => api.projectItems(slug, filters),
-    // with ?product=, only the project's own products say whether it applies
-    enabled: search.product === undefined || project.data !== undefined,
+    ...projectItemsQuery(slug, filters),
+    enabled: !itemsWaitOnProject || project.data !== undefined,
   });
   const updates = useQuery({
     queryKey: keys.projectStatusUpdates(slug),
@@ -82,7 +83,9 @@ function ProjectPage() {
     >
       <ProjectView
         project={loadableOf(project)}
-        items={loadableOf(items)}
+        items={
+          itemsWaitOnProject ? loadableAfter(items, project) : loadableOf(items)
+        }
         statusUpdates={loadableOf(updates)}
         filters={filters}
         onFiltersChange={(next) =>
@@ -96,6 +99,10 @@ function ProjectPage() {
         onRetryProject={() => void project.refetch()}
         onRetryItems={() => void items.refetch()}
         onRetryStatusUpdates={() => void updates.refetch()}
+      />
+      <RowsMissing
+        list={project.data && items.data}
+        shown={items.data?.groups.reduce((n, g) => n + g.items.length, 0) ?? 0}
       />
     </AppPage>
   );

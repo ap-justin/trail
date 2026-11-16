@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { AppPage, useChrome } from "@/app/chrome";
 import { NotFoundPage } from "@/app/not-found-page";
+import { RowsMissing } from "@/app/rows-missing";
 import {
   ProductHeading,
   ProductHealth,
@@ -10,7 +11,7 @@ import {
 import { api, isNotFound } from "@/lib/api";
 import { itemSearchOf, validateItemSearch } from "@/lib/item-search";
 import { loadableOf } from "@/lib/loadable";
-import { keys } from "@/lib/queries";
+import { keys, productItemsQuery } from "@/lib/queries";
 
 export const Route = createFileRoute("/_app/products/$key/")({
   validateSearch: validateItemSearch,
@@ -27,10 +28,7 @@ function ProductPage() {
     queryKey: keys.product(key),
     queryFn: () => api.product(key),
   });
-  const items = useQuery({
-    queryKey: keys.productItems(key, filters),
-    queryFn: () => api.productItems(key, filters),
-  });
+  const items = useQuery(productItemsQuery(key, filters));
   const updates = useQuery({
     queryKey: keys.productStatusUpdates(key),
     queryFn: () => api.productStatusUpdates(key),
@@ -63,6 +61,7 @@ function ProductPage() {
         onRetryItems={() => void items.refetch()}
         onRetryStatusUpdates={() => void updates.refetch()}
       />
+      <RowsMissing list={items.data} shown={items.data?.items.length ?? 0} />
     </AppPage>
   );
 }

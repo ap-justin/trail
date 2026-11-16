@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { createBot } from "../service/keys.js";
-import { projectKey, setupTestApp } from "../test-app.js";
+import { atFakeTimeAsync, projectKey, setupTestApp } from "../test-app.js";
 import { type Body, mcpClients } from "./test-client.js";
 
 const { app, db, bot } = setupTestApp();
@@ -70,6 +70,25 @@ test("the triage flow: another bot files an issue, the product's bot finds it in
       })
     ).items,
   ).toEqual([]);
+});
+
+test("accepting an issue from triage with status open and no assignee leaves it open and unassigned", async () => {
+  const tara = await productBot("Tara accepts");
+  const filed = await call(await connect(bot.key), "file_issue", {
+    product: tara.product.key,
+    title: "accept me bare",
+  });
+  const accepted = await call(tara.client, "update_item", {
+    item: filed.key,
+    status: "open",
+  });
+  expect(accepted).toMatchObject({
+    type: "issue",
+    status: "open",
+    assignee: null,
+  });
+  const read = await call(tara.client, "get_item", { item: filed.key });
+  expect(read).toMatchObject({ status: "open", assignee: null });
 });
 
 test("an issue in triage can be canceled by the product's bot", async () => {
@@ -206,10 +225,13 @@ test("update_item changes type: todo opens an issue in triage, and a todo never 
 test("list_items filters by product, type, status and assignee and pages with cursor", async () => {
   const pia = await productBot("Pia");
   const lena = await connect(createBot(db, "Lena").key);
-  for (const title of ["t1", "t2", "t3"]) {
-    await call(pia.client, "add_todo", { title });
-  }
-  await call(lena, "file_issue", { product: pia.product.key, title: "i1" });
+  // one stamp apiece: same-millisecond rows would order by random id
+  await atFakeTimeAsync([
+    ...["t1", "t2", "t3"].map(
+      (title) => () => call(pia.client, "add_todo", { title }),
+    ),
+    () => call(lena, "file_issue", { product: pia.product.key, title: "i1" }),
+  ]);
   const keys = async (args: Body) =>
     (
       await call(pia.client, "list_items", {

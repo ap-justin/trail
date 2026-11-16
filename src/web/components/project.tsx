@@ -14,6 +14,7 @@ import {
   statusFilterOf,
   statusTabValue,
 } from "@/components/item-list";
+import { Pane, PaneTabs } from "@/components/pane-tabs";
 import {
   EmptyState,
   ErrorState,
@@ -28,7 +29,6 @@ import {
 } from "@/components/status-updates";
 import { KeyText } from "@/components/text";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type {
   WebProjectDetailView,
   WebProjectItemsView,
@@ -213,7 +213,12 @@ function NoItems() {
   );
 }
 
-type Pane = "items" | "updates";
+type PaneName = "items" | "updates";
+
+const PANES = [
+  ["items", "Items"],
+  ["updates", "Status updates"],
+] as const;
 
 function ProjectBody(
   props: Omit<ProjectViewProps, "project" | "onRetryProject"> & {
@@ -222,7 +227,7 @@ function ProjectBody(
   },
 ) {
   const { project, items, filters, onFiltersChange, now } = props;
-  const [pane, setPane] = useState<Pane>("items");
+  const [pane, setPane] = useState<PaneName>("items");
   const detailsHeading = useId();
   const updatesHeading = useId();
   // no items at all leaves nothing to filter; none under a product filter is a filter result
@@ -231,10 +236,15 @@ function ProjectBody(
     items.data.counts.all.all === 0 &&
     filters.product === null;
   const counts = items.status === "ready" ? items.data.counts : null;
-  const hiddenUnless = (which: Pane) => pane !== which && "max-lg:hidden";
 
   return (
-    <div className="flex flex-col lg:flex-row lg:gap-8 lg:px-6 lg:py-4">
+    <Tabs
+      value={pane}
+      onValueChange={(next) => {
+        if (next === "items" || next === "updates") setPane(next);
+      }}
+      className="gap-0 lg:gap-8 lg:px-6 lg:py-4 lg:data-horizontal:flex-row"
+    >
       <div className="flex min-w-0 flex-1 flex-col">
         <div
           className={cn(
@@ -255,92 +265,68 @@ function ProjectBody(
             <p className="text-xs text-muted-foreground">{HIDDEN_PRODUCTS}</p>
           )}
         </div>
-        <ToggleGroup
-          aria-label="Show"
-          value={[pane]}
-          onValueChange={(next) => {
-            if (next[0] === "items" || next[0] === "updates") setPane(next[0]);
-          }}
-          spacing={4}
-          className="w-full rounded-none border-b px-4 lg:hidden"
-        >
-          {(
-            [
-              ["items", "Items"],
-              ["updates", "Status updates"],
-            ] as const
-          ).map(([value, label]) => (
-            <ToggleGroupItem
-              key={value}
-              value={value}
-              className="-mb-px h-10 min-w-10 rounded-none border-b-2 border-transparent px-0.5 font-normal text-muted-foreground hover:bg-transparent aria-pressed:border-foreground aria-pressed:bg-transparent aria-pressed:text-foreground"
-            >
-              {label}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-        {empty ? (
-          <div className={cn(hiddenUnless("items"))}>
+        <PaneTabs panes={PANES} />
+        <Pane value="items">
+          {empty ? (
             <NoItems />
-          </div>
-        ) : (
-          <Tabs
-            value={statusTabValue(filters)}
-            onValueChange={(value) => {
-              const status = statusFilterOf(String(value));
-              if (status !== filters.status)
-                onFiltersChange({ ...filters, status });
-            }}
-            className={cn("gap-1", hiddenUnless("items"))}
-          >
-            <ItemFilterBar
-              filters={filters}
-              counts={counts}
-              onFiltersChange={(next) =>
-                onFiltersChange({ ...filters, ...next })
-              }
-              select={
-                <ProductSelect
-                  products={project.products}
-                  value={filters.product}
-                  onChange={(product) =>
-                    onFiltersChange({ ...filters, product })
-                  }
-                />
-              }
-            />
-            {/* one panel, keyed to whichever tab is current, so the list is that tab's panel */}
-            <TabsContent value={statusTabValue(filters)}>
-              <ItemsBody
-                items={items}
+          ) : (
+            <Tabs
+              value={statusTabValue(filters)}
+              onValueChange={(value) => {
+                const status = statusFilterOf(String(value));
+                if (status !== filters.status)
+                  onFiltersChange({ ...filters, status });
+              }}
+              className="gap-1"
+            >
+              <ItemFilterBar
                 filters={filters}
-                onFiltersChange={onFiltersChange}
-                onRetryItems={props.onRetryItems}
-                now={now}
+                counts={counts}
+                onFiltersChange={(next) =>
+                  onFiltersChange({ ...filters, ...next })
+                }
+                select={
+                  <ProductSelect
+                    products={project.products}
+                    value={filters.product}
+                    onChange={(product) =>
+                      onFiltersChange({ ...filters, product })
+                    }
+                  />
+                }
               />
-            </TabsContent>
-          </Tabs>
-        )}
+              {/* one panel, keyed to whichever tab is current, so the list is that tab's panel */}
+              <TabsContent value={statusTabValue(filters)}>
+                <ItemsBody
+                  items={items}
+                  filters={filters}
+                  onFiltersChange={onFiltersChange}
+                  onRetryItems={props.onRetryItems}
+                  now={now}
+                />
+              </TabsContent>
+            </Tabs>
+          )}
+        </Pane>
       </div>
       <aside className="flex flex-col gap-5 lg:w-70 lg:shrink-0">
         <section aria-labelledby={detailsHeading} className="max-lg:hidden">
           <AsideHeading id={detailsHeading}>Details</AsideHeading>
           <ProjectDetails project={project} layout="aside" now={now} />
         </section>
-        <section
-          aria-labelledby={updatesHeading}
-          className={cn(hiddenUnless("updates"))}
-        >
-          <AsideHeading id={updatesHeading} className="max-lg:sr-only">
-            Status updates
-          </AsideHeading>
-          <StatusUpdateList
-            updates={props.statusUpdates}
-            onRetry={props.onRetryStatusUpdates}
-          />
-        </section>
+        <Pane value="updates">
+          <section aria-labelledby={updatesHeading}>
+            <AsideHeading id={updatesHeading} className="max-lg:sr-only">
+              Status updates
+            </AsideHeading>
+            <StatusUpdateList
+              updates={props.statusUpdates}
+              onRetry={props.onRetryStatusUpdates}
+            />
+          </section>
+        </Pane>
       </aside>
-    </div>
+    </Tabs>
   );
 }
 

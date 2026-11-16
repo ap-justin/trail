@@ -64,6 +64,23 @@ const keyed: [string, string, (k: string) => unknown][] = [
   ["GET", "/issues/{K}-1/comments", () => undefined],
   ["POST", "/issues/{K}-1/comments", () => ({ body: "c" })],
   ["GET", "/activity?projectId={K}", () => undefined],
+  ["GET", "/products/{K}", () => undefined],
+  ["PATCH", "/products/{K}", () => ({ name: "renamed" })],
+  ["GET", "/products/{K}/labels", () => undefined],
+  ["POST", "/products/{K}/labels", () => ({ name: "new" })],
+  ["GET", "/products/{K}/status-updates", () => undefined],
+  [
+    "POST",
+    "/products/{K}/status-updates",
+    () => ({ body: "x", health: "at_risk" }),
+  ],
+  ["GET", "/items?product={K}", () => undefined],
+  ["POST", "/items", (k) => ({ type: "todo", product: k, title: "t" })],
+  ["POST", "/items", (k) => ({ type: "issue", product: k, title: "t" })],
+  ["GET", "/items/{K}-1", () => undefined],
+  ["PATCH", "/items/{K}-1", () => ({ title: "t2" })],
+  ["GET", "/items/{K}-1/comments", () => undefined],
+  ["POST", "/items/{K}-1/comments", () => ({ body: "c" })],
 ];
 
 test("a project outside the key's projects answers exactly as one that doesn't exist, on every keyed route", async () => {

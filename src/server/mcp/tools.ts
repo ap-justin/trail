@@ -456,13 +456,16 @@ export function registerTools(
     "list_projects",
     {
       description:
-        "List projects (named groups of items across products) newest first, a page at a time: pass nextCursor back as cursor until it is null. Only projects drawing from a product this key reaches are listed. Before this release list_projects listed products; call list_products for those.",
+        "List projects (named groups of items across products) newest first, a page at a time: pass nextCursor back as cursor until it is null. Only projects drawing from a product this key reaches are listed. Before this release list_projects listed products; call list_products for those. The result carries deprecated for one release.",
       inputSchema: z.strictObject(page),
       annotations: read,
     },
     (query) =>
       run("list_projects", () =>
-        toPage(service.listProjects(actor, query), toProject),
+        deprecated(
+          toPage(service.listProjects(actor, query), toProject),
+          deprecations.listProjects,
+        ),
       ),
   );
 
@@ -778,7 +781,7 @@ export function registerTools(
   server.registerTool(
     "list_issues",
     {
-      description: `${aliasOf("list_items")} Lists items newest first; projectId takes a product's key.`,
+      description: `${aliasOf("list_items")} Lists items newest first; projectId takes a product's key, and status open also lists issues waiting in triage (list_items matches status exactly).`,
       inputSchema: z.strictObject({
         projectId: projectIdAlias,
         status: issueListQuerySchema.shape.status,
@@ -791,7 +794,7 @@ export function registerTools(
       run("list_issues", () =>
         deprecated(
           toPage(
-            service.listItems(actor, {
+            service.listIssues(actor, {
               ...query,
               product: projectId,
               assignee: assigneeId,

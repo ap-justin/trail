@@ -18,3 +18,16 @@ export function loadableOf<T>(query: QueryLike<T>): Loadable<T> {
   if (query.data !== undefined) return { status: "ready", data: query.data };
   return query.isError ? { status: "error" } : { status: "loading" };
 }
+
+/**
+ * A query gated on `gate` (its `enabled` waits for the gate's data): when the gate fails
+ * first, the query never runs, so it reads as failed rather than loading forever.
+ */
+export function loadableAfter<T>(
+  query: QueryLike<T>,
+  gate: QueryLike<unknown>,
+): Loadable<T> {
+  if (query.data === undefined && statusOf(gate) === "error")
+    return { status: "error" };
+  return loadableOf(query);
+}

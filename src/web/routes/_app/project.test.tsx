@@ -2,6 +2,7 @@ import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, test } from "vitest";
+import { ITEM_PAGES_MAX } from "@/lib/queries";
 import { notFound, renderApp, signedInAs } from "@/test/app";
 import {
   issueRow,
@@ -108,6 +109,92 @@ describe("project page", () => {
         "Items from products you can't see are not shown.",
       ),
     ).not.toHaveLength(0);
+  });
+
+  test("with ?product=, Retry after a failed project read brings back the items too", async () => {
+    signedInAs("member");
+    const asked = serveProject();
+    let projectReads = 0;
+    server.use(
+      http.get("/api/web/projects/human-ui", () =>
+        ++projectReads === 1
+          ? HttpResponse.json({ error: "unavailable" }, { status: 503 })
+          : HttpResponse.json(projectDetail()),
+      ),
+    );
+    renderApp("/projects/human-ui?product=TRL");
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Try again" }),
+    );
+    expect(await screen.findAllByText(todoRow().title)).not.toHaveLength(0);
+    expect(asked).toEqual(["product=TRL type=null status=null"]);
+  });
+});
+
+describe("pages", () => {
+  test("a group split across pages is one group, and later groups are drawn", async () => {
+    signedInAs("member");
+    serveProject();
+    const cursors: (string | null)[] = [];
+    server.use(
+      http.get("/api/web/projects/human-ui/items", ({ request }) => {
+        const cursor = new URL(request.url).searchParams.get("cursor");
+        cursors.push(cursor);
+        const first = projectItems([
+          { product: openBot, items: [issueRow({ key: "OPB-3" })] },
+        ]);
+        const second = projectItems([
+          {
+            product: openBot,
+            items: [issueRow({ key: "OPB-1", title: "Continued row" })],
+          },
+          { product: trail, items: [todoRow()] },
+        ]);
+        // the server's count is the group's whole total on every page
+        const page = cursor ? second : first;
+        return HttpResponse.json({
+          ...page,
+          groups: page.groups.map((g) => ({
+            ...g,
+            count: g.product.key === openBot.key ? 2 : 1,
+          })),
+          nextCursor: cursor ? null : "after-opb-3",
+        });
+      }),
+    );
+    renderApp("/projects/human-ui");
+    expect(await screen.findAllByText(todoRow().title)).not.toHaveLength(0);
+    expect(screen.getAllByText("Continued row")).not.toHaveLength(0);
+    expect(cursors).toEqual([null, "after-opb-3"]);
+    // as many openBot headers ("2 items") as trail ones ("1 item"): one per layout, not per page
+    expect(screen.getAllByText("2 items")).toHaveLength(
+      screen.getAllByText("1 item").length,
+    );
+  });
+
+  test("past the page cap the page says rows are missing", async () => {
+    signedInAs("member");
+    serveProject();
+    let asked = 0;
+    server.use(
+      http.get("/api/web/projects/human-ui/items", () => {
+        asked++;
+        const row = issueRow({ key: `OPB-${asked}`, title: `Row ${asked}` });
+        return HttpResponse.json({
+          ...projectItems([
+            { product: openBot, items: [row] },
+            { product: trail, items: [todoRow({ key: `TRL-${asked}` })] },
+          ]),
+          nextCursor: `after-${asked}`,
+        });
+      }),
+    );
+    renderApp("/projects/human-ui");
+    // two rows a page, one per product
+    expect(
+      await screen.findAllByText("Only the first 20 items are shown."),
+    ).not.toHaveLength(0);
+    expect(asked).toBe(ITEM_PAGES_MAX);
   });
 });
 

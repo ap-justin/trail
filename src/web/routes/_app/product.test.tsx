@@ -2,6 +2,7 @@ import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, test } from "vitest";
+import { ITEM_PAGES_MAX } from "@/lib/queries";
 import { notFound, renderApp, signedInAs } from "@/test/app";
 import {
   issueList,
@@ -34,7 +35,10 @@ function serveProduct() {
 }
 
 const selectedTab = () =>
-  screen.getByRole("tab", { selected: true }).textContent;
+  within(screen.getByRole("tablist", { name: "Filter by status" })).getByRole(
+    "tab",
+    { selected: true },
+  ).textContent;
 
 describe("product page", () => {
   test("?status= picks the tab and the request", async () => {
@@ -132,6 +136,57 @@ describe("type filter", () => {
       }),
     );
     await waitFor(() => expect(asked).toEqual(["null open", "todo open"]));
+  });
+});
+
+describe("pages", () => {
+  test("rows past the first page are read and drawn", async () => {
+    signedInAs("member");
+    serveProduct();
+    const cursors: (string | null)[] = [];
+    server.use(
+      http.get("/api/web/products/TRL/items", ({ request }) => {
+        const cursor = new URL(request.url).searchParams.get("cursor");
+        cursors.push(cursor);
+        const page = cursor
+          ? issueList([issueRow({ key: "TRL-1", title: "Second page row" })])
+          : issueList([issueRow()]);
+        return HttpResponse.json({
+          ...page,
+          nextCursor: cursor ? null : "after-17",
+        });
+      }),
+    );
+    renderApp("/products/TRL");
+    expect(await screen.findAllByText("Second page row")).not.toHaveLength(0);
+    expect(
+      screen.getAllByText("Human UI: feed, projects, issue page"),
+    ).not.toHaveLength(0);
+    expect(cursors).toEqual([null, "after-17"]);
+    expect(screen.queryByText(/items are shown/)).toBeNull();
+  });
+
+  test("past the page cap the page says rows are missing", async () => {
+    signedInAs("member");
+    serveProduct();
+    let asked = 0;
+    server.use(
+      http.get("/api/web/products/TRL/items", () => {
+        asked++;
+        const row = issueRow({ key: `TRL-${asked}`, title: `Row ${asked}` });
+        return HttpResponse.json({
+          ...issueList([row]),
+          nextCursor: `after-${asked}`,
+        });
+      }),
+    );
+    renderApp("/products/TRL");
+    // one row a page, so the cap's pages hold ITEM_PAGES_MAX rows
+    expect(
+      await screen.findAllByText("Only the first 10 items are shown."),
+    ).not.toHaveLength(0);
+    expect(asked).toBe(ITEM_PAGES_MAX);
+    expect(screen.getAllByText(`Row ${ITEM_PAGES_MAX}`)).not.toHaveLength(0);
   });
 });
 

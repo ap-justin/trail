@@ -321,7 +321,8 @@ export type ItemQuery = PageQuery & {
   /** a project's slug */
   project?: string;
   type?: IssueType;
-  status?: IssueStatus;
+  /** one status, or any of several */
+  status?: IssueStatus | readonly IssueStatus[];
   /** a bot's id or name, or a person's id */
   assignee?: string;
 };
@@ -615,16 +616,20 @@ export function createService({
     actor: ActingActor,
     options: WriteOptions,
     scope: string,
-    prepare: (tx: Tx) => { request: unknown; write: () => Write<T> },
+    prepare: (tx: Tx) => {
+      request: unknown;
+      legacyRequest?: unknown;
+      write: () => Write<T>;
+    },
   ): T {
     const key =
       options.idempotencyKey === undefined
         ? undefined
         : validIdempotencyKey(options.idempotencyKey);
     return commit((tx) => {
-      const { request, write } = prepare(tx);
+      const { request, legacyRequest, write } = prepare(tx);
       if (key === undefined) return write();
-      const idem: IdempotentRequest = { key, scope, request };
+      const idem: IdempotentRequest = { key, scope, request, legacyRequest };
       const replay = replayOf<T>(tx, actor.id, idem);
       if (replay !== undefined) return { result: replay, event: null };
       const written = write();
@@ -925,7 +930,12 @@ export function createService({
    * several, a 422 listing the products to pick from: its own when it has
    * several, else every one it reaches.
    */
-  function defaultProduct(tx: Tx | Db, actor: ActingActor, doing: string) {
+  function defaultProduct(
+    tx: Tx | Db,
+    actor: ActingActor,
+    doing: string,
+    field: "product" | "products" = "product",
+  ) {
     const own = ownProductsOf(tx, actor);
     if (own.length === 1) return own[0] as Product;
     const choices = own.length > 1 ? own : reachableProducts(tx, actor);
@@ -933,11 +943,13 @@ export function createService({
     const listed =
       keys.length === 0
         ? "this key reaches no product"
-        : `pick one of ${andList(keys)}`;
+        : field === "product"
+          ? `pick one of ${andList(keys)}`
+          : `send products with one or more of ${andList(keys)}`;
     throw new ValidationError(
       own.length > 1
-        ? `you own ${keys.length} products, so ${doing} needs product: ${listed}`
-        : `you own no product, so ${doing} needs product: ${listed} (list_products describes each)`,
+        ? `you own ${keys.length} products, so ${doing} needs ${field}: ${listed}`
+        : `you own no product, so ${doing} needs ${field}: ${listed} (list_products describes each)`,
     );
   }
 
@@ -1546,9 +1558,23 @@ export function createService({
     };
   }
 
+  /** An item as issue.create stored it before migration 0015: projectId (now its product's id, the same row) and no type. */
+  type LegacyStoredItem = Omit<Issue, "productId" | "productKey" | "type"> & {
+    projectId: string;
+  };
+
   /** A stored replay from before items carried their product key and projects, brought to today's shape. */
-  const currentShape = (item: Issue): Issue =>
-    "productKey" in item ? item : hydrateOne(db, item);
+  function currentShape(item: Issue | LegacyStoredItem): Issue {
+    if ("productKey" in item) return item;
+    const { projectId, ...stored } = item;
+    // the stored item has no type: the one migration 0015 gave the row
+    const { type } = db
+      .select({ type: issue.type })
+      .from(issue)
+      .where(eq(issue.id, item.id))
+      .get() as { type: IssueType };
+    return hydrateOne(db, { ...stored, productId: projectId, type });
+  }
 
   /**
    * Creates an item: an issue starts in triage, a todo open and always
@@ -1605,6 +1631,17 @@ export function createService({
         };
         return {
           request: { ...fields, labels: labelNames, links },
+          legacyRequest: {
+            projectId: product.id,
+            title,
+            description: fields.description,
+            assigneeId: input.assignee == null ? null : assigneeId,
+            estimate: fields.estimate,
+            priority: fields.priority,
+            externalRef,
+            labels: labelNames,
+            links,
+          },
           write: () => {
             if (externalRef !== null) {
               const twin = tx
@@ -2363,7 +2400,7 @@ export function createService({
       const row = create(actor, options, "project_group.create", (tx) => {
         const products =
           input.products === undefined
-            ? [defaultProduct(tx, actor, "create_project")]
+            ? [defaultProduct(tx, actor, "create_project", "products")]
             : input.products.map((ref) => resolveProduct(tx, ref, actor));
         const productIds = [...new Set(products.map((p) => p.id))].sort();
         const leadId =
@@ -2831,6 +2868,14 @@ export function createService({
       return hydrateOne(db, resolveIssueRow(db, ref, actor));
     },
 
+    /** The legacy list_issues: status open also lists issues waiting in triage, which did not exist when it was named. */
+    listIssues(actor: ActingActor, query: ItemQuery = {}): Page<Issue> {
+      return this.listItems(actor, {
+        ...query,
+        status: query.status === "open" ? ["triage", "open"] : query.status,
+      });
+    },
+
     /** Newest first, filtered by any of product, project, type, status and assignee. */
     listItems(actor: ActingActor, query: ItemQuery = {}): Page<Issue> {
       requireAction(actor, "read", "list items", () => {
@@ -2860,7 +2905,9 @@ export function createService({
         query.type === undefined ? undefined : eq(issue.type, query.type),
         query.status === undefined
           ? undefined
-          : eq(issue.status, validStatus(query.status)),
+          : typeof query.status === "string"
+            ? eq(issue.status, validStatus(query.status))
+            : inArray(issue.status, query.status.map(validStatus)),
         query.assignee === undefined
           ? undefined
           : eq(

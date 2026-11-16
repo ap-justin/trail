@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { createBot } from "../service/keys.js";
-import { setupTestApp } from "../test-app.js";
+import { atFakeTimeAsync, setupTestApp } from "../test-app.js";
 import { type Body, mcpClients } from "./test-client.js";
 
 const { app, db, bot } = setupTestApp();
@@ -30,10 +30,21 @@ test("each deprecated alias says so first and names its replacement", async () =
 test("create_issue makes a todo for the product's owner and an issue in triage for anyone else, each carrying deprecated", async () => {
   const owner = await connect(bot.key);
   await call(owner, "create_product", { key: "LGI", name: "legacy items" });
-  const own = await call(owner, "create_issue", {
-    projectId: "lgi",
-    title: "mine",
-  });
+  const other = await connect(createBot(db, "legacy filer").key);
+  // one stamp apiece: same-millisecond rows would list in random id order
+  const [own, filed] = await atFakeTimeAsync([
+    () =>
+      call(owner, "create_issue", {
+        projectId: "lgi",
+        title: "mine",
+      }),
+    () =>
+      call(other, "create_issue", {
+        projectId: "LGI",
+        title: "theirs",
+      }),
+  ]);
+  if (!own || !filed) throw new Error("create_issue answered nothing");
   expect(own).toMatchObject({
     type: "todo",
     status: "open",
@@ -41,11 +52,6 @@ test("create_issue makes a todo for the product's owner and an issue in triage f
     deprecated: expect.stringMatching(
       /^create_issue and POST \/issues are deprecated: use add_todo/,
     ),
-  });
-  const other = await connect(createBot(db, "legacy filer").key);
-  const filed = await call(other, "create_issue", {
-    projectId: "LGI",
-    title: "theirs",
   });
   expect(filed).toMatchObject({ type: "issue", status: "triage" });
 
@@ -99,11 +105,13 @@ test("create_project with key creates a product and says so; with project fields
   ).toBe(
     "validation_failed: key creates a product (deprecated), and products create a project: drop key to create a project, or use create_product (POST /products) for a product",
   );
-  expect(
-    (await call(client, "list_projects", { limit: 200 })).items.map(
-      (p: Body) => p.slug ?? p.key,
-    ),
-  ).toEqual(["new-style"]);
+  const listed = (await call(client, "list_projects", { limit: 200 }))
+    .items as Body[];
+  expect(listed.map((p) => p.slug)).toContain("new-style");
+  // every row is a project (a slug, no product key), never the product LGP
+  expect(listed.every((p) => typeof p.slug === "string" && !("key" in p))).toBe(
+    true,
+  );
 });
 
 test("get_project and update_project take a slug first, else a product key by the old meaning with a deprecated note", async () => {
@@ -185,5 +193,52 @@ test("the old projectId and issueId arguments still work and carry a deprecated 
     }),
   ).toBe(
     "validation_failed: send product alone: projectId is its deprecated alias, and both together is ambiguous",
+  );
+});
+
+test("list_issues with status open includes issues waiting in triage, as open meant before triage; list_items keeps exact status", async () => {
+  const owner = await connect(bot.key);
+  await call(owner, "create_product", { key: "LGS", name: "legacy status" });
+  const filer = await connect(createBot(db, "lgs filer").key);
+  const filed = await call(filer, "file_issue", {
+    product: "LGS",
+    title: "filed",
+  });
+  const todo = await call(owner, "add_todo", {
+    product: "LGS",
+    title: "planned",
+  });
+  const started = await call(owner, "add_todo", {
+    product: "LGS",
+    title: "started",
+  });
+  await call(owner, "update_item", {
+    item: started.key,
+    status: "in_progress",
+  });
+  const keys = async (tool: string, args: Body) =>
+    (await call(owner, tool, args)).items.map((i: Body) => i.key);
+
+  expect(
+    await keys("list_issues", { projectId: "LGS", status: "open" }),
+  ).toEqual([todo.key, filed.key]);
+  expect(
+    await keys("list_issues", { projectId: "LGS", status: "in_progress" }),
+  ).toEqual([started.key]);
+  expect(await keys("list_items", { product: "LGS", status: "open" })).toEqual([
+    todo.key,
+  ]);
+});
+
+test("list_projects carries deprecated, pointing a caller after products to list_products", async () => {
+  const client = await connect(bot.key);
+  const made = await call(client, "create_project", {
+    name: "listed",
+    products: ["LGS"],
+  });
+  const page = await call(client, "list_projects", {});
+  expect(page.items.map((p: Body) => p.slug)).toContain(made.slug);
+  expect(page.deprecated).toBe(
+    "list_projects lists projects (groups of items across products) since this release, no longer products: call list_products (GET /products) for those",
   );
 });

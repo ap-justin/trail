@@ -1,8 +1,8 @@
 import { eq } from "drizzle-orm";
-import { expect, test } from "vitest";
+import { expect, onTestFinished, test } from "vitest";
 import { webhookDelivery, webhookSubscription } from "../db/schema.js";
 import { createBot } from "../service/keys.js";
-import { projectKey, setupTestApp } from "../test-app.js";
+import { atFakeTimeAsync, projectKey, setupTestApp } from "../test-app.js";
 import { type Body, mcpClients } from "./test-client.js";
 
 const { app, db, bot } = setupTestApp();
@@ -92,7 +92,7 @@ test("create_project takes a lead by name and several products, and refuses a pr
   expect(
     await callError(scoped, "create_project", { name: "none of mine" }),
   ).toBe(
-    `validation_failed: you own no product, so create_project needs product: pick one of ${kai.product.key} (list_products describes each)`,
+    `validation_failed: you own no product, so create_project needs products: send products with one or more of ${kai.product.key} (list_products describes each)`,
   );
   expect(
     await callError(kai.client, "create_project", {
@@ -154,8 +154,12 @@ test("add_to_project adds items from two products, adding the second product its
   const nora = await productBot("Nora");
   const slug = freshSlug();
   await call(wren.client, "create_project", { name: "together", slug });
-  const mine = await call(wren.client, "add_todo", { title: "mine" });
-  const theirs = await call(nora.client, "add_todo", { title: "theirs" });
+  // one stamp apiece: list_items orders newest first, and same-millisecond rows sort by random id
+  const [mine, theirs] = await atFakeTimeAsync([
+    () => call(wren.client, "add_todo", { title: "mine" }),
+    () => call(nora.client, "add_todo", { title: "theirs" }),
+  ]);
+  if (!mine || !theirs) throw new Error("add_todo answered nothing");
 
   const added = await call(wren.client, "add_to_project", {
     project: slug,
@@ -408,6 +412,9 @@ test("project writes record project.created, project.updated and item_added and 
 });
 
 test("a project's own events reach webhooks following any of its products; an item's events reach its product's followers", async () => {
+  onTestFinished(() => {
+    db.delete(webhookSubscription).run();
+  });
   const ivy = await productBot("Ivy hooks");
   const kai = await productBot("Kai hooks");
   const follow = async (who: typeof ivy, url: string) =>
@@ -446,7 +453,6 @@ test("a project's own events reach webhooks following any of its products; an it
     "trail.project.item_added",
   ]);
   expect(typesFor(kaiHook)).toEqual(["trail.project.created"]);
-  db.delete(webhookSubscription).run();
 });
 
 test("a retried create_project with the same idempotency_key returns the first project", async () => {

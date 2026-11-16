@@ -1,5 +1,7 @@
+import { eq } from "drizzle-orm";
 import { beforeAll, describe, expect, test } from "vitest";
-import { activityEvent } from "../db/schema.js";
+import { activityEvent, issue as issueTable } from "../db/schema.js";
+import { storeResult } from "../service/idempotency.js";
 import { projectKey, setupTestApp } from "../test-app.js";
 
 const { db, app, bot, addBot, request, published } = setupTestApp();
@@ -212,4 +214,85 @@ test("an empty Idempotency-Key is a 422", async () => {
   expect(((await res.json()) as Body).error.message).toMatch(
     /^idempotency-key: /,
   );
+});
+
+describe("a key stored before items had products and types", () => {
+  // the request issue.create hashed and the item it stored before migration 0015
+  function storeLegacyCreate(idempotencyKey: string, itemId: string) {
+    const row = db
+      .select()
+      .from(issueTable)
+      .where(eq(issueTable.id, itemId))
+      .get();
+    if (!row) throw new Error(`no item ${itemId}`);
+    const { productId, type, ...unchanged } = row;
+    db.transaction((tx) =>
+      storeResult(
+        tx,
+        bot.actor.id,
+        {
+          key: idempotencyKey,
+          scope: "issue.create",
+          request: {
+            projectId: productId,
+            title: row.title,
+            description: row.description,
+            assigneeId: null,
+            estimate: null,
+            priority: 0,
+            externalRef: null,
+            labels: [],
+            links: [],
+          },
+        },
+        {
+          ...unchanged,
+          projectId: productId,
+          key: `IDEM-${row.number}`,
+          labels: [],
+          links: [],
+        },
+      ),
+    );
+  }
+
+  test("replays the stored item when the same create is retried", async () => {
+    const first = (await (
+      await request("POST", "/api/v1/issues", {
+        json: { projectId: project.id, title: "before the release" },
+      })
+    ).json()) as Body;
+    storeLegacyCreate("legacy retry", first.id);
+    const items = db.select().from(issueTable).all().length;
+
+    const again = await post(
+      "/issues",
+      { projectId: project.id, title: "before the release" },
+      "legacy retry",
+    );
+    expect(again.status).toBe(201);
+    const body = (await again.json()) as Body;
+    expect(body.id).toBe(first.id);
+    expect(body.key).toBe(first.key);
+    expect(body.product).toBe("IDEM");
+    expect(db.select().from(issueTable).all().length).toBe(items);
+  });
+
+  test("a different create under that key is still a 422", async () => {
+    const first = (await (
+      await request("POST", "/api/v1/issues", {
+        json: { projectId: project.id, title: "legacy original" },
+      })
+    ).json()) as Body;
+    storeLegacyCreate("legacy reused", first.id);
+    const res = await post(
+      "/issues",
+      { projectId: project.id, title: "something else" },
+      "legacy reused",
+    );
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as Body).error.code).toBe(
+      "idempotency_key_reused",
+    );
+  });
 });

@@ -35,6 +35,7 @@ const scoped = createBot(db, "bg-ivy", {
 let ivy: Client;
 let wide: Client;
 let issueA = "";
+let projectSlugA = "";
 
 beforeAll(async () => {
   ivy = await connect(scoped.key);
@@ -87,6 +88,13 @@ const keyed: [string, (k: string) => Body][] = [
   ["list_comments", (k) => ({ item: `${k}-1` })],
   ["add_comment", (k) => ({ item: `${k}-1`, body: "c" })],
   ["list_activity", (k) => ({ product: k })],
+  ["add_to_project", (k) => ({ project: k.toLowerCase(), items: [`${k}-1`] })],
+  [
+    "remove_from_project",
+    (k) => ({ project: k.toLowerCase(), items: [`${k}-1`] }),
+  ],
+  ["get_issue", (k) => ({ issueId: `${k}-1` })],
+  ["update_issue", (k) => ({ issueId: `${k}-1`, title: "t2" })],
   ["create_issue", (k) => ({ projectId: k, title: "t" })],
   ["list_issues", (k) => ({ projectId: k })],
 ];
@@ -110,6 +118,40 @@ test("a product outside the key's products answers exactly as one that doesn't e
     const [first] = result.content as { text: string }[];
     expect(first?.text, tool).toMatch(/^not_found: no (product|project|item) /);
   }
+});
+
+test("a project whose products are all out of the key's reach answers exactly as a missing slug, on every project tool", async () => {
+  const slug = "hidden-proj";
+  const product = projectKey();
+  await call(wide, "create_product", { key: product, name: "H" });
+  const item = await call(wide, "add_todo", { product, title: "h" });
+  const tools: [string, (s: string) => Body][] = [
+    ["get_project", (s) => ({ project: s })],
+    ["update_project", (s) => ({ project: s, name: "renamed" })],
+    ["add_to_project", (s) => ({ project: s, items: [item.key] })],
+    ["remove_from_project", (s) => ({ project: s, items: [item.key] })],
+  ];
+  const as = async (s: string) =>
+    Promise.all(tools.map(([tool, args]) => raw(ivy, tool, args(s))));
+  const missing = await as("hidden-proj-x");
+  await call(wide, "create_project", {
+    name: "hidden proj",
+    slug,
+    products: [product],
+  });
+  const hidden = await as(slug);
+  expect(hidden.map((r) => (r.content as { text: string }[])[0]?.text)).toEqual(
+    missing.map((r) =>
+      (r.content as { text: string }[])[0]?.text.replaceAll(
+        "hidden-proj-x",
+        slug,
+      ),
+    ),
+  );
+  for (const r of hidden) expect(r.isError).toBe(true);
+  expect((await call(wide, "get_project", { project: slug })).name).toBe(
+    "hidden proj",
+  );
 });
 
 test("tools/list offers a scoped key every tool", async () => {
@@ -210,6 +252,21 @@ const gated = (): [string, string, () => Body][] => [
     "issues",
     () => ({ name: `p ${projectKey()}`, products: [a.key] }),
   ],
+  [
+    "update_project",
+    "issues",
+    () => ({ project: projectSlugA, name: `renamed ${projectKey()}` }),
+  ],
+  [
+    "add_to_project",
+    "issues",
+    () => ({ project: projectSlugA, items: [issueA] }),
+  ],
+  [
+    "remove_from_project",
+    "issues",
+    () => ({ project: projectSlugA, items: [issueA] }),
+  ],
   ["add_comment", "comments", () => ({ item: issueA, body: "c" })],
   [
     "post_status_update",
@@ -240,6 +297,16 @@ const gated = (): [string, string, () => Body][] => [
 test.each(["read", "issues", "comments", "status_updates", "admin"])(
   "a key with only %s may call exactly the tools that need it, and whoami",
   async (action) => {
+    // made here, not in beforeAll: a project event in A's feed would join the activity lists above
+    if (!projectSlugA) {
+      projectSlugA = (
+        await call(wide, "create_project", {
+          name: "gate project",
+          slug: "gate-project",
+          products: [a.key],
+        })
+      ).slug;
+    }
     const only = await connect(
       createBot(db, `mcp only ${action}`, { scope: { actions: [action] } }).key,
     );

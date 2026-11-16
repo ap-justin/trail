@@ -279,6 +279,62 @@ describe("product select", () => {
   });
 });
 
+describe("375 panes", () => {
+  const panes = () => screen.getByRole("tablist", { name: "Show" });
+  const paneTab = (name: string) => within(panes()).getByRole("tab", { name });
+  const pane = (name: string) => screen.getByRole("tabpanel", { name });
+
+  test("the tabs show Items or Status updates, each a panel named by its tab", async () => {
+    const user = userEvent.setup();
+    renderProject();
+    expect(
+      within(panes())
+        .getAllByRole("tab")
+        .map((t) => t.textContent),
+    ).toEqual(["Items", "Status updates"]);
+    expect(paneTab("Items")).toHaveAttribute("aria-selected", "true");
+    expect(pane("Status updates")).toHaveAttribute("data-hidden");
+    await user.click(paneTab("Status updates"));
+    expect(paneTab("Status updates")).toHaveAttribute("aria-selected", "true");
+    expect(paneTab("Status updates")).toHaveAttribute(
+      "aria-controls",
+      pane("Status updates").id,
+    );
+    expect(pane("Status updates")).toContainElement(
+      screen.getByRole("region", { name: "Status updates" }),
+    );
+    expect(pane("Items")).toHaveAttribute("data-hidden");
+    expect(pane("Items")).toContainElement(table());
+  });
+
+  test("both panes stay rendered and reachable for 1024px, where the breakpoint alone hides one", () => {
+    renderProject();
+    for (const name of ["Items", "Status updates"]) {
+      expect(pane(name)).not.toHaveAttribute("hidden");
+      expect(pane(name)).not.toHaveAttribute("inert");
+      expect(pane(name)).toHaveClass("max-lg:data-hidden:hidden");
+    }
+  });
+
+  test("the tabs work from the keyboard", async () => {
+    const user = userEvent.setup();
+    renderProject();
+    paneTab("Items").focus();
+    await user.keyboard("{ArrowRight}");
+    expect(paneTab("Status updates")).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(paneTab("Status updates")).toHaveAttribute("aria-selected", "true");
+  });
+
+  test("a project with no items still switches to Status updates", async () => {
+    const user = userEvent.setup();
+    renderProject({ items: { status: "ready", data: projectItems([]) } });
+    expect(pane("Items")).toHaveTextContent("No items in this project yet");
+    await user.click(paneTab("Status updates"));
+    expect(pane("Status updates")).not.toHaveAttribute("data-hidden");
+  });
+});
+
 describe("empty and failed", () => {
   test("a project with no items: the empty state and no tabs or filters", () => {
     renderProject({
