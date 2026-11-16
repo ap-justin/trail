@@ -258,6 +258,32 @@ test("update_item on another bot's product attaches only labels the product has 
   ).toMatchObject({ labels: ["made-up", "ui"] });
 });
 
+test("create_label on another bot's product is refused with the next step and creates nothing; the owner creates it, and on an unowned product anyone does", async () => {
+  const owner = await productBot("alpha create label");
+  const outsider = await connect(createBot(db, "beta create label").key);
+  const key = owner.product.key;
+  expect(
+    await callError(outsider, "create_label", { product: key, name: "ui" }),
+  ).toBe(
+    `forbidden: ${key} is owned by alpha create label, so only alpha create label creates its labels: ask alpha create label to create it, or file or update the item without it, and a label ${key} lacks comes back in skippedLabels`,
+  );
+  expect(
+    (await call(owner.client, "list_labels", { product: key })).items,
+  ).toEqual([]);
+  expect(
+    await call(owner.client, "create_label", { product: key, name: "ui" }),
+  ).toMatchObject({ name: "ui" });
+
+  const unowned = await call(owner.client, "create_product", {
+    key: projectKey(),
+    name: "unowned labels",
+    owner: null,
+  });
+  expect(
+    await call(outsider, "create_label", { product: unowned.key, name: "ui" }),
+  ).toMatchObject({ name: "ui" });
+});
+
 test("reopening a canceled issue a non-owner filed is the owner's decision, so a filer's cancel is no way out of triage", async () => {
   const owner = await productBot("alpha reopen");
   const filer = await connect(createBot(db, "beta reopen").key);

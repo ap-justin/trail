@@ -24,7 +24,9 @@ import {
   idempotencyHeaders,
   jsonBody,
   jsonContent,
+  LABEL_CREATORS,
   notFoundError,
+  OWNER_CREATES_LABELS,
   projectItemParam,
   projectParam,
   projectSlugParam,
@@ -215,8 +217,7 @@ const createLabel = createRoute({
   path: "/projects/{ref}/labels",
   summary:
     "Deprecated: create a label in a product (use POST /products/{key}/labels)",
-  description:
-    "Deprecated alias of POST /products/{key}/labels, removed after the next release: ref is a product's key. Projects have no labels of their own.",
+  description: `Deprecated alias of POST /products/{key}/labels, removed after the next release: ref is a product's key. Projects have no labels of their own. ${LABEL_CREATORS}`,
   deprecated: true,
   tags: labelTags,
   request: {
@@ -229,7 +230,7 @@ const createLabel = createRoute({
       labelSchema.extend({ deprecated: z.string() }),
       "The created label",
     ),
-    ...forbiddenError("admin"),
+    ...forbiddenError("admin", { owner: OWNER_CREATES_LABELS }),
     ...writeErrors,
     ...notFoundError,
     ...conflictError,

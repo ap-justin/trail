@@ -35,6 +35,20 @@ type IssueChanges = {
   estimate?: Change<number | null>;
 };
 
+/**
+ * The type an `issue.created` payload records; one stored before payloads
+ * carried it (or an imported item, which has none) reads issue when a person
+ * created the item, else the item's type now.
+ */
+function createdAs(
+  createdPayload: unknown,
+  creator: WebActorView,
+  current: IssueType,
+): IssueType {
+  const recorded = (createdPayload as { type?: IssueType } | undefined)?.type;
+  return recorded ?? (creator.kind === "human" ? "issue" : current);
+}
+
 /** A `project.updated` payload's field names, as the entry names them. */
 const projectFieldOf: Record<string, (typeof webProjectFields)[number]> = {
   name: "name",
@@ -299,13 +313,17 @@ export function entriesByEvent(db: Db, events: ActivityEvent[]): EntryView[][] {
             },
           ]);
         }
-        case "issue.created":
+        case "issue.created": {
+          const created = items.get(e.subjectId);
+          if (!created) return [];
           return onItem(e.subjectId, [
             {
               kind: "item_created",
-              sourceAuthor: items.get(e.subjectId)?.sourceAuthor ?? null,
+              sourceAuthor: created.sourceAuthor,
+              createdAs: createdAs(e.payload, shared.actor, created.type),
             },
           ]);
+        }
         case "issue.updated":
           return onItem(
             e.subjectId,
@@ -455,20 +473,33 @@ export function timelineOf(
     )
     .orderBy(activityEvent.seq)
     .all();
+  const createdEvent = db
+    .select({ payload: activityEvent.payload })
+    .from(activityEvent)
+    .where(
+      and(
+        eq(activityEvent.subjectType, "issue"),
+        eq(activityEvent.subjectId, target.id),
+        eq(activityEvent.action, "issue.created"),
+      ),
+    )
+    .get();
   const actorOf = actorsById(db, [
     target.createdBy,
     ...comments.map((c) => c.authorId),
   ]);
+  const creator = actorOf(target.createdBy);
   const base = { product: productRef, item: itemRef };
   const entries: EntryView[] = [
     {
       id: target.id,
       kind: "item_created",
       createdAt: target.createdAt.toISOString(),
-      actor: actorOf(target.createdBy),
+      actor: creator,
       ...base,
       project: null,
       sourceAuthor: target.sourceAuthor,
+      createdAs: createdAs(createdEvent?.payload, creator, target.type),
     },
     ...comments.map(
       (c): EntryView => ({

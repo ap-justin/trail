@@ -2668,6 +2668,13 @@ export function createService({
           // projectId, as requests were stored before products were named
           request: { projectId: target.id, name },
           write: () => {
+            requireOwner(
+              tx,
+              actor,
+              target.id,
+              (owner, key) =>
+                `${key} is owned by ${owner}, so only ${owner} creates its labels: ask ${owner} to create it, or file or update the item without it, and a label ${key} lacks comes back in skippedLabels`,
+            );
             const twin = findLabel(tx, target.id, name);
             if (twin) {
               throw new ConflictError(

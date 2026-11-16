@@ -50,7 +50,8 @@ const usage = `Usage:
   trail products owners            list each product's current owner bot, or none
   trail products set-owner <key> <bot-id-label-or-name>
                                    make a bot the product's owner: it adds
-                                   todos and accepts or cancels triage issues
+                                   todos, accepts issues from triage and
+                                   cancels any item
   trail products set-repo <key> <url>
                                    set the product's GitHub repository,
                                    https://github.com/<owner>/<name>

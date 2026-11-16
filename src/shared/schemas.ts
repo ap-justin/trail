@@ -326,7 +326,7 @@ export const activityEventSchema = z
         "The slug of the project on a project's own event and on project.item_added and project.item_removed; else null.",
     }),
     projectId: id.nullable().meta({
-      description: "Deprecated: the id of the product that product names.",
+      description: "Deprecated: the id of the product in product.",
     }),
     action: z.string().meta({
       description:
@@ -593,10 +593,14 @@ const projectSlug = z.string().min(1).max(SLUG_MAX).meta({
   example: "launch-q4",
 });
 const botRef = z.string().min(1).max(200);
-const labelNames = z.array(labelName).max(ISSUE_LABELS_MAX).meta({
-  description:
-    "Label names. A name matches the product's label ignoring the case of A-Z; a new name creates the label.",
-});
+const LABEL_NAMES =
+  "A name matches the product's label ignoring the case of A-Z. Only the product's owner creates labels: from the owner, or on a product with no owner, a new name creates the label; from anyone else, the names the product lacks come back in skippedLabels.";
+const labelNames = z
+  .array(labelName)
+  .max(ISSUE_LABELS_MAX)
+  .meta({
+    description: `Label names. ${LABEL_NAMES}`,
+  });
 const links = z
   .array(
     z.strictObject({
@@ -767,10 +771,6 @@ export const projectItemsSchema = z
   })
   .openapi("ProjectItems");
 
-const outsideLabels = labelNames.optional().meta({
-  description:
-    "Label names. A name matches the product's label ignoring the case of A-Z. A new name creates the label, except on an issue filed on a product another bot owns: there only the product's labels attach, and the others are listed in skippedLabels.",
-});
 const itemFields = {
   title,
   description: text.optional(),
@@ -841,7 +841,7 @@ export const issueFileSchema = z
           "The key (like TRL) of the product the issue is for; any product this key reaches. list_products lists them.",
       }),
       ...itemFields,
-      labels: outsideLabels,
+      labels: labelNames.optional(),
       assignee: assigneeRef.nullable().optional().meta({
         description:
           "Usually left out: the product's bot assigns it when it accepts the issue from triage (status open with an assignee).",
@@ -864,7 +864,7 @@ export const itemCreateSchema = z
           "The product's key (like TRL). Required for an issue; a todo goes to the one product you own when left out.",
       }),
       ...itemFields,
-      labels: outsideLabels,
+      labels: labelNames.optional(),
       assignee: assigneeRef.nullable().optional(),
     },
     itemCreateRenames,
@@ -887,8 +887,6 @@ export const issueCreateSchema = z
   )
   .openapi("IssueCreate");
 
-const UPDATE_LABEL_NAMES =
-  "A name matches the product's label ignoring the case of A-Z. A new name creates the label, except on a product another bot owns: there only the product's labels attach, and the others are listed in skippedLabels.";
 const itemPatchFields = {
   title: title.optional(),
   description: text.optional(),
@@ -902,13 +900,13 @@ const itemPatchFields = {
     .meta({ description: "Hours; null clears." }),
   priority: priority.optional(),
   labels: labelNames.optional().meta({
-    description: `Replaces the item's labels; [] removes them all. ${UPDATE_LABEL_NAMES}`,
+    description: `Replaces the item's labels; [] removes them all. ${LABEL_NAMES}`,
   }),
   links: links.optional().meta({
     description: "Replaces the item's links; [] removes them all.",
   }),
   addLabels: labelNames.optional().meta({
-    description: `Labels to add, keeping the item's others, even those another bot added a moment ago. ${UPDATE_LABEL_NAMES} Not with labels.`,
+    description: `Labels to add, keeping the item's others, even those another bot added a moment ago. ${LABEL_NAMES} Not with labels.`,
   }),
   removeLabels: z.array(labelName).max(50).optional().meta({
     description:
@@ -1453,6 +1451,10 @@ export const entrySchema = z
       ...onItem,
       kind: z.literal("item_created"),
       sourceAuthor,
+      createdAs: webItemTypeSchema.meta({
+        description:
+          "The type the item was created with, which item.type no longer shows once the owner retypes it: issue when it was filed, todo when it was planned. An item created before trail recorded this reads issue when a person created it, else its current type.",
+      }),
     }),
     z.object({
       ...onItem,

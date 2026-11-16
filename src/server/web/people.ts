@@ -38,7 +38,10 @@ const listPeople = createRoute({
   method: "get",
   path: "/people",
   responses: {
-    200: jsonContent(peopleSchema, "The owner, then each invite, oldest first"),
+    200: jsonContent(
+      peopleSchema,
+      "The person who runs this trail, then each invite, oldest first",
+    ),
   },
 });
 
@@ -48,7 +51,10 @@ const invitePerson = createRoute({
   request: { body: jsonBody(personCreateSchema) },
   responses: {
     201: jsonContent(personSchema, "The invite"),
-    409: jsonContent(errorSchema, "Already invited, or the owner"),
+    409: jsonContent(
+      errorSchema,
+      "Already invited, or the person who runs this trail",
+    ),
     422: jsonContent(
       errorSchema,
       "Neither a GitHub username nor an email address, or an unknown product key",
@@ -228,7 +234,7 @@ export function peopleRoutes(db: Db) {
       if (!invitee) throw new ValidationError(INVITEE_HINT);
       if ("username" in invitee && invitee.username === owner.login) {
         throw new ConflictError(
-          `@${invitee.username} is the owner, who sees every product`,
+          `@${invitee.username} is the person who runs this trail, who sees every product`,
         );
       }
       const created = db.transaction(
@@ -236,7 +242,7 @@ export function peopleRoutes(db: Db) {
           const productIds = productIdsOf(tx, products);
           if (tx.select().from(invite).where(inviteFor(invitee)).get()) {
             throw new ConflictError(
-              `${handleOf(invitee)} is already invited: change their products in People.`,
+              `${handleOf(invitee)} is already invited: change their products in the list below.`,
             );
           }
           const { id } = tx

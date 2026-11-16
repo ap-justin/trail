@@ -29,6 +29,7 @@ import {
 } from "../../shared/schemas.js";
 import { deprecations } from "../api/deprecations.js";
 import { TODO_OR_ISSUE } from "../api/items.js";
+import { LABEL_CREATORS } from "../api/routes.js";
 import {
   deprecated,
   toActivityEvent,
@@ -704,8 +705,7 @@ export function registerTools(
   server.registerTool(
     "create_label",
     {
-      description:
-        "Create a label in a product. Naming a new label on add_todo, file_issue or update_item creates it too. Needs the admin action.",
+      description: `Create a label in a product. ${LABEL_CREATORS} Needs the admin action.`,
       inputSchema: labelCreateSchema.extend({
         product: aliasedProduct,
         projectId: projectIdAlias,

@@ -592,6 +592,7 @@ test("the spec documents each gated operation's 403 with the action it needs", a
     `${needs(action)}, or reaches only some products (code forbidden_scope)`;
   const orOwner = (action: string) =>
     `${needs(action)}, or the product has an owner bot and the call is that bot's alone: adding a todo, moving an issue out of triage, canceling an item another bot filed, reopening a canceled issue another bot filed, or changing an item's type; the message names the owner and what to do instead (code forbidden)`;
+  const ownerLabels = `${needs("admin")}, or another bot owns the product: only its owner creates its labels (code forbidden)`;
   expect(forbidden).toEqual({
     "GET /activity": needs("read"),
     "GET /bots": needs("admin"),
@@ -626,11 +627,11 @@ test("the spec documents each gated operation's 403 with the action it needs", a
     "POST /issues": needs("issues"),
     "POST /issues/{id}/comments": needs("comments"),
     "POST /products": orScope("admin"),
-    "POST /products/{key}/labels": needs("admin"),
+    "POST /products/{key}/labels": ownerLabels,
     "POST /products/{key}/status-updates": needs("status_updates"),
     "POST /projects":
       "The key lacks the issues action, or with key the admin action (code forbidden_action), or with key reaches only some products (code forbidden_scope)",
-    "POST /projects/{ref}/labels": needs("admin"),
+    "POST /projects/{ref}/labels": ownerLabels,
     "POST /projects/{ref}/status-updates": needs("status_updates"),
     "POST /projects/{slug}/items": needs("issues"),
     "DELETE /projects/{slug}/items/{key}": needs("issues"),

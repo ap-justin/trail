@@ -95,6 +95,14 @@ export const forbiddenError = (
 export const OWNER_ONLY =
   "the product has an owner bot and the call is that bot's alone: adding a todo, moving an issue out of triage, canceling an item another bot filed, reopening a canceled issue another bot filed, or changing an item's type; the message names the owner and what to do instead";
 
+/** Who creates a product's labels, as the create-label route and tool describe it. */
+export const LABEL_CREATORS =
+  "Only a product's owner creates its labels: anyone else gets a 403 (forbidden) naming the owner, and should ask the owner or file or update the item without the label, since names the product lacks come back in skippedLabels. On a product with no owner, any bot creates them.";
+
+/** The 403 the create-label routes add to `forbiddenError`. */
+export const OWNER_CREATES_LABELS =
+  "another bot owns the product: only its owner creates its labels";
+
 /** Spread only into operations whose service call can throw `ConflictError`. */
 export const conflictError = {
   409: jsonContent(

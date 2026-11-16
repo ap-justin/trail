@@ -122,7 +122,7 @@ export function encodeFeedCursor(position: FeedPosition): string {
 const describeFilters = (f: FeedFilters) =>
   [
     `product=${f.projectId === null ? "(none)" : (f.productKey ?? f.projectId)}`,
-    `actorId=${f.actorId ?? "(none)"}`,
+    `actor=${f.actorId ?? "(none)"}`,
     ...(f.groupId == null ? [] : [`project=${f.projectSlug ?? f.groupId}`]),
     ...(f.type == null ? [] : [`type=${f.type}`]),
   ].join(", ");

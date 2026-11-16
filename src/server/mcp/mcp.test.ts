@@ -338,7 +338,7 @@ test("list_activity resumes after a cursor and refuses it under other filters", 
   expect(
     await callError(client, "list_activity", { after: start.nextCursor }),
   ).toMatch(
-    /^validation_failed: cursor was issued for product=MCA, actorId=\(none\) but this request has product=\(none\), actorId=\(none\): repeat the cursor's filters, or drop the cursor to start over$/,
+    /^validation_failed: cursor was issued for product=MCA, actor=\(none\) but this request has product=\(none\), actor=\(none\): repeat the cursor's filters, or drop the cursor to start over$/,
   );
 });
 

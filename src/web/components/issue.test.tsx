@@ -427,6 +427,7 @@ describe("project and type events", () => {
               createdAt: "2026-11-09T14:02:00.000Z",
               actor: maya,
               sourceAuthor: null,
+              createdAs: "issue",
             },
             {
               ...on,
@@ -478,6 +479,7 @@ describe("project and type events", () => {
               createdAt: "2026-11-09T14:02:00.000Z",
               actor: maya,
               sourceAuthor: null,
+              createdAs: "issue",
             },
             {
               product: base.product,

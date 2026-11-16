@@ -18,7 +18,9 @@ import {
   idempotencyHeaders,
   jsonBody,
   jsonContent,
+  LABEL_CREATORS,
   notFoundError,
+  OWNER_CREATES_LABELS,
   productParam,
   readErrors,
   writeErrors,
@@ -130,8 +132,8 @@ const listStatusUpdates = createRoute({
 const createLabel = createRoute({
   method: "post",
   path: "/products/{key}/labels",
-  summary:
-    "Create a label in a product (naming a new label on an item creates it too)",
+  summary: "Create a label in a product",
+  description: `Needs the admin action. ${LABEL_CREATORS}`,
   tags,
   request: {
     params: productParam,
@@ -140,7 +142,7 @@ const createLabel = createRoute({
   },
   responses: {
     201: jsonContent(labelSchema, "The created label"),
-    ...forbiddenError("admin"),
+    ...forbiddenError("admin", { owner: OWNER_CREATES_LABELS }),
     ...writeErrors,
     ...notFoundError,
     ...conflictError,

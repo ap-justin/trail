@@ -203,6 +203,7 @@ export function issue(overrides: Partial<WebItemView> = {}): WebItemView {
         createdAt: "2026-11-09T14:02:00.000Z",
         actor: beta,
         sourceAuthor: null,
+        createdAs: "issue",
       },
       {
         ...on,
@@ -306,6 +307,7 @@ export function todo(overrides: Partial<WebItemView> = {}): WebItemView {
         createdAt: "2026-11-11T10:15:00.000Z",
         actor: alpha,
         sourceAuthor: null,
+        createdAs: "todo",
       },
       {
         ...on,
@@ -344,6 +346,7 @@ export function itemCreatedEntry(
     project: null,
     item,
     sourceAuthor: null,
+    createdAs: item.type,
   };
 }
 

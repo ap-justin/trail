@@ -1,8 +1,10 @@
+import { and, eq, sql } from "drizzle-orm";
 import { expect, test } from "vitest";
+import { activityEvent, issue } from "../db/schema.js";
 import { atFakeTimeAsync, setupTestApp } from "../test-app.js";
 import { type Body, webSeed } from "./test-seed.js";
 
-const { request, signIn, owner, addProject, addBot, addMember, bot } =
+const { db, request, signIn, owner, addProject, addBot, addMember, bot } =
   setupTestApp();
 const ownerCookie = await signIn(owner);
 const seed = webSeed(request);
@@ -102,6 +104,7 @@ test("an issue reads with its type, product and fields, its people as actors, an
       project,
       item,
       sourceAuthor: null,
+      createdAs: "issue",
     },
     {
       kind: "status_changed",
@@ -341,5 +344,76 @@ test("an item's key reads it in lower case and with its number zero-padded", asy
     const { status, body } = await get(`/items/${ref}`);
     expect(status, ref).toBe(200);
     expect(body.key, ref).toBe(key);
+  }
+});
+
+test("the created entry carries the type the item was created with, on the timeline and in the feed, whatever its type now", async () => {
+  const p = addProject("Created as");
+  const issue = await seed.item(p.key, "issue");
+  await v1("PATCH", `/items/${issue}`, { type: "todo" });
+  const todo = await seed.item(p.key, "todo");
+
+  const feed = (await get(`/feed?product=${p.key}`)).body.items as Body[];
+  for (const [key, createdAs] of [
+    [issue, "issue"],
+    [todo, "todo"],
+  ]) {
+    const { body } = await get(`/items/${key}`);
+    expect(body.timeline[0], key).toMatchObject({
+      kind: "item_created",
+      createdAs,
+    });
+    expect(
+      feed.find((e) => e.kind === "item_created" && e.item.key === key),
+      key,
+    ).toMatchObject({ createdAs });
+  }
+});
+
+test("a created entry stored before events recorded the type reads issue when a person filed it, else the item's type now", async () => {
+  const p = addProject("Created before");
+  const filed = await request("POST", "/api/web/issues", {
+    key: null,
+    cookie: ownerCookie,
+    json: { product: p.key, title: "filed by a person" },
+  });
+  expect(filed.status).toBe(201);
+  const byPerson = ((await filed.json()) as Body).key as string;
+  const byBot = await seed.item(p.key, "issue");
+  for (const key of [byPerson, byBot]) {
+    await v1("PATCH", `/items/${key}`, { type: "todo" });
+  }
+  const ids = db
+    .select({ id: issue.id })
+    .from(issue)
+    .where(eq(issue.productId, p.id))
+    .all()
+    .map((r) => r.id);
+  for (const id of ids) {
+    db.update(activityEvent)
+      .set({ payload: sql`json_remove(${activityEvent.payload}, '$.type')` })
+      .where(
+        and(
+          eq(activityEvent.subjectId, id),
+          eq(activityEvent.action, "issue.created"),
+        ),
+      )
+      .run();
+  }
+
+  const feed = (await get(`/feed?product=${p.key}`)).body.items as Body[];
+  for (const [key, createdAs] of [
+    [byPerson, "issue"],
+    [byBot, "todo"],
+  ]) {
+    const { body } = await get(`/items/${key}`);
+    expect(body.timeline[0], key).toMatchObject({
+      kind: "item_created",
+      createdAs,
+    });
+    expect(
+      feed.find((e) => e.kind === "item_created" && e.item.key === key),
+      key,
+    ).toMatchObject({ createdAs });
   }
 });

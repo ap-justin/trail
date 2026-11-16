@@ -347,7 +347,7 @@ describe("GET /activity?after= resumes the feed oldest first", () => {
           code: "validation_failed",
           message: expect.stringMatching(
             new RegExp(
-              `^cursor was issued for product=${a.key}, actorId=\\(none\\) but this request has .*: repeat the cursor's filters, or drop the cursor to start over$`,
+              `^cursor was issued for product=${a.key}, actor=\\(none\\) but this request has .*: repeat the cursor's filters, or drop the cursor to start over$`,
             ),
           ),
         },

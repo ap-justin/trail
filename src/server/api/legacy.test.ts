@@ -181,6 +181,31 @@ test("PATCH /issues/{id} by a bot outside the product creates no label, and says
   expect(labels.items.map((l: Body) => l.name)).not.toContain("legacy-made-up");
 });
 
+test("POST /products/{key}/labels and the deprecated /projects/{ref}/labels refuse a bot outside the owned product with the next step", async () => {
+  const outsider = addBot("legacy rest label creator");
+  for (const path of [
+    "/api/v1/products/LEG/labels",
+    "/api/v1/projects/LEG/labels",
+  ]) {
+    const res = await request("POST", path, {
+      json: { name: "outsider-made" },
+      key: outsider.key,
+    });
+    expect(res.status, path).toBe(403);
+    expect(await json(res), path).toMatchObject({
+      error: {
+        code: "forbidden",
+        message:
+          "LEG is owned by tester, so only tester creates its labels: ask tester to create it, or file or update the item without it, and a label LEG lacks comes back in skippedLabels",
+      },
+    });
+  }
+  const labels = await json(
+    await request("GET", "/api/v1/products/LEG/labels"),
+  );
+  expect(labels.items.map((l: Body) => l.name)).not.toContain("outsider-made");
+});
+
 test("/projects/{KEY} that matches no slug names the product, carrying deprecated", async () => {
   const got = await json(await request("GET", "/api/v1/projects/leg"));
   expect(got).toMatchObject({

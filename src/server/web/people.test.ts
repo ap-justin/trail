@@ -148,6 +148,20 @@ test("the list carries both kinds of invite, oldest first, after the owner", asy
   );
 });
 
+test("inviting the person who runs this trail is a 409 saying so", async () => {
+  expect(
+    await people("POST", "/people", { username: owner, products: [] }),
+  ).toEqual({
+    status: 409,
+    body: {
+      error: {
+        code: "conflict",
+        message: `@${owner} is the person who runs this trail, who sees every product`,
+      },
+    },
+  });
+});
+
 test("an entry that is neither a GitHub username nor an email address is a 422 saying what to enter", async () => {
   const res = await people("POST", "/people", {
     username: "devon@",
@@ -181,7 +195,7 @@ test.each([
       body: {
         error: {
           code: "conflict",
-          message: `${named} is already invited: change their products in People.`,
+          message: `${named} is already invited: change their products in the list below.`,
         },
       },
     });
