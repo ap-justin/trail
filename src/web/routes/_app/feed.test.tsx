@@ -2,6 +2,7 @@ import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { keys } from "@/lib/queries";
 import {
   feedPage,
   notFound,
@@ -10,7 +11,7 @@ import {
   signedInAs,
 } from "@/test/app";
 import { FakeEventSource } from "@/test/event-source";
-import { commentEntry, statusEntry } from "@/test/fixtures";
+import { commentEntry, humanUi, issue, statusEntry } from "@/test/fixtures";
 import { server } from "@/test/server";
 
 afterEach(() => {
@@ -265,24 +266,103 @@ describe("after a reconnect", () => {
   });
 });
 
-describe("a project taken away while filtered to it", () => {
-  test("the closed stream reads the feed again, and its 404 clears the project filter", async () => {
+describe("a product taken away while filtered to it", () => {
+  test("the closed stream reads the feed again, and its 404 clears the product filter", async () => {
     const { asked } = await openFeed();
     await userEvent.click(
-      screen.getByRole("combobox", { name: "Filter by project" }),
+      screen.getByRole("combobox", { name: "Filter by product" }),
     );
-    await userEvent.click(await screen.findByRole("option", { name: "trail" }));
-    await waitFor(() => expect(asked.at(-1)?.get("project")).toBe("TRL"));
+    await userEvent.click(
+      await screen.findByRole("option", { name: "TRL trail" }),
+    );
+    await waitFor(() => expect(asked.at(-1)?.get("product")).toBe("TRL"));
     const filtered = FakeEventSource.current;
-    expect(filtered.url).toBe("/api/web/events?project=TRL");
+    expect(filtered.url).toBe("/api/web/events?product=TRL");
 
     server.use(
       http.get("/api/web/feed", ({ request }) => {
         const query = new URL(request.url).searchParams;
         asked.push(query);
-        return query.has("project")
+        return query.has("product")
           ? notFound()
           : HttpResponse.json(feedPage([statusEntry("e2", minutesAgo(30))]));
+      }),
+    );
+    filtered.fail({ closed: true });
+    await waitFor(() =>
+      expect(FakeEventSource.current.url).toBe("/api/web/events"),
+    );
+    await waitFor(() => expect(asked.at(-1)?.has("product")).toBe(false));
+    expect(
+      screen.getByRole("combobox", { name: "Filter by product" }),
+    ).toHaveTextContent("All products");
+  });
+});
+
+describe("the project filter", () => {
+  test("a project chosen reads and streams the feed by its slug", async () => {
+    signedInAs("member");
+    const asked: URLSearchParams[] = [];
+    const page = feedPage([statusEntry("e2", minutesAgo(30))]);
+    server.use(
+      http.get("/api/web/feed", ({ request }) => {
+        asked.push(new URL(request.url).searchParams);
+        return HttpResponse.json({
+          ...page,
+          filters: {
+            ...page.filters,
+            projects: [{ slug: "human-ui", name: "Human UI launch" }],
+          },
+        });
+      }),
+    );
+    renderApp("/");
+    await waitFor(() => expect(rowFor("e2")).not.toBeNull());
+    await userEvent.click(
+      screen.getByRole("combobox", { name: "Filter by project" }),
+    );
+    await userEvent.click(
+      await screen.findByRole("option", { name: "Human UI launch" }),
+    );
+    await waitFor(() => expect(asked.at(-1)?.get("project")).toBe("human-ui"));
+    expect(FakeEventSource.current.url).toBe(
+      "/api/web/events?project=human-ui",
+    );
+  });
+
+  test("a project taken away while filtered to it clears the project filter", async () => {
+    signedInAs("member");
+    const asked: URLSearchParams[] = [];
+    const page = feedPage([statusEntry("e2", minutesAgo(30))]);
+    server.use(
+      http.get("/api/web/feed", ({ request }) => {
+        asked.push(new URL(request.url).searchParams);
+        return HttpResponse.json({
+          ...page,
+          filters: { ...page.filters, projects: [humanUi] },
+        });
+      }),
+    );
+    renderApp("/");
+    await waitFor(() => expect(rowFor("e2")).not.toBeNull());
+    await userEvent.click(
+      screen.getByRole("combobox", { name: "Filter by project" }),
+    );
+    await userEvent.click(
+      await screen.findByRole("option", { name: "Human UI launch" }),
+    );
+    await waitFor(() =>
+      expect(FakeEventSource.current.url).toBe(
+        "/api/web/events?project=human-ui",
+      ),
+    );
+    const filtered = FakeEventSource.current;
+
+    server.use(
+      http.get("/api/web/feed", ({ request }) => {
+        const query = new URL(request.url).searchParams;
+        asked.push(query);
+        return query.has("project") ? notFound() : HttpResponse.json(page);
       }),
     );
     filtered.fail({ closed: true });
@@ -296,14 +376,79 @@ describe("a project taken away while filtered to it", () => {
   });
 });
 
+describe("one of two filters taken away", () => {
+  /** Filters the feed to TRL and Human UI launch, then has the server 404 whatever `gone` names. */
+  async function filterBothThenLose(gone: "product" | "project") {
+    signedInAs("member");
+    const page = feedPage([statusEntry("e2", minutesAgo(30))]);
+    const withProjects = {
+      ...page,
+      filters: { ...page.filters, projects: [humanUi] },
+    };
+    server.use(
+      http.get("/api/web/feed", () => HttpResponse.json(withProjects)),
+    );
+    renderApp("/");
+    await waitFor(() => expect(rowFor("e2")).not.toBeNull());
+    await userEvent.click(
+      screen.getByRole("combobox", { name: "Filter by product" }),
+    );
+    await userEvent.click(
+      await screen.findByRole("option", { name: "TRL trail" }),
+    );
+    await userEvent.click(
+      screen.getByRole("combobox", { name: "Filter by project" }),
+    );
+    await userEvent.click(
+      await screen.findByRole("option", { name: "Human UI launch" }),
+    );
+    await waitFor(() =>
+      expect(FakeEventSource.current.url).toBe(
+        "/api/web/events?product=TRL&project=human-ui",
+      ),
+    );
+    const filtered = FakeEventSource.current;
+    server.use(
+      http.get("/api/web/feed", ({ request }) =>
+        new URL(request.url).searchParams.has(gone)
+          ? notFound()
+          : HttpResponse.json(withProjects),
+      ),
+    );
+    filtered.fail({ closed: true });
+  }
+
+  test("a lost project clears the project and keeps the product", async () => {
+    await filterBothThenLose("project");
+    await waitFor(() =>
+      expect(FakeEventSource.current.url).toBe("/api/web/events?product=TRL"),
+    );
+    expect(
+      screen.getByRole("combobox", { name: "Filter by project" }),
+    ).toHaveTextContent("All projects");
+  });
+
+  test("a lost product clears the product and keeps the project", async () => {
+    await filterBothThenLose("product");
+    await waitFor(() =>
+      expect(FakeEventSource.current.url).toBe(
+        "/api/web/events?project=human-ui",
+      ),
+    );
+    expect(
+      screen.getByRole("combobox", { name: "Filter by product" }),
+    ).toHaveTextContent("All products");
+  });
+});
+
 describe("a filter change with arrivals in flight", () => {
-  const chooseKai = async () => {
+  const chooseAlpha = async () => {
     await userEvent.click(
       screen.getByRole("combobox", { name: "Filter by bot" }),
     );
-    await userEvent.click(await screen.findByRole("option", { name: "Kai" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Alpha" }));
     await waitFor(() =>
-      expect(FakeEventSource.current.url).toBe("/api/web/events?actor=a-kai"),
+      expect(FakeEventSource.current.url).toBe("/api/web/events?actor=a-alpha"),
     );
   };
 
@@ -311,7 +456,7 @@ describe("a filter change with arrivals in flight", () => {
     const { stream } = await openFeed();
     stream.send(commentEntry("e9", minutesAgo(0)));
     expect(order()).toEqual(["e9", "e2"]);
-    await chooseKai();
+    await chooseAlpha();
     await waitFor(() => expect(order()).toEqual(["e2"]));
     expect(document.querySelector(".row-fresh")).toBeNull();
     FakeEventSource.current.open();
@@ -325,7 +470,7 @@ describe("a filter change with arrivals in flight", () => {
     topInView(false);
     stream.send(commentEntry("e9", minutesAgo(0)));
     expect(screen.getByRole("button", { name: "1 new" })).toBeInTheDocument();
-    await chooseKai();
+    await chooseAlpha();
     await waitFor(() =>
       expect(
         screen.queryByRole("button", { name: /new$/ }),
@@ -344,10 +489,278 @@ describe("filters", () => {
     const options = (await screen.findAllByRole("option")).map(
       (o) => o.textContent,
     );
-    expect(options).toEqual(["All bots", "Kai"]);
-    await userEvent.click(await screen.findByRole("option", { name: "Kai" }));
-    await waitFor(() => expect(asked.at(-1)?.get("actor")).toBe("a-kai"));
-    expect(FakeEventSource.current.url).toBe("/api/web/events?actor=a-kai");
+    expect(options).toEqual(["All bots", "Alpha"]);
+    await userEvent.click(await screen.findByRole("option", { name: "Alpha" }));
+    await waitFor(() => expect(asked.at(-1)?.get("actor")).toBe("a-alpha"));
+    expect(FakeEventSource.current.url).toBe("/api/web/events?actor=a-alpha");
     expect(FakeEventSource.opened[0]?.readyState).toBe(FakeEventSource.CLOSED);
+  });
+});
+
+describe("the type filter", () => {
+  test("a type chosen reads and streams the feed by that type", async () => {
+    const { asked } = await openFeed();
+    await userEvent.click(
+      screen.getByRole("combobox", { name: "Filter by type" }),
+    );
+    await userEvent.click(await screen.findByRole("option", { name: "Todos" }));
+    await waitFor(() => expect(asked.at(-1)?.get("type")).toBe("todo"));
+    expect(FakeEventSource.current.url).toBe("/api/web/events?type=todo");
+  });
+});
+
+describe("filters in the URL", () => {
+  const atlas = { key: "ATL", name: "Atlas" };
+  const bastion = { key: "BTL", name: "Bastion" };
+
+  /** Answers /feed with `e2` and ATL and BTL as product options, recording each query. */
+  function serveNeutralFeed() {
+    const asked: URLSearchParams[] = [];
+    const page = feedPage([statusEntry("e2", minutesAgo(30))]);
+    server.use(
+      http.get("/api/web/feed", ({ request }) => {
+        asked.push(new URL(request.url).searchParams);
+        return HttpResponse.json({
+          ...page,
+          filters: { ...page.filters, products: [atlas, bastion] },
+        });
+      }),
+    );
+    return asked;
+  }
+
+  test("a link with ?product=atl&type=todo reads and streams the feed by both", async () => {
+    signedInAs("member");
+    const asked = serveNeutralFeed();
+    renderApp("/?product=atl&type=todo");
+    await waitFor(() => expect(rowFor("e2")).not.toBeNull());
+    expect(asked[0]?.get("product")).toBe("ATL");
+    expect(asked[0]?.get("type")).toBe("todo");
+    expect(FakeEventSource.current.url).toBe(
+      "/api/web/events?product=ATL&type=todo",
+    );
+  });
+
+  test("an all-digit ?project= and ?product= read and stream the feed as text", async () => {
+    signedInAs("member");
+    const asked = serveNeutralFeed();
+    renderApp("/?project=2026&product=42");
+    await waitFor(() => expect(rowFor("e2")).not.toBeNull());
+    expect(asked[0]?.get("project")).toBe("2026");
+    expect(asked[0]?.get("product")).toBe("42");
+    expect(FakeEventSource.current.url).toBe(
+      "/api/web/events?product=42&project=2026",
+    );
+  });
+
+  test("a ?project= in capitals is the lowercase slug", async () => {
+    signedInAs("member");
+    const asked = serveNeutralFeed();
+    renderApp("/?project=Alpha-Launch");
+    await waitFor(() => expect(rowFor("e2")).not.toBeNull());
+    expect(asked[0]?.get("project")).toBe("alpha-launch");
+  });
+
+  // the router's default parseSearch reads 1E5 as JSON before any validator sees it
+  test("a ?product= in exponent form reads as the number the router made of it", async () => {
+    signedInAs("member");
+    const asked = serveNeutralFeed();
+    renderApp("/?product=1E5");
+    await waitFor(() => expect(rowFor("e2")).not.toBeNull());
+    expect(asked[0]?.get("product")).toBe("100000");
+  });
+
+  test("a filter picked survives going to another page and back", async () => {
+    signedInAs("member");
+    const asked = serveNeutralFeed();
+    server.use(
+      http.get("/api/web/products", () =>
+        HttpResponse.json({ items: [], nextCursor: null }),
+      ),
+    );
+    const { router } = renderApp("/");
+    await waitFor(() => expect(rowFor("e2")).not.toBeNull());
+    await userEvent.click(
+      screen.getByRole("combobox", { name: "Filter by product" }),
+    );
+    await userEvent.click(
+      await screen.findByRole("option", { name: "ATL Atlas" }),
+    );
+    await waitFor(() =>
+      expect(router.state.location.search).toEqual({ product: "ATL" }),
+    );
+
+    await router.navigate({ to: "/products" });
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe("/products"),
+    );
+    router.history.back();
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/"));
+    expect(router.state.location.search).toEqual({ product: "ATL" });
+    await waitFor(() =>
+      expect(FakeEventSource.current.url).toBe("/api/web/events?product=ATL"),
+    );
+    expect(asked.at(-1)?.get("product")).toBe("ATL");
+    await waitFor(() =>
+      expect(
+        screen.getByRole("combobox", { name: "Filter by product" }),
+      ).toHaveTextContent("Atlas"),
+    );
+  });
+
+  test("an empty value or an unknown type is no filter", async () => {
+    signedInAs("member");
+    const asked = serveNeutralFeed();
+    renderApp("/?product=&actor=&project=&type=epic");
+    await waitFor(() => expect(rowFor("e2")).not.toBeNull());
+    expect([...(asked[0]?.keys() ?? [])]).toEqual(["limit"]);
+    expect(FakeEventSource.current.url).toBe("/api/web/events");
+  });
+
+  test("choosing All takes the filter out of the URL and keeps the others", async () => {
+    signedInAs("member");
+    serveNeutralFeed();
+    const { router } = renderApp("/?product=ATL&type=todo");
+    await waitFor(() => expect(rowFor("e2")).not.toBeNull());
+    await userEvent.click(
+      screen.getByRole("combobox", { name: "Filter by type" }),
+    );
+    await userEvent.click(await screen.findByRole("option", { name: /^All/ }));
+    await waitFor(() =>
+      expect(router.state.location.search).toEqual({ product: "ATL" }),
+    );
+    await waitFor(() =>
+      expect(FakeEventSource.current.url).toBe("/api/web/events?product=ATL"),
+    );
+  });
+
+  test("a product found gone after another was picked leaves the new one", async () => {
+    signedInAs("member");
+    const page = feedPage([statusEntry("e2", minutesAgo(30))]);
+    const withProducts = {
+      ...page,
+      filters: { ...page.filters, products: [atlas, bastion] },
+    };
+    server.use(
+      http.get("/api/web/feed", () => HttpResponse.json(withProducts)),
+    );
+    const { router, queryClient } = renderApp("/?product=ATL");
+    await waitFor(() => expect(rowFor("e2")).not.toBeNull());
+    const filtered = FakeEventSource.current;
+    expect(filtered.url).toBe("/api/web/events?product=ATL");
+
+    // ATL's 404 waits until BTL has been picked
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let atlAsked = false;
+    server.use(
+      http.get("/api/web/feed", async ({ request }) => {
+        if (new URL(request.url).searchParams.get("product") !== "ATL") {
+          return HttpResponse.json(withProducts);
+        }
+        atlAsked = true;
+        await held;
+        return notFound();
+      }),
+    );
+    filtered.fail({ closed: true });
+    await waitFor(() => expect(atlAsked).toBe(true));
+    await userEvent.click(
+      screen.getByRole("combobox", { name: "Filter by product" }),
+    );
+    await userEvent.click(
+      await screen.findByRole("option", { name: "BTL Bastion" }),
+    );
+    await waitFor(() =>
+      expect(FakeEventSource.current.url).toBe("/api/web/events?product=BTL"),
+    );
+    release();
+
+    // the ATL read has answered 404; clearing on it would replace the URL straight after
+    const atlRead = keys.feed({
+      actor: null,
+      product: "ATL",
+      project: null,
+      type: null,
+    });
+    await waitFor(() =>
+      expect(queryClient.getQueryState(atlRead)?.status).toBe("error"),
+    );
+    await act(() => Promise.resolve());
+    expect(router.history.location.search).toBe("?product=BTL");
+    expect(router.state.location.search).toEqual({ product: "BTL" });
+    expect(FakeEventSource.current.url).toBe("/api/web/events?product=BTL");
+  });
+
+  test("a product found gone after the viewer opened an item leaves them on the item", async () => {
+    signedInAs("member");
+    const page = feedPage([statusEntry("e2", minutesAgo(30))]);
+    const withProducts = {
+      ...page,
+      filters: { ...page.filters, products: [atlas, bastion] },
+    };
+    // ATL's 404 waits until the viewer is on the item
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let atlAsked = 0;
+    server.use(
+      http.get("/api/web/feed", async () => {
+        atlAsked += 1;
+        if (atlAsked === 1) return HttpResponse.json(withProducts);
+        await held;
+        return notFound();
+      }),
+      http.get("/api/web/items/ATL-1", () =>
+        HttpResponse.json(issue({ key: "ATL-1" })),
+      ),
+    );
+    const { router, queryClient } = renderApp("/?product=ATL");
+    await waitFor(() => expect(rowFor("e2")).not.toBeNull());
+    FakeEventSource.current.fail({ closed: true });
+    await waitFor(() => expect(atlAsked).toBe(2));
+    await router.navigate({
+      to: "/products/$key/$n",
+      params: { key: "ATL", n: "1" },
+    });
+    release();
+
+    const atlRead = keys.feed({
+      actor: null,
+      product: "ATL",
+      project: null,
+      type: null,
+    });
+    await waitFor(() =>
+      expect(queryClient.getQueryState(atlRead)?.status).toBe("error"),
+    );
+    await act(() => Promise.resolve());
+    expect(router.state.location.pathname).toBe("/products/ATL/1");
+    expect(router.history.location.pathname).toBe("/products/ATL/1");
+  });
+
+  test("a bot the feed no longer offers leaves the URL; one it offers stays", async () => {
+    signedInAs("member");
+    const asked = serveNeutralFeed();
+    const { router } = renderApp("/?actor=a-gone&type=todo");
+    await waitFor(() =>
+      expect(router.state.location.search).toEqual({ type: "todo" }),
+    );
+    await waitFor(() =>
+      expect(FakeEventSource.current.url).toBe("/api/web/events?type=todo"),
+    );
+    expect(asked.at(-1)?.has("actor")).toBe(false);
+
+    await router.navigate({ to: "/", search: { actor: "a-alpha" } });
+    await waitFor(() =>
+      expect(FakeEventSource.current.url).toBe("/api/web/events?actor=a-alpha"),
+    );
+    await waitFor(() => expect(asked.at(-1)?.get("actor")).toBe("a-alpha"));
+    await act(() => Promise.resolve());
+    expect(router.state.location.search).toEqual({ actor: "a-alpha" });
   });
 });

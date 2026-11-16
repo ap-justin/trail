@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, test } from "vitest";
 import { migrate, openDatabase } from "../db/client.js";
-import { actor, apiKey, project } from "../db/schema.js";
+import { actor, apiKey, product } from "../db/schema.js";
 import { NotFoundError, ValidationError } from "./errors.js";
 import {
   authenticateKey,
@@ -78,7 +78,7 @@ test("a bot needs a display name", () => {
 });
 
 test("a human can be created with a GitHub id and has no key", () => {
-  const human = createHuman(db, { displayName: "Justin", githubId: 42 });
+  const human = createHuman(db, { displayName: "Pat", githubId: 42 });
   expect(human).toMatchObject({ kind: "human", githubId: 42 });
   const keys = db.select().from(apiKey).all();
   expect(keys.some((r) => r.actorId === human.id)).toBe(false);
@@ -88,7 +88,7 @@ describe("a key's scope", () => {
   const owner = createBot(db, "scope owner").actor;
   const addProject = (key: string) =>
     db
-      .insert(project)
+      .insert(product)
       .values({ key, name: key, createdBy: owner.id })
       .returning()
       .get();
@@ -98,19 +98,19 @@ describe("a key's scope", () => {
   test("a key minted without a scope reaches every project with every action", () => {
     const { key } = createBot(db, "unscoped");
     expect(authenticateKey(db, key)?.scope).toEqual({
-      projects: null,
+      products: null,
       actions: null,
     });
   });
 
   test("createBot stores the projects by id and the actions, both read back on the key", () => {
-    const { actor, key } = createBot(db, "bg-ivy", {
+    const { actor, key } = createBot(db, "bg-zeta", {
       scope: { projects: ["bgp", "OPS"], actions: ["comments", "read"] },
     });
     expect(authenticateKey(db, key)).toEqual({
       ...actor,
       scope: {
-        projects: [
+        products: [
           { id: bgp.id, key: "BGP" },
           { id: ops.id, key: "OPS" },
         ],
@@ -123,11 +123,11 @@ describe("a key's scope", () => {
     const { actor, key: wide } = createBot(db, "two keys");
     const { key: narrow } = createKey(db, actor.id, { actions: ["issues"] });
     expect(authenticateKey(db, narrow)?.scope).toEqual({
-      projects: null,
+      products: null,
       actions: ["issues"],
     });
     expect(authenticateKey(db, wide)?.scope).toEqual({
-      projects: null,
+      products: null,
       actions: null,
     });
   });
@@ -137,7 +137,7 @@ describe("a key's scope", () => {
       scope: { projects: ["BGP", "bgp", "Bgp"], actions: ["read", "read"] },
     });
     expect(authenticateKey(db, key)?.scope).toEqual({
-      projects: [{ id: bgp.id, key: "BGP" }],
+      products: [{ id: bgp.id, key: "BGP" }],
       actions: ["read"],
     });
   });
@@ -149,7 +149,7 @@ describe("a key's scope", () => {
       }),
     ).toThrow(
       new ValidationError(
-        "no project with key NOPE, ZZ: scope the key to the keys of existing projects, like TRL",
+        "no product NOPE, ZZ: scope the key to products that exist, which are BGP, OPS",
       ),
     );
     // listKeys joins api_key, so an orphaned bot row is only visible on actor
@@ -176,7 +176,7 @@ describe("a key's scope", () => {
     [
       "projects",
       { projects: [] },
-      "projects must name at least one project: leave it out for a key that reaches every project",
+      "products must name at least one product: leave it out for a key that reaches every product",
     ],
     [
       "actions",
@@ -195,9 +195,9 @@ describe("a key's scope", () => {
     });
     const listed = listKeys(db).filter((k) => k.actorId === actor.id);
     expect(listed.map((k) => k.scope)).toEqual([
-      { projects: ["BGP", "OPS"], actions: ["admin"] },
+      { products: ["BGP", "OPS"], actions: ["admin"] },
     ]);
     const unscoped = listKeys(db).find((k) => k.actorId === owner.id);
-    expect(unscoped?.scope).toEqual({ projects: null, actions: null });
+    expect(unscoped?.scope).toEqual({ products: null, actions: null });
   });
 });

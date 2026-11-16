@@ -2,103 +2,387 @@ import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, test } from "vitest";
+import { ITEM_PAGES_MAX } from "@/lib/queries";
 import { notFound, renderApp, signedInAs } from "@/test/app";
 import {
-  issueList,
   issueRow,
-  project,
+  openBot,
+  projectDetail,
+  projectItems,
   statusUpdate,
+  todoRow,
   trail,
 } from "@/test/fixtures";
 import { server } from "@/test/server";
 
-/** Answers TRL's reads, recording the status each issue-list request asked for. */
-function serveProject() {
-  const statuses: (string | null)[] = [];
+/** Answers Human UI launch's reads, recording each item-list request's query. */
+function serveProject(detail = projectDetail()) {
+  const asked: string[] = [];
   server.use(
-    http.get("/api/web/projects/TRL", () => HttpResponse.json(project())),
-    http.get("/api/web/projects/TRL/issues", ({ request }) => {
-      statuses.push(new URL(request.url).searchParams.get("status"));
-      return HttpResponse.json(issueList([issueRow()]));
+    http.get("/api/web/projects/human-ui", () => HttpResponse.json(detail)),
+    http.get("/api/web/projects/human-ui/items", ({ request }) => {
+      const params = new URL(request.url).searchParams;
+      asked.push(
+        ["product", "type", "status"]
+          .map((name) => `${name}=${params.get(name)}`)
+          .join(" "),
+      );
+      return HttpResponse.json(
+        projectItems([
+          { product: openBot, items: [issueRow({ key: "OPB-3" })] },
+          { product: trail, items: [todoRow()] },
+        ]),
+      );
     }),
-    http.get("/api/web/projects/TRL/status-updates", () =>
+    http.get("/api/web/projects/human-ui/status-updates", () =>
       HttpResponse.json({ items: [statusUpdate()], nextCursor: null }),
     ),
   );
-  return statuses;
+  return asked;
 }
 
-const selectedTab = () =>
-  screen.getByRole("tab", { selected: true }).textContent;
+const currentSection = () => {
+  const nav = screen.getAllByRole("navigation")[0];
+  if (!nav) throw new Error("no navigation");
+  return within(nav)
+    .getAllByRole("link")
+    .filter((link) => link.getAttribute("aria-current") === "page")
+    .map((link) => link.textContent);
+};
 
 describe("project page", () => {
-  test("?status= picks the tab and the request", async () => {
+  test("draws the project, its items and its status updates, with Projects current", async () => {
     signedInAs("member");
-    const statuses = serveProject();
-    renderApp("/projects/TRL?status=in_progress");
+    const asked = serveProject();
+    renderApp("/projects/human-ui");
+    expect(await screen.findAllByText(todoRow().title)).not.toHaveLength(0);
     expect(
-      await screen.findAllByText("Human UI: feed, projects, issue page"),
+      screen.getAllByText("SSE feed shipped. Human UI design is in review."),
     ).not.toHaveLength(0);
-    expect(statuses).toEqual(["in_progress"]);
-    expect(selectedTab()).toMatch(/^In progress/);
+    expect(screen.getAllByText("Human UI launch")).not.toHaveLength(0);
+    expect(asked).toEqual(["product=null type=null status=null"]);
+    expect(currentSection()).toEqual(["Projects"]);
   });
 
-  test("an unknown status falls back to All", async () => {
+  test("?product=, ?type= and ?status= go to the items request", async () => {
     signedInAs("member");
-    const statuses = serveProject();
-    renderApp("/projects/TRL?status=bogus");
-    expect(
-      await screen.findAllByText("Human UI: feed, projects, issue page"),
-    ).not.toHaveLength(0);
-    expect(statuses).toEqual([null]);
-    expect(selectedTab()).toMatch(/^All/);
+    const asked = serveProject();
+    renderApp("/projects/human-ui?product=TRL&type=todo&status=open");
+    await screen.findAllByText(todoRow().title);
+    expect(asked).toEqual(["product=TRL type=todo status=open"]);
   });
 
-  test("clicking a tab puts it in the URL and asks for it", async () => {
+  test("?product= in lowercase is that product, in the request and the filter", async () => {
     signedInAs("member");
-    const statuses = serveProject();
-    const { router } = renderApp("/projects/TRL");
-    await screen.findAllByText("Human UI: feed, projects, issue page");
+    const asked = serveProject(
+      projectDetail({ products: [{ key: "ATL", name: "Atlas" }] }),
+    );
+    renderApp("/projects/human-ui?product=atl");
+    await waitFor(() =>
+      expect(asked).toEqual(["product=ATL type=null status=null"]),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getAllByRole("combobox", { name: "Filter by product" })[0],
+      ).toHaveTextContent("Atlas"),
+    );
+  });
+
+  test("an all-digit ?product= is that product, in the request and the filter", async () => {
+    signedInAs("member");
+    const asked = serveProject(
+      projectDetail({ products: [{ key: "42", name: "Beta" }] }),
+    );
+    renderApp("/projects/human-ui?product=42");
+    await waitFor(() =>
+      expect(asked).toEqual(["product=42 type=null status=null"]),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getAllByRole("combobox", { name: "Filter by product" })[0],
+      ).toHaveTextContent("Beta"),
+    );
+  });
+
+  test("an empty ?product= is All, and the items don't wait on the project", async () => {
+    signedInAs("member");
+    const asked = serveProject();
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.get("/api/web/projects/human-ui", async () => {
+        await held;
+        return HttpResponse.json(projectDetail());
+      }),
+    );
+    renderApp("/projects/human-ui?product=");
+    await waitFor(() =>
+      expect(asked).toEqual(["product=null type=null status=null"]),
+    );
+    release();
+  });
+
+  test("a product the project doesn't draw from, or an unknown type or status, is All", async () => {
+    signedInAs("member");
+    const asked = serveProject();
+    renderApp("/projects/human-ui?product=SEC&type=epic&status=triage");
+    await screen.findAllByText(todoRow().title);
+    expect(asked).toEqual(["product=null type=null status=null"]);
+  });
+
+  test("clicking a tab keeps the product in the URL and asks for both", async () => {
+    signedInAs("member");
+    const asked = serveProject();
+    const { router } = renderApp("/projects/human-ui?product=TRL");
+    await screen.findAllByText(todoRow().title);
     await userEvent.click(screen.getByRole("tab", { name: /^Done/ }));
     await waitFor(() =>
-      expect(router.state.location.search).toEqual({ status: "done" }),
+      expect(router.state.location.search).toEqual({
+        product: "TRL",
+        status: "done",
+      }),
     );
-    await waitFor(() => expect(statuses).toEqual([null, "done"]));
-    await userEvent.click(screen.getByRole("tab", { name: /^All/ }));
-    await waitFor(() => expect(router.state.location.search).toEqual({}));
+    await waitFor(() =>
+      expect(asked).toEqual([
+        "product=TRL type=null status=null",
+        "product=TRL type=null status=done",
+      ]),
+    );
+  });
+
+  test("a project with products the viewer can't see says so", async () => {
+    signedInAs("member");
+    serveProject(projectDetail({ hiddenProducts: true }));
+    renderApp("/projects/human-ui");
+    expect(
+      await screen.findAllByText(
+        "Items from products you can't see are not shown.",
+      ),
+    ).not.toHaveLength(0);
+  });
+
+  test("with ?product=, Retry after a failed project read brings back the items too", async () => {
+    signedInAs("member");
+    const asked = serveProject();
+    let projectReads = 0;
+    server.use(
+      http.get("/api/web/projects/human-ui", () =>
+        ++projectReads === 1
+          ? HttpResponse.json({ error: "unavailable" }, { status: 503 })
+          : HttpResponse.json(projectDetail()),
+      ),
+    );
+    renderApp("/projects/human-ui?product=TRL");
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Try again" }),
+    );
+    expect(await screen.findAllByText(todoRow().title)).not.toHaveLength(0);
+    expect(asked).toEqual(["product=TRL type=null status=null"]);
   });
 });
 
-describe("links", () => {
-  test("an issue row's link is described by its meta line", async () => {
-    signedInAs("member");
-    serveProject();
-    renderApp("/projects/TRL");
-    const links = await screen.findAllByRole("link", {
-      name: "TRL-17 Human UI: feed, projects, issue page",
+describe("while the next filter loads", () => {
+  /** Human UI launch's items, read at once unfiltered and held for any filter until `release`. */
+  function serveHeld() {
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
     });
-    // the 375 list's row; the 1440 table names its row by cells instead
-    const row = links.find((link) => link.closest("ul"));
-    expect(row).toHaveAccessibleDescription(/Tara/);
-  });
-
-  test("a link to the page you're on carries only the component's own aria-current", async () => {
-    signedInAs("member");
     serveProject();
     server.use(
-      http.get("/api/web/search", () =>
-        HttpResponse.json({ issues: [], projects: [trail] }),
+      http.get("/api/web/projects/human-ui/items", async ({ request }) => {
+        const query = new URL(request.url).searchParams;
+        const both = [
+          { product: openBot, items: [issueRow({ key: "OPB-3" })] },
+          { product: trail, items: [todoRow()] },
+        ];
+        const filtered = ["product", "type", "status"].some((f) =>
+          query.has(f),
+        );
+        if (!filtered) return HttpResponse.json(projectItems(both));
+        await held;
+        return HttpResponse.json(projectItems(both.slice(1)));
+      }),
+    );
+    return release;
+  }
+
+  const allTab = () => screen.getByRole("tab", { name: /^All/ });
+
+  test("a new status tab never shows the last list's group counts, which counted every status", async () => {
+    signedInAs("member");
+    serveProject();
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.get("/api/web/projects/human-ui/items", async ({ request }) => {
+        const list = projectItems([{ product: trail, items: [todoRow()] }]);
+        if (new URL(request.url).searchParams.has("status")) {
+          await held;
+          return HttpResponse.json(list);
+        }
+        // under All the group counts its rows of every status
+        return HttpResponse.json({
+          ...list,
+          groups: list.groups.map((g) => ({ ...g, count: 3 })),
+        });
+      }),
+    );
+    renderApp("/projects/human-ui");
+    expect(await screen.findAllByText("3 items")).not.toHaveLength(0);
+    await userEvent.click(screen.getByRole("tab", { name: /^Open/ }));
+    await waitFor(() =>
+      expect(screen.queryAllByText("3 items")).toHaveLength(0),
+    );
+    release();
+    expect(await screen.findAllByText("1 item")).not.toHaveLength(0);
+  });
+
+  test("a new product drops the last counts, which counted the other products", async () => {
+    signedInAs("member");
+    const release = serveHeld();
+    const { router } = renderApp("/projects/human-ui");
+    expect(await screen.findAllByText(todoRow().title)).not.toHaveLength(0);
+    await router.navigate({
+      to: "/projects/$slug",
+      params: { slug: "human-ui" },
+      search: { product: "TRL" },
+    });
+    await waitFor(() => expect(allTab()).not.toHaveTextContent("2"));
+    release();
+    await waitFor(() => expect(allTab()).toHaveTextContent("1"));
+  });
+});
+
+describe("pages", () => {
+  test("a group split across pages is one group, and later groups are drawn", async () => {
+    signedInAs("member");
+    serveProject();
+    const cursors: (string | null)[] = [];
+    server.use(
+      http.get("/api/web/projects/human-ui/items", ({ request }) => {
+        const cursor = new URL(request.url).searchParams.get("cursor");
+        cursors.push(cursor);
+        const first = projectItems([
+          { product: openBot, items: [issueRow({ key: "OPB-3" })] },
+        ]);
+        const second = projectItems([
+          {
+            product: openBot,
+            items: [issueRow({ key: "OPB-1", title: "Continued row" })],
+          },
+          { product: trail, items: [todoRow()] },
+        ]);
+        // the server's count is the group's whole total on every page
+        const page = cursor ? second : first;
+        return HttpResponse.json({
+          ...page,
+          groups: page.groups.map((g) => ({
+            ...g,
+            count: g.product.key === openBot.key ? 2 : 1,
+          })),
+          nextCursor: cursor ? null : "after-opb-3",
+        });
+      }),
+    );
+    renderApp("/projects/human-ui");
+    expect(await screen.findAllByText(todoRow().title)).not.toHaveLength(0);
+    expect(screen.getAllByText("Continued row")).not.toHaveLength(0);
+    expect(cursors).toEqual([null, "after-opb-3"]);
+    // as many openBot headers ("2 items") as trail ones ("1 item"): one per layout, not per page
+    expect(screen.getAllByText("2 items")).toHaveLength(
+      screen.getAllByText("1 item").length,
+    );
+  });
+
+  test("past the page cap the page says rows are missing", async () => {
+    signedInAs("member");
+    serveProject();
+    let asked = 0;
+    server.use(
+      http.get("/api/web/projects/human-ui/items", () => {
+        asked++;
+        const row = issueRow({ key: `OPB-${asked}`, title: `Row ${asked}` });
+        return HttpResponse.json({
+          ...projectItems([
+            { product: openBot, items: [row] },
+            { product: trail, items: [todoRow({ key: `TRL-${asked}` })] },
+          ]),
+          nextCursor: `after-${asked}`,
+        });
+      }),
+    );
+    renderApp("/projects/human-ui");
+    // two rows a page, one per product
+    expect(
+      await screen.findAllByText("Only the first 20 items are shown."),
+    ).not.toHaveLength(0);
+    expect(asked).toBe(ITEM_PAGES_MAX);
+  });
+});
+
+describe("old product links", () => {
+  test("/projects/TRL is the TRL product, filters and all", async () => {
+    signedInAs("member");
+    server.use(
+      http.get("/api/web/products/TRL", notFound),
+      http.get("/api/web/products/TRL/items", notFound),
+      http.get("/api/web/products/TRL/status-updates", notFound),
+    );
+    const { router } = renderApp("/projects/TRL?status=done");
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe("/products/TRL"),
+    );
+    expect(router.state.location.search).toEqual({ status: "done" });
+    // the product page's own reads, answered before the test ends
+    await screen.findByRole("heading", { name: "Page not found", level: 1 });
+  });
+  test("/projects/trl, no such project, is the TRL product in place, with its filters", async () => {
+    signedInAs("member");
+    server.use(
+      http.get("/api/web/projects/trl", notFound),
+      http.get("/api/web/projects/trl/items", notFound),
+      http.get("/api/web/projects/trl/status-updates", notFound),
+      http.get("/api/web/products/TRL", notFound),
+      http.get("/api/web/products/TRL/items", notFound),
+      http.get("/api/web/products/TRL/status-updates", notFound),
+    );
+    const { router } = renderApp(
+      "/projects/trl?status=done&type=todo&product=OPB",
+    );
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe("/products/TRL"),
+    );
+    expect(router.state.location.search).toEqual({
+      status: "done",
+      type: "todo",
+    });
+    expect(router.history.length).toBe(1);
+    await screen.findByRole("heading", { name: "Page not found", level: 1 });
+  });
+
+  test("a project named like a product is the project", async () => {
+    signedInAs("member");
+    server.use(
+      http.get("/api/web/projects/trl", () =>
+        HttpResponse.json(projectDetail()),
+      ),
+      http.get("/api/web/projects/trl/items", () =>
+        HttpResponse.json(
+          projectItems([{ product: trail, items: [todoRow()] }]),
+        ),
+      ),
+      http.get("/api/web/projects/trl/status-updates", () =>
+        HttpResponse.json({ items: [], nextCursor: null }),
       ),
     );
-    renderApp("/projects/TRL");
-    await screen.findAllByText("Human UI: feed, projects, issue page");
-    const [box] = screen.getAllByRole("searchbox", { name: "Search issues" });
-    if (!box) throw new Error("no search box");
-    await userEvent.type(box, "trail");
-    const results = await screen.findByRole("list", { name: "Search results" });
-    expect(within(results).getByRole("link")).not.toHaveAttribute(
-      "aria-current",
-    );
+    const { router } = renderApp("/projects/trl");
+    expect(await screen.findAllByText(todoRow().title)).not.toHaveLength(0);
+    expect(router.state.location.pathname).toBe("/projects/trl");
   });
 });
 
@@ -106,27 +390,24 @@ describe("not found", () => {
   async function notFoundMarkup(path: string) {
     signedInAs("member");
     server.use(
-      http.get("/api/web/projects/:key", notFound),
-      http.get("/api/web/projects/:key/issues", notFound),
-      http.get("/api/web/projects/:key/status-updates", notFound),
-      http.get("/api/web/issues/:key", notFound),
+      http.get("/api/web/projects/:slug", notFound),
+      http.get("/api/web/projects/:slug/items", notFound),
+      http.get("/api/web/projects/:slug/status-updates", notFound),
     );
     renderApp(path);
     await screen.findByRole("heading", { name: "Page not found", level: 1 });
-    // the panel's heading is the page's only one: the shell draws none
-    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
-    // useId values count up across renders; only the markup itself must match
     const markup = document.body.innerHTML.replace(/_r_\w+_/g, "_id_");
     cleanup();
     return markup;
   }
 
-  test("a hidden project, a hidden issue and an unknown URL render the same page", async () => {
+  test("a project the server won't show renders the same page as an unknown URL", async () => {
     const unknown = await notFoundMarkup("/no-such-page");
-    expect(unknown).toContain(
-      "This page doesn't exist, or you don't have access to it.",
-    );
-    expect(await notFoundMarkup("/projects/SEC")).toBe(unknown);
-    expect(await notFoundMarkup("/issues/SEC-1")).toBe(unknown);
+    expect(await notFoundMarkup("/projects/secret-launch")).toBe(unknown);
+  });
+
+  test("/projects/sec, a product the viewer can't see, is the same page as one that doesn't exist", async () => {
+    const unknown = await notFoundMarkup("/projects/zzz");
+    expect(await notFoundMarkup("/projects/sec")).toBe(unknown);
   });
 });

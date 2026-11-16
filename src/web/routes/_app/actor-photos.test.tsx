@@ -6,9 +6,9 @@ import { keys } from "@/lib/queries";
 import { renderApp, serveFeed, signedInAs } from "@/test/app";
 import { FakeEventSource } from "@/test/event-source";
 import {
+  alpha,
   commentEntry,
   issue,
-  kai,
   maya,
   people,
   photoUrlFor,
@@ -16,7 +16,7 @@ import {
 } from "@/test/fixtures";
 import { server } from "@/test/server";
 
-const kaiPhoto = photoUrlFor("a-kai", "9c");
+const alphaPhoto = photoUrlFor("a-alpha", "9c");
 const mayaPhoto = photoUrlFor("a-maya", "5e");
 const issueTitle = "Team access: invite people by GitHub username";
 
@@ -60,7 +60,7 @@ async function openAndSettleSession(
 function serveIssue() {
   const reads = { count: 0 };
   server.use(
-    http.get("/api/web/issues/TRL-14", () => {
+    http.get("/api/web/items/TRL-14", () => {
       reads.count += 1;
       return HttpResponse.json(issue());
     }),
@@ -71,7 +71,7 @@ function serveIssue() {
 async function openIssue() {
   signedInAs("member");
   const reads = serveIssue();
-  const app = renderApp("/issues/TRL-14");
+  const app = renderApp("/products/TRL/14");
   expect(await screen.findByText(issueTitle)).toBeInTheDocument();
   const stream = FakeEventSource.current;
   stream.open();
@@ -100,9 +100,15 @@ describe("an actor event on the feed", () => {
 
   test("swaps the actor's avatar in every row in place, with no read and no new row", async () => {
     const { asked, stream, queryClient } = await openFeed();
-    stream.actor({ actorId: kai.id, photoUrl: kaiPhoto, title: null });
-    expect(rowFor("e1")?.querySelector("img")).toHaveAttribute("src", kaiPhoto);
-    expect(rowFor("e3")?.querySelector("img")).toHaveAttribute("src", kaiPhoto);
+    stream.actor({ actorId: alpha.id, photoUrl: alphaPhoto, title: null });
+    expect(rowFor("e1")?.querySelector("img")).toHaveAttribute(
+      "src",
+      alphaPhoto,
+    );
+    expect(rowFor("e3")?.querySelector("img")).toHaveAttribute(
+      "src",
+      alphaPhoto,
+    );
     expect(rowFor("e2")?.querySelector("img")).toBeNull();
     expect(order()).toEqual(["e1", "e2", "e3"]);
     expect(document.querySelector(".row-fresh")).toBeNull();
@@ -112,18 +118,21 @@ describe("an actor event on the feed", () => {
 
   test("a null photo puts the initials back", async () => {
     const { stream } = await openFeed();
-    stream.actor({ actorId: kai.id, photoUrl: kaiPhoto, title: null });
-    stream.actor({ actorId: kai.id, photoUrl: null, title: null });
+    stream.actor({ actorId: alpha.id, photoUrl: alphaPhoto, title: null });
+    stream.actor({ actorId: alpha.id, photoUrl: null, title: null });
     const avatar = rowFor("e1")?.querySelector('[data-actor-kind="bot"]');
     expect(avatar?.querySelector("img")).toBeNull();
-    expect(avatar).toHaveTextContent("K");
+    expect(avatar).toHaveTextContent("A");
   });
 
   test("rows the stream delivered take the new photo too", async () => {
     const { stream } = await openFeed();
     stream.send(commentEntry("e9", minutesAgo(0)), 9);
-    stream.actor({ actorId: kai.id, photoUrl: kaiPhoto, title: null });
-    expect(rowFor("e9")?.querySelector("img")).toHaveAttribute("src", kaiPhoto);
+    stream.actor({ actorId: alpha.id, photoUrl: alphaPhoto, title: null });
+    expect(rowFor("e9")?.querySelector("img")).toHaveAttribute(
+      "src",
+      alphaPhoto,
+    );
   });
 
   test("the viewer's own photo changes in the shell", async () => {
@@ -146,12 +155,12 @@ describe("an actor event on the feed", () => {
 describe("an actor event off the feed", () => {
   test("swaps the avatar on an issue page without reading it again", async () => {
     const { reads, stream, queryClient } = await openIssue();
-    expect(imgsOf(kaiPhoto)).toHaveLength(0);
-    stream.actor({ actorId: kai.id, photoUrl: kaiPhoto, title: null });
-    // the assignee and each timeline row Kai wrote
-    await waitFor(() => expect(imgsOf(kaiPhoto).length).toBeGreaterThan(1));
-    stream.actor({ actorId: kai.id, photoUrl: null, title: null });
-    await waitFor(() => expect(imgsOf(kaiPhoto)).toHaveLength(0));
+    expect(imgsOf(alphaPhoto)).toHaveLength(0);
+    stream.actor({ actorId: alpha.id, photoUrl: alphaPhoto, title: null });
+    // the assignee and each timeline row Alpha wrote
+    await waitFor(() => expect(imgsOf(alphaPhoto).length).toBeGreaterThan(1));
+    stream.actor({ actorId: alpha.id, photoUrl: null, title: null });
+    await waitFor(() => expect(imgsOf(alphaPhoto)).toHaveLength(0));
     await readsSettled(queryClient);
     expect(reads.count).toBe(1);
   });
@@ -218,7 +227,10 @@ describe("the shell's stream", () => {
       expect(account.querySelector("img")).toHaveAttribute("src", mayaPhoto),
     );
 
-    await router.navigate({ to: "/issues/$key", params: { key: "TRL-14" } });
+    await router.navigate({
+      to: "/products/$key/$n",
+      params: { key: "TRL", n: "14" },
+    });
     expect(await screen.findByText(issueTitle)).toBeInTheDocument();
     expect(feed?.readyState).toBe(FakeEventSource.CLOSED);
     const [reopened, ...more] = liveStreams();
@@ -227,8 +239,8 @@ describe("the shell's stream", () => {
     // nothing was missed while the feed's stream was open, so its first open reads nothing
     const before = reads.count;
     reopened?.open();
-    reopened?.actor({ actorId: kai.id, photoUrl: kaiPhoto, title: null });
-    await waitFor(() => expect(imgsOf(kaiPhoto).length).toBeGreaterThan(0));
+    reopened?.actor({ actorId: alpha.id, photoUrl: alphaPhoto, title: null });
+    await waitFor(() => expect(imgsOf(alphaPhoto).length).toBeGreaterThan(0));
     await readsSettled(queryClient);
     expect(reads.count).toBe(before);
   });

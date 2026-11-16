@@ -6,7 +6,7 @@ import { createApp } from "./app.js";
 import { type AuthConfig, createAuth } from "./auth/auth.js";
 import type { MailMessage } from "./auth/mail.js";
 import { migrate, openDatabase } from "./db/client.js";
-import { invite, project, projectMember } from "./db/schema.js";
+import { invite, product, productMember } from "./db/schema.js";
 import { type ActivityEvent, createEventBus } from "./events/bus.js";
 import { createBot } from "./service/keys.js";
 import { type WebhookSettings, webhookSettings } from "./service/webhooks.js";
@@ -257,7 +257,7 @@ export function setupTestApp({
 
   /**
    * Sends `json` as the body and the bot's key unless `key` overrides it (null
-   * sends none), and `cookie` as the Cookie header. A non-GET carries the app's
+   * sends none), `cookie` as the Cookie header, and any further `headers`. A non-GET carries the app's
    * own Origin, as a browser on the SPA sends it, unless `origin` overrides it
    * (null sends none).
    */
@@ -269,14 +269,17 @@ export function setupTestApp({
       key = bot.key,
       cookie,
       origin = TEST_ORIGIN,
+      headers: extra = {},
     }: {
       json?: unknown;
       key?: string | null;
       cookie?: string;
       origin?: string | null;
+      /** sent as well, like an Idempotency-Key */
+      headers?: Record<string, string>;
     } = {},
   ) {
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = { ...extra };
     if (key !== null) headers.authorization = `Bearer ${key}`;
     if (cookie !== undefined) headers.cookie = cookie;
     if (origin !== null && method !== "GET") headers.origin = origin;
@@ -376,7 +379,7 @@ export function setupTestApp({
       .returning()
       .get();
     for (const projectId of projectIds) {
-      db.insert(projectMember).values({ inviteId, projectId }).run();
+      db.insert(productMember).values({ inviteId, productId: projectId }).run();
     }
     return inviteId;
   }
@@ -387,7 +390,7 @@ export function setupTestApp({
   /** A project written straight to the database, created by the bot, with no activity event. */
   const addProject = (name = "p") =>
     db
-      .insert(project)
+      .insert(product)
       .values({ key: projectKey(), name, createdBy: bot.actor.id })
       .returning()
       .get();
@@ -404,7 +407,7 @@ export function setupTestApp({
       .returning()
       .get();
     for (const projectId of projectIds) {
-      db.insert(projectMember).values({ inviteId, projectId }).run();
+      db.insert(productMember).values({ inviteId, productId: projectId }).run();
     }
     return signIn(login, account);
   }

@@ -52,18 +52,18 @@ describe("a member's feed with no filter", () => {
           : await addMember("grace", ids);
 
       const feed = await get<FeedView>("/feed", cookie);
-      expect(feed.items.map((e) => e.project.key)).toHaveLength(6);
-      expect(new Set(feed.items.map((e) => e.project.key))).toEqual(
+      expect(feed.items.map((e) => e.product?.key)).toHaveLength(6);
+      expect(new Set(feed.items.map((e) => e.product?.key))).toEqual(
         new Set(mine.map((p) => p.key)),
       );
-      expect(feed.items.map((e) => e.project.key)).not.toContain(other.key);
-      expect(feed.filters.projects.map((p) => p.key).sort()).toEqual(
+      expect(feed.items.map((e) => e.product?.key)).not.toContain(other.key);
+      expect(feed.filters.products.map((p) => p.key).sort()).toEqual(
         mine.map((p) => p.key).sort(),
       );
       expect(feed.filters.actors.map((a) => a.name)).toEqual([`filer-${kind}`]);
 
       const me = await get<MeView>("/me", cookie);
-      expect(me.projects?.map((p) => p.key).sort()).toEqual(
+      expect(me.products?.map((p) => p.key).sort()).toEqual(
         mine.map((p) => p.key).sort(),
       );
     });
@@ -120,8 +120,8 @@ describe("a member's feed of an import", () => {
     const feed = await memberFeed("a", id);
     expect(feed.items).toMatchObject([
       {
-        kind: "project_imported",
-        project: { key: "IMPA" },
+        kind: "product_imported",
+        product: { key: "IMPA" },
         imported: { issues: 2, comments: 1 },
       },
     ]);
@@ -133,7 +133,7 @@ describe("a member's feed of an import", () => {
       importPayload("b", "carried over, renamed", [noted, later]),
     );
     const feed = await memberFeed("b", id);
-    const rows = feed.items.filter((e) => e.kind === "project_imported");
+    const rows = feed.items.filter((e) => e.kind === "product_imported");
     // first import: 2 issues + 1 comment; re-import: 1 issue updated + 1 comment created
     expect(rows.map((r) => r.imported)).toEqual(
       expect.arrayContaining([
@@ -150,7 +150,7 @@ describe("a member's feed of an import", () => {
       importPayload("e", "carried over", [{ ...noted, body: "noted, edited" }]),
     );
     const feed = await memberFeed("e", id);
-    const rows = feed.items.filter((e) => e.kind === "project_imported");
+    const rows = feed.items.filter((e) => e.kind === "product_imported");
     // nothing else changed, so the second row's comment count is `updated` alone
     expect(rows.map((r) => r.imported)).toEqual(
       expect.arrayContaining([
@@ -172,7 +172,7 @@ describe("a member's feed of an import", () => {
       await signInWithEmail(outsiderEmail),
     );
     const importRows = (f: FeedView) =>
-      f.items.filter((e) => e.kind === "project_imported");
+      f.items.filter((e) => e.kind === "product_imported");
     expect(importRows(insider)).toHaveLength(1);
     expect(importRows(outsider)).toEqual([]);
   });
@@ -185,8 +185,8 @@ describe("a member's feed of an import", () => {
       .from(activityEvent)
       .where(
         and(
-          eq(activityEvent.projectId, id),
-          eq(activityEvent.action, "project.imported"),
+          eq(activityEvent.productId, id),
+          eq(activityEvent.action, "product.imported"),
         ),
       )
       .orderBy(asc(activityEvent.seq))
@@ -199,7 +199,7 @@ describe("a member's feed of an import", () => {
     const feed = await memberFeed("d", id);
     // the re-import's retitle: 1 issue updated, nothing else
     expect(feed.items).toMatchObject([
-      { kind: "project_imported", imported: { issues: 1, comments: 0 } },
+      { kind: "product_imported", imported: { issues: 1, comments: 0 } },
     ]);
   });
 
@@ -217,7 +217,7 @@ describe("a member's feed of an import", () => {
     const retitle = (tag: string) =>
       importProject(importPayload(tag, "carried over, renamed", [noted]));
 
-    test("a member of an imported project is sent the import as a project_imported entry", async () => {
+    test("a member of an imported project is sent the import as a product_imported entry", async () => {
       const id = await importProject(
         importPayload("g", "carried over", [noted]),
       );
@@ -228,8 +228,8 @@ describe("a member's feed of an import", () => {
       await retitle("g");
 
       expect(await stream.nextEntry()).toMatchObject({
-        kind: "project_imported",
-        project: { key: "IMPG" },
+        kind: "product_imported",
+        product: { key: "IMPG" },
         imported: { issues: 1, comments: 0 },
       });
       await stream.cancel();
@@ -250,8 +250,8 @@ describe("a member's feed of an import", () => {
       expect(filed.status).toBe(201);
 
       expect(await stream.nextEntry()).toMatchObject({
-        kind: "issue_created",
-        issue: { title: "after the import" },
+        kind: "item_created",
+        item: { title: "after the import" },
       });
       await stream.cancel();
     });
@@ -263,16 +263,17 @@ describe("a member's feed of an import", () => {
     await importProject(payload);
     const feed = await memberFeed("c", id);
     expect(
-      feed.items.filter((e) => e.kind === "project_imported"),
+      feed.items.filter((e) => e.kind === "product_imported"),
     ).toHaveLength(1);
   });
 });
 
-test("a member with no project gets an empty feed and no project filters", async () => {
+test("a member with no product gets an empty feed and no product or project filters", async () => {
   inviteEmail("none@example.com");
   const cookie = await signInWithEmail("none@example.com");
   const feed = await get<FeedView>("/feed", cookie);
   expect(feed.items).toEqual([]);
+  expect(feed.filters.products).toEqual([]);
   expect(feed.filters.projects).toEqual([]);
-  expect((await get<MeView>("/me", cookie)).projects).toEqual([]);
+  expect((await get<MeView>("/me", cookie)).products).toEqual([]);
 });

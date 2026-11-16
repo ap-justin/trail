@@ -8,10 +8,10 @@ import {
   actor,
   actorPhoto,
   invite,
-  project,
-  projectMember,
+  product,
+  productMember,
 } from "../db/schema.js";
-import { accessOfEmail, syncEmailActor, visibleProjects } from "./identity.js";
+import { accessOfEmail, syncEmailActor, visibleProducts } from "./identity.js";
 
 const dir = mkdtempSync(join(tmpdir(), "trail-identity-"));
 const db = openDatabase(join(dir, "trail.db"));
@@ -27,11 +27,11 @@ const owner = db
   .returning()
   .get();
 const docs = db
-  .insert(project)
+  .insert(product)
   .values({ key: "DOC", name: "docs", createdBy: owner.id })
   .returning()
   .get();
-db.insert(project)
+db.insert(product)
   .values({ key: "TRL", name: "trail", createdBy: owner.id })
   .run();
 
@@ -42,7 +42,9 @@ const inviteEmail = (email: string, ...projectIds: string[]) => {
     .returning()
     .get();
   for (const projectId of projectIds) {
-    db.insert(projectMember).values({ inviteId: row.id, projectId }).run();
+    db.insert(productMember)
+      .values({ inviteId: row.id, productId: projectId })
+      .run();
   }
   return row;
 };
@@ -84,7 +86,7 @@ test("an invited email gets a human actor on its first let-in, named for the par
       .where(eq(actorPhoto.actorId, stored?.id ?? ""))
       .all(),
   ).toEqual([]);
-  expect(access && visibleProjects(db, access).map((p) => p.key)).toEqual([
+  expect(access && visibleProducts(db, access).map((p) => p.key)).toEqual([
     "DOC",
   ]);
 });

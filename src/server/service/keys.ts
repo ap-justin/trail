@@ -6,8 +6,8 @@ import {
   actor,
   apiKey,
   apiKeyActions,
-  apiKeyProject,
-  project,
+  apiKeyProduct,
+  product,
 } from "../db/schema.js";
 import { ConflictError, NotFoundError, ValidationError } from "./errors.js";
 import type { Tx } from "./tx.js";
@@ -18,7 +18,7 @@ export type Actor = typeof actor.$inferSelect;
 /** What a key may reach; null on either side is unrestricted. */
 export type KeyScope = {
   /** by id and key, A to Z by key */
-  projects: { id: string; key: string }[] | null;
+  products: { id: string; key: string }[] | null;
   /** in `apiKeyActions` order */
   actions: ApiKeyAction[] | null;
 };
@@ -26,17 +26,17 @@ export type KeyScope = {
 /** A bot as one of its keys authenticates it: the bot, and that key's scope. */
 export type KeyActor = Actor & { scope: KeyScope };
 
-/** A key's scope as a person or bot reads it: projects by key. */
+/** A key's scope as a person or bot reads it: products by key. */
 export type KeyScopeView = {
-  projects: string[] | null;
+  products: string[] | null;
   actions: ApiKeyAction[] | null;
 };
 
-/** The scope to mint a key with: project keys in any case, and actions; a list left out is unrestricted. */
+/** The scope to mint a key with: product keys in any case (`projects`, the name before products), and actions; a list left out is unrestricted. */
 export type KeyScopeInput = { projects?: string[]; actions?: string[] };
 
 export const scopeView = (scope: KeyScope): KeyScopeView => ({
-  projects: scope.projects?.map((p) => p.key) ?? null,
+  products: scope.products?.map((p) => p.key) ?? null,
   actions: scope.actions,
 });
 
@@ -81,24 +81,34 @@ function validActions(raw: string[] | undefined): ApiKeyAction[] | null {
   return apiKeyActions.filter((a) => wanted.has(a));
 }
 
-/** The ids of the projects with these keys; null for a list left out. */
-function projectIdsOf(tx: Tx, keys: string[] | undefined): string[] | null {
+/** The ids of the products with these keys; null for a list left out. */
+function productIdsOf(tx: Tx, keys: string[] | undefined): string[] | null {
   if (keys === undefined) return null;
   if (keys.length === 0) {
     throw new ValidationError(
-      "projects must name at least one project: leave it out for a key that reaches every project",
+      "products must name at least one product: leave it out for a key that reaches every product",
     );
   }
   const wanted = [...new Set(keys.map((k) => k.trim().toUpperCase()))];
   const found = tx
-    .select({ id: project.id, key: project.key })
-    .from(project)
-    .where(inArray(project.key, wanted))
+    .select({ id: product.id, key: product.key })
+    .from(product)
+    .where(inArray(product.key, wanted))
     .all();
   const unknown = wanted.filter((k) => !found.some((p) => p.key === k));
   if (unknown.length > 0) {
+    const existing = tx
+      .select({ key: product.key })
+      .from(product)
+      .orderBy(asc(product.key))
+      .all()
+      .map((p) => p.key);
     throw new ValidationError(
-      `no project with key ${unknown.join(", ")}: scope the key to the keys of existing projects, like TRL`,
+      `no product ${unknown.join(", ")}: ${
+        existing.length === 0
+          ? "there is no product yet, so leave products out"
+          : `scope the key to products that exist, which are ${existing.join(", ")}`
+      }`,
     );
   }
   return found.map((p) => p.id);
@@ -106,7 +116,7 @@ function projectIdsOf(tx: Tx, keys: string[] | undefined): string[] | null {
 
 function mintKey(tx: Tx, actorId: string, scope: KeyScopeInput): string {
   const actions = validActions(scope.actions);
-  const projectIds = projectIdsOf(tx, scope.projects);
+  const productIds = productIdsOf(tx, scope.projects);
   const prefix = randomBytes(4).toString("hex");
   const key = `trail_${prefix}_${randomBytes(32).toString("base64url")}`;
   const { id } = tx
@@ -114,9 +124,9 @@ function mintKey(tx: Tx, actorId: string, scope: KeyScopeInput): string {
     .values({ actorId, prefix, hash: sha256(key).toString("hex"), actions })
     .returning({ id: apiKey.id })
     .get();
-  if (projectIds !== null) {
-    tx.insert(apiKeyProject)
-      .values(projectIds.map((projectId) => ({ apiKeyId: id, projectId })))
+  if (productIds !== null) {
+    tx.insert(apiKeyProduct)
+      .values(productIds.map((productId) => ({ apiKeyId: id, productId })))
       .run();
   }
   return key;
@@ -205,7 +215,7 @@ function onlyBotByLabelOrName(tx: Tx, ref: string): Actor | undefined {
  * id wins outright, and a label or name matching two bots is ambiguous. An id
  * that is a person's is refused, `why` saying what that person can't have.
  */
-function botByRef(tx: Tx, ref: string, why: string): Actor {
+export function botByRef(tx: Tx, ref: string, why: string): Actor {
   const bot =
     tx.select().from(actor).where(eq(actor.id, ref)).get() ??
     onlyBotByLabelOrName(tx, ref);
@@ -333,14 +343,14 @@ function allowlists(
       ? []
       : db
           .select({
-            keyId: apiKeyProject.apiKeyId,
-            id: project.id,
-            key: project.key,
+            keyId: apiKeyProduct.apiKeyId,
+            id: product.id,
+            key: product.key,
           })
-          .from(apiKeyProject)
-          .innerJoin(project, eq(project.id, apiKeyProject.projectId))
-          .where(inArray(apiKeyProject.apiKeyId, keyIds))
-          .orderBy(asc(project.key))
+          .from(apiKeyProduct)
+          .innerJoin(product, eq(product.id, apiKeyProduct.productId))
+          .where(inArray(apiKeyProduct.apiKeyId, keyIds))
+          .orderBy(asc(product.key))
           .all();
   const byKey = new Map<string, { id: string; key: string }[]>();
   for (const { keyId, id, key } of rows) {
@@ -372,7 +382,7 @@ export function listKeys(db: Db): KeyListing[] {
   );
   return rows.map(({ id, actions, ...listing }) => ({
     ...listing,
-    scope: scopeView({ projects: lists.get(id) ?? null, actions }),
+    scope: scopeView({ products: lists.get(id) ?? null, actions }),
   }));
 }
 
@@ -447,7 +457,7 @@ export function authenticateKey(db: Db, token: string): KeyActor | null {
   return {
     ...row.actor,
     scope: {
-      projects: allowlists(db, [row.id]).get(row.id) ?? null,
+      products: allowlists(db, [row.id]).get(row.id) ?? null,
       actions: row.actions,
     },
   };

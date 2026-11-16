@@ -7,12 +7,18 @@ import { jsonContent } from "../api/routes.js";
 import type { TrailAuth } from "../auth/auth.js";
 import { inviteOf } from "../auth/identity.js";
 import type { Db } from "../db/client.js";
-import { activityEvent, actor, invite, projectMember } from "../db/schema.js";
+import {
+  activityEvent,
+  actor,
+  invite,
+  productMember,
+  projectProduct,
+} from "../db/schema.js";
 import type { ActivityEvent, ActorUpdate, EventBus } from "../events/bus.js";
 import type { FeedFilters } from "../service/paging.js";
 import { entriesByEvent } from "./entries.js";
 import { createWebRouter, type Member } from "./env.js";
-import { eventsAfter, feedFilters } from "./feed.js";
+import { eventsAfter, feedFilters, ofItemType } from "./feed.js";
 import { visibleIds } from "./visible.js";
 
 // under the idle timeout of Fly's proxy, which drops a stream that sends nothing
@@ -88,9 +94,9 @@ const streamEvents = createRoute({
     200: {
       content: { "text/event-stream": { schema: z.string() } },
       description:
-        "Feed entries as they happen, each event's seq its id; Last-Event-ID resumes after that seq. A `reset` event means the client is too far behind: refetch /feed. An `actor` event, `{actorId, photoUrl, title}` with no id, says an actor's photo or a bot's title was set, replaced or removed, and carries both as they are now (each null when unset; title always null on a person), so the latest event for an actor is its whole state: sent whatever the stream's filters, but only to a viewer who can see that actor (the owner sees all; a member sees themselves, bots acting in their projects and people who share a project with them), and it is not a feed entry, so Last-Event-ID never replays it. With only=actors the stream carries `actor` events and heartbeats alone.",
+        "Feed entries as they happen, each event's seq its id; Last-Event-ID resumes after that seq. A `reset` event means the client is too far behind: refetch /feed. An `actor` event, `{actorId, photoUrl, title}` with no id, says an actor's photo or a bot's title was set, replaced or removed, and carries both as they are now (each null when unset; title always null on a person), so the latest event for an actor is its whole state: sent whatever the stream's filters, but only to a viewer who can see that actor (the owner sees all; a member sees themselves, bots acting in their products and people who share a product with them), and it is not a feed entry, so Last-Event-ID never replays it. With only=actors the stream carries `actor` events and heartbeats alone.",
     },
-    404: jsonContent(errorSchema, "No such project to filter by"),
+    404: jsonContent(errorSchema, "No such product or project to filter by"),
     429: jsonContent(
       errorSchema,
       `The person already has ${STREAMS_PER_PERSON.feed} streams open, or ${STREAMS_PER_PERSON.actors} with only=actors, which are counted apart: close one first`,
@@ -105,29 +111,59 @@ function resumeSeq(header: string | undefined): number | undefined {
 }
 
 /**
- * The ids of the projects the member sees now, or "all" for the owner: read at
- * each batch of events, so a project taken away stops at once.
+ * The ids of the products the member sees now, or "all" for the owner: read at
+ * each batch of events, so a product taken away stops at once.
  */
-function projectsNow(db: Db, member: Member): Set<string> | "all" {
+function productsNow(db: Db, member: Member): Set<string> | "all" {
   if (member.kind === "owner") return "all";
   const rows = db
-    .select({ projectId: projectMember.projectId })
-    .from(projectMember)
-    .innerJoin(invite, eq(invite.id, projectMember.inviteId))
+    .select({ productId: productMember.productId })
+    .from(productMember)
+    .innerJoin(invite, eq(invite.id, productMember.inviteId))
     .where(inviteOf(member.actor))
     .all();
-  return new Set(rows.map((r) => r.projectId));
+  return new Set(rows.map((r) => r.productId));
+}
+
+/**
+ * Whether a viewer of `visible` products may see the event: one of a visible
+ * product, or a project's own (no product) when the project draws from one.
+ */
+function mayShow(
+  db: Db,
+  event: ActivityEvent,
+  visible: Set<string> | "all",
+): boolean {
+  if (event.productId !== null) {
+    return visible === "all" || visible.has(event.productId);
+  }
+  if (event.projectId === null) return false;
+  if (visible === "all") return true;
+  if (visible.size === 0) return false;
+  return (
+    db
+      .select({ one: projectProduct.projectId })
+      .from(projectProduct)
+      .where(
+        and(
+          eq(projectProduct.projectId, event.projectId),
+          inArray(projectProduct.productId, [...visible]),
+        ),
+      )
+      .limit(1)
+      .all().length > 0
+  );
 }
 
 /**
  * Whether the member may hear of this actor's photo or title changing: the owner hears of
- * everyone; a member of themselves, of a bot acting in one of their projects
- * (`botsActingIn`'s rule in feed.ts) and of a person who shares a project with
- * them, the owner being in every project. Read at each delivery, so a project
+ * everyone; a member of themselves, of a bot acting in one of their products
+ * (`botsActingIn`'s rule in feed.ts) and of a person who shares a product with
+ * them, the owner being in every product. Read at each delivery, so a product
  * taken away stops it at once.
  */
 function mayHearOf(db: Db, member: Member, actorId: string): boolean {
-  const visible = projectsNow(db, member);
+  const visible = productsNow(db, member);
   if (visible === "all" || actorId === member.actor.id) return true;
   if (visible.size === 0) return false;
   const row = db.select().from(actor).where(eq(actor.id, actorId)).get();
@@ -140,7 +176,7 @@ function mayHearOf(db: Db, member: Member, actorId: string): boolean {
         .where(
           and(
             eq(activityEvent.actorId, actorId),
-            inArray(activityEvent.projectId, [...visible]),
+            inArray(activityEvent.productId, [...visible]),
           ),
         )
         .limit(1)
@@ -149,21 +185,48 @@ function mayHearOf(db: Db, member: Member, actorId: string): boolean {
   }
   if (row.isOwner) return true;
   const theirs = db
-    .select({ projectId: projectMember.projectId })
-    .from(projectMember)
-    .innerJoin(invite, eq(invite.id, projectMember.inviteId))
+    .select({ productId: productMember.productId })
+    .from(productMember)
+    .innerJoin(invite, eq(invite.id, productMember.inviteId))
     .where(
       row.githubId === null
         ? eq(invite.email, row.email ?? "")
         : eq(invite.githubId, row.githubId),
     )
     .all();
-  return theirs.some((r) => visible.has(r.projectId));
+  return theirs.some((r) => visible.has(r.productId));
 }
 
 const matches = (filters: FeedFilters, event: ActivityEvent) =>
-  (filters.projectId === null || event.projectId === filters.projectId) &&
+  (filters.projectId === null || event.productId === filters.projectId) &&
+  (filters.groupId == null || event.projectId === filters.groupId) &&
   (filters.actorId === null || event.actorId === filters.actorId);
+
+/** Those of `events` the type filter keeps, read in one query: the item's type is the row's now. */
+function ofType(
+  db: Db,
+  filters: FeedFilters,
+  events: ActivityEvent[],
+): ActivityEvent[] {
+  if (filters.type == null || events.length === 0) return events;
+  const kept = new Set(
+    db
+      .select({ id: activityEvent.id })
+      .from(activityEvent)
+      .where(
+        and(
+          inArray(
+            activityEvent.id,
+            events.map((e) => e.id),
+          ),
+          ofItemType(filters.type),
+        ),
+      )
+      .all()
+      .map((e) => e.id),
+  );
+  return events.filter((e) => kept.has(e.id));
+}
 
 const newestSeq = (db: Db) =>
   db
@@ -181,8 +244,8 @@ export function eventRoutes(
     const member = c.var.member;
     const query = c.req.valid("query");
     const kind: StreamKind = query.only === "actors" ? "actors" : "feed";
-    // resolved before the stream opens, so a project the member can't see is the feed's 404
-    const filters = feedFilters(member, query);
+    // resolved before the stream opens, so a product or project the member can't see is the feed's 404
+    const filters = feedFilters(db, member, query);
     // actor events are never replayed, so an actors-only stream has nothing to resume
     const resumeFrom =
       kind === "feed"
@@ -256,12 +319,11 @@ export function eventRoutes(
           const fresh = events.filter((e) => e.seq > lastSeq);
           if (fresh.length === 0) return;
           lastSeq = Math.max(...fresh.map((e) => e.seq));
-          const visible = projectsNow(db, member);
-          const shown = fresh.filter(
-            (e) =>
-              e.projectId !== null &&
-              matches(filters, e) &&
-              (visible === "all" || visible.has(e.projectId)),
+          const visible = productsNow(db, member);
+          const shown = ofType(
+            db,
+            filters,
+            fresh.filter((e) => matches(filters, e) && mayShow(db, e, visible)),
           );
           for (const [i, entries] of entriesByEvent(db, shown).entries()) {
             for (const entry of entries) {

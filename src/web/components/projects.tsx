@@ -1,17 +1,13 @@
-import {
-  ActorAvatar,
-  ActorBadge,
-  actorNameGroup,
-  BotTitle,
-} from "@/components/actor";
+import { FolderIcon } from "lucide-react";
+import { ActorAvatar, ActorBadge } from "@/components/actor";
 import { RowLink } from "@/components/app-link";
-import { MarkdownText } from "@/components/markdown-text";
+import { EmptyState, ListSkeleton, ProjectsError } from "@/components/states";
 import {
-  ListSkeleton,
-  ProjectsEmpty,
-  ProjectsError,
-} from "@/components/states";
-import { HealthPill } from "@/components/status";
+  Age,
+  LatestUpdate,
+  TargetDate,
+  UpdateHealth,
+} from "@/components/status-updates";
 import { KeyText } from "@/components/text";
 import {
   Table,
@@ -21,107 +17,47 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { WebProjectView, WebStatusUpdateView } from "@/lib/api-types";
+import type { WebProjectView } from "@/lib/api-types";
 import { paths } from "@/lib/paths";
-import { formatAbsolute, formatRelative } from "@/lib/time";
 import { useMinuteClock } from "@/lib/use-minute-clock";
+import { cn } from "@/lib/utils";
 
 export type ProjectsViewProps = {
   status: "loading" | "error" | "ready";
-  /** The projects the viewer can see. */
+  /** The projects drawing from a product the viewer can see, newest first. */
   projects: WebProjectView[];
-  /** Named in the empty state a person with no projects sees. */
-  ownerName: string;
-  isOwner: boolean;
   onRetry: () => void;
   /** The clock relative times are read against; ticks each minute when omitted. */
   now?: Date;
 };
 
-/** `41m ago`, `3h ago`; a date or `just now` stands alone. */
-function age(iso: string, now: Date): string {
-  const relative = formatRelative(iso, now);
-  return /^\d+[mh]$/.test(relative) ? `${relative} ago` : relative;
-}
-
-function Age({
-  iso,
-  now,
-  ago = false,
-}: {
-  iso: string;
-  now: Date;
-  ago?: boolean;
-}) {
+/** The viewer's products in the project, keys in mono. */
+function ProductKeys({ project }: { project: WebProjectView }) {
   return (
-    <time dateTime={iso} title={formatAbsolute(iso)}>
-      {ago ? age(iso, now) : formatRelative(iso, now)}
-    </time>
-  );
-}
-
-/**
- * The latest update: in the table, author, badge and age over its first line; on a card,
- * two lines of it with the author under them. "No status update yet" with none.
- */
-function LatestUpdate({
-  update,
-  now,
-  layout,
-}: {
-  update: WebStatusUpdateView | null;
-  now: Date;
-  layout: "table" | "card";
-}) {
-  if (!update) {
-    return <p className="text-muted-foreground">No status update yet</p>;
-  }
-  const author = (
-    <div className="flex min-w-0 items-center gap-2">
-      <ActorAvatar actor={update.author} size="xs" />
-      <span className={actorNameGroup}>
-        <span className="min-w-0 truncate font-medium">
-          {update.author.name}
-        </span>
-        <BotTitle actor={update.author} />
-        <ActorBadge kind={update.author.kind} />
-      </span>
-      <span className="shrink-0 whitespace-nowrap text-muted-foreground">
-        <Age iso={update.createdAt} now={now} ago />
-      </span>
-    </div>
-  );
-  if (layout === "card") {
-    return (
-      <div className="flex min-w-0 flex-col gap-2">
-        <p className="line-clamp-2 text-muted-foreground">
-          <MarkdownText source={update.body} />
-        </p>
-        {author}
-      </div>
-    );
-  }
-  return (
-    <div className="flex min-w-0 flex-col gap-0.5">
-      {author}
-      <p className="truncate text-muted-foreground">
-        <MarkdownText source={update.body} />
-      </p>
-    </div>
+    <span className="flex flex-wrap items-center gap-x-2">
+      {project.products.map((product) => (
+        <KeyText key={product.key} className="text-foreground">
+          {product.key}{" "}
+        </KeyText>
+      ))}
+    </span>
   );
 }
 
 function ProjectName({ project }: { project: WebProjectView }) {
   return (
     <RowLink
-      href={paths.project(project.key)}
-      className="flex items-center gap-2"
+      href={paths.project(project.slug)}
+      className="block min-w-0 truncate font-semibold"
     >
-      <KeyText className="text-sm text-foreground">{project.key}</KeyText>{" "}
-      <span className="font-semibold">{project.name}</span>
+      {project.name}
     </RowLink>
   );
 }
+
+// 16px between columns, 12px at the row's ends
+const head = "h-10 px-2 text-2xs text-muted-foreground first:pl-3 last:pr-3";
+const cell = "px-2 first:pl-3 last:pr-3";
 
 function ProjectsTable({
   projects,
@@ -134,58 +70,60 @@ function ProjectsTable({
     <Table className="table-fixed max-lg:hidden">
       <TableHeader>
         <TableRow className="hover:bg-transparent">
-          <TableHead className="h-8 w-60 px-3 text-2xs text-muted-foreground">
-            Project
-          </TableHead>
-          <TableHead className="h-8 w-24 px-3 text-2xs text-muted-foreground">
-            Health
-          </TableHead>
-          <TableHead className="h-8 px-3 text-2xs text-muted-foreground">
-            Latest status update
-          </TableHead>
-          <TableHead className="h-8 w-16 px-3 text-right text-2xs text-muted-foreground">
-            Open
-          </TableHead>
-          <TableHead className="h-8 w-24 px-3 text-right text-2xs text-muted-foreground">
-            In progress
-          </TableHead>
-          <TableHead className="h-8 w-20 px-3 text-right text-2xs text-muted-foreground">
-            Updated
-          </TableHead>
+          <TableHead className={cn(head, "w-65")}>Project</TableHead>
+          <TableHead className={cn(head, "w-26")}>Health</TableHead>
+          <TableHead className={cn(head, "w-39")}>Products</TableHead>
+          <TableHead className={cn(head, "w-37")}>Lead</TableHead>
+          <TableHead className={cn(head, "w-22")}>Target</TableHead>
+          <TableHead className={head}>Latest status update</TableHead>
+          <TableHead className={cn(head, "w-15 text-right")}>Open</TableHead>
+          <TableHead className={cn(head, "w-18 text-right")}>Updated</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {projects.map((project) => (
           <TableRow
-            key={project.key}
-            data-project-key={project.key}
-            className="relative"
+            key={project.slug}
+            data-project-slug={project.slug}
+            className="relative h-17"
           >
-            <TableCell className="px-3 py-2.5">
+            <TableCell className={cell}>
               <ProjectName project={project} />
-              <p className="truncate text-muted-foreground">
-                {project.description}
-              </p>
+              <p className="truncate text-muted-foreground">{project.goal}</p>
             </TableCell>
-            <TableCell className="px-3 py-2.5">
-              {project.latestStatusUpdate && project.health && (
-                <HealthPill health={project.health} />
+            <TableCell className={cell}>
+              <UpdateHealth of={project} />
+            </TableCell>
+            <TableCell className={cn(cell, "whitespace-normal")}>
+              <ProductKeys project={project} />
+            </TableCell>
+            <TableCell className={cell}>
+              <span className="flex min-w-0 items-center gap-2">
+                <ActorAvatar actor={project.lead} size="xs" />
+                <span className="truncate">{project.lead.name}</span>{" "}
+                <ActorBadge kind={project.lead.kind} />
+              </span>
+            </TableCell>
+            {/* a date in another year carries it and is wider than the 72px column: its year wraps under */}
+            <TableCell className={cn(cell, "whitespace-normal")}>
+              {project.targetDate ? (
+                <TargetDate date={project.targetDate} now={now} />
+              ) : (
+                <span className="text-muted-foreground">None</span>
               )}
             </TableCell>
-            <TableCell className="px-3 py-2.5">
+            <TableCell className={cell}>
               <LatestUpdate
                 update={project.latestStatusUpdate}
                 now={now}
                 layout="table"
+                badge={false}
               />
             </TableCell>
-            <TableCell className="px-3 py-2.5 text-right tabular-nums">
+            <TableCell className={cn(cell, "text-right tabular-nums")}>
               {project.openCount}
             </TableCell>
-            <TableCell className="px-3 py-2.5 text-right tabular-nums">
-              {project.inProgressCount}
-            </TableCell>
-            <TableCell className="px-3 py-2.5 text-right text-muted-foreground">
+            <TableCell className={cn(cell, "text-right text-muted-foreground")}>
               <Age iso={project.updatedAt} now={now} />
             </TableCell>
           </TableRow>
@@ -203,26 +141,33 @@ function ProjectCards({
   now: Date;
 }) {
   return (
-    <ul className="lg:hidden">
+    <ul className="border-t lg:hidden">
       {projects.map((project) => (
         <li
-          key={project.key}
-          data-project-key={project.key}
-          className="relative flex flex-col gap-1.5 border-b px-4 py-3.5"
+          key={project.slug}
+          data-project-slug={project.slug}
+          className="relative flex flex-col gap-2 border-b px-4 py-3.5"
         >
-          <div className="flex items-center justify-between gap-2">
-            <ProjectName project={project} />
-            {project.latestStatusUpdate && project.health && (
-              <HealthPill health={project.health} />
-            )}
+          <div className="flex flex-col gap-0.5">
+            <div className="flex items-center justify-between gap-2">
+              <ProjectName project={project} />
+              <UpdateHealth of={project} />
+            </div>
+            <p className="text-muted-foreground">{project.goal}</p>
           </div>
           <LatestUpdate
             update={project.latestStatusUpdate}
             now={now}
             layout="card"
           />
-          <p className="text-xs text-muted-foreground">
-            {project.openCount} open · {project.inProgressCount} in progress
+          <p className="flex flex-wrap items-center gap-x-2 text-muted-foreground">
+            <ProductKeys project={project} />
+            {project.targetDate && (
+              <span>
+                · Target <TargetDate date={project.targetDate} now={now} />
+              </span>
+            )}
+            <span>· {project.openCount} open</span>
           </p>
         </li>
       ))}
@@ -231,8 +176,8 @@ function ProjectCards({
 }
 
 /**
- * Every project the viewer can see: a table at 1024px and up, a card each below. Open
- * and In progress count only those two statuses; done and canceled are not counted.
+ * The projects the viewer can see a product of: a table at 1024px and up, a card each
+ * below. Open counts triage and open items of the viewer's products only.
  */
 export function ProjectsView(props: ProjectsViewProps) {
   const now = useMinuteClock(props.now);
@@ -242,11 +187,15 @@ export function ProjectsView(props: ProjectsViewProps) {
     return <ProjectsError onRetry={props.onRetry} />;
   if (props.projects.length === 0) {
     return (
-      <ProjectsEmpty ownerName={props.ownerName} isOwner={props.isOwner} />
+      <EmptyState
+        icon={FolderIcon}
+        title="No projects yet"
+        description="Projects that bots create show up here."
+      />
     );
   }
   return (
-    <div className="flex flex-col lg:px-6 lg:py-4">
+    <div className="flex flex-col max-lg:pt-3 lg:px-6 lg:py-2">
       <ProjectsTable projects={props.projects} now={now} />
       <ProjectCards projects={props.projects} now={now} />
     </div>

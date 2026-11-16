@@ -20,6 +20,12 @@ export const FRESH_MS = 2000;
 /** The wait before opening a new stream once the browser has given up on one. */
 export const RECONNECT_MS = 5000;
 
+/**
+ * The feed filter values found naming something the viewer can no longer see. The filter
+ * may have moved on while the check ran, so a caller clears only a filter still at its value.
+ */
+export type FilterGone = { actor?: string; product?: string; project?: string };
+
 export type LiveConnection = "connecting" | "open" | "reconnecting";
 
 type Arrivals = {
@@ -87,17 +93,20 @@ function arrivals(state: Arrivals, action: ArrivalAction): Arrivals {
 /**
  * The feed under `filter`: the newest page from `/feed`, with entries from the
  * `/events` stream merged on top. The stream reopens when the filter changes.
- * `onProjectGone` runs when the filtered project turns out to be hidden or missing.
+ * `onFilterGone` runs when the filtered product or project turns out to be hidden or missing,
+ * or the filtered bot is no longer among the feed's options, with the value that was.
  */
 export function useLiveFeed(
   filter: FeedFilter,
-  { onProjectGone }: { onProjectGone: () => void },
+  { onFilterGone }: { onFilterGone: (gone: FilterGone) => void },
 ) {
-  const { actor, project } = filter;
+  const { actor, product, project, type } = filter;
+  // rebuilt from the parts, so the effects below depend on values, not the caller's object
+  const current = { actor, product, project, type };
   const queryClient = useQueryClient();
   const feed = useQuery({
-    queryKey: keys.feed({ actor, project }),
-    queryFn: () => api.feed({ actor, project }),
+    queryKey: keys.feed(current),
+    queryFn: () => api.feed(current),
     // the stream keeps it current; a focus refetch would only repeat it
     refetchOnWindowFocus: false,
     // the filter options stay while another filter's page loads
@@ -116,7 +125,7 @@ export function useLiveFeed(
   // once anything is held, later entries wait behind it so the order holds
   const hold = !atTop || state.pending.length > 0;
 
-  const filterKey = `${actor}\u0000${project}`;
+  const filterKey = `${actor}\u0000${product}\u0000${project}\u0000${type}`;
   const [shownFor, setShownFor] = useState(filterKey);
   const filterChanged = shownFor !== filterKey;
   if (filterChanged) {
@@ -162,10 +171,22 @@ export function useLiveFeed(
     );
   });
 
+  /** Whether `/feed` under `filter` answers 404; read into the cache, so a filter left standing has its page. */
+  const feedGone = async (filter: FeedFilter) => {
+    try {
+      await queryClient.fetchQuery({
+        queryKey: keys.feed(filter),
+        queryFn: () => api.feed(filter),
+        staleTime: 0,
+      });
+      return false;
+    } catch (error) {
+      return error instanceof Error && isNotFound(error);
+    }
+  };
+
   const refetch = useEffectEvent(() => {
-    void queryClient.invalidateQueries({
-      queryKey: keys.feed({ actor, project }),
-    });
+    void queryClient.invalidateQueries({ queryKey: keys.feed(current) });
   });
   const readEverything = useEffectEvent(() => {
     void queryClient.invalidateQueries();
@@ -177,25 +198,38 @@ export function useLiveFeed(
   const recheckSession = useEffectEvent(() => {
     void queryClient.invalidateQueries({ queryKey: keys.me });
   });
-  // the server closes a stream on a 4xx: a 404 is a filtered project this person lost,
+  // the server closes a stream on a 4xx: a 404 is a filtered product or project this person lost,
   // which only /feed can say, since EventSource never exposes the status
-  const readAfterClose = useEffectEvent(async () => {
-    try {
-      await queryClient.fetchQuery({
-        queryKey: keys.feed({ actor, project }),
-        queryFn: () => api.feed({ actor, project }),
-        staleTime: 0,
-      });
-    } catch (error) {
-      if (project !== null && error instanceof Error && isNotFound(error)) {
-        onProjectGone();
+  // `live` turns false once the stream is torn down: a check answering after the viewer left
+  // the feed, or moved its filter, must not pull them back
+  const readAfterClose = useEffectEvent(async (live: () => boolean) => {
+    if (!(await feedGone(current)) || !live()) return;
+    // with both set, the 404 doesn't say which: each alone answers for itself
+    if (product !== null && project !== null) {
+      const [productGone, projectGone] = await Promise.all([
+        feedGone({ actor, product, project: null, type }),
+        feedGone({ actor, product: null, project, type }),
+      ]);
+      if ((productGone || projectGone) && live()) {
+        onFilterGone({
+          ...(productGone && { product }),
+          ...(projectGone && { project }),
+        });
       }
+    } else if (product !== null || project !== null) {
+      onFilterGone({
+        product: product ?? undefined,
+        project: project ?? undefined,
+      });
     }
   });
 
   useEffect(() => {
-    const source = new EventSource(api.eventsUrl({ actor, project }));
+    const source = new EventSource(
+      api.eventsUrl({ actor, product, project, type }),
+    );
     let retry: ReturnType<typeof setTimeout> | undefined;
+    let live = true;
     source.addEventListener("open", () => {
       setConnection("open");
       // a new stream starts from now: read what the gap missed, photos and titles included,
@@ -209,7 +243,7 @@ export function useLiveFeed(
       // a stream that ends can mean the session did, or this person was removed
       recheckSession();
       if (source.readyState === EventSource.CLOSED) {
-        void readAfterClose();
+        void readAfterClose(() => live);
         retry = setTimeout(() => setAttempt((n) => n + 1), RECONNECT_MS);
       }
     });
@@ -225,10 +259,27 @@ export function useLiveFeed(
       recheckSession();
     });
     return () => {
+      live = false;
       source.close();
       clearTimeout(retry);
     };
-  }, [actor, project, attempt]);
+  }, [actor, product, project, type, attempt]);
+
+  // the options list every bot acting in a visible product, whatever the filter
+  const actorOptions =
+    feed.isSuccess && !loading ? feed.data.filters.actors : null;
+  const goneActor =
+    actor !== null &&
+    actorOptions !== null &&
+    !actorOptions.some((a) => a.id === actor)
+      ? actor
+      : null;
+  const actorGone = useEffectEvent((gone: string) =>
+    onFilterGone({ actor: gone }),
+  );
+  useEffect(() => {
+    if (goneActor !== null) actorGone(goneActor);
+  }, [goneActor]);
 
   // the shell's own stream stays closed while this one carries the actor changes
   useEffect(() => holdFeedStream(), []);
@@ -253,7 +304,7 @@ export function useLiveFeed(
     pendingCount: state.pending.length,
     showPending: () => dispatch({ type: "show_pending" }),
     setAtTop,
-    filters: feed.data?.filters ?? { actors: [], projects: [] },
+    filters: feed.data?.filters ?? { actors: [], products: [], projects: [] },
     retry: () => void feed.refetch(),
   };
 }

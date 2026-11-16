@@ -19,8 +19,8 @@ import {
   actor,
   actorPhoto,
   invite,
-  project,
-  projectMember,
+  product,
+  productMember,
 } from "../db/schema.js";
 import {
   ConflictError,
@@ -38,7 +38,10 @@ const listPeople = createRoute({
   method: "get",
   path: "/people",
   responses: {
-    200: jsonContent(peopleSchema, "The owner, then each invite, oldest first"),
+    200: jsonContent(
+      peopleSchema,
+      "The person who runs this trail, then each invite, oldest first",
+    ),
   },
 });
 
@@ -48,22 +51,25 @@ const invitePerson = createRoute({
   request: { body: jsonBody(personCreateSchema) },
   responses: {
     201: jsonContent(personSchema, "The invite"),
-    409: jsonContent(errorSchema, "Already invited, or the owner"),
+    409: jsonContent(
+      errorSchema,
+      "Already invited, or the person who runs this trail",
+    ),
     422: jsonContent(
       errorSchema,
-      "Neither a GitHub username nor an email address, or an unknown project key",
+      "Neither a GitHub username nor an email address, or an unknown product key",
     ),
   },
 });
 
-const setProjects = createRoute({
+const setProducts = createRoute({
   method: "put",
   path: "/people/{username}",
   request: { params: usernameParam, body: jsonBody(personUpdateSchema) },
   responses: {
-    200: jsonContent(personSchema, "The invite with its new projects"),
+    200: jsonContent(personSchema, "The invite with its new products"),
     404: jsonContent(errorSchema, "No invite for that username or email"),
-    422: jsonContent(errorSchema, "An unknown project key"),
+    422: jsonContent(errorSchema, "An unknown product key"),
   },
 });
 
@@ -100,29 +106,29 @@ const inviteFor = (invitee: Invitee): SQL =>
 const noInvite = (invitee: Invitee) =>
   new NotFoundError(`no invite for ${handleOf(invitee)}`);
 
-/** The ids of the projects with these keys, in any case; an unknown key is a 422 naming it. */
-function projectIdsOf(tx: Tx, keys: string[]): string[] {
+/** The ids of the products with these keys, in any case; an unknown key is a 422 naming it. */
+function productIdsOf(tx: Tx, keys: string[]): string[] {
   const wanted = [...new Set(keys.map((k) => k.toUpperCase()))];
   if (wanted.length === 0) return [];
   const rows = tx
-    .select({ id: project.id, key: project.key })
-    .from(project)
-    .where(inArray(project.key, wanted))
+    .select({ id: product.id, key: product.key })
+    .from(product)
+    .where(inArray(product.key, wanted))
     .all();
   const missing = wanted.filter((k) => !rows.some((r) => r.key === k));
   if (missing.length > 0) {
     throw new ValidationError(
-      `no project ${missing.join(", ")}: pass the keys of existing projects`,
+      `no product ${missing.join(", ")}: pass the keys of existing products`,
     );
   }
   return rows.map((r) => r.id);
 }
 
-function setMemberships(tx: Tx, inviteId: number, projectIds: string[]) {
-  tx.delete(projectMember).where(eq(projectMember.inviteId, inviteId)).run();
-  if (projectIds.length === 0) return;
-  tx.insert(projectMember)
-    .values(projectIds.map((projectId) => ({ inviteId, projectId })))
+function setMemberships(tx: Tx, inviteId: number, productIds: string[]) {
+  tx.delete(productMember).where(eq(productMember.inviteId, inviteId)).run();
+  if (productIds.length === 0) return;
+  tx.insert(productMember)
+    .values(productIds.map((productId) => ({ inviteId, productId })))
     .run();
 }
 
@@ -137,19 +143,19 @@ function invitees(db: Db | Tx, ids?: number[]): PersonView[] {
   if (invites.length === 0) return [];
   const memberships = db
     .select({
-      inviteId: projectMember.inviteId,
-      key: project.key,
-      name: project.name,
+      inviteId: productMember.inviteId,
+      key: product.key,
+      name: product.name,
     })
-    .from(projectMember)
-    .innerJoin(project, eq(project.id, projectMember.projectId))
+    .from(productMember)
+    .innerJoin(product, eq(product.id, productMember.productId))
     .where(
       inArray(
-        projectMember.inviteId,
+        productMember.inviteId,
         invites.map((i) => i.id),
       ),
     )
-    .orderBy(asc(project.key))
+    .orderBy(asc(product.key))
     .all();
   const claimedIds = invites.flatMap((i) =>
     i.githubId === null ? [] : [i.githubId],
@@ -192,7 +198,7 @@ function invitees(db: Db | Tx, ids?: number[]): PersonView[] {
       pending: person === undefined,
       name: person?.name ?? null,
       photoUrl: person ? photoUrl(person.id, person.photoHash) : null,
-      projects: memberships
+      products: memberships
         .filter((m) => m.inviteId === i.id)
         .map(({ key, name }) => ({ key, name })),
       invitedAt: i.createdAt.toISOString(),
@@ -216,27 +222,27 @@ export function peopleRoutes(db: Db) {
         pending: false,
         name: owner.actor.displayName,
         photoUrl: photoUrlOf(db, owner.actor.id),
-        projects: owner.projects.map(({ key, name }) => ({ key, name })),
+        products: owner.products.map(({ key, name }) => ({ key, name })),
         invitedAt: null,
       };
       return c.json({ items: [ownerRow, ...invitees(db)] }, 200);
     })
     .openapi(invitePerson, (c) => {
       const owner = c.var.member;
-      const { username: entry, projectKeys } = c.req.valid("json");
+      const { username: entry, products } = c.req.valid("json");
       const invitee = parseInvitee(entry);
       if (!invitee) throw new ValidationError(INVITEE_HINT);
       if ("username" in invitee && invitee.username === owner.login) {
         throw new ConflictError(
-          `@${invitee.username} is the owner, who sees every project`,
+          `@${invitee.username} is the person who runs this trail, who sees every product`,
         );
       }
       const created = db.transaction(
         (tx) => {
-          const projectIds = projectIdsOf(tx, projectKeys);
+          const productIds = productIdsOf(tx, products);
           if (tx.select().from(invite).where(inviteFor(invitee)).get()) {
             throw new ConflictError(
-              `${handleOf(invitee)} is already invited. Change their projects in the list below.`,
+              `${handleOf(invitee)} is already invited: change their products in the list below.`,
             );
           }
           const { id } = tx
@@ -244,16 +250,16 @@ export function peopleRoutes(db: Db) {
             .values({ ...invitee, invitedBy: owner.actor.id })
             .returning({ id: invite.id })
             .get();
-          setMemberships(tx, id, projectIds);
+          setMemberships(tx, id, productIds);
           return one(tx, id);
         },
         { behavior: "immediate" },
       );
       return c.json(created, 201);
     })
-    .openapi(setProjects, (c) => {
+    .openapi(setProducts, (c) => {
       const invitee = inviteeOfParam(c.req.valid("param").username);
-      const { projectKeys } = c.req.valid("json");
+      const { products } = c.req.valid("json");
       const updated = db.transaction(
         (tx) => {
           const found = tx
@@ -262,7 +268,7 @@ export function peopleRoutes(db: Db) {
             .where(inviteFor(invitee))
             .get();
           if (!found) throw noInvite(invitee);
-          setMemberships(tx, found.id, projectIdsOf(tx, projectKeys));
+          setMemberships(tx, found.id, productIdsOf(tx, products));
           return one(tx, found.id);
         },
         { behavior: "immediate" },
@@ -273,7 +279,7 @@ export function peopleRoutes(db: Db) {
       const invitee = inviteeOfParam(c.req.valid("param").username);
       db.transaction(
         (tx) => {
-          // project_member rows go with it (on delete cascade)
+          // product_member rows go with it (on delete cascade)
           const removed = tx
             .delete(invite)
             .where(inviteFor(invitee))

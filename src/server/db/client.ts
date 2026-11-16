@@ -108,6 +108,31 @@ function refuseBotNamesClashingByCase(sqlite: Db["$client"]): void {
   );
 }
 
+// journal `when` of 0015_products_projects, which copies every item as type 'issue'
+const productsMigration = 1794806529483;
+
+/**
+ * 0015's data step: each product a bot created gets that bot as its owner, then the items its
+ * owner created become todos, assigned to the owner when unassigned. A product a person created
+ * has no owner and keeps every item an issue. Statuses and updated_at stay as they were.
+ */
+function typeItemsByOwner(sqlite: Db["$client"]): void {
+  sqlite.exec(`
+    update product set owner_id = created_by
+      where (select kind from actor where id = product.created_by) = 'bot';
+    update issue set type = 'todo', assignee_id = coalesce(assignee_id, created_by)
+      where created_by = (select owner_id from product where id = issue.product_id);
+  `);
+  // a replayed create returns its stored row as the service returned it, so stored rows take
+  // the renamed column and an item its type
+  sqlite.exec(`
+    update idempotency_key set response = json_set(json_remove(response, '$.projectId'), '$.productId', response ->> '$.projectId')
+      where scope in ('issue.create', 'label.create', 'status_update.create') and json_type(response, '$.projectId') is not null;
+    update idempotency_key set response = json_set(response, '$.type', (select type from issue where id = response ->> '$.id'))
+      where scope = 'issue.create' and exists (select 1 from issue where id = response ->> '$.id');
+  `);
+}
+
 /**
  * Applies pending drizzle-kit migrations. Throws, leaving the file untouched,
  * when the file was migrated by a newer build than this one, or holds bots
@@ -163,6 +188,7 @@ export function migrate(db: Db, folder = migrationsFolder): void {
             refuseBotNamesClashingByCase(sqlite);
           }
           for (const statement of m.sql) sqlite.exec(statement);
+          if (m.folderMillis === productsMigration) typeItemsByOwner(sqlite);
           record.run(m.hash, m.folderMillis);
         }
         const violations = sqlite.pragma("foreign_key_check") as unknown[];

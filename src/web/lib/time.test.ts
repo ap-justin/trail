@@ -1,5 +1,10 @@
 import { describe, expect, test } from "vitest";
-import { formatAbsolute, formatDayHeader, formatRelative } from "@/lib/time";
+import {
+  formatAbsolute,
+  formatDate,
+  formatDayHeader,
+  formatRelative,
+} from "@/lib/time";
 
 // local-time constructors keep these independent of the machine's time zone
 const now = new Date(2026, 10, 11, 15, 0, 0);
@@ -51,5 +56,12 @@ describe("formatDayHeader", () => {
   test("Yesterday crosses a month boundary", () => {
     const first = new Date(2026, 11, 1, 8, 0);
     expect(formatDayHeader(at(2026, 10, 30, 20, 0), first)).toBe("Yesterday");
+  });
+});
+
+describe("formatDate", () => {
+  test("a calendar date reads as that day wherever the viewer is, the year only outside this one", () => {
+    expect(formatDate("2026-12-04", now)).toBe("Dec 4");
+    expect(formatDate("2027-01-31", now)).toBe("Jan 31, 2027");
   });
 });

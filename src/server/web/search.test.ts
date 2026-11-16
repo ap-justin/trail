@@ -1,5 +1,6 @@
 import { beforeAll, expect, test } from "vitest";
 import { setupTestApp } from "../test-app.js";
+import { webSeed } from "./test-seed.js";
 
 const { request, addMember, addProject } = setupTestApp();
 
@@ -19,6 +20,10 @@ beforeAll(async () => {
   await file(visible.id, "100% done_ish");
   await file(visible.id, "Paint");
   await file(hidden.id, "Rocket blueprint");
+  const seed = webSeed(request);
+  await seed.project("Rocket road", [visible.key, hidden.key]);
+  await seed.project("Rocket vault", [hidden.key]);
+  await seed.project("Moonshot", [visible.key], [], { slug: "rocket-moon" });
 });
 
 const search = async (q: string) => {
@@ -30,41 +35,90 @@ const search = async (q: string) => {
   return { status: res.status, body: (await res.json()) as Body };
 };
 
-test("finds visible issues by title and visible projects by name, and nothing in a hidden project", async () => {
+test("finds visible items by title, visible products by name and visible projects by name or slug, and nothing of a hidden product", async () => {
   const { status, body } = await search("rocket");
   expect(status).toBe(200);
   expect(body).toEqual({
-    issues: [
+    items: [
       {
         key: `${visible.key}-1`,
         sourceKey: null,
         title: "Fuel the rocket",
-        status: "open",
-        project: { key: visible.key, name: "Rocket launch" },
+        type: "issue",
+        status: "triage",
+        product: { key: visible.key, name: "Rocket launch" },
       },
     ],
-    projects: [{ key: visible.key, name: "Rocket launch" }],
+    products: [{ key: visible.key, name: "Rocket launch" }],
+    projects: [
+      { slug: "rocket-moon", name: "Moonshot" },
+      { slug: "rocket-road", name: "Rocket road" },
+    ],
   });
 });
 
-test("finds an issue by its key and a project by its key", async () => {
+test("finds an item by its key and a product by its key", async () => {
   const { body } = await search(`${visible.key.toLowerCase()}-3`);
-  expect(body.issues.map((i: Body) => i.title)).toEqual(["Paint"]);
-  const byProjectKey = await search(visible.key);
-  expect(byProjectKey.body.projects).toEqual([
+  expect(body.items.map((i: Body) => i.title)).toEqual(["Paint"]);
+  const byProductKey = await search(visible.key);
+  expect(byProductKey.body.products).toEqual([
     { key: visible.key, name: "Rocket launch" },
   ]);
   const hiddenKey = await search(hidden.key);
-  expect(hiddenKey.body).toEqual({ issues: [], projects: [] });
+  expect(hiddenKey.body).toEqual({ items: [], products: [], projects: [] });
 });
 
 test("matches % and _ literally", async () => {
-  expect((await search("%")).body.issues.map((i: Body) => i.title)).toEqual([
+  expect((await search("%")).body.items.map((i: Body) => i.title)).toEqual([
     "100% done_ish",
   ]);
-  expect((await search("F_el")).body.issues).toEqual([]);
+  expect((await search("F_el")).body.items).toEqual([]);
 });
 
 test("an empty query is a 422", async () => {
   expect((await search(" ")).status).toBe(422);
+});
+
+test("an item whose key is the query comes first, ahead of the 20 newest items whose keys only contain it", async () => {
+  const many = addProject("Many items");
+  const reader = await addMember("exact-searcher", [many.id]);
+  for (let n = 1; n <= 120; n++) await file(many.id, `item ${n}`);
+  const res = await request(
+    "GET",
+    `/api/web/search?q=${encodeURIComponent(`${many.key.toLowerCase()}-1`)}`,
+    { key: null, cookie: reader },
+  );
+  const { items } = (await res.json()) as Body;
+  expect(items).toHaveLength(20);
+  expect(items[0]).toMatchObject({ key: `${many.key}-1`, title: "item 1" });
+});
+
+test("an item whose source key is the query comes first, ahead of the 20 newest items whose source keys only contain it", async () => {
+  const issues = [1, ...Array.from({ length: 30 }, (_, i) => 100 + i)].map(
+    (n, i) => ({
+      externalRef: `src-${n}`,
+      sourceKey: `SRC-${n}`,
+      title: `imported ${n}`,
+      status: "Todo",
+      createdAt: new Date(Date.UTC(2026, 0, 1, 0, i)).toISOString(),
+    }),
+  );
+  const imported = await request("POST", "/api/v1/import", {
+    json: {
+      externalRef: "src-product",
+      key: "SRCP",
+      name: "Imported keys",
+      issues,
+    },
+  });
+  expect(imported.status).toBe(200);
+  const { product } = (await imported.json()) as Body;
+  const reader = await addMember("source-key-searcher", [product.id]);
+  const res = await request("GET", "/api/web/search?q=src-1", {
+    key: null,
+    cookie: reader,
+  });
+  const { items } = (await res.json()) as Body;
+  expect(items).toHaveLength(20);
+  expect(items[0]).toMatchObject({ sourceKey: "SRC-1", title: "imported 1" });
 });

@@ -4,7 +4,7 @@ import { HttpResponse, http } from "msw";
 import type { EntryView, FeedView, MeView } from "@/lib/api-types";
 import { createQueryClient } from "@/lib/queries";
 import { createAppRouter } from "@/router";
-import { allProjects, kai, maya, trail } from "@/test/fixtures";
+import { allProducts, alpha, maya, trail } from "@/test/fixtures";
 import { server } from "@/test/server";
 
 /** The whole app at `path`, on a fresh cache that never retries. */
@@ -20,7 +20,7 @@ export function renderApp(path: string) {
   return { router, queryClient };
 }
 
-export const ownerName = "Justin Salas";
+export const ownerName = "Jordan Smith";
 
 export function meView(state: MeView["state"]): MeView {
   switch (state) {
@@ -30,7 +30,7 @@ export function meView(state: MeView["state"]): MeView {
         login: null,
         email: null,
         actor: null,
-        projects: [],
+        products: [],
         ownerName,
         emailSignIn: true,
       };
@@ -40,7 +40,7 @@ export function meView(state: MeView["state"]): MeView {
         login: "stranger",
         email: null,
         actor: null,
-        projects: [],
+        products: [],
         ownerName,
         emailSignIn: true,
       };
@@ -50,7 +50,7 @@ export function meView(state: MeView["state"]): MeView {
         login: "mayachen",
         email: null,
         actor: maya,
-        projects: allProjects,
+        products: allProducts,
         ownerName,
         emailSignIn: true,
       };
@@ -72,7 +72,7 @@ export function feedPage(items: EntryView[]): FeedView {
   return {
     items,
     nextCursor: null,
-    filters: { actors: [kai], projects: [trail] },
+    filters: { actors: [alpha], products: [trail], projects: [] },
   };
 }
 

@@ -37,7 +37,7 @@ test("a database holding 0005 data keeps every row and gains empty, STRICT auth 
   migrate(db, through(5));
   db.$client.exec(`
     insert into actor (id, kind, display_name, github_id, github_login, created_at) values
-      ('b1', 'bot', 'Tara', null, null, 0), ('h1', 'human', 'Justin', 89639563, 'justin', 0);
+      ('b1', 'bot', 'Builder', null, null, 0), ('h1', 'human', 'Maya Chen', 1001, 'mayachen', 0);
     insert into project (id, key, name, created_by, created_at, updated_at) values
       ('p', 'TRL', 'trail', 'b1', 0, 0);
     insert into invite (username, invited_by, created_at) values ('ada', 'h1', 0);

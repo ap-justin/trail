@@ -1,29 +1,35 @@
-import { GitPullRequestIcon } from "lucide-react";
+import { FolderIcon, GitPullRequestIcon } from "lucide-react";
 import { type FormEvent, type ReactNode, useId, useState } from "react";
 import { ActorAvatar, ActorBadge, ActorName } from "@/components/actor";
 import { AppLink } from "@/components/app-link";
 import { Markdown } from "@/components/markdown";
 import { IssueError, IssueSkeleton, NotFoundPanel } from "@/components/states";
 import {
+  changedStatusLabel,
   PriorityLabel,
   priorityLabel,
   StatusLabel,
-  statusLabel,
+  TypeBadge,
 } from "@/components/status";
 import { KeyText, LabelChip } from "@/components/text";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import type { EntryView, WebActorView, WebIssueView } from "@/lib/api-types";
+import type {
+  EntryView,
+  WebActorView,
+  WebItemType,
+  WebItemView,
+} from "@/lib/api-types";
 import type { Loadable } from "@/lib/loadable";
 import { paths } from "@/lib/paths";
 import { formatAbsolute, formatDay } from "@/lib/time";
 import { cn } from "@/lib/utils";
 
 export type IssueViewProps = {
-  /** The key from the URL, named in the error copy before the issue has loaded. */
+  /** The key from the URL, named in the error copy before the item has loaded. */
   issueKey: string;
-  /** Not found covers a missing issue and one in a project the viewer can't see. */
-  issue: Loadable<WebIssueView> | { status: "not_found" };
+  /** Not found covers a missing item and one in a product the viewer can't see. */
+  issue: Loadable<WebItemView> | { status: "not_found" };
   /** Who a comment will be credited to. */
   viewer: { name: string };
   onRetry: () => void;
@@ -35,31 +41,31 @@ export type IssueViewProps = {
 };
 
 /**
- * The shell heading on an issue page, as `headingKind="breadcrumb"` (the title is the h1):
- * `Projects / trail / TRL-14` at 1440, the key below.
+ * The shell heading on an item page, as `headingKind="breadcrumb"` (the title is the h1):
+ * `Products / trail / TRL-14` at 1440, the key below.
  */
 export function IssueBreadcrumb({
   issueKey,
-  project,
+  product,
 }: {
   issueKey: string;
-  /** Absent until the issue has loaded. */
-  project?: { key: string; name: string };
+  /** Absent until the item has loaded. */
+  product?: { key: string; name: string };
 }) {
   return (
     <span className="flex min-w-0 items-center gap-2">
       <span className="flex items-center gap-2 font-normal text-muted-foreground max-lg:hidden">
-        <AppLink href={paths.projects} className="hover:text-foreground">
-          Projects
+        <AppLink href={paths.products} className="hover:text-foreground">
+          Products
         </AppLink>
         <span aria-hidden="true">/</span>
-        {project && (
+        {product && (
           <>
             <AppLink
-              href={paths.project(project.key)}
+              href={paths.product(product.key)}
               className="hover:text-foreground"
             >
-              {project.name}
+              {product.name}
             </AppLink>
             <span aria-hidden="true">/</span>
           </>
@@ -73,9 +79,12 @@ export function IssueBreadcrumb({
 function Actor({
   actor,
   titleSurface,
+  withTitle = true,
 }: {
   actor: WebActorView;
   titleSurface?: "card";
+  /** False drops a bot's title pill, as the byline does. */
+  withTitle?: boolean;
 }) {
   return (
     <>
@@ -84,6 +93,7 @@ function Actor({
         actor={actor}
         nameClassName="font-medium text-foreground"
         titleSurface={titleSurface}
+        titleClassName={withTitle ? undefined : "hidden"}
       />{" "}
     </>
   );
@@ -93,18 +103,23 @@ const strong = (text: string) => (
   <span className="font-medium text-foreground">{text}</span>
 );
 
-function Header({ issue }: { issue: WebIssueView }) {
+/** The type the item was created as, which its current type loses once retyped. */
+function createdAs(issue: WebItemView): WebItemType {
+  const created = issue.timeline.find((e) => e.kind === "item_created");
+  return created?.kind === "item_created" ? created.createdAs : issue.type;
+}
+
+function Header({ issue }: { issue: WebItemView }) {
   return (
     <header className="flex flex-col gap-2 border-b px-4 pt-3.5 pb-3 lg:gap-1.5 lg:border-0 lg:p-0">
       <h1 className="text-lg leading-tight font-semibold lg:text-xl">
         {issue.title}
       </h1>
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground">
-        <KeyText className="max-lg:hidden">{issue.key}</KeyText>
-        <span>
-          <span className="max-lg:hidden">created </span>by
-        </span>
-        <Actor actor={issue.creator} />
+        <TypeBadge type={issue.type} />
+        <KeyText>{issue.key}</KeyText>
+        <span>{createdAs(issue) === "todo" ? "planned by" : "filed by"}</span>
+        <Actor actor={issue.creator} withTitle={false} />
         <time dateTime={issue.createdAt}>
           <span className="max-lg:hidden">on </span>
           {formatDay(new Date(issue.createdAt), new Date())}
@@ -153,11 +168,19 @@ function Property({
 
 const none = <span className="text-muted-foreground">None</span>;
 
+// an issue waits in triage for an owner; a todo always has its planning bot
+const noAssignee: Record<WebItemType, ReactNode> = {
+  issue: <span className="text-muted-foreground">Unassigned</span>,
+  todo: none,
+};
+
 /**
  * Read-only on purpose: people never change status, priority, labels, assignee or
  * estimate, so nothing here is a control, has a hover state or carries a chevron.
+ * Below lg: Status, Priority, Estimate and Product as a 4-column grid, then Labels,
+ * Assignee and Projects as full rows; the byline carries the type.
  */
-function Properties({ issue }: { issue: WebIssueView }) {
+function Properties({ issue }: { issue: WebItemView }) {
   const headingId = useId();
   return (
     <section
@@ -170,7 +193,10 @@ function Properties({ issue }: { issue: WebIssueView }) {
       >
         Properties
       </h2>
-      <dl className="grid grid-cols-[auto_minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 lg:grid-cols-[auto_minmax(0,1fr)]">
+      <dl className="grid grid-cols-[auto_minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 lg:grid-cols-[--spacing(21)_minmax(0,1fr)]">
+        <Property label="Type" className="max-lg:hidden">
+          <TypeBadge type={issue.type} />
+        </Property>
         <Property label="Status">
           <StatusLabel status={issue.status} className="text-sm" />
         </Property>
@@ -180,7 +206,7 @@ function Properties({ issue }: { issue: WebIssueView }) {
         <Property label="Estimate">
           {issue.estimate === null ? none : `${issue.estimate} h`}
         </Property>
-        {/* below lg, Labels then Assignee take full-width rows after the pairs */}
+        {/* below lg, Labels, Assignee then Projects take full-width rows after the pairs */}
         <Property
           label="Assignee"
           // at lg the label stays on the name's row, above the title's
@@ -204,7 +230,7 @@ function Properties({ issue }: { issue: WebIssueView }) {
               />
             </span>
           ) : (
-            <span className="text-muted-foreground">Unassigned</span>
+            noAssignee[issue.type]
           )}
         </Property>
         <Property
@@ -218,13 +244,40 @@ function Properties({ issue }: { issue: WebIssueView }) {
                 <LabelChip key={label} name={label} />
               ))}
         </Property>
-        <Property label="Project">
+        <Property label="Product">
           <AppLink
-            href={paths.project(issue.project.key)}
+            href={paths.product(issue.product.key)}
             className="flex items-center gap-1 hover:underline lg:gap-2"
           >
-            <KeyText>{issue.project.key}</KeyText> {issue.project.name}
+            <KeyText className="text-foreground">{issue.product.key}</KeyText>{" "}
+            {issue.product.name}
           </AppLink>
+        </Property>
+        <Property
+          label="Projects"
+          itemClassName="max-lg:order-3 self-start"
+          valueClassName="max-lg:col-span-3"
+        >
+          {issue.projects.length === 0 ? (
+            none
+          ) : (
+            <ul className="flex flex-col gap-1">
+              {issue.projects.map((project) => (
+                <li key={project.slug}>
+                  <AppLink
+                    href={paths.project(project.slug)}
+                    className="flex items-center gap-1.5 hover:underline lg:gap-2"
+                  >
+                    <FolderIcon
+                      aria-hidden="true"
+                      className="size-3.5 shrink-0 text-muted-foreground"
+                    />
+                    {project.name}
+                  </AppLink>
+                </li>
+              ))}
+            </ul>
+          )}
         </Property>
         <Property label="Created" className="max-lg:hidden">
           {formatAbsolute(issue.createdAt)}
@@ -239,7 +292,7 @@ function Properties({ issue }: { issue: WebIssueView }) {
 
 const webScheme = /^https?:\/\//i;
 
-function Links({ links }: { links: WebIssueView["links"] }) {
+function Links({ links }: { links: WebItemView["links"] }) {
   const headingId = useId();
   if (links.length === 0) return null;
   return (
@@ -296,20 +349,40 @@ function Links({ links }: { links: WebIssueView["links"] }) {
   );
 }
 
+const typeLabels: Record<WebItemType, string> = {
+  issue: "Issue",
+  todo: "Todo",
+};
+
 /** The words after the actor in a one-line timeline entry. */
 function changePhrase(entry: EntryView): ReactNode {
   switch (entry.kind) {
-    case "issue_created":
-      return entry.actor.kind === "bot"
-        ? "created this issue"
+    case "item_created":
+      return entry.createdAs === "todo"
+        ? "planned this todo"
         : "filed this issue";
     case "status_changed":
       return (
         <>
-          changed status from {strong(statusLabel(entry.from))} to{" "}
-          <StatusLabel status={entry.to} className="text-sm font-medium" />
+          changed status from {strong(changedStatusLabel(entry.from))} to{" "}
+          <StatusLabel
+            status={entry.to}
+            namesTriage
+            className="text-sm font-medium"
+          />
         </>
       );
+    case "type_changed":
+      return (
+        <>
+          changed type from {strong(typeLabels[entry.from])} to{" "}
+          {strong(typeLabels[entry.to])}
+        </>
+      );
+    case "added_to_project":
+      return <>added this to project {strong(entry.project.name)}</>;
+    case "removed_from_project":
+      return <>removed this from project {strong(entry.project.name)}</>;
     case "priority_changed":
       return <>set priority to {strong(priorityLabel(entry.to))}</>;
     case "labels_changed":
@@ -339,11 +412,14 @@ function changePhrase(entry: EntryView): ReactNode {
       ) : (
         <>set the estimate to {strong(`${entry.to} h`)}</>
       );
-    // project-level kinds and comments never render as a change line
+    // product- and project-level kinds and comments never render as a change line
     case "comment":
-    case "status_update":
+    case "product_status_update":
+    case "product_created":
+    case "product_imported":
+    case "project_status_update":
     case "project_created":
-    case "project_imported":
+    case "project_updated":
       return null;
     default:
       // typechecks only while every known kind has a case; at runtime, a kind the server added later lands here
@@ -494,8 +570,8 @@ function CommentBox({
 }
 
 /**
- * An issue as people see it: everything read-only except the comment box at the end of
- * the timeline. At 1440 a main column beside a 280px Properties and Links rail; below,
+ * An item (issue or todo) as people see it: everything read-only except the comment box
+ * at the end of the timeline. At 1440 a main column beside a 280px Properties and Links rail; below,
  * one column in the order title, properties, links, description, activity, comment box.
  */
 export function IssueView(props: IssueViewProps) {

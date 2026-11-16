@@ -16,6 +16,12 @@ import {
   revokeKey,
   setBotTitle,
 } from "./service/keys.js";
+import {
+  listProductOwners,
+  type ProductChange,
+  setProductOwner,
+  setProductRepo,
+} from "./service/product-admin.js";
 import { BOT_TITLE_MAX } from "./service/validate.js";
 
 interface Output {
@@ -41,21 +47,31 @@ const usage = `Usage:
                                    mint another key for an existing bot
   trail key list                   list every key's prefix, bot, times and scope
   trail key revoke <prefix>        revoke a key by its prefix or the full key
+  trail products owners            list each product's current owner bot, or none
+  trail products set-owner <key> <bot-id-label-or-name>
+                                   make a bot the product's owner: it adds
+                                   todos, accepts issues from triage and
+                                   cancels any item
+  trail products set-repo <key> <url>
+                                   set the product's GitHub repository,
+                                   https://github.com/<owner>/<name>
 
   --label <agent-id>  the bot's id in the system that runs it, unique among bots
-  --projects <keys>   scope: limit the key to these projects, like BGP,ATL
+  --products <keys>   scope: limit the key to these products, like BGP,ATL
+                      (--projects, the old name, still works)
   --actions <actions> scope: limit the key to these of read, issues, comments,
                       status_updates and admin, like read,issues,comments
   --key-only          print only the key on stdout; the rest goes to stderr
   --clear             bot title: remove the title instead of setting one
 
-  <scope> is --projects, --actions or both. A key without --projects reaches
-  every project; without --actions it has every action.
+  <scope> is --products, --actions or both. A key without --products reaches
+  every product; without --actions it has every action.
 `;
 
 const options = {
   help: { type: "boolean", short: "h" },
   label: { type: "string" },
+  products: { type: "string" },
   projects: { type: "string" },
   actions: { type: "string" },
   "key-only": { type: "boolean" },
@@ -64,6 +80,8 @@ const options = {
 
 type Flags = {
   label?: string;
+  products?: string;
+  /** the old name of --products; accepted with a notice */
   projects?: string;
   actions?: string;
   "key-only"?: boolean;
@@ -104,9 +122,19 @@ export function runCli(argv: readonly string[], io: CliIo): number {
 
   try {
     for (const flag of Object.keys(flags)) {
-      if (!command.flags.includes(flag as keyof Flags)) {
+      const canonical = flag === "projects" ? "products" : flag;
+      if (!command.flags.includes(canonical as keyof Flags)) {
         throw new UsageError(`'${noun} ${verb}' takes no --${flag}`);
       }
+    }
+    if (flags.projects !== undefined) {
+      if (flags.products !== undefined) {
+        throw new UsageError(
+          "send --products or --projects, not both: --projects is the old name of --products",
+        );
+      }
+      io.stderr.write("trail: --projects is deprecated: use --products\n");
+      flags = { ...flags, products: flags.projects, projects: undefined };
     }
     const input = command.parse(args, flags);
     const db = openDatabase(
@@ -159,21 +187,21 @@ interface Command<T> {
   run(db: Db, input: T, io: CliIo): void;
 }
 
-const projectsCell = (scope: KeyScopeView) =>
-  scope.projects?.join(",") ?? "all projects";
+const productsCell = (scope: KeyScopeView) =>
+  scope.products?.join(",") ?? "all products";
 const actionsCell = (scope: KeyScopeView) =>
   scope.actions?.join(",") ?? "all actions";
 
-/** `scope  projects BGP; all actions`, or nothing for an unscoped key. */
+/** `scope  products BGP; all actions`, or nothing for an unscoped key. */
 function scopeLine(scope: KeyScopeView): string {
-  if (scope.projects === null && scope.actions === null) return "";
-  const projects = scope.projects
-    ? `projects ${projectsCell(scope)}`
-    : projectsCell(scope);
+  if (scope.products === null && scope.actions === null) return "";
+  const products = scope.products
+    ? `products ${productsCell(scope)}`
+    : productsCell(scope);
   const actions = scope.actions
     ? `actions ${actionsCell(scope)}`
     : actionsCell(scope);
-  return `scope  ${projects}; ${actions}\n`;
+  return `scope  ${products}; ${actions}\n`;
 }
 
 /**
@@ -204,24 +232,25 @@ function printKey(
 
 /** The comma-separated value of a list flag; a blank entry is refused here, before the database opens. */
 function listFlag(
-  flag: "projects" | "actions",
+  flag: "products" | "actions",
   value: string | undefined,
 ): string[] | undefined {
   if (value === undefined) return undefined;
   const items = value.split(",").map((item) => item.trim());
   if (items.some((item) => item === "")) {
     throw new UsageError(
-      `--${flag} takes a comma-separated list with no blank entries, like --${flag}=${flag === "projects" ? "BGP,ATL" : "read,issues"}; leave it out for no limit`,
+      `--${flag} takes a comma-separated list with no blank entries, like --${flag}=${flag === "products" ? "BGP,ATL" : "read,issues"}; leave it out for no limit`,
     );
   }
   return items;
 }
 
 function scopeFlags(flags: Flags): KeyScopeInput {
-  const projects = listFlag("projects", flags.projects);
+  const products = listFlag("products", flags.products);
   const actions = listFlag("actions", flags.actions);
   return {
-    ...(projects && { projects }),
+    // KeyScopeInput still names the product list `projects`
+    ...(products && { projects: products }),
     ...(actions && { actions }),
   };
 }
@@ -232,7 +261,7 @@ const botCreate: Command<{
   scope: KeyScopeInput;
   keyOnly: boolean;
 }> = {
-  flags: ["label", "projects", "actions", "key-only"],
+  flags: ["label", "products", "actions", "key-only"],
   parse: (args, flags) => ({
     name: oneArg(args, "name"),
     label: flags.label,
@@ -249,7 +278,7 @@ const keyCreate: Command<{
   scope: KeyScopeInput;
   keyOnly: boolean;
 }> = {
-  flags: ["projects", "actions", "key-only"],
+  flags: ["products", "actions", "key-only"],
   parse: (args, flags) => ({
     bot: oneArg(args, "bot-id-or-label"),
     scope: scopeFlags(flags),
@@ -275,7 +304,7 @@ const keyList: Command<null> = {
         "label",
         "created",
         "revoked",
-        "projects",
+        "products",
         "actions",
       ],
       ...listKeys(db).map((k) => [
@@ -285,19 +314,11 @@ const keyList: Command<null> = {
         k.label ?? "-",
         k.createdAt.toISOString(),
         k.revokedAt?.toISOString() ?? "-",
-        projectsCell(k.scope),
+        productsCell(k.scope),
         actionsCell(k.scope),
       ]),
     ];
-    const widths = rows[0]?.map((_, i) =>
-      Math.max(...rows.map((r) => (r[i] as string).length)),
-    ) as number[];
-    for (const row of rows) {
-      const cells = row.map((cell, i) =>
-        i === row.length - 1 ? cell : cell.padEnd(widths[i] as number),
-      );
-      io.stdout.write(`${cells.join("  ")}\n`);
-    }
+    printTable(io, rows);
   },
 };
 
@@ -366,6 +387,72 @@ const botTitle: Command<{ bot: string; title: string | null }> = {
   },
 };
 
+/** Rows as columns padded to their widest cell, the last left unpadded. */
+function printTable(io: CliIo, rows: string[][]): void {
+  const widths = rows[0]?.map((_, i) =>
+    Math.max(...rows.map((r) => (r[i] as string).length)),
+  ) as number[];
+  for (const row of rows) {
+    const cells = row.map((cell, i) =>
+      i === row.length - 1 ? cell : cell.padEnd(widths[i] as number),
+    );
+    io.stdout.write(`${cells.join("  ")}\n`);
+  }
+}
+
+const productsOwners: Command<null> = {
+  flags: [],
+  parse(args) {
+    if (args.length > 0) {
+      throw new UsageError("'products owners' takes no arguments");
+    }
+    return null;
+  },
+  run(db, _, io) {
+    printTable(io, [
+      ["product", "owner"],
+      ...listProductOwners(db).map((r) => [r.key, r.owner ?? "none"]),
+    ]);
+  },
+};
+
+function printChange(io: CliIo, change: ProductChange): void {
+  io.stdout.write(
+    `product  ${change.key}\nfrom     ${change.from ?? "-"}\nto       ${change.to}\n`,
+  );
+}
+
+function twoArgs(
+  args: readonly string[],
+  first: string,
+  second: string,
+): [string, string] {
+  if (args.length === 0) throw new UsageError(`missing <${first}>`);
+  if (args.length === 1) throw new UsageError(`missing <${second}>`);
+  if (args.length > 2) {
+    throw new UsageError(
+      `expected <${first}> <${second}>, got ${args.length} arguments; quote a value containing spaces`,
+    );
+  }
+  return [args[0] as string, args[1] as string];
+}
+
+const productsSetOwner: Command<[string, string]> = {
+  flags: [],
+  parse: (args) => twoArgs(args, "key", "bot-id-label-or-name"),
+  run(db, [key, bot], io) {
+    printChange(io, setProductOwner(db, key, bot));
+  },
+};
+
+const productsSetRepo: Command<[string, string]> = {
+  flags: [],
+  parse: (args) => twoArgs(args, "key", "url"),
+  run(db, [key, url], io) {
+    printChange(io, setProductRepo(db, key, url));
+  },
+};
+
 // method syntax in Command keeps run() bivariant, so each command keeps its own input type
 const commands: Record<string, Command<unknown> | undefined> = {
   "bot create": botCreate,
@@ -374,6 +461,9 @@ const commands: Record<string, Command<unknown> | undefined> = {
   "key create": keyCreate,
   "key list": keyList,
   "key revoke": keyRevoke,
+  "products owners": productsOwners,
+  "products set-owner": productsSetOwner,
+  "products set-repo": productsSetRepo,
 };
 
 function isMain(): boolean {

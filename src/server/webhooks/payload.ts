@@ -1,10 +1,12 @@
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { Db } from "../db/client.js";
 import {
   actor,
   comment,
   issue,
   label,
+  product,
+  productStatusUpdate,
   project,
   projectStatusUpdate,
 } from "../db/schema.js";
@@ -29,9 +31,11 @@ export function cutPayload(payload: Record<string, unknown>): unknown {
 type Subject = {
   type: string;
   id: string;
-  /** the issue's key (BGP-12) for an issue or a comment on it; the project's key otherwise */
+  /** an item's key (BGP-12) for an item or a comment on one; a project's slug for a project; the product's key otherwise */
   key: string | null;
   title: string | null;
+  /** issue or todo, on an item or a comment on one */
+  itemType?: string;
 };
 
 function issueSubject(db: Db, issueId: string) {
@@ -39,31 +43,46 @@ function issueSubject(db: Db, issueId: string) {
     .select({
       number: issue.number,
       title: issue.title,
-      projectKey: project.key,
+      type: issue.type,
+      productKey: product.key,
     })
     .from(issue)
-    .innerJoin(project, eq(project.id, issue.projectId))
+    .innerJoin(product, eq(product.id, issue.productId))
     .where(eq(issue.id, issueId))
     .get();
 }
 
+type ProjectRef = { slug: string; name: string };
+
 function subjectOf(
   db: Db,
   event: ActivityEvent,
-  projectKey: string | null,
-  projectName: string | null,
+  productKey: string | null,
+  productName: string | null,
+  proj: ProjectRef | undefined,
 ): { subject: Subject; path: string } {
   const base = { type: event.subjectType, id: event.subjectId };
-  const projectPath = projectKey === null ? "/" : `/projects/${projectKey}`;
+  const ownerPath =
+    proj !== undefined
+      ? `/projects/${proj.slug}`
+      : productKey === null
+        ? "/"
+        : `/products/${productKey}`;
+  const ownerKey = proj?.slug ?? productKey;
+  const itemSubject = (issueId: string) => {
+    const row = issueSubject(db, issueId);
+    if (!row) return undefined;
+    const key = `${row.productKey}-${row.number}`;
+    return {
+      subject: { ...base, key, title: row.title, itemType: row.type },
+      path: `/issues/${key}`,
+    };
+  };
   switch (event.subjectType) {
     case "issue": {
-      const row = issueSubject(db, event.subjectId);
-      if (!row) break;
-      const key = `${row.projectKey}-${row.number}`;
-      return {
-        subject: { ...base, key, title: row.title },
-        path: `/issues/${key}`,
-      };
+      const found = itemSubject(event.subjectId);
+      if (found) return found;
+      break;
     }
     case "comment": {
       const row = db
@@ -71,13 +90,9 @@ function subjectOf(
         .from(comment)
         .where(eq(comment.id, event.subjectId))
         .get();
-      const found = row && issueSubject(db, row.issueId);
-      if (!found) break;
-      const key = `${found.projectKey}-${found.number}`;
-      return {
-        subject: { ...base, key, title: found.title },
-        path: `/issues/${key}`,
-      };
+      const found = row && itemSubject(row.issueId);
+      if (found) return found;
+      break;
     }
     case "label": {
       const row = db
@@ -86,38 +101,42 @@ function subjectOf(
         .where(eq(label.id, event.subjectId))
         .get();
       return {
-        subject: { ...base, key: projectKey, title: row?.name ?? null },
-        path: projectPath,
+        subject: { ...base, key: productKey, title: row?.name ?? null },
+        path: ownerPath,
       };
     }
     case "status_update": {
+      const table =
+        proj === undefined ? productStatusUpdate : projectStatusUpdate;
       const row = db
-        .select({ health: projectStatusUpdate.health })
-        .from(projectStatusUpdate)
-        .where(
-          and(
-            eq(projectStatusUpdate.id, event.subjectId),
-            event.projectId === null
-              ? undefined
-              : eq(projectStatusUpdate.projectId, event.projectId),
-          ),
-        )
+        .select({ health: table.health })
+        .from(table)
+        .where(eq(table.id, event.subjectId))
         .get();
       return {
         subject: {
           ...base,
-          key: projectKey,
+          key: ownerKey,
           title: row ? `Status update: ${row.health}` : null,
         },
-        path: projectPath,
+        path: ownerPath,
       };
     }
+    case "project":
+      return {
+        subject: {
+          ...base,
+          key: proj?.slug ?? null,
+          title: proj?.name ?? null,
+        },
+        path: ownerPath,
+      };
     default:
       break;
   }
   return {
-    subject: { ...base, key: projectKey, title: projectName },
-    path: projectPath,
+    subject: { ...base, key: productKey, title: productName },
+    path: ownerPath,
   };
 }
 
@@ -127,11 +146,19 @@ export function buildEnvelope(
   event: ActivityEvent,
   publicUrl: string | undefined,
 ): Envelope {
+  const prod =
+    event.productId === null
+      ? undefined
+      : db
+          .select({ key: product.key, name: product.name })
+          .from(product)
+          .where(eq(product.id, event.productId))
+          .get();
   const proj =
     event.projectId === null
       ? undefined
       : db
-          .select({ key: project.key, name: project.name })
+          .select({ slug: project.slug, name: project.name })
           .from(project)
           .where(eq(project.id, event.projectId))
           .get();
@@ -143,16 +170,22 @@ export function buildEnvelope(
   const { subject, path } = subjectOf(
     db,
     event,
-    proj?.key ?? null,
-    proj?.name ?? null,
+    prod?.key ?? null,
+    prod?.name ?? null,
+    // an item's membership event links to the item, not the project
+    event.subjectType === "issue" ? undefined : proj,
   );
+  const productRef = prod ? { key: prod.key, name: prod.name } : null;
   return {
     type: `trail.${event.action}`,
     occurredAt: event.createdAt.toISOString(),
     data: {
       eventId: event.id,
       seq: event.seq,
-      project: proj ? { key: proj.key, name: proj.name } : null,
+      product: productRef,
+      // deprecated alias of product, kept for one release
+      project: productRef,
+      projectSlug: proj?.slug ?? null,
       subject,
       actor: by ? { name: by.name, kind: by.kind } : null,
       ...(publicUrl !== undefined && {

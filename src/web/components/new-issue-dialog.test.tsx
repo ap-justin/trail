@@ -5,16 +5,16 @@ import {
   NewIssueDialog,
   type NewIssueDialogProps,
 } from "@/components/new-issue-dialog";
-import { allProjects } from "@/test/fixtures";
+import { allProducts } from "@/test/fixtures";
 
 function renderDialog(overrides: Partial<NewIssueDialogProps> = {}) {
   const props: NewIssueDialogProps = {
     open: true,
     onOpenChange: vi.fn(),
-    projects: allProjects,
-    defaultProjectKey: "DOC",
+    products: allProducts,
+    defaultProductKey: "DOC",
     viewer: { name: "Maya Chen", isOwner: false },
-    ownerName: "Justin Salas",
+    ownerName: "Jordan Smith",
     onSubmit: vi.fn(),
     pending: false,
     error: null,
@@ -27,7 +27,7 @@ function renderDialog(overrides: Partial<NewIssueDialogProps> = {}) {
 const dialog = () => screen.getByRole("dialog", { name: "New issue" });
 
 describe("new issue dialog", () => {
-  test("an empty title submit says Add a title., keeps focus on Title and sends nothing", async () => {
+  test("an empty title submit says Required, keeps focus on Title and sends nothing", async () => {
     const user = userEvent.setup();
     const props = renderDialog();
     await user.type(within(dialog()).getByLabelText("Title"), "   ");
@@ -35,7 +35,7 @@ describe("new issue dialog", () => {
       within(dialog()).getByRole("button", { name: "Create issue" }),
     );
     const title = within(dialog()).getByLabelText("Title");
-    expect(within(dialog()).getByText("Add a title.")).toBeInTheDocument();
+    expect(within(dialog()).getByText("Required")).toBeInTheDocument();
     expect(title).toHaveFocus();
     expect(title).toHaveAttribute("aria-invalid", "true");
     expect(props.onSubmit).not.toHaveBeenCalled();
@@ -48,15 +48,13 @@ describe("new issue dialog", () => {
       within(dialog()).getByRole("button", { name: "Create issue" }),
     );
     await user.type(within(dialog()).getByLabelText("Title"), "S");
-    expect(
-      within(dialog()).queryByText("Add a title."),
-    ).not.toBeInTheDocument();
+    expect(within(dialog()).queryByText("Required")).not.toBeInTheDocument();
   });
 
-  test("the project defaults to the current one and the issue goes out trimmed", async () => {
+  test("the product defaults to the current one and the issue goes out trimmed", async () => {
     const user = userEvent.setup();
     const props = renderDialog();
-    expect(within(dialog()).getByLabelText("Project")).toHaveTextContent(
+    expect(within(dialog()).getByLabelText("Product")).toHaveTextContent(
       "DOC Docs site",
     );
     await user.type(
@@ -65,21 +63,21 @@ describe("new issue dialog", () => {
     );
     await user.type(
       within(dialog()).getByLabelText(/^Description/),
-      "Vera picks a direction.",
+      "The owner picks a direction.",
     );
     await user.click(
       within(dialog()).getByRole("button", { name: "Create issue" }),
     );
     expect(props.onSubmit).toHaveBeenCalledWith({
-      projectKey: "DOC",
+      product: "DOC",
       title: "Fix the logo",
-      description: "Vera picks a direction.",
+      description: "The owner picks a direction.",
     });
   });
 
-  test("without a current project the first visible one is picked", () => {
-    renderDialog({ defaultProjectKey: null });
-    expect(within(dialog()).getByLabelText("Project")).toHaveTextContent(
+  test("without a current product the first visible one is picked", () => {
+    renderDialog({ defaultProductKey: null });
+    expect(within(dialog()).getByLabelText("Product")).toHaveTextContent(
       "TRL trail",
     );
   });
@@ -130,7 +128,7 @@ describe("new issue dialog", () => {
     );
     expect(title).toHaveFocus();
     expect(title).toHaveAttribute("aria-invalid", "true");
-    expect(title).toHaveAccessibleDescription("Keep it to 300 characters.");
+    expect(title).toHaveAccessibleDescription("300 characters at most");
     expect(props.onSubmit).not.toHaveBeenCalled();
   });
 
@@ -157,14 +155,14 @@ describe("new issue dialog", () => {
     expect(props.onSubmit).not.toHaveBeenCalled();
   });
 
-  test("with no projects, it asks for access in place of the form", () => {
-    renderDialog({ projects: [], defaultProjectKey: null });
+  test("with no products, it asks for access in place of the form", () => {
+    renderDialog({ products: [], defaultProductKey: null });
     expect(
-      within(dialog()).getByRole("heading", { name: "No projects yet" }),
+      within(dialog()).getByRole("heading", { name: "No products yet" }),
     ).toBeInTheDocument();
     expect(
       within(dialog()).getByText(
-        "Ask Justin Salas to give you access to a project.",
+        "Ask Jordan Smith to give you access to a product.",
       ),
     ).toBeInTheDocument();
     expect(within(dialog()).queryByLabelText("Title")).not.toBeInTheDocument();
@@ -174,5 +172,34 @@ describe("new issue dialog", () => {
     expect(
       within(dialog()).getByRole("button", { name: "Close" }),
     ).toBeInTheDocument();
+  });
+});
+
+describe("product field", () => {
+  test("is the one choice: a required Product, no type or project control", () => {
+    renderDialog();
+    const product = within(dialog()).getByRole("combobox", { name: "Product" });
+    expect(within(dialog()).getAllByRole("combobox")).toEqual([product]);
+    expect(within(dialog()).queryByText("Project")).not.toBeInTheDocument();
+  });
+
+  test("another product picked from the menu files there, by key", async () => {
+    const user = userEvent.setup();
+    const props = renderDialog();
+    await user.click(
+      within(dialog()).getByRole("combobox", { name: "Product" }),
+    );
+    await user.click(
+      await screen.findByRole("option", { name: "OPB OpenBot" }),
+    );
+    await user.type(within(dialog()).getByLabelText("Title"), "Retry webhooks");
+    await user.click(
+      within(dialog()).getByRole("button", { name: "Create issue" }),
+    );
+    expect(props.onSubmit).toHaveBeenCalledWith({
+      product: "OPB",
+      title: "Retry webhooks",
+      description: "",
+    });
   });
 });

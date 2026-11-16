@@ -39,7 +39,7 @@ const rows = (db: Db, sql: string) => db.$client.prepare(sql).all();
 
 const live = `
   insert into actor (id, kind, display_name, created_at) values
-    ('b1', 'bot', 'Tara', 0), ('b2', 'bot', 'fly-smoke', 0);
+    ('b1', 'bot', 'Builder', 0), ('b2', 'bot', 'fly-smoke', 0);
   insert into project (id, key, name, created_by, created_at, updated_at, issue_seq) values ('p', 'TRL', 'trail', 'b1', 0, 0, 2);
   insert into issue (id, project_id, number, title, created_by, created_at, updated_at) values
     ('i1', 'p', 1, 'first', 'b1', 1, 1), ('i2', 'p', 2, 'second', 'b1', 2, 2);
@@ -60,16 +60,16 @@ test("a live database keeps its issues with no source key, and bot names become 
         "insert into actor (id, kind, display_name, created_at) values (?, ?, ?, 0)",
       )
       .run(id, kind, name);
-  expect(() => insertBot("b3", "bot", "tara")).toThrow(
+  expect(() => insertBot("b3", "bot", "builder")).toThrow(
     expect.objectContaining({ code: "SQLITE_CONSTRAINT_UNIQUE" }),
   );
-  expect(() => insertBot("h1", "human", "tara")).not.toThrow();
+  expect(() => insertBot("h1", "human", "builder")).not.toThrow();
   const setKey = (id: string, key: string | null) =>
     db.$client
       .prepare("update issue set source_key = ? where id = ?")
       .run(key, id);
-  setKey("i1", "JUS-5");
-  expect(() => setKey("i2", "JUS-5")).toThrow(
+  setKey("i1", "ABC-5");
+  expect(() => setKey("i2", "ABC-5")).toThrow(
     expect.objectContaining({ code: "SQLITE_CONSTRAINT_UNIQUE" }),
   );
   expect(() => setKey("i2", null)).not.toThrow();
@@ -78,7 +78,7 @@ test("a live database keeps its issues with no source key, and bot names become 
 
 test("two bots whose names differ only by case fail the migration naming both, leaving the file as it was", () => {
   const db = liveDb(`${live}
-    insert into actor (id, kind, display_name, created_at) values ('b3', 'bot', 'tara', 0);
+    insert into actor (id, kind, display_name, created_at) values ('b3', 'bot', 'builder', 0);
   `);
 
   let message = "";
@@ -87,8 +87,8 @@ test("two bots whose names differ only by case fail the migration naming both, l
   } catch (e) {
     message = (e as Error).message;
   }
-  expect(message).toContain("b1 (Tara)");
-  expect(message).toContain("b3 (tara)");
+  expect(message).toContain("b1 (Builder)");
+  expect(message).toContain("b3 (builder)");
   expect(message).not.toContain("fly-smoke");
   expect(message).toMatch(/rename/i);
 
@@ -98,9 +98,9 @@ test("two bots whose names differ only by case fail the migration naming both, l
     { n: 4 },
   ]);
   expect(rows(db, "select display_name from actor order by id")).toEqual([
-    { display_name: "Tara" },
+    { display_name: "Builder" },
     { display_name: "fly-smoke" },
-    { display_name: "tara" },
+    { display_name: "builder" },
   ]);
   db.$client.close();
 });

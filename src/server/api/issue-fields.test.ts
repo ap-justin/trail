@@ -65,7 +65,7 @@ test("an unknown issue key is a 404 that says what to pass", async () => {
     const { status, body } = await send("GET", `/issues/${ref}`);
     expect(status).toBe(404);
     expect(body.error.message).toBe(
-      `no issue ${ref}: pass the id, the key (like TRL-12) or the source key (like JUS-187, kept from an import) of an existing issue`,
+      `no item ${ref}: pass the key (like TRL-12), the id or the source key (the key it had in the system it was imported from, like ABC-187) of an item this key reaches; list_items (GET /api/v1/items) finds them`,
     );
   }
 });
@@ -111,7 +111,7 @@ test("a project key in use is a 409 naming the holder", async () => {
   expect(status).toBe(409);
   expect(body.error).toEqual({
     code: "conflict",
-    message: `project key TRL is taken by project ${trl.id} ("trail"): choose another key`,
+    message: `product key TRL is taken by product "trail": choose another key`,
   });
 });
 
@@ -123,22 +123,26 @@ test("POST /issues sets estimate, priority, labels, links and externalRef", asyn
     priority: 2,
     labels: ["bug", "Backend", "BUG"],
     links: [
-      { url: "https://github.com/ap-justin/trail/pull/3", title: "PR #3" },
+      { url: "https://github.com/ap-pat/trail/pull/3", title: "PR #3" },
       { url: "https://example.com/spec" },
     ],
-    externalRef: "JUS-188",
+    externalRef: "ABC-188",
   });
   expect(issue).toMatchObject({
     estimate: 2.5,
     priority: 2,
     labels: ["Backend", "bug"],
     links: [
-      { url: "https://github.com/ap-justin/trail/pull/3", title: "PR #3" },
+      { url: "https://github.com/ap-pat/trail/pull/3", title: "PR #3" },
       { url: "https://example.com/spec", title: "https://example.com/spec" },
     ],
-    externalRef: "JUS-188",
+    externalRef: "ABC-188",
   });
-  expect((await send("GET", `/issues/${issue.key}`)).body).toEqual(issue);
+  const { deprecated: _created, ...fields } = issue;
+  expect((await send("GET", `/issues/${issue.key}`)).body).toEqual({
+    ...fields,
+    deprecated: expect.stringMatching(/use get_item/),
+  });
   expect(published.at(-1)).toMatchObject({
     action: "issue.created",
     payload: {
@@ -146,7 +150,7 @@ test("POST /issues sets estimate, priority, labels, links and externalRef", asyn
       estimate: 2.5,
       priority: 2,
       labels: ["Backend", "bug"],
-      externalRef: "JUS-188",
+      externalRef: "ABC-188",
     },
   });
 });
@@ -284,37 +288,37 @@ test("an externalRef already used in its scope is a 409 saying which row has it"
   const project = await created("/projects", {
     key: projectKey(),
     name: "refs",
-    externalRef: "P-JUS-9",
+    externalRef: "P-ABC-9",
   });
   const dupProject = await send("POST", "/projects", {
     key: projectKey(),
     name: "refs again",
-    externalRef: "P-JUS-9",
+    externalRef: "P-ABC-9",
   });
   expect(dupProject.status).toBe(409);
   expect(dupProject.body.error.message).toBe(
-    `externalRef P-JUS-9 is already on project ${project.key} (${project.id}): use that project, or send a different externalRef`,
+    `externalRef P-ABC-9 is already on product ${project.key}: use that product, or send a different externalRef`,
   );
 
   const issue = await created("/issues", {
     projectId: project.id,
     title: "linear issue",
-    externalRef: "JUS-1",
+    externalRef: "ABC-1",
   });
   const dupIssue = await send("POST", "/issues", {
     projectId: project.id,
     title: "again",
-    externalRef: "JUS-1",
+    externalRef: "ABC-1",
   });
   expect(dupIssue.status).toBe(409);
   expect(dupIssue.body.error.message).toBe(
-    `externalRef JUS-1 is already on issue ${issue.key} (${issue.id}): update that issue, or send a different externalRef`,
+    `externalRef ABC-1 is already on item ${issue.key}: update that item with update_item, or send a different externalRef`,
   );
   // unique within the project only
   await created("/issues", {
     projectId: trl.id,
     title: "same ref elsewhere",
-    externalRef: "JUS-1",
+    externalRef: "ABC-1",
   });
 
   const comment = await created(`/issues/${issue.id}/comments`, {
@@ -328,16 +332,16 @@ test("an externalRef already used in its scope is a 409 saying which row has it"
   });
   expect(dupComment.status).toBe(409);
   expect(dupComment.body.error.message).toMatch(
-    /^externalRef c-1 is already on comment \S+ of this issue/,
+    /^externalRef c-1 is already on comment \S+ of this item/,
   );
 });
 
-test("POST /projects/:id/labels creates a label; a name taken in any case is a 409", async () => {
+test("POST /products/:key/labels creates a label; a name taken in any case is a 409", async () => {
   const project = await created("/projects", {
     key: projectKey(),
     name: "explicit labels",
   });
-  const label = await created(`/projects/${project.key}/labels`, {
+  const label = await created(`/products/${project.key}/labels`, {
     name: "Feature",
   });
   expect(label).toEqual({
@@ -350,22 +354,22 @@ test("POST /projects/:id/labels creates a label; a name taken in any case is a 4
     action: "label.created",
     subjectType: "label",
     subjectId: label.id,
-    projectId: project.id,
+    productId: project.id,
   });
-  const dup = await send("POST", `/projects/${project.id}/labels`, {
+  const dup = await send("POST", `/products/${project.id}/labels`, {
     name: "feature",
   });
   expect(dup.status).toBe(409);
   expect(dup.body.error.message).toBe(
-    `project ${project.key} already has the label "Feature": use it as it is, since label names match ignoring the case of A-Z`,
+    `product ${project.key} already has the label "Feature": use it as it is, since label names match ignoring the case of A-Z`,
   );
-  const list = await send("GET", `/projects/${project.id}/labels`);
+  const list = await send("GET", `/products/${project.id}/labels`);
   expect(list.body).toEqual({ items: [label], nextCursor: null });
 });
 
-test("labels routes on an unknown project are 404s", async () => {
-  expect((await send("GET", "/projects/NOPE/labels")).status).toBe(404);
+test("labels routes on an unknown product are 404s", async () => {
+  expect((await send("GET", "/products/NOPE/labels")).status).toBe(404);
   expect(
-    (await send("POST", "/projects/NOPE/labels", { name: "x" })).status,
+    (await send("POST", "/products/NOPE/labels", { name: "x" })).status,
   ).toBe(404);
 });

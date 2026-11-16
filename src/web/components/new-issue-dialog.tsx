@@ -8,7 +8,7 @@ import {
   useState,
 } from "react";
 import { ActorBadge } from "@/components/actor";
-import { ProjectsEmpty } from "@/components/states";
+import { ProductsEmpty } from "@/components/states";
 import { KeyText } from "@/components/text";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,10 +27,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import type { WebProjectRefView } from "@/lib/api-types";
+import type { WebProductRefView } from "@/lib/api-types";
 
+/** What people file: always an issue, never a todo. */
 export type NewIssue = {
-  projectKey: string;
+  /** The product's key. */
+  product: string;
   title: string;
   description: string;
 };
@@ -38,13 +40,13 @@ export type NewIssue = {
 export type NewIssueDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** The projects the viewer can file in. */
-  projects: WebProjectRefView[];
-  /** The current project's key; the first project when null or not among `projects`. */
-  defaultProjectKey: string | null;
+  /** The products the viewer can file in. */
+  products: WebProductRefView[];
+  /** The current product's key; the first product when null or not among `products`. */
+  defaultProductKey: string | null;
   /** Who the issue will be credited to. */
   viewer: { name: string; isOwner: boolean };
-  /** Who to ask for access when `projects` is empty. */
+  /** Who to ask for access when `products` is empty. */
   ownerName: string;
   /** Title and description arrive trimmed; the caller navigates to the new issue. */
   onSubmit: (issue: NewIssue) => void;
@@ -53,29 +55,29 @@ export type NewIssueDialogProps = {
   error: ReactNode;
 };
 
-type Errors = { project?: string; title?: string };
+type Errors = { product?: string; title?: string };
 
 /** `webIssueCreateSchema.title` in src/shared/schemas.ts, which src/web can only import as a type. */
 const TITLE_MAX = 300;
 
 function titleError(title: string) {
   const trimmed = title.trim();
-  if (!trimmed) return "Add a title.";
-  if (trimmed.length > TITLE_MAX) return `Keep it to ${TITLE_MAX} characters.`;
+  if (!trimmed) return "Required";
+  if (trimmed.length > TITLE_MAX) return `${TITLE_MAX} characters at most`;
   return undefined;
 }
 
-function validate(projectKey: string | null, title: string): Errors {
+function validate(productKey: string | null, title: string): Errors {
   const titleMessage = titleError(title);
   return {
-    ...(projectKey ? {} : { project: "Pick a project." }),
+    ...(productKey ? {} : { product: "Required" }),
     ...(titleMessage ? { title: titleMessage } : {}),
   };
 }
 
 function NewIssueForm({
-  projects,
-  defaultProjectKey,
+  products,
+  defaultProductKey,
   viewer,
   onSubmit,
   pending,
@@ -84,19 +86,19 @@ function NewIssueForm({
 }: Omit<NewIssueDialogProps, "open" | "onOpenChange" | "ownerName"> & {
   titleRef: RefObject<HTMLInputElement | null>;
 }) {
-  const [projectKey, setProjectKey] = useState<string | null>(
+  const [productKey, setProductKey] = useState<string | null>(
     () =>
-      projects.find((p) => p.key === defaultProjectKey)?.key ??
-      projects[0]?.key ??
+      products.find((p) => p.key === defaultProductKey)?.key ??
+      products[0]?.key ??
       null,
   );
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   // null until the first submit; from then on each edit re-checks
   const [errors, setErrors] = useState<Errors | null>(null);
-  const projectTriggerRef = useRef<HTMLButtonElement>(null);
+  const productTriggerRef = useRef<HTMLButtonElement>(null);
   const ids = {
-    project: useId(),
+    product: useId(),
     title: useId(),
     description: useId(),
     status: useId(),
@@ -105,22 +107,22 @@ function NewIssueForm({
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (pending) return;
-    const found = validate(projectKey, title);
+    const found = validate(productKey, title);
     setErrors(found);
-    if (found.project || !projectKey) {
-      projectTriggerRef.current?.focus();
+    if (found.product || !productKey) {
+      productTriggerRef.current?.focus();
     } else if (found.title) {
       titleRef.current?.focus();
     } else {
       onSubmit({
-        projectKey,
+        product: productKey,
         title: title.trim(),
         description: description.trim(),
       });
     }
   };
 
-  const items = projects.map((p) => ({ value: p.key, label: p.name }));
+  const items = products.map((p) => ({ value: p.key, label: p.name }));
 
   return (
     <form
@@ -130,56 +132,56 @@ function NewIssueForm({
     >
       <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-1.5">
-          <label htmlFor={ids.project} className="w-fit font-medium">
-            Project
+          <label htmlFor={ids.product} className="w-fit font-medium">
+            Product
           </label>
           <Select
             items={items}
-            value={projectKey}
+            value={productKey}
             onValueChange={(value: string | null) => {
-              setProjectKey(value);
+              setProductKey(value);
               if (errors) setErrors(validate(value, title));
             }}
           >
             <SelectTrigger
-              id={ids.project}
-              ref={projectTriggerRef}
-              aria-invalid={errors?.project ? true : undefined}
+              id={ids.product}
+              ref={productTriggerRef}
+              aria-invalid={errors?.product ? true : undefined}
               aria-describedby={
-                errors?.project ? `${ids.project}-error` : undefined
+                errors?.product ? `${ids.product}-error` : undefined
               }
               className="w-full data-[size=default]:h-9 max-lg:data-[size=default]:h-10"
             >
-              <SelectValue placeholder="Pick a project">
+              <SelectValue placeholder="Pick a product">
                 {(key: string | null) => {
-                  const project = projects.find((p) => p.key === key);
-                  return project ? (
+                  const product = products.find((p) => p.key === key);
+                  return product ? (
                     <>
                       <KeyText className="text-foreground">
-                        {project.key}
+                        {product.key}
                       </KeyText>{" "}
-                      {project.name}
+                      {product.name}
                     </>
                   ) : (
-                    "Pick a project"
+                    "Pick a product"
                   );
                 }}
               </SelectValue>
             </SelectTrigger>
             <SelectContent alignItemWithTrigger={false} align="start">
               <SelectGroup>
-                {projects.map((project) => (
-                  <SelectItem key={project.key} value={project.key}>
-                    <KeyText className="text-foreground">{project.key}</KeyText>{" "}
-                    {project.name}
+                {products.map((product) => (
+                  <SelectItem key={product.key} value={product.key}>
+                    <KeyText className="text-foreground">{product.key}</KeyText>{" "}
+                    {product.name}
                   </SelectItem>
                 ))}
               </SelectGroup>
             </SelectContent>
           </Select>
-          {errors?.project && (
-            <p id={`${ids.project}-error`} className="text-xs text-destructive">
-              {errors.project}
+          {errors?.product && (
+            <p id={`${ids.product}-error`} className="text-xs text-destructive">
+              {errors.product}
             </p>
           )}
         </div>
@@ -194,7 +196,7 @@ function NewIssueForm({
             onChange={(event) => {
               const next = event.currentTarget.value;
               setTitle(next);
-              if (errors) setErrors(validate(projectKey, next));
+              if (errors) setErrors(validate(productKey, next));
             }}
             aria-invalid={errors?.title ? true : undefined}
             aria-describedby={errors?.title ? `${ids.title}-error` : undefined}
@@ -257,7 +259,7 @@ function NewIssueForm({
 
 /**
  * Filing an issue: a centred dialog at 1024px and up, a full-screen sheet below. Title
- * and project are required; an empty title, or one over 300 characters once trimmed, is
+ * and product are required; an empty title, or one over 300 characters once trimmed, is
  * caught on submit, focus moves to it, and `onSubmit` is not called. A click outside does
  * not close it, so a draft is never lost to a stray click.
  */
@@ -296,9 +298,9 @@ export function NewIssueDialog({
             <XIcon aria-hidden="true" />
           </DialogClose>
         </div>
-        {form.projects.length === 0 ? (
-          // nowhere to file yet: the Projects page's empty state, not a form that can't submit
-          <ProjectsEmpty ownerName={ownerName} isOwner={form.viewer.isOwner} />
+        {form.products.length === 0 ? (
+          // nowhere to file yet: the Products page's empty state, not a form that can't submit
+          <ProductsEmpty ownerName={ownerName} isOwner={form.viewer.isOwner} />
         ) : (
           // the popup unmounts on close, so each opening starts from a fresh form
           <NewIssueForm {...form} titleRef={titleRef} />

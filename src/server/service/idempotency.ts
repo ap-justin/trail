@@ -11,6 +11,8 @@ export type IdempotentRequest = {
   scope: string;
   // the normalised input, with every reference resolved to an id
   request: unknown;
+  // the same input as this create normalised it before migration 0015, so a key stored then still replays
+  legacyRequest?: unknown;
 };
 
 const maxKeyLength = 255;
@@ -69,9 +71,14 @@ export function replayOf<T>(
     )
     .get();
   if (!stored) return undefined;
+  const matches = (request: unknown) =>
+    stored.requestHash === hashOf(idem.scope, request);
   if (
     stored.scope !== idem.scope ||
-    stored.requestHash !== hashOf(idem.scope, idem.request)
+    !(
+      matches(idem.request) ||
+      (idem.legacyRequest !== undefined && matches(idem.legacyRequest))
+    )
   ) {
     throw new IdempotencyKeyReusedError(
       `idempotency key "${idem.key}" was already used for a different ${stored.scope === idem.scope ? "request body or target" : `operation (${stored.scope})`}: send a new key for a new create, or resend the first request unchanged to get its result`,

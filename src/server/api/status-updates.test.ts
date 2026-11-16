@@ -8,25 +8,27 @@ type Body = Record<string, any>;
 
 let project: Body;
 beforeAll(async () => {
-  const res = await request("POST", "/api/v1/projects", {
+  const res = await request("POST", "/api/v1/products", {
     json: { key: "SUP", name: "status" },
   });
   project = (await res.json()) as Body;
 });
 
 const post = (json: unknown, key?: string) =>
-  request("POST", `/api/v1/projects/${project.key}/status-updates`, {
+  request("POST", `/api/v1/products/${project.key}/status-updates`, {
     json,
     key,
   });
 
-test("POST /projects/:id/status-updates posts as the calling bot with one event", async () => {
+test("POST /products/:key/status-updates posts as the calling bot with one event", async () => {
   const before = published.length;
   const res = await post({ body: "on schedule", health: "on_track" });
   expect(res.status).toBe(201);
   const update = (await res.json()) as Body;
   expect(update).toEqual({
     id: expect.any(String),
+    product: "SUP",
+    project: null,
     projectId: project.id,
     authorId: bot.actor.id,
     body: "on schedule",
@@ -40,14 +42,14 @@ test("POST /projects/:id/status-updates posts as the calling bot with one event"
       action: "status_update.created",
       subjectType: "status_update",
       subjectId: update.id,
-      projectId: project.id,
+      productId: project.id,
       actorId: bot.actor.id,
       payload: { body: "on schedule", health: "on_track", externalRef: null },
     }),
   ]);
 });
 
-test("GET /projects/:id/status-updates lists newest first, paged", async () => {
+test("GET /products/:key/status-updates lists newest first, paged", async () => {
   const other = addBot("status other");
   await atFakeTimeAsync([
     () => post({ body: "slipping", health: "at_risk" }),
@@ -56,7 +58,7 @@ test("GET /projects/:id/status-updates lists newest first, paged", async () => {
   ]);
   const first = await request(
     "GET",
-    `/api/v1/projects/${project.id}/status-updates?limit=2`,
+    `/api/v1/products/${project.id}/status-updates?limit=2`,
   );
   expect(first.status).toBe(200);
   const page = (await first.json()) as Body;
@@ -67,7 +69,7 @@ test("GET /projects/:id/status-updates lists newest first, paged", async () => {
   const rest = (await (
     await request(
       "GET",
-      `/api/v1/projects/${project.id}/status-updates?limit=2&cursor=${page.nextCursor}`,
+      `/api/v1/products/${project.id}/status-updates?limit=2&cursor=${page.nextCursor}`,
     )
   ).json()) as Body;
   expect(rest.items.map((u: Body) => [u.body, u.authorId])).toEqual([
@@ -91,7 +93,7 @@ test.each([
   expect(((await res.json()) as Body).error.message).toMatch(message);
 });
 
-test("an externalRef used on another of the project's updates is a 409", async () => {
+test("an externalRef used on another of the product's updates is a 409", async () => {
   await post({ body: "a", health: "on_track", externalRef: "u-dup" });
   const res = await post({
     body: "b",
@@ -100,12 +102,12 @@ test("an externalRef used on another of the project's updates is a 409", async (
   });
   expect(res.status).toBe(409);
   expect(((await res.json()) as Body).error.message).toMatch(
-    /^externalRef u-dup is already on status update \S+ of project SUP/,
+    /^externalRef u-dup is already on status update \S+ of product SUP/,
   );
 });
 
-test("status updates of an unknown project are 404s", async () => {
-  const path = "/api/v1/projects/NOPE/status-updates";
+test("status updates of an unknown product are 404s", async () => {
+  const path = "/api/v1/products/NOPE/status-updates";
   expect((await request("GET", path)).status).toBe(404);
   const res = await request("POST", path, {
     json: { body: "x", health: "on_track" },

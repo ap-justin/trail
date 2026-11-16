@@ -3,20 +3,22 @@ import { describe, expect, test } from "vitest";
 import { SearchResults } from "@/components/search-results";
 
 const results = {
-  projects: [{ key: "TRL", name: "trail" }],
-  issues: [
+  products: [{ key: "TRL", name: "trail" }],
+  projects: [{ slug: "human-ui", name: "Human UI launch" }],
+  items: [
     {
       key: "TRL-14",
-      sourceKey: "JUS-187",
+      sourceKey: "OLD-187",
       title: "Team access: invite people",
+      type: "issue" as const,
       status: "in_progress" as const,
-      project: { key: "TRL", name: "trail" },
+      product: { key: "TRL", name: "trail" },
     },
   ],
 };
 
 describe("SearchResults", () => {
-  test("projects and issues as links, each with its key and title", () => {
+  test("products, projects and items as links: products by key and name, projects by name", () => {
     render(
       <SearchResults
         query="team"
@@ -25,14 +27,18 @@ describe("SearchResults", () => {
         status="ready"
       />,
     );
-    const [project, issue] = within(
+    const [product, project, issue] = within(
       screen.getByRole("list", { name: "Search results" }),
     ).getAllByRole("link");
-    expect(project).toHaveAttribute("href", "/projects/TRL");
-    expect(project).toHaveAccessibleName("TRL trail");
-    expect(issue).toHaveAttribute("href", "/issues/TRL-14");
+    expect(product).toHaveAttribute("href", "/products/TRL");
+    expect(product).toHaveAccessibleName("TRL trail");
+    expect(product?.querySelector("svg")).toHaveClass("lucide-package");
+    expect(project).toHaveAttribute("href", "/projects/human-ui");
+    expect(project).toHaveAccessibleName("Human UI launch");
+    expect(project?.querySelector("svg")).toHaveClass("lucide-folder");
+    expect(issue).toHaveAttribute("href", "/products/TRL/14");
     expect(issue).toHaveAccessibleName(
-      "TRL-14 Team access: invite people JUS-187",
+      "TRL-14 Team access: invite people OLD-187",
     );
   });
 
@@ -41,7 +47,7 @@ describe("SearchResults", () => {
       <SearchResults
         query="team"
         answeredQuery="team"
-        results={{ projects: [], issues: [] }}
+        results={{ products: [], projects: [], items: [] }}
         status="ready"
       />,
     );
@@ -114,12 +120,12 @@ describe("SearchResults", () => {
 
     rerender(<SearchResults {...props} results={results} status="ready" />);
     expect(screen.getByRole("status")).toBe(region);
-    expect(region).toHaveTextContent("2 results");
+    expect(region).toHaveTextContent("3 results");
 
     rerender(
       <SearchResults
         {...props}
-        results={{ projects: [], issues: [] }}
+        results={{ products: [], projects: [], items: [] }}
         status="ready"
       />,
     );
@@ -134,7 +140,7 @@ describe("SearchResults", () => {
       <SearchResults
         query="team"
         answeredQuery="team"
-        results={{ projects: [], issues: results.issues }}
+        results={{ products: [], projects: [], items: results.items }}
         status="ready"
       />,
     );

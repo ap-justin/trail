@@ -41,7 +41,7 @@ const rows = (db: Db, sql: string) => db.$client.prepare(sql).all();
 
 const actors = `
   insert into actor (id, kind, display_name, created_at) values ('b', 'bot', 'builder', 0);
-  insert into actor (id, kind, display_name, github_id, created_at) values ('h', 'human', 'Justin', 1, 0);
+  insert into actor (id, kind, display_name, github_id, created_at) values ('h', 'human', 'Maya Chen', 1, 0);
 `;
 
 test("existing projects get unique keys and their issues numbers from 1 in creation order", () => {
@@ -59,14 +59,14 @@ test("existing projects get unique keys and their issues numbers from 1 in creat
   migrate(db);
 
   expect(
-    rows(db, "select id, key, issue_seq from project order by created_at"),
+    rows(db, "select id, key, issue_seq from product order by created_at"),
   ).toEqual([
     { id: "p1", key: "P1", issue_seq: 4 },
     { id: "p2", key: "P2", issue_seq: 1 },
     { id: "p3", key: "P3", issue_seq: 0 },
   ]);
   expect(
-    rows(db, "select id, number from issue order by project_id, number"),
+    rows(db, "select id, number from issue order by product_id, number"),
   ).toEqual([
     { id: "i-z", number: 1 },
     { id: "i-a", number: 2 },
@@ -121,7 +121,7 @@ test("bots sharing a name keep it for the earliest, the later ones take their id
     { id: "h2", kind: "human", display_name: "builder" },
     { id: "r", kind: "bot", display_name: "reviewer" },
   ]);
-  expect(rows(db, "select created_by from project")).toEqual([
+  expect(rows(db, "select created_by from product")).toEqual([
     { created_by: "b2" },
   ]);
   expect(rows(db, "select actor_id from api_key")).toEqual([

@@ -1,0 +1,554 @@
+import { SearchIcon } from "lucide-react";
+import { Fragment, type ReactNode, useId } from "react";
+import { ActorAvatar, ActorBadge } from "@/components/actor";
+import { AppLink, RowLink } from "@/components/app-link";
+import { EmptyState } from "@/components/states";
+import {
+  type IssueStatus,
+  type ItemType,
+  PriorityLabel,
+  StatusIcon,
+  StatusLabel,
+  statusLabel,
+  TypeBadge,
+} from "@/components/status";
+import { Age } from "@/components/status-updates";
+import { KeyText, LabelChip } from "@/components/text";
+import { Button } from "@/components/ui/button";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import type {
+  WebItemCountsView,
+  WebItemRowView,
+  WebProductRefView,
+} from "@/lib/api-types";
+import { paths } from "@/lib/paths";
+import { cn } from "@/lib/utils";
+
+/** A status tab: triage has none of its own, Open covers it. */
+export type StatusFilter = Exclude<IssueStatus, "triage">;
+
+/** The type toggle and the status tab; null is All. The URL is the route's. */
+export type ItemFilters = {
+  type: ItemType | null;
+  status: StatusFilter | null;
+};
+
+export const NO_FILTERS: ItemFilters = { type: null, status: null };
+
+const filterStatuses: StatusFilter[] = [
+  "open",
+  "in_progress",
+  "done",
+  "canceled",
+];
+// the 375 chips leave Canceled out, unless it is the filter in force
+const chipStatuses: StatusFilter[] = ["open", "in_progress", "done"];
+const ALL = "all";
+
+/** A tab value back to its filter: All and anything unknown are null. */
+export function statusFilterOf(value: string): StatusFilter | null {
+  return filterStatuses.find((status) => status === value) ?? null;
+}
+
+/**
+ * Whether a row belongs under the filters. The route fetches with them; this keeps rows
+ * from a list still answering an earlier filter off the screen.
+ */
+export function matchesFilters(item: WebItemRowView, filters: ItemFilters) {
+  if (filters.type && item.type !== filters.type) return false;
+  if (!filters.status) return true;
+  if (filters.status === "open")
+    return item.status === "open" || item.status === "triage";
+  return item.status === filters.status;
+}
+
+const typeOptions = [
+  { value: ALL, label: "All", count: "all" },
+  { value: "issue", label: "Issues", count: "issue" },
+  { value: "todo", label: "Todos", count: "todo" },
+] as const;
+
+/**
+ * All, Issues or Todos, each with its count. 28px beside the status tabs at 1024px and up;
+ * 40px and as wide as it's let below. `countsBelowLg={false}` drops the counts there,
+ * where the toggle shares its row with the product select.
+ */
+export function TypeToggle({
+  value,
+  counts,
+  onChange,
+  countsBelowLg = true,
+  className,
+}: {
+  value: ItemType | null;
+  /** Null while the list loads: the words show alone. */
+  counts: WebItemCountsView | null;
+  onChange: (type: ItemType | null) => void;
+  countsBelowLg?: boolean;
+  className?: string;
+}) {
+  return (
+    <ToggleGroup
+      aria-label="Filter by type"
+      value={[value ?? ALL]}
+      onValueChange={(next) => {
+        // pressing the current item again empties the group; keep the filter instead
+        const picked = next[0];
+        if (picked === undefined) return;
+        const type = picked === "issue" || picked === "todo" ? picked : null;
+        if (type !== value) onChange(type);
+      }}
+      spacing={0}
+      className={cn(
+        "h-7 overflow-hidden rounded-md border max-lg:h-10 max-lg:w-full",
+        className,
+      )}
+    >
+      {typeOptions.map((option) => (
+        <ToggleGroupItem
+          key={option.value}
+          value={option.value}
+          className="h-full gap-1.25 rounded-none border-l px-2.5 text-xs font-normal text-muted-foreground first:border-l-0 aria-pressed:bg-muted aria-pressed:font-medium aria-pressed:text-foreground max-lg:flex-1 max-lg:text-sm"
+        >
+          {option.label}
+          {counts && (
+            <>
+              {" "}
+              <span
+                className={cn("text-2xs", !countsBelowLg && "max-lg:hidden")}
+              >
+                {counts[option.count].all}
+              </span>
+            </>
+          )}
+        </ToggleGroupItem>
+      ))}
+    </ToggleGroup>
+  );
+}
+
+type StatusCounts = WebItemCountsView["all"];
+
+/** All, then each status, with its count once the list has loaded. */
+function statusOptions(statuses: StatusFilter[], counts: StatusCounts | null) {
+  return [
+    { value: ALL, label: "All", count: counts?.all },
+    ...statuses.map((status) => ({
+      value: status,
+      label: statusLabel(status),
+      count: counts?.[status],
+    })),
+  ];
+}
+
+/** The 1024px status tabs; render inside the `Tabs` whose value is the status filter. */
+function StatusTabs({ counts }: { counts: StatusCounts | null }) {
+  return (
+    <TabsList
+      variant="line"
+      aria-label="Filter by status"
+      className="h-8 justify-start gap-3 rounded-none p-0 max-lg:hidden"
+    >
+      {statusOptions(filterStatuses, counts).map((option) => (
+        <TabsTrigger
+          key={option.value}
+          value={option.value}
+          className="h-8 flex-none px-1 font-normal text-muted-foreground data-active:text-foreground"
+        >
+          {option.label}{" "}
+          {option.count !== undefined && (
+            <span className="text-2xs text-muted-foreground">
+              {option.count}
+            </span>
+          )}
+        </TabsTrigger>
+      ))}
+    </TabsList>
+  );
+}
+
+function StatusChips({
+  value,
+  onChange,
+}: {
+  value: StatusFilter | null;
+  onChange: (status: StatusFilter | null) => void;
+}) {
+  // the row scrolls sideways; its right padding fades out, so a chip cut at the edge reads as more
+  return (
+    <ToggleGroup
+      aria-label="Filter by status"
+      value={[value ?? ALL]}
+      onValueChange={(next) => {
+        // pressing the current chip again empties the group; keep the filter instead
+        if (next[0]) onChange(statusFilterOf(next[0]));
+      }}
+      className="w-full scrollbar-none overflow-x-auto px-4 pt-2.5 pb-3 mask-r-from-[calc(100%-var(--spacing)*4)] lg:hidden"
+    >
+      {statusOptions(
+        value && !chipStatuses.includes(value)
+          ? [...chipStatuses, value]
+          : chipStatuses,
+        null,
+      ).map((option) => (
+        <ToggleGroupItem
+          key={option.value}
+          value={option.value}
+          variant="outline"
+          className="h-10 rounded-4xl border-border px-3.5 font-normal text-muted-foreground aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background"
+        >
+          {option.label}
+        </ToggleGroupItem>
+      ))}
+    </ToggleGroup>
+  );
+}
+
+/**
+ * Status tabs with the type toggle at their right at 1024px and up; below, the toggle
+ * (after `select`, when given) on a row of its own over the status chips. The tab counts
+ * follow the toggle. Render inside a `Tabs` whose value is `filters.status ?? "all"`.
+ */
+export function ItemFilterBar({
+  filters,
+  counts,
+  onFiltersChange,
+  select,
+}: {
+  filters: ItemFilters;
+  counts: WebItemCountsView | null;
+  onFiltersChange: (filters: ItemFilters) => void;
+  select?: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col lg:flex-row lg:items-end lg:border-b">
+      <StatusTabs counts={counts?.[filters.type ?? "all"] ?? null} />
+      <div className="flex items-center gap-2 max-lg:px-4 max-lg:pt-3 lg:mb-0.5 lg:ml-auto">
+        {select}
+        <TypeToggle
+          value={filters.type}
+          counts={counts}
+          onChange={(type) => onFiltersChange({ ...filters, type })}
+          countsBelowLg={!select}
+          className="max-lg:flex-1"
+        />
+      </div>
+      <StatusChips
+        value={filters.status}
+        onChange={(status) => onFiltersChange({ ...filters, status })}
+      />
+    </div>
+  );
+}
+
+/** Lists, tabs and chips all read the same filter value off this. */
+export const statusTabValue = (filters: ItemFilters) => filters.status ?? ALL;
+
+const nouns: Record<ItemType | "all", string> = {
+  all: "items",
+  issue: "issues",
+  todo: "todos",
+};
+
+/** Items exist, none under the filters: say which, and offer them all back. */
+export function FilterEmpty({
+  filters,
+  onShowAll,
+}: {
+  filters: ItemFilters;
+  onShowAll: () => void;
+}) {
+  const noun = nouns[filters.type ?? "all"];
+  return (
+    <EmptyState
+      icon={SearchIcon}
+      title={
+        filters.status
+          ? `No ${noun} are ${statusLabel(filters.status).toLowerCase()}`
+          : `No ${noun} yet`
+      }
+      description="Try another filter."
+      action={
+        <Button
+          variant="outline"
+          size="sm"
+          className="max-lg:h-10 max-lg:px-3.5"
+          onClick={onShowAll}
+        >
+          Show all
+        </Button>
+      }
+    />
+  );
+}
+
+/** An issue may be unassigned; a todo always has its bot, so it never reads Unassigned. */
+function Assignee({ item }: { item: WebItemRowView }) {
+  if (!item.assignee) {
+    return item.type === "issue" ? (
+      <span className="text-muted-foreground">Unassigned</span>
+    ) : null;
+  }
+  return (
+    <span className="flex min-w-0 items-center gap-2">
+      <ActorAvatar actor={item.assignee} size="xs" />
+      <span className="truncate">{item.assignee.name}</span>
+      <ActorBadge kind={item.assignee.kind} />
+    </span>
+  );
+}
+
+/** `oneLine` keeps a table row at its height: labels past the cell's width clip. */
+function Labels({
+  labels,
+  oneLine = false,
+}: {
+  labels: string[];
+  oneLine?: boolean;
+}) {
+  return (
+    <span
+      className={cn(
+        "flex min-w-0 items-center gap-1",
+        oneLine ? "overflow-hidden" : "flex-wrap",
+      )}
+    >
+      {labels.map((label) => (
+        // the space keeps the names apart when read as text; flex drops it visually
+        <Fragment key={label}>
+          <LabelChip name={label} />{" "}
+        </Fragment>
+      ))}
+    </span>
+  );
+}
+
+const itemNoun = (count: number) => (count === 1 ? "item" : "items");
+
+/** `TRL trail 8 items`: a product group's heading, key in mono. */
+export function GroupHeading({
+  product,
+  count,
+}: {
+  product: WebProductRefView;
+  count: number;
+}) {
+  return (
+    <span className="flex min-w-0 items-center gap-2">
+      <KeyText className="text-foreground">{product.key}</KeyText>{" "}
+      <span className="truncate font-medium">{product.name}</span>{" "}
+      <span className="shrink-0 font-normal whitespace-nowrap text-muted-foreground">
+        {count} {itemNoun(count)}
+      </span>
+    </span>
+  );
+}
+
+/** Rows under a product heading; a list without groups has one, unheaded. */
+export type ItemGroup = {
+  product: WebProductRefView | null;
+  count: number;
+  items: WebItemRowView[];
+};
+
+const head = "h-7.5 px-0 text-2xs text-muted-foreground";
+
+/**
+ * The 1024px table: status, key, type, title, priority, (labels,) assignee, updated. A
+ * group with a product gets a heading row; groups after the first sit 12px apart.
+ */
+export function ItemTable({
+  groups,
+  labels,
+  now,
+}: {
+  groups: ItemGroup[];
+  labels: boolean;
+  now: Date;
+}) {
+  const columns = labels ? 8 : 7;
+  return (
+    <Table className="table-fixed max-lg:hidden">
+      <TableHeader>
+        <TableRow className="hover:bg-transparent">
+          <TableHead className={cn(head, "w-8.5 pl-2")}>
+            <span className="sr-only">Status</span>
+          </TableHead>
+          <TableHead className={cn(head, "w-16.5")}>Key</TableHead>
+          <TableHead className={cn(head, "w-17.5")}>Type</TableHead>
+          <TableHead className={head}>Title</TableHead>
+          <TableHead className={cn(head, "w-21.5")}>Priority</TableHead>
+          {labels && (
+            <TableHead className={cn(head, "w-24.5")}>Labels</TableHead>
+          )}
+          <TableHead className={cn(head, "w-34.5")}>Assignee</TableHead>
+          <TableHead className={cn(head, "w-15 pr-2 text-right")}>
+            Updated
+          </TableHead>
+        </TableRow>
+      </TableHeader>
+      {groups.map((group, index) => (
+        <TableBody
+          key={group.product?.key ?? ""}
+          data-group={group.product?.key}
+        >
+          {group.product && (
+            <TableRow className="hover:bg-transparent">
+              {/* the band is the inner div, so the cell's top padding parts it from the group above: a tbody takes no margin */}
+              <TableHead
+                colSpan={columns}
+                scope="colgroup"
+                className={cn(
+                  "h-auto p-0 text-sm text-foreground",
+                  index > 0 && "pt-3",
+                )}
+              >
+                <div className="flex h-8.5 items-center bg-muted px-2">
+                  <GroupHeading product={group.product} count={group.count} />
+                </div>
+              </TableHead>
+            </TableRow>
+          )}
+          {group.items.map((item) => (
+            <TableRow
+              key={item.key}
+              data-item-key={item.key}
+              className="relative"
+            >
+              <TableCell className="py-2 pr-0 pl-2">
+                <StatusIcon status={item.status} label />
+              </TableCell>
+              <TableCell className="px-0 py-2">
+                <KeyText>{item.key}</KeyText>
+              </TableCell>
+              <TableCell className="px-0 py-2">
+                <TypeBadge type={item.type} />
+              </TableCell>
+              <TableCell className="truncate px-0 py-2 pr-2.5">
+                <RowLink
+                  href={paths.issue(item.key)}
+                  label={`${item.key} ${item.title}`}
+                  className={cn(
+                    item.status === "canceled" && "text-muted-foreground",
+                  )}
+                >
+                  {item.title}
+                </RowLink>
+              </TableCell>
+              <TableCell className="px-0 py-2">
+                <PriorityLabel priority={item.priority} />
+              </TableCell>
+              {labels && (
+                <TableCell className="px-0 py-2 pr-2.5">
+                  <Labels labels={item.labels} oneLine />
+                </TableCell>
+              )}
+              <TableCell className="px-0 py-2 pr-2.5">
+                <Assignee item={item} />
+              </TableCell>
+              <TableCell className="py-2 pr-2 pl-0 text-right text-muted-foreground">
+                <Age iso={item.updatedAt} now={now} />
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      ))}
+    </Table>
+  );
+}
+
+/**
+ * Below 1024px, three lines a row: key, type badge and age; the title; status, priority
+ * glyph, labels and the assignee's avatar. The whole row is the link, named by key and
+ * title and described by its type and the last line. A group with a product gets a 36px
+ * heading.
+ */
+export function ItemRows({ groups, now }: { groups: ItemGroup[]; now: Date }) {
+  const id = useId();
+  return (
+    <div className="lg:hidden">
+      {groups.map((group) => (
+        <section
+          key={group.product?.key ?? ""}
+          data-group={group.product?.key}
+          aria-labelledby={
+            group.product ? `${id}-${group.product.key}` : undefined
+          }
+        >
+          {group.product && (
+            <h3
+              id={`${id}-${group.product.key}`}
+              className="flex h-9 items-center border-b bg-muted px-4 font-normal"
+            >
+              <GroupHeading product={group.product} count={group.count} />
+            </h3>
+          )}
+          <ul>
+            {group.items.map((item) => {
+              const typeId = `${id}-${item.key}-type`;
+              const metaId = `${id}-${item.key}-meta`;
+              return (
+                <li
+                  key={item.key}
+                  data-item-key={item.key}
+                  className="border-b"
+                >
+                  <AppLink
+                    href={paths.issue(item.key)}
+                    aria-label={`${item.key} ${item.title}`}
+                    aria-describedby={`${typeId} ${metaId}`}
+                    className="flex flex-col px-4 py-3 outline-none focus-visible:ring-3 focus-visible:ring-ring/25 focus-visible:ring-inset"
+                  >
+                    <span className="flex items-center gap-2">
+                      <KeyText>{item.key}</KeyText>
+                      <span id={typeId}>
+                        <TypeBadge type={item.type} />
+                      </span>
+                      <span className="ml-auto text-muted-foreground">
+                        <Age iso={item.updatedAt} now={now} />
+                      </span>
+                    </span>
+                    <span
+                      className={cn(
+                        "mt-0.5 mb-1.5",
+                        item.status === "canceled" && "text-muted-foreground",
+                      )}
+                    >
+                      {item.title}
+                    </span>
+                    <span
+                      id={metaId}
+                      className="flex items-center gap-2 text-xs"
+                    >
+                      <StatusLabel status={item.status} />{" "}
+                      <PriorityLabel priority={item.priority} iconOnly />{" "}
+                      <Labels labels={item.labels} />{" "}
+                      {item.assignee && (
+                        <span className="ml-auto">
+                          <ActorAvatar actor={item.assignee} size="xs" />
+                          <span className="sr-only">
+                            Assigned to {item.assignee.name},{" "}
+                            {item.assignee.kind === "bot" ? "Bot" : "Human"}
+                          </span>
+                        </span>
+                      )}
+                    </span>
+                  </AppLink>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ))}
+    </div>
+  );
+}

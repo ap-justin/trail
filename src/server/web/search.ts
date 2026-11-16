@@ -1,12 +1,21 @@
 import { createRoute } from "@hono/zod-openapi";
-import { and, asc, desc, eq, or, type SQLWrapper, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  or,
+  type SQLWrapper,
+  sql,
+} from "drizzle-orm";
 import { searchQuerySchema, searchSchema } from "../../shared/schemas.js";
 import { jsonContent } from "../api/routes.js";
 import type { Db } from "../db/client.js";
-import { issue, project } from "../db/schema.js";
+import { issue, product, project } from "../db/schema.js";
 import { amongVisible } from "../service/visible.js";
 import { createWebRouter } from "./env.js";
-import { visibleIds } from "./visible.js";
+import { projectIdsAmong, visibleIds } from "./visible.js";
 
 const SEARCH_LIMIT = 20;
 
@@ -17,7 +26,7 @@ const search = createRoute({
   responses: {
     200: jsonContent(
       searchSchema,
-      `Up to ${SEARCH_LIMIT} visible issues, newest first, and projects`,
+      `Up to ${SEARCH_LIMIT} each of visible items (newest first), products (A to Z by key) and projects (A to Z by name)`,
     ),
   },
 });
@@ -30,49 +39,69 @@ export function searchRoutes(db: Db) {
   return createWebRouter().openapi(search, (c) => {
     const { q } = c.req.valid("query");
     const ids = visibleIds(c.var.member);
-    const issueKey = sql`${project.key} || '-' || ${issue.number}`;
-    const issues = db
+    const itemKey = sql`${product.key} || '-' || ${issue.number}`;
+    const exact = q.trim().toUpperCase();
+    const items = db
       .select({
-        key: sql<string>`${issueKey}`,
+        key: sql<string>`${itemKey}`,
         sourceKey: issue.sourceKey,
         title: issue.title,
+        type: issue.type,
         status: issue.status,
-        projectKey: project.key,
-        projectName: project.name,
+        productKey: product.key,
+        productName: product.name,
       })
       .from(issue)
-      .innerJoin(project, eq(project.id, issue.projectId))
+      .innerJoin(product, eq(product.id, issue.productId))
       .where(
         and(
-          amongVisible(issue.projectId, ids),
+          amongVisible(issue.productId, ids),
           or(
             contains(issue.title, q),
-            contains(issueKey, q),
+            contains(itemKey, q),
             contains(issue.sourceKey, q),
           ),
         ),
       )
-      .orderBy(desc(issue.createdAt), desc(issue.id))
+      // an item the query names exactly first, so newer items whose keys merely contain it can't crowd it out
+      .orderBy(
+        sql`case when upper(${itemKey}) = ${exact} or ${issue.sourceKey} = ${exact} then 0 else 1 end`,
+        desc(issue.createdAt),
+        desc(issue.id),
+      )
+      .limit(SEARCH_LIMIT)
+      .all();
+    const products = db
+      .select({ key: product.key, name: product.name })
+      .from(product)
+      .where(
+        and(
+          amongVisible(product.id, ids),
+          or(contains(product.key, q), contains(product.name, q)),
+        ),
+      )
+      .orderBy(asc(product.key))
       .limit(SEARCH_LIMIT)
       .all();
     const projects = db
-      .select({ key: project.key, name: project.name })
+      .select({ slug: project.slug, name: project.name })
       .from(project)
       .where(
         and(
-          amongVisible(project.id, ids),
-          or(contains(project.key, q), contains(project.name, q)),
+          inArray(project.id, projectIdsAmong(db, ids)),
+          or(contains(project.slug, q), contains(project.name, q)),
         ),
       )
-      .orderBy(asc(project.key))
+      .orderBy(asc(project.name), asc(project.slug))
       .limit(SEARCH_LIMIT)
       .all();
     return c.json(
       {
-        issues: issues.map(({ projectKey, projectName, ...rest }) => ({
+        items: items.map(({ productKey, productName, ...rest }) => ({
           ...rest,
-          project: { key: projectKey, name: projectName },
+          product: { key: productKey, name: productName },
         })),
+        products,
         projects,
       },
       200,

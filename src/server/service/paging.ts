@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, gt, lt, or, type SQL } from "drizzle-orm";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
+import type { IssueType } from "../db/schema.js";
 import { ValidationError } from "./errors.js";
 
 export type Page<T> = { items: T[]; nextCursor: string | null };
@@ -84,8 +85,20 @@ export function page<T extends { createdAt: Date; id: string }>(
   };
 }
 
-/** The filters a feed cursor was issued under; null is "not filtered". */
-export type FeedFilters = { projectId: string | null; actorId: string | null };
+/**
+ * The filters a feed cursor was issued under; null is "not filtered".
+ * `projectId` is a product's id (the name it had before projects); `groupId` a
+ * project's, and a cursor issued without it or `type` reads as null there.
+ * `productKey` and `projectSlug` name those two in an error, never compared.
+ */
+export type FeedFilters = {
+  projectId: string | null;
+  actorId: string | null;
+  groupId?: string | null;
+  type?: IssueType | null;
+  productKey?: string | null;
+  projectSlug?: string | null;
+};
 /** The query parameter a feed cursor goes back on: `cursor` pages newest first, `after` oldest first. */
 export type FeedParam = "cursor" | "after";
 export type FeedPosition = FeedFilters & { seq: number; param: FeedParam };
@@ -95,12 +108,24 @@ export function encodeFeedCursor(position: FeedPosition): string {
     seq: position.seq,
     projectId: position.projectId,
     actorId: position.actorId,
+    ...(position.groupId != null && { groupId: position.groupId }),
+    ...(position.type != null && { type: position.type }),
+    ...(position.productKey != null && { productKey: position.productKey }),
+    ...(position.projectSlug != null && {
+      projectSlug: position.projectSlug,
+    }),
     param: position.param,
   });
 }
 
+// a cursor issued before it carried keys and slugs names them by id
 const describeFilters = (f: FeedFilters) =>
-  `projectId=${f.projectId ?? "(none)"}, actorId=${f.actorId ?? "(none)"}`;
+  [
+    `product=${f.projectId === null ? "(none)" : (f.productKey ?? f.projectId)}`,
+    `actor=${f.actorId ?? "(none)"}`,
+    ...(f.groupId == null ? [] : [`project=${f.projectSlug ?? f.groupId}`]),
+    ...(f.type == null ? [] : [`type=${f.type}`]),
+  ].join(", ");
 
 const feedOrder = { cursor: "newest-first", after: "oldest-first" } as const;
 
@@ -122,6 +147,18 @@ export function decodeFeedCursor(
     (parsed.seq as number) < 0 ||
     !nullableString(parsed.projectId) ||
     !nullableString(parsed.actorId) ||
+    !(parsed.groupId === undefined || typeof parsed.groupId === "string") ||
+    !(
+      parsed.type === undefined ||
+      parsed.type === "issue" ||
+      parsed.type === "todo"
+    ) ||
+    !(
+      parsed.productKey === undefined || typeof parsed.productKey === "string"
+    ) ||
+    !(
+      parsed.projectSlug === undefined || typeof parsed.projectSlug === "string"
+    ) ||
     (parsed.param !== "cursor" && parsed.param !== "after")
   ) {
     throw new ValidationError(
@@ -131,7 +168,9 @@ export function decodeFeedCursor(
   const issued = parsed as FeedPosition;
   if (
     issued.projectId !== filters.projectId ||
-    issued.actorId !== filters.actorId
+    issued.actorId !== filters.actorId ||
+    (issued.groupId ?? null) !== (filters.groupId ?? null) ||
+    (issued.type ?? null) !== (filters.type ?? null)
   ) {
     throw new ValidationError(
       `cursor was issued for ${describeFilters(issued)} but this request has ${describeFilters(filters)}: repeat the cursor's filters, or drop the cursor to start over`,

@@ -1,15 +1,20 @@
 import { and, eq, inArray, or, type SQL, sql } from "drizzle-orm";
-import type {
-  EntryView,
-  WebActorView,
-  WebProjectRefView,
+import {
+  type EntryView,
+  type WebActorView,
+  type WebItemRefView,
+  type WebProductRefView,
+  type WebProjectRefView,
+  webProjectFields,
 } from "../../shared/schemas.js";
 import type { Db } from "../db/client.js";
+import type { IssueStatus, IssueType } from "../db/schema.js";
 import {
   activityEvent,
   comment,
-  type IssueStatus,
   issue,
+  product,
+  productStatusUpdate,
   project,
   projectStatusUpdate,
 } from "../db/schema.js";
@@ -22,6 +27,7 @@ type Change<T> = { from: T; to: T };
 /** The part of an `issue.updated` payload (field → from/to) the feed shows. */
 type IssueChanges = {
   status?: Change<IssueStatus>;
+  type?: Change<IssueType>;
   priority?: Change<number>;
   labels?: Change<string[]>;
   links?: Change<Link[]>;
@@ -29,12 +35,38 @@ type IssueChanges = {
   estimate?: Change<number | null>;
 };
 
+/**
+ * The type an `issue.created` payload records; one stored before payloads
+ * carried it (or an imported item, which has none) reads issue when a person
+ * created the item, else the item's type now.
+ */
+function createdAs(
+  createdPayload: unknown,
+  creator: WebActorView,
+  current: IssueType,
+): IssueType {
+  const recorded = (createdPayload as { type?: IssueType } | undefined)?.type;
+  return recorded ?? (creator.kind === "human" ? "issue" : current);
+}
+
+/** A `project.updated` payload's field names, as the entry names them. */
+const projectFieldOf: Record<string, (typeof webProjectFields)[number]> = {
+  name: "name",
+  goal: "goal",
+  leadId: "lead",
+  targetDate: "targetDate",
+};
+
 const shownActions = [
-  "project.created",
-  "project.imported",
+  "product.created",
+  "product.imported",
   "issue.created",
   "comment.created",
   "status_update.created",
+  "project.created",
+  "project.updated",
+  "project.item_added",
+  "project.item_removed",
 ];
 
 const changed = (field: string) =>
@@ -43,7 +75,8 @@ const changed = (field: string) =>
 /**
  * The events that become at least one entry: a page of them is never empty of
  * entries. An `issue.updated` shows only when it changed a field the feed
- * shows; a links change only when it added a url.
+ * shows; a links change only when it added a url. A `project.updated` always
+ * changed a field it shows.
  */
 export const shownEvent: SQL = or(
   inArray(activityEvent.action, shownActions),
@@ -51,6 +84,7 @@ export const shownEvent: SQL = or(
     eq(activityEvent.action, "issue.updated"),
     or(
       changed("status"),
+      changed("type"),
       changed("priority"),
       changed("labels"),
       changed("assigneeId"),
@@ -60,23 +94,30 @@ export const shownEvent: SQL = or(
   ),
 ) as SQL;
 
-type IssueRef = {
-  id: string;
-  key: string;
-  title: string;
-  sourceAuthor: string | null;
-};
+type ItemRef = WebItemRefView & { id: string; sourceAuthor: string | null };
 
-/** The bits of an issue's changes the feed shows, each one entry, in a fixed order. */
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown
+  ? Omit<T, K>
+  : never;
+
+/** An entry without what every entry of its event shares. */
+type EntryPart = DistributiveOmit<
+  EntryView,
+  "id" | "createdAt" | "actor" | "product" | "project" | "item"
+>;
+
+/** The bits of an item's changes the feed shows, each one entry, in a fixed order. */
 function changeEntries(
   changes: IssueChanges,
   actorOf: (id: string) => WebActorView,
-) {
-  const parts: DistributiveOmit<
-    EntryView,
-    "id" | "createdAt" | "actor" | "project" | "issue"
-  >[] = [];
-  if (changes.status) parts.push({ kind: "status_changed", ...changes.status });
+): EntryPart[] {
+  const parts: EntryPart[] = [];
+  if (changes.status) {
+    parts.push({ kind: "status_changed", ...changes.status });
+  }
+  if (changes.type) {
+    parts.push({ kind: "type_changed", ...changes.type });
+  }
   if (changes.priority) {
     parts.push({ kind: "priority_changed", ...changes.priority });
   }
@@ -113,20 +154,26 @@ function changeEntries(
   return parts;
 }
 
-type DistributiveOmit<T, K extends PropertyKey> = T extends unknown
-  ? Omit<T, K>
-  : never;
-
 /** The actor ids an `issue.updated` payload names as assignees. */
 const assigneeIds = (event: ActivityEvent) => {
   const change = (event.payload as IssueChanges).assigneeId;
   return change ? [change.from, change.to] : [];
 };
 
+/** The rows `load` reads for the subjects of the events `test` picks, by id. */
+function rowsFor<T extends { id: string }>(
+  events: ActivityEvent[],
+  test: (e: ActivityEvent) => boolean,
+  load: (ids: string[]) => T[],
+): Map<string, T> {
+  const ids = events.filter(test).map((e) => e.subjectId);
+  return new Map((ids.length === 0 ? [] : load(ids)).map((r) => [r.id, r]));
+}
+
 /**
  * The display entries of these events, in the order given: none for an event
  * the feed doesn't show, several for an `issue.updated` that changed several
- * fields. Every event must have a project.
+ * fields.
  */
 export const entriesOf = (db: Db, events: ActivityEvent[]): EntryView[] =>
   entriesByEvent(db, events).flat();
@@ -134,14 +181,10 @@ export const entriesOf = (db: Db, events: ActivityEvent[]): EntryView[] =>
 /** `entriesOf`, kept apart per event: the i-th list holds the i-th event's entries. */
 export function entriesByEvent(db: Db, events: ActivityEvent[]): EntryView[][] {
   if (events.length === 0) return [];
-  const commentIds = events
-    .filter((e) => e.action === "comment.created")
-    .map((e) => e.subjectId);
-  const comments = new Map(
-    (commentIds.length === 0
-      ? []
-      : db.select().from(comment).where(inArray(comment.id, commentIds)).all()
-    ).map((c) => [c.id, c]),
+  const comments = rowsFor(
+    events,
+    (e) => e.action === "comment.created",
+    (ids) => db.select().from(comment).where(inArray(comment.id, ids)).all(),
   );
   const issueIds = events
     .map((e) =>
@@ -150,38 +193,51 @@ export function entriesByEvent(db: Db, events: ActivityEvent[]): EntryView[][] {
         : comments.get(e.subjectId)?.issueId,
     )
     .filter((id) => id !== undefined);
-  const issues = new Map<string, IssueRef>(
+  const items = new Map<string, ItemRef>(
     (issueIds.length === 0
       ? []
       : db
           .select({
             id: issue.id,
-            key: sql<string>`${project.key} || '-' || ${issue.number}`,
+            key: sql<string>`${product.key} || '-' || ${issue.number}`,
             title: issue.title,
+            type: issue.type,
             sourceAuthor: issue.sourceAuthor,
           })
           .from(issue)
-          .innerJoin(project, eq(project.id, issue.projectId))
+          .innerJoin(product, eq(product.id, issue.productId))
           .where(inArray(issue.id, issueIds))
           .all()
     ).map((i) => [i.id, i]),
   );
-  const updateIds = events
-    .filter((e) => e.action === "status_update.created")
-    .map((e) => e.subjectId);
-  const updates = new Map(
-    (updateIds.length === 0
-      ? []
-      : db
-          .select()
-          .from(projectStatusUpdate)
-          .where(inArray(projectStatusUpdate.id, updateIds))
-          .all()
-    ).map((u) => [u.id, u]),
+  const isUpdate = (e: ActivityEvent) => e.action === "status_update.created";
+  const productUpdates = rowsFor(
+    events,
+    (e) => isUpdate(e) && e.productId !== null,
+    (ids) =>
+      db
+        .select()
+        .from(productStatusUpdate)
+        .where(inArray(productStatusUpdate.id, ids))
+        .all(),
+  );
+  const projectUpdates = rowsFor(
+    events,
+    (e) => isUpdate(e) && e.productId === null,
+    (ids) =>
+      db
+        .select()
+        .from(projectStatusUpdate)
+        .where(inArray(projectStatusUpdate.id, ids))
+        .all(),
+  );
+  const products = productRefs(
+    db,
+    events.flatMap((e) => (e.productId === null ? [] : [e.productId])),
   );
   const projects = projectRefs(
     db,
-    events.map((e) => e.projectId as string),
+    events.flatMap((e) => (e.projectId === null ? [] : [e.projectId])),
   );
   const actorOf = actorsById(db, [
     ...events.map((e) => e.actorId),
@@ -189,90 +245,161 @@ export function entriesByEvent(db: Db, events: ActivityEvent[]): EntryView[][] {
   ]);
 
   return events.map((event) => {
-    const base = {
+    const productRef =
+      event.productId === null ? undefined : products(event.productId);
+    const projectRef =
+      event.projectId === null ? undefined : projects(event.projectId);
+    const itemRef = (id: string | undefined): WebItemRefView | undefined => {
+      const found = id === undefined ? undefined : items.get(id);
+      return found && { key: found.key, title: found.title, type: found.type };
+    };
+    const shared = {
       createdAt: event.createdAt.toISOString(),
       actor: actorOf(event.actorId),
-      project: projects(event.projectId as string),
-    };
-    const ref = (id: string | undefined) => {
-      const found = id === undefined ? undefined : issues.get(id);
-      return found ? { key: found.key, title: found.title } : null;
     };
     const parts = partsOf(event);
     return parts.map((part, i) => ({
       id: parts.length === 1 ? event.id : `${event.id}:${i}`,
-      ...base,
+      ...shared,
       ...part,
     })) as EntryView[];
 
+    function onItem(id: string | undefined, entries: EntryPart[]) {
+      const target = itemRef(id);
+      if (!target || !productRef) return [];
+      return entries.map((part) => ({
+        ...part,
+        product: productRef,
+        project: null,
+        item: target,
+      }));
+    }
+
+    function onProduct(entries: EntryPart[]) {
+      if (!productRef) return [];
+      return entries.map((part) => ({
+        ...part,
+        product: productRef,
+        project: null,
+        item: null,
+      }));
+    }
+
+    function onProject(entries: EntryPart[]) {
+      if (!projectRef) return [];
+      return entries.map((part) => ({
+        ...part,
+        product: null,
+        project: projectRef,
+        item: null,
+      }));
+    }
+
     function partsOf(e: ActivityEvent) {
       switch (e.action) {
-        case "project.created":
-          return [{ kind: "project_created" as const, issue: null }];
-        case "project.imported": {
+        case "product.created":
+          return onProduct([{ kind: "product_created" }]);
+        case "product.imported": {
           const counts = importedEventPayload.safeParse(e.payload);
           if (!counts.success) return [];
           const { created, updated } = counts.data;
-          return [
+          return onProduct([
             {
-              kind: "project_imported" as const,
-              issue: null,
+              kind: "product_imported",
               imported: {
                 issues: created.issues + updated.issues,
                 comments: created.comments + updated.comments,
               },
             },
-          ];
+          ]);
         }
         case "issue.created": {
-          const target = ref(e.subjectId);
-          if (!target) return [];
-          return [
+          const created = items.get(e.subjectId);
+          if (!created) return [];
+          return onItem(e.subjectId, [
             {
-              kind: "issue_created" as const,
-              issue: target,
-              sourceAuthor: issues.get(e.subjectId)?.sourceAuthor ?? null,
+              kind: "item_created",
+              sourceAuthor: created.sourceAuthor,
+              createdAs: createdAs(e.payload, shared.actor, created.type),
             },
-          ];
+          ]);
         }
-        case "issue.updated": {
-          const target = ref(e.subjectId);
-          if (!target) return [];
-          return changeEntries(e.payload as IssueChanges, actorOf).map(
-            (part) => ({ ...part, issue: target }),
+        case "issue.updated":
+          return onItem(
+            e.subjectId,
+            changeEntries(e.payload as IssueChanges, actorOf),
           );
-        }
         case "comment.created": {
           const row = comments.get(e.subjectId);
-          const target = ref(row?.issueId);
-          if (!row || !target) return [];
-          return [
+          if (!row) return [];
+          return onItem(row.issueId, [
             {
-              kind: "comment" as const,
-              issue: target,
+              kind: "comment",
               comment: {
                 id: row.id,
                 body: row.body,
                 sourceAuthor: row.sourceAuthor,
               },
             },
+          ]);
+        }
+        case "project.item_added":
+        case "project.item_removed": {
+          const target = itemRef(e.subjectId);
+          if (!target || !productRef || !projectRef) return [];
+          return [
+            {
+              kind:
+                e.action === "project.item_added"
+                  ? ("added_to_project" as const)
+                  : ("removed_from_project" as const),
+              product: productRef,
+              project: projectRef,
+              item: target,
+            },
           ];
         }
         case "status_update.created": {
-          const row = updates.get(e.subjectId);
-          if (!row) return [];
-          return [
+          const fromProduct = productUpdates.get(e.subjectId);
+          if (fromProduct) {
+            return onProduct([
+              {
+                kind: "product_status_update",
+                statusUpdate: {
+                  id: fromProduct.id,
+                  body: fromProduct.body,
+                  health: fromProduct.health,
+                  sourceAuthor: fromProduct.sourceAuthor,
+                },
+              },
+            ]);
+          }
+          const fromProject = projectUpdates.get(e.subjectId);
+          if (!fromProject) return [];
+          return onProject([
             {
-              kind: "status_update" as const,
-              issue: null,
+              kind: "project_status_update",
               statusUpdate: {
-                id: row.id,
-                body: row.body,
-                health: row.health,
-                sourceAuthor: row.sourceAuthor,
+                id: fromProject.id,
+                body: fromProject.body,
+                health: fromProject.health,
+                sourceAuthor: null,
               },
             },
-          ];
+          ]);
+        }
+        case "project.created":
+          return onProject([{ kind: "project_created" }]);
+        case "project.updated": {
+          const fields = Object.keys(e.payload as object);
+          return onProject([
+            {
+              kind: "project_updated",
+              changed: webProjectFields.filter((f) =>
+                fields.some((k) => projectFieldOf[k] === f),
+              ),
+            },
+          ]);
         }
         default:
           return [];
@@ -281,30 +408,48 @@ export function entriesByEvent(db: Db, events: ActivityEvent[]): EntryView[][] {
   });
 }
 
-/** The projects with these ids as key and name, by id. */
-export function projectRefs(
+/** The products with these ids as key and name, by id. */
+export function productRefs(
   db: Db,
   ids: string[],
-): (id: string) => WebProjectRefView {
+): (id: string) => WebProductRefView {
   const wanted = [...new Set(ids)];
   const rows =
     wanted.length === 0
       ? []
       : db
-          .select({ id: project.id, key: project.key, name: project.name })
+          .select({ id: product.id, key: product.key, name: product.name })
+          .from(product)
+          .where(inArray(product.id, wanted))
+          .all();
+  const byId = new Map(rows.map((r) => [r.id, { key: r.key, name: r.name }]));
+  return (id) => byId.get(id) as WebProductRefView;
+}
+
+/** The projects with these ids as slug and name, by id. */
+function projectRefs(db: Db, ids: string[]): (id: string) => WebProjectRefView {
+  const wanted = [...new Set(ids)];
+  const rows =
+    wanted.length === 0
+      ? []
+      : db
+          .select({ id: project.id, slug: project.slug, name: project.name })
           .from(project)
           .where(inArray(project.id, wanted))
           .all();
-  const byId = new Map(rows.map((r) => [r.id, { key: r.key, name: r.name }]));
+  const byId = new Map(rows.map((r) => [r.id, { slug: r.slug, name: r.name }]));
   return (id) => byId.get(id) as WebProjectRefView;
 }
 
-/** An issue's timeline, oldest first: its filing, its comments and the changes the feed shows. */
+/**
+ * An item's timeline, oldest first: its filing, its comments, the changes the
+ * feed shows and its being added to or removed from projects.
+ */
 export function timelineOf(
   db: Db,
   target: typeof issue.$inferSelect,
-  issueRef: { key: string; title: string },
-  projectRef: WebProjectRefView,
+  itemRef: WebItemRefView,
+  productRef: WebProductRefView,
 ): EntryView[] {
   const comments = db
     .select()
@@ -319,24 +464,42 @@ export function timelineOf(
       and(
         eq(activityEvent.subjectType, "issue"),
         eq(activityEvent.subjectId, target.id),
-        eq(activityEvent.action, "issue.updated"),
+        inArray(activityEvent.action, [
+          "issue.updated",
+          "project.item_added",
+          "project.item_removed",
+        ]),
       ),
     )
     .orderBy(activityEvent.seq)
     .all();
+  const createdEvent = db
+    .select({ payload: activityEvent.payload })
+    .from(activityEvent)
+    .where(
+      and(
+        eq(activityEvent.subjectType, "issue"),
+        eq(activityEvent.subjectId, target.id),
+        eq(activityEvent.action, "issue.created"),
+      ),
+    )
+    .get();
   const actorOf = actorsById(db, [
     target.createdBy,
     ...comments.map((c) => c.authorId),
   ]);
-  const base = { project: projectRef, issue: issueRef };
+  const creator = actorOf(target.createdBy);
+  const base = { product: productRef, item: itemRef };
   const entries: EntryView[] = [
     {
       id: target.id,
-      kind: "issue_created",
+      kind: "item_created",
       createdAt: target.createdAt.toISOString(),
-      actor: actorOf(target.createdBy),
+      actor: creator,
       ...base,
+      project: null,
       sourceAuthor: target.sourceAuthor,
+      createdAs: createdAs(createdEvent?.payload, creator, target.type),
     },
     ...comments.map(
       (c): EntryView => ({
@@ -345,9 +508,11 @@ export function timelineOf(
         createdAt: c.createdAt.toISOString(),
         actor: actorOf(c.authorId),
         ...base,
+        project: null,
         comment: { id: c.id, body: c.body, sourceAuthor: c.sourceAuthor },
       }),
     ),
+    // the item as it reads now, whatever its title was then
     ...entriesOf(db, changes).map((e) => ({ ...e, ...base }) as EntryView),
   ];
   // stable: at one instant the filing comes first, then comments, then changes

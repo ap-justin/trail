@@ -76,19 +76,32 @@ export const notFoundError = {
 
 /**
  * The 403 of an operation a key's actions gate: spread into every operation but
- * whoami. `scope` adds the refusal of a key limited to projects, for the
- * operations that make one. (The service's bot-only 403 can't reach /api/v1,
- * whose every caller is a bot.)
+ * whoami. `scope` adds the refusal of a key limited to products, for the
+ * operations that make one; `owner` the refusal of a write only the product's
+ * owner bot makes. (The service's bot-only 403 can't reach /api/v1, whose
+ * every caller is a bot.)
  */
 export const forbiddenError = (
   action: ApiKeyAction,
-  { scope = false }: { scope?: boolean } = {},
+  { scope = false, owner }: { scope?: boolean; owner?: string } = {},
 ) => ({
   403: jsonContent(
     errorSchema,
-    `The key lacks the ${action} action (code forbidden_action)${scope ? ", or reaches only some projects (code forbidden_scope)" : ""}`,
+    `The key lacks the ${action} action (code forbidden_action)${scope ? ", or reaches only some products (code forbidden_scope)" : ""}${owner === undefined ? "" : `, or ${owner} (code forbidden)`}`,
   ),
 });
+
+/** The 403 a write only a product's owner makes adds to `forbiddenError`. */
+export const OWNER_ONLY =
+  "the product has an owner bot and the call is that bot's alone: adding a todo, moving an issue out of triage, canceling an item another bot filed, reopening a canceled issue another bot filed, or changing an item's type; the message names the owner and what to do instead";
+
+/** Who creates a product's labels, as the create-label route and tool describe it. */
+export const LABEL_CREATORS =
+  "Only a product's owner creates its labels: anyone else gets a 403 (forbidden) naming the owner, and should ask the owner or file or update the item without the label, since names the product lacks come back in skippedLabels. On a product with no owner, any bot creates them.";
+
+/** The 403 the create-label routes add to `forbiddenError`. */
+export const OWNER_CREATES_LABELS =
+  "another bot owns the product: only its owner creates its labels";
 
 /** Spread only into operations whose service call can throw `ConflictError`. */
 export const conflictError = {
@@ -121,6 +134,18 @@ export const jsonBody = <T extends z.ZodType>(schema: T) => ({
   required: true,
 });
 
+export const itemParam = z.object({
+  key: z
+    .string()
+    .min(1)
+    .openapi({
+      param: { name: "key", in: "path" },
+      description:
+        "The item's key (like TRL-12), its id, or its source key (the key it had in the system it was imported from, like ABC-187). Looked up in that order, so a key beats a source key that looks the same.",
+      example: "TRL-12",
+    }),
+});
+
 export const issueParam = z.object({
   id: z
     .string()
@@ -128,18 +153,45 @@ export const issueParam = z.object({
     .openapi({
       param: { name: "id", in: "path" },
       description:
-        "The issue's id, its key (like TRL-12) or its source key (like JUS-187, kept from an import). Looked up in that order, so a key beats a source key that looks the same.",
+        "The item's id, its key (like TRL-12) or its source key (the key it had in the system it was imported from, like ABC-187).",
       example: "TRL-12",
     }),
 });
 
-export const projectParam = z.object({
-  id: z
+export const productParam = z.object({
+  key: z
     .string()
     .min(1)
     .openapi({
-      param: { name: "id", in: "path" },
-      description: "The project's id or its key, like TRL.",
+      param: { name: "key", in: "path" },
+      description: "The product's key (like TRL, any case) or id.",
       example: "TRL",
     }),
+});
+
+export const projectParam = z.object({
+  ref: z
+    .string()
+    .min(1)
+    .openapi({
+      param: { name: "ref", in: "path" },
+      description:
+        "The project's slug, like launch-q4, matched exactly. Deprecated: a product's key (like TRL) that matches no slug names the product, as this path did before projects; use /products/{key} for that.",
+      example: "launch-q4",
+    }),
+});
+
+export const projectSlugParam = z.object({
+  slug: z
+    .string()
+    .min(1)
+    .openapi({
+      param: { name: "slug", in: "path" },
+      description: "The project's slug, like launch-q4, matched exactly.",
+      example: "launch-q4",
+    }),
+});
+
+export const projectItemParam = projectSlugParam.extend({
+  key: itemParam.shape.key,
 });

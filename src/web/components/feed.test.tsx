@@ -4,11 +4,20 @@ import { useState } from "react";
 import { describe, expect, test, vi } from "vitest";
 import { FeedView, type FeedViewProps, LiveIndicator } from "@/components/feed";
 import {
+  alpha,
+  alphaWithPhoto,
   commentEntry,
-  kai,
-  kaiWithPhoto,
+  humanUi,
+  itemCreatedEntry,
+  maya,
+  membershipEntry,
+  productStatusUpdateEntry,
+  projectEntry,
   projectImportedEntry,
+  projectStatusUpdateEntry,
   statusEntry,
+  teamAccess,
+  typeChangedEntry,
 } from "@/test/fixtures";
 
 const now = new Date(2026, 10, 11, 12, 0);
@@ -27,11 +36,19 @@ function feedProps(overrides: Partial<FeedViewProps> = {}): FeedViewProps {
     pendingCount: 0,
     onShowPending: vi.fn(),
     onAtTopChange: vi.fn(),
-    filters: { actors: [kai], projects: [{ key: "TRL", name: "trail" }] },
+    filters: {
+      actors: [alpha],
+      products: [{ key: "TRL", name: "trail" }],
+      projects: [humanUi],
+    },
     actorFilter: null,
+    productFilter: null,
     projectFilter: null,
+    typeFilter: null,
     onActorFilterChange: vi.fn(),
+    onProductFilterChange: vi.fn(),
     onProjectFilterChange: vi.fn(),
+    onTypeFilterChange: vi.fn(),
     onRetry: vi.fn(),
     now,
     ...overrides,
@@ -51,22 +68,24 @@ const rowFor = (id: string) => {
 };
 
 const filterControls = () =>
-  screen.queryAllByRole("combobox", { name: /^Filter by (bot|project)$/ });
+  screen.queryAllByRole("combobox", {
+    name: /^Filter by (bot|product|project|type)$/,
+  });
 
 describe("actor photos", () => {
   test("an entry by an actor with a photo shows the photo; one without shows initials", () => {
     renderFeed({
       entries: [
-        commentEntry("e1", minutesAgo(1), { actor: kaiWithPhoto }),
+        commentEntry("e1", minutesAgo(1), { actor: alphaWithPhoto }),
         statusEntry("e2", minutesAgo(30)),
       ],
     });
     expect(rowFor("e1").querySelector("img")).toHaveAttribute(
       "src",
-      kaiWithPhoto.photoUrl,
+      alphaWithPhoto.photoUrl,
     );
     expect(rowFor("e2").querySelector("img")).toBeNull();
-    expect(within(rowFor("e2")).getByText("K")).toBeInTheDocument();
+    expect(within(rowFor("e2")).getByText("A")).toBeInTheDocument();
   });
 });
 
@@ -181,15 +200,15 @@ describe("live connection", () => {
   });
 
   test("reconnecting with no projects and no entries: no banner, since nothing can arrive", () => {
-    renderFeed({ entries: [], noProjects: true, connection: "reconnecting" });
+    renderFeed({ entries: [], noProducts: true, connection: "reconnecting" });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: "No projects yet" }),
+      screen.getByRole("heading", { name: "No products yet" }),
     ).toBeInTheDocument();
   });
 
-  test("reconnecting with noProjects but entries: the banner still shows", () => {
-    renderFeed({ noProjects: true, connection: "reconnecting" });
+  test("reconnecting with noProducts but entries: the banner still shows", () => {
+    renderFeed({ noProducts: true, connection: "reconnecting" });
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Reconnecting… new activity will appear when it's back.",
     );
@@ -210,32 +229,72 @@ describe("feed states", () => {
     ).toBeInTheDocument();
   });
 
-  test("empty for a member with no project says so", () => {
-    renderFeed({ entries: [], noProjects: true });
+  test("filters that match nothing say so and Clear filters drops each one in force", async () => {
+    const user = userEvent.setup();
+    const p = renderFeed({
+      entries: [],
+      productFilter: "TRL",
+      projectFilter: humanUi.slug,
+    });
+    expect(screen.queryByText("No activity yet")).not.toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: "No projects yet" }),
+      screen.getByRole("heading", { name: "Nothing matches these filters" }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(p.onProductFilterChange).toHaveBeenCalledWith(null);
+    expect(p.onProjectFilterChange).toHaveBeenCalledWith(null);
+    expect(p.onActorFilterChange).not.toHaveBeenCalled();
+    expect(p.onTypeFilterChange).not.toHaveBeenCalled();
+    // the button goes with the empty state; focus waits on the filters
+    expect(
+      screen.getByRole("group", { name: "Filter the feed" }),
+    ).toHaveFocus();
+  });
+
+  test("a type filter alone that matches nothing offers Clear filters, which drops it", async () => {
+    const user = userEvent.setup();
+    const p = renderFeed({ entries: [], typeFilter: "todo" });
+    expect(screen.queryByText("No activity yet")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(p.onTypeFilterChange).toHaveBeenCalledWith(null);
+    expect(p.onProductFilterChange).not.toHaveBeenCalled();
+  });
+
+  test("a filter whose value has left the options reads All, not the raw value", () => {
+    renderFeed({ actorFilter: "act_gone" });
+    const bot = screen.getByRole("combobox", { name: "Filter by bot" });
+    expect(bot).toHaveTextContent("All bots");
+    expect(bot).not.toHaveTextContent("act_gone");
+  });
+
+  test("empty for a member with no project says so", () => {
+    renderFeed({ entries: [], noProducts: true });
+    expect(
+      screen.getByRole("heading", { name: "No products yet" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Ask the owner to add you to a project."),
+      screen.getByText(
+        "Ask the person who runs this trail to give you access to a product.",
+      ),
     ).toBeInTheDocument();
     expect(screen.queryByText("No activity yet")).not.toBeInTheDocument();
   });
 
   test("an empty feed for a member with no project shows no filters", () => {
-    renderFeed({ entries: [], noProjects: true });
+    renderFeed({ entries: [], noProducts: true });
     expect(filterControls()).toHaveLength(0);
     expect(
-      screen.getByRole("heading", { name: "No projects yet" }),
+      screen.getByRole("heading", { name: "No products yet" }),
     ).toBeInTheDocument();
   });
 
-  test("noProjects is ignored once there are entries: rows and filters show", () => {
-    renderFeed({ noProjects: true });
+  test("noProducts is ignored once there are entries: rows and filters show", () => {
+    renderFeed({ noProducts: true });
     expect(rowFor("e1")).toBeInTheDocument();
     expect(
-      screen.queryByRole("heading", { name: "No projects yet" }),
+      screen.queryByRole("heading", { name: "No products yet" }),
     ).not.toBeInTheDocument();
-    expect(filterControls()).toHaveLength(2);
+    expect(filterControls()).toHaveLength(4);
   });
 
   describe("an import row", () => {
@@ -248,9 +307,11 @@ describe("feed states", () => {
     // the muted connector is its own element, so the counts are the last span
     const tailOf = (row: HTMLElement) => within(row).queryByText(/^\d+ /);
 
-    test("names the project as a link alongside imported and with", () => {
+    test("names the product as a link alongside imported and with", () => {
       const row = importRow({ issues: 12, comments: 1 });
-      expect(within(row).getByRole("link", { name: "trail" })).toBeVisible();
+      expect(
+        within(row).getByRole("link", { name: "TRL trail" }),
+      ).toBeVisible();
       expect(within(row).getByText("imported")).toBeInTheDocument();
       expect(within(row).getByText("with")).toBeInTheDocument();
     });
@@ -315,7 +376,7 @@ describe("feed rows", () => {
       within(rowFor("e1")).getByRole("link", {
         name: "TRL-14 Team access: invite people",
       }),
-    ).toHaveAttribute("href", "/issues/TRL-14");
+    ).toHaveAttribute("href", "/products/TRL/14");
   });
 
   test("rows sit under day headers", () => {
@@ -336,15 +397,15 @@ describe("feed rows", () => {
           comment: {
             id: "c1",
             body: "Ported from Linear.",
-            sourceAuthor: "Justin Salas",
+            sourceAuthor: "Jordan Smith",
           },
         }),
       ],
     });
     const row = rowFor("e1");
-    expect(within(row).getByText("Kai")).toBeInTheDocument();
+    expect(within(row).getByText("Alpha")).toBeInTheDocument();
     expect(
-      within(row).getByText("originally by Justin Salas"),
+      within(row).getByText("originally by Jordan Smith"),
     ).toBeInTheDocument();
   });
 });
@@ -374,4 +435,238 @@ test("a comment's quote shows its words, not its Markdown", () => {
   });
   expect(rowFor("e1")).toHaveTextContent("Client never sends Last-Event-ID.");
   expect(rowFor("e1")).not.toHaveTextContent("**");
+});
+
+describe("item events", () => {
+  test("carry the type badge before the key, its word and glyph following the type", () => {
+    renderFeed({
+      entries: [
+        commentEntry("e1", minutesAgo(1)),
+        itemCreatedEntry("e2", minutesAgo(2), {
+          item: { key: "TRL-15", title: "Back up the volume", type: "todo" },
+        }),
+      ],
+    });
+    const issueBadge = within(rowFor("e1")).getByText("Issue");
+    expect(issueBadge).toHaveAttribute("data-item-type", "issue");
+    expect(issueBadge.querySelector("svg")).toHaveClass("lucide-inbox");
+    const todoBadge = within(rowFor("e2")).getByText("Todo");
+    expect(todoBadge).toHaveAttribute("data-item-type", "todo");
+    expect(todoBadge.querySelector("svg")).toHaveClass("lucide-list-todo");
+    // the badge sits before the key link
+    const key = within(rowFor("e2")).getByRole("link", {
+      name: "TRL-15 Back up the volume",
+    });
+    expect(
+      todoBadge.compareDocumentPosition(key) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  test("bots and people file issues; bots plan todos", () => {
+    renderFeed({
+      entries: [
+        itemCreatedEntry("bot-issue", minutesAgo(1)),
+        itemCreatedEntry("bot-todo", minutesAgo(2), {
+          item: { key: "TRL-15", title: "Back up the volume", type: "todo" },
+        }),
+        itemCreatedEntry("person", minutesAgo(3), { actor: maya }),
+      ],
+    });
+    expect(within(rowFor("bot-issue")).getByText("filed")).toBeVisible();
+    expect(within(rowFor("bot-todo")).getByText("planned")).toBeVisible();
+    expect(within(rowFor("person")).getByText("filed")).toBeVisible();
+  });
+
+  test("an issue a bot filed and the owner accepted as a todo still reads filed", () => {
+    renderFeed({
+      entries: [
+        itemCreatedEntry("accepted", minutesAgo(1), {
+          item: { key: "TRL-15", title: "Back up the volume", type: "todo" },
+          createdAs: "issue",
+        }),
+      ],
+    });
+    const row = rowFor("accepted");
+    expect(within(row).getByText("filed")).toBeVisible();
+    expect(within(row).queryByText("planned")).toBeNull();
+  });
+
+  test("a change into triage reads to Triage, not Open", () => {
+    renderFeed({
+      entries: [
+        statusEntry("e1", minutesAgo(1), { from: "open", to: "triage" }),
+      ],
+    });
+    const row = rowFor("e1");
+    expect(row).toHaveTextContent(/to\s*Triage/);
+    expect(row).not.toHaveTextContent("Open");
+  });
+
+  test("accepting an issue out of triage reads to Open", () => {
+    renderFeed({
+      entries: [
+        statusEntry("e1", minutesAgo(1), { from: "triage", to: "open" }),
+      ],
+    });
+    expect(rowFor("e1")).toHaveTextContent(/to\s*Open/);
+  });
+
+  test("a type change names the new type", () => {
+    renderFeed({ entries: [typeChangedEntry("e1", minutesAgo(1))] });
+    const row = rowFor("e1");
+    expect(row).toHaveTextContent(/changed type of\s*Todo\s*TRL-14/);
+    expect(row).toHaveTextContent(/to\s*Todo/);
+  });
+
+  test("adding to and removing from a project name the project", () => {
+    renderFeed({
+      entries: [
+        membershipEntry("add", minutesAgo(1), "added_to_project"),
+        membershipEntry("remove", minutesAgo(2), "removed_from_project"),
+      ],
+    });
+    expect(rowFor("add")).toHaveTextContent(
+      /added\s*Issue\s*TRL-14.*to project\s*Human UI launch/,
+    );
+    expect(rowFor("remove")).toHaveTextContent(
+      /removed\s*Issue\s*TRL-14.*from project\s*Human UI launch/,
+    );
+    // the item is the row's one link
+    expect(within(rowFor("add")).getAllByRole("link")).toHaveLength(1);
+  });
+});
+
+describe("status update rows", () => {
+  test("a project update names the project and leaves the right column empty", () => {
+    renderFeed({ entries: [projectStatusUpdateEntry("e1", minutesAgo(1))] });
+    const row = rowFor("e1");
+    expect(row).toHaveTextContent("posted a status update on project");
+    expect(
+      within(row).getByRole("link", { name: "Human UI launch" }),
+    ).toHaveAttribute("href", "/projects/human-ui");
+    expect(within(row).getByText("At risk")).toBeInTheDocument();
+    expect(row.querySelector("[data-product-column]")).toBeEmptyDOMElement();
+  });
+
+  test("a product update names the product by key and name, and carries the key at the right", () => {
+    renderFeed({ entries: [productStatusUpdateEntry("e1", minutesAgo(1))] });
+    const row = rowFor("e1");
+    expect(row).toHaveTextContent("posted a status update on product");
+    expect(
+      within(row).getByRole("link", { name: "OPB OpenBot" }),
+    ).toHaveAttribute("href", "/products/OPB");
+    expect(row.querySelector("[data-product-column]")).toHaveTextContent(
+      /^OPB$/,
+    );
+  });
+
+  test("an item event carries its product key at the right", () => {
+    renderFeed();
+    expect(
+      rowFor("e1").querySelector("[data-product-column]"),
+    ).toHaveTextContent(/^TRL$/);
+  });
+
+  test("a project created or edited names the project, with no product key", () => {
+    renderFeed({
+      entries: [
+        projectEntry("made", minutesAgo(1), "project_created"),
+        projectEntry("edit", minutesAgo(2), "project_updated"),
+      ],
+    });
+    expect(rowFor("made")).toHaveTextContent(
+      /created project\s*Human UI launch/,
+    );
+    expect(rowFor("edit")).toHaveTextContent(
+      /updated project\s*Human UI launch/,
+    );
+    expect(
+      rowFor("made").querySelector("[data-product-column]"),
+    ).toBeEmptyDOMElement();
+  });
+});
+
+describe("filters", () => {
+  test("four filters: bots, products, projects and types, each starting at All", () => {
+    renderFeed();
+    const [bots, products, projects, types] = filterControls();
+    expect(bots).toHaveTextContent("All bots");
+    expect(products).toHaveTextContent("All products");
+    expect(projects).toHaveTextContent("All projects");
+    expect(types).toHaveTextContent("All types");
+  });
+
+  test("the type menu offers Issues and Todos and chooses by type", async () => {
+    const user = userEvent.setup();
+    const props = renderFeed();
+    await user.click(screen.getByRole("combobox", { name: "Filter by type" }));
+    const options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual([
+      "All types",
+      "Issues",
+      "Todos",
+    ]);
+    await user.click(screen.getByRole("option", { name: "Todos" }));
+    expect(props.onTypeFilterChange).toHaveBeenCalledWith(
+      "todo",
+      expect.anything(),
+    );
+  });
+
+  test("the chosen type shows on the trigger", () => {
+    renderFeed({ typeFilter: "issue" });
+    expect(
+      screen.getByRole("combobox", { name: "Filter by type" }),
+    ).toHaveTextContent("Issues");
+  });
+
+  test("the product menu lists only the products given, key then name", async () => {
+    const user = userEvent.setup();
+    const props = renderFeed({
+      filters: {
+        actors: [alpha],
+        products: [
+          { key: "TRL", name: "trail" },
+          { key: "OPB", name: "OpenBot" },
+        ],
+        projects: [humanUi],
+      },
+    });
+    await user.click(
+      screen.getByRole("combobox", { name: "Filter by product" }),
+    );
+    const options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual([
+      "All products",
+      "TRL trail",
+      "OPB OpenBot",
+    ]);
+    await user.click(screen.getByRole("option", { name: "OPB OpenBot" }));
+    expect(props.onProductFilterChange).toHaveBeenCalledWith("OPB");
+  });
+
+  test("the project menu lists only the projects given and chooses by slug", async () => {
+    const user = userEvent.setup();
+    const props = renderFeed({
+      filters: {
+        actors: [alpha],
+        products: [],
+        projects: [humanUi, teamAccess],
+      },
+    });
+    await user.click(
+      screen.getByRole("combobox", { name: "Filter by project" }),
+    );
+    const options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual([
+      "All projects",
+      "Human UI launch",
+      "Team access",
+    ]);
+    await user.click(screen.getByRole("option", { name: "Team access" }));
+    expect(props.onProjectFilterChange).toHaveBeenCalledWith(
+      "team-access",
+      expect.anything(),
+    );
+  });
 });

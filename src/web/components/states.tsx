@@ -2,13 +2,13 @@ import {
   ActivityIcon,
   FolderIcon,
   type LucideIcon,
+  PackageIcon,
   PlusIcon,
   SearchIcon,
   TriangleAlertIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { AppLink } from "@/components/app-link";
-import { type IssueStatus, statusLabel } from "@/components/status";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Empty,
@@ -141,13 +141,34 @@ export function FeedEmpty() {
   );
 }
 
-/** A member the owner has not added to any project: nothing can appear until they do. */
-export function FeedNoProjects() {
+/** Nothing under the feed filters: say so, and offer them all back. */
+export function FeedFilterEmpty({ onClear }: { onClear: () => void }) {
   return (
     <EmptyState
-      icon={FolderIcon}
-      title="No projects yet"
-      description="Ask the owner to add you to a project."
+      icon={SearchIcon}
+      title="Nothing matches these filters"
+      description="Try other filters, or clear them to see all activity."
+      action={
+        <Button
+          variant="outline"
+          size="sm"
+          className={panelAction}
+          onClick={onClear}
+        >
+          Clear filters
+        </Button>
+      }
+    />
+  );
+}
+
+/** A member the person who runs this trail has not added to any product: nothing can appear until they do. */
+export function FeedNoProducts() {
+  return (
+    <EmptyState
+      icon={PackageIcon}
+      title="No products yet"
+      description="Ask the person who runs this trail to give you access to a product."
     />
   );
 }
@@ -188,18 +209,18 @@ export function LoadingRegion({
   );
 }
 
-export function IssueListEmpty({
-  projectKey,
+export function ItemListEmpty({
+  productKey,
   onNewIssue,
 }: {
-  projectKey: string;
+  productKey: string;
   onNewIssue: () => void;
 }) {
   return (
     <EmptyState
       icon={FolderIcon}
-      title={`No issues in ${projectKey} yet`}
-      description="Bots file issues here. You can file one too."
+      title={`No items in ${productKey} yet`}
+      description="Bots plan todos and file issues here. You can file an issue too."
       action={
         <Button size="sm" className={panelAction} onClick={onNewIssue}>
           <PlusIcon data-icon="inline-start" aria-hidden="true" />
@@ -210,45 +231,18 @@ export function IssueListEmpty({
   );
 }
 
-/** The project has issues, just none with the status the filter picked. */
-export function StatusFilterEmpty({
-  status,
-  onShowAll,
-}: {
-  status: IssueStatus;
-  onShowAll: () => void;
-}) {
-  return (
-    <EmptyState
-      icon={SearchIcon}
-      title={`No issues are ${statusLabel(status).toLowerCase()}`}
-      description="Try another status."
-      action={
-        <Button
-          variant="outline"
-          size="sm"
-          className={panelAction}
-          onClick={onShowAll}
-        >
-          Show all
-        </Button>
-      }
-    />
-  );
-}
-
-export function IssueListError({ onRetry }: { onRetry: () => void }) {
+export function ItemListError({ onRetry }: { onRetry: () => void }) {
   return (
     <ErrorState
-      title="Couldn't load issues"
+      title="Couldn't load items"
       description="Check your connection, then try again."
       onRetry={onRetry}
     />
   );
 }
 
-/** A person given no projects yet is pointed at the owner; the owner sees where projects come from. */
-export function ProjectsEmpty({
+/** A person given no products yet is pointed at the person who runs this trail, who sees where products come from. */
+export function ProductsEmpty({
   ownerName,
   isOwner,
 }: {
@@ -257,13 +251,23 @@ export function ProjectsEmpty({
 }) {
   return (
     <EmptyState
-      icon={FolderIcon}
-      title="No projects yet"
+      icon={PackageIcon}
+      title="No products yet"
       description={
         isOwner
-          ? "Projects that bots create show up here."
-          : `Ask ${ownerName} to give you access to a project.`
+          ? "Products that bots create show up here."
+          : `Ask ${ownerName} to give you access to a product.`
       }
+    />
+  );
+}
+
+export function ProductsError({ onRetry }: { onRetry: () => void }) {
+  return (
+    <ErrorState
+      title="Couldn't load products"
+      description="Check your connection, then try again."
+      onRetry={onRetry}
     />
   );
 }

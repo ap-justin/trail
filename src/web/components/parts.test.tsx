@@ -22,14 +22,14 @@ describe("ActorBadge", () => {
   test("bot avatars are rounded squares, human avatars circles", () => {
     const { container } = render(
       <>
-        <ActorAvatar actor={{ name: "Kai", kind: "bot", photoUrl: null }} />
+        <ActorAvatar actor={{ name: "Alpha", kind: "bot", photoUrl: null }} />
         <ActorAvatar
           actor={{ name: "Maya Chen", kind: "human", photoUrl: null }}
         />
       </>,
     );
     const [bot, human] = container.children;
-    expect(bot).toHaveTextContent("K");
+    expect(bot).toHaveTextContent("A");
     expect(bot).toHaveClass("rounded-md");
     expect(human).toHaveTextContent("MC");
     expect(human).toHaveClass("rounded-full");
@@ -43,7 +43,7 @@ describe("ActorAvatar", () => {
     ["md", "size-7"],
     ["lg", "size-9"],
   ] as const;
-  const photo = photoUrlFor("a-kai", "3f");
+  const photo = photoUrlFor("a-alpha", "3f");
 
   test.each(sizes)(
     "%s: a photo sits over the initials in its kind's shape at its size",
@@ -51,7 +51,7 @@ describe("ActorAvatar", () => {
       const { container } = render(
         <>
           <ActorAvatar
-            actor={{ name: "Kai", kind: "bot", photoUrl: photo }}
+            actor={{ name: "Alpha", kind: "bot", photoUrl: photo }}
             size={size}
           />
           <ActorAvatar
@@ -67,7 +67,7 @@ describe("ActorAvatar", () => {
       const [bot, human] = container.children;
       expect(bot).toHaveClass(sizeClass, "rounded-md", "bg-bot-muted");
       expect(bot?.querySelector("img")).toHaveAttribute("src", photo);
-      expect(bot).toHaveTextContent("K");
+      expect(bot).toHaveTextContent("A");
       expect(human).toHaveClass(sizeClass, "rounded-full");
       expect(human?.querySelector("img")).toHaveAttribute(
         "src",
@@ -83,7 +83,7 @@ describe("ActorAvatar", () => {
       const { container } = render(
         <>
           <ActorAvatar
-            actor={{ name: "Kai", kind: "bot", photoUrl: photo }}
+            actor={{ name: "Alpha", kind: "bot", photoUrl: photo }}
             size={size}
           />
           <ActorAvatar
@@ -104,8 +104,8 @@ describe("ActorAvatar", () => {
   test("a bot without a photo has no frame; one whose loaded photo then fails drops the img and the frame", () => {
     const { container } = render(
       <>
-        <ActorAvatar actor={{ name: "Kai", kind: "bot", photoUrl: null }} />
-        <ActorAvatar actor={{ name: "Kai", kind: "bot", photoUrl: photo }} />
+        <ActorAvatar actor={{ name: "Alpha", kind: "bot", photoUrl: null }} />
+        <ActorAvatar actor={{ name: "Alpha", kind: "bot", photoUrl: photo }} />
       </>,
     );
     const [bare, failing] = container.children;
@@ -121,12 +121,12 @@ describe("ActorAvatar", () => {
     expect(failing).not.toHaveClass("border");
     expect(failing).not.toHaveClass("border-bot");
     expect(failing).toHaveClass("bg-bot-muted", "text-bot");
-    expect(failing).toHaveTextContent("K");
+    expect(failing).toHaveTextContent("A");
   });
 
   test("a bot's frame shows only while its photo is shown: not while loading, not after a failure", () => {
     const { container, rerender } = render(
-      <ActorAvatar actor={{ name: "Kai", kind: "bot", photoUrl: photo }} />,
+      <ActorAvatar actor={{ name: "Alpha", kind: "bot", photoUrl: photo }} />,
     );
     const avatar = container.firstElementChild;
     const img = container.querySelector("img");
@@ -134,7 +134,7 @@ describe("ActorAvatar", () => {
     expect(avatar).not.toHaveClass("border");
     expect(avatar).not.toHaveClass("border-bot");
     expect(avatar).toHaveClass("bg-bot-muted", "text-bot");
-    expect(avatar).toHaveTextContent("K");
+    expect(avatar).toHaveTextContent("A");
 
     fireEvent.load(img);
     expect(avatar).toHaveClass("border", "border-bot");
@@ -142,7 +142,7 @@ describe("ActorAvatar", () => {
     rerender(
       <ActorAvatar
         actor={{
-          name: "Kai",
+          name: "Alpha",
           kind: "bot",
           photoUrl: photoUrlFor("a-new", "9c"),
         }}
@@ -162,7 +162,7 @@ describe("ActorAvatar", () => {
 
   test("a new photo URL gets a fresh img, so the old photo never paints unframed under the initials", () => {
     const { container, rerender } = render(
-      <ActorAvatar actor={{ name: "Kai", kind: "bot", photoUrl: photo }} />,
+      <ActorAvatar actor={{ name: "Alpha", kind: "bot", photoUrl: photo }} />,
     );
     const avatar = container.firstElementChild;
     const old = container.querySelector("img");
@@ -172,20 +172,24 @@ describe("ActorAvatar", () => {
 
     rerender(
       <ActorAvatar
-        actor={{ name: "Kai", kind: "bot", photoUrl: "/api/photos/a-new/9c0d" }}
+        actor={{
+          name: "Alpha",
+          kind: "bot",
+          photoUrl: "/api/photos/a-new/9c0d",
+        }}
       />,
     );
     const next = container.querySelector("img");
     expect(old).not.toBeInTheDocument();
     expect(next).not.toBe(old);
     expect(next).toHaveAttribute("src", "/api/photos/a-new/9c0d");
-    expect(avatar).toHaveTextContent("K");
+    expect(avatar).toHaveTextContent("A");
     expect(avatar).not.toHaveClass("border");
   });
 
   test("the photo is decorative and loads lazily", () => {
     const { container } = render(
-      <ActorAvatar actor={{ name: "Kai", kind: "bot", photoUrl: photo }} />,
+      <ActorAvatar actor={{ name: "Alpha", kind: "bot", photoUrl: photo }} />,
     );
     const img = container.querySelector("img");
     expect(container.firstElementChild).toHaveAttribute("aria-hidden", "true");
@@ -198,9 +202,9 @@ describe("ActorAvatar", () => {
   test("loading is lazy by default and eager on request", () => {
     const { container } = render(
       <>
-        <ActorAvatar actor={{ name: "Kai", kind: "bot", photoUrl: photo }} />
+        <ActorAvatar actor={{ name: "Alpha", kind: "bot", photoUrl: photo }} />
         <ActorAvatar
-          actor={{ name: "Kai", kind: "bot", photoUrl: photo }}
+          actor={{ name: "Alpha", kind: "bot", photoUrl: photo }}
           loading="eager"
         />
       </>,
@@ -213,20 +217,20 @@ describe("ActorAvatar", () => {
   test("photoUrl null: initials and no img", () => {
     const { container } = render(
       <>
-        <ActorAvatar actor={{ name: "Kai", kind: "bot", photoUrl: null }} />
+        <ActorAvatar actor={{ name: "Alpha", kind: "bot", photoUrl: null }} />
         <ActorAvatar
           actor={{ name: "Maya Chen", kind: "human", photoUrl: null }}
         />
       </>,
     );
     const [bot, human] = container.children;
-    expect(bot).toHaveTextContent("K");
+    expect(bot).toHaveTextContent("A");
     expect(human).toHaveTextContent("MC");
     expect(container.querySelector("img")).toBeNull();
   });
 
   test.each([
-    ["bot", "Kai", "K"],
+    ["bot", "Alpha", "A"],
     ["human", "Maya Chen", "MC"],
   ] as const)(
     "%s: initials show until the photo loads, then stop painting so a transparent photo never shows them through",
@@ -253,7 +257,7 @@ describe("ActorAvatar", () => {
   );
 
   test.each([
-    ["bot", "Kai", "K"],
+    ["bot", "Alpha", "A"],
     ["human", "Maya Chen", "MC"],
   ] as const)(
     "%s: the img loads hidden behind the initials, unframed, and shows only once loaded",
@@ -301,7 +305,7 @@ describe("ActorAvatar", () => {
     afterEach(() => vi.restoreAllMocks());
 
     test.each([
-      ["bot", "Kai", "K"],
+      ["bot", "Alpha", "A"],
       ["human", "Maya Chen", "MC"],
     ] as const)(
       "%s: no initials from the first paint, without waiting for load",
@@ -320,36 +324,36 @@ describe("ActorAvatar", () => {
 
     test("a cached new URL is shown straight away too", () => {
       const { container, rerender } = render(
-        <ActorAvatar actor={{ name: "Kai", kind: "bot", photoUrl: photo }} />,
+        <ActorAvatar actor={{ name: "Alpha", kind: "bot", photoUrl: photo }} />,
       );
-      expect(container.firstElementChild).toHaveTextContent("K");
+      expect(container.firstElementChild).toHaveTextContent("A");
       stubCompleteImages();
       rerender(
         <ActorAvatar
           actor={{
-            name: "Kai",
+            name: "Alpha",
             kind: "bot",
             photoUrl: photoUrlFor("a-new", "9c"),
           }}
         />,
       );
-      expect(container.firstElementChild).not.toHaveTextContent("K");
+      expect(container.firstElementChild).not.toHaveTextContent("A");
     });
 
     test("a new URL still fetching keeps the initials until it loads", () => {
       stubCompleteImages();
       const { container, rerender } = render(
-        <ActorAvatar actor={{ name: "Kai", kind: "bot", photoUrl: photo }} />,
+        <ActorAvatar actor={{ name: "Alpha", kind: "bot", photoUrl: photo }} />,
       );
       const avatar = container.firstElementChild;
       const old = container.querySelector("img");
-      expect(avatar).not.toHaveTextContent("K");
+      expect(avatar).not.toHaveTextContent("A");
       // the new URL's fresh img isn't complete yet
       vi.restoreAllMocks();
       rerender(
         <ActorAvatar
           actor={{
-            name: "Kai",
+            name: "Alpha",
             kind: "bot",
             photoUrl: photoUrlFor("a-new", "9c"),
           }}
@@ -358,10 +362,10 @@ describe("ActorAvatar", () => {
       const img = container.querySelector("img");
       if (!img) throw new Error("no img");
       expect(img).not.toBe(old);
-      expect(avatar).toHaveTextContent("K");
+      expect(avatar).toHaveTextContent("A");
       expect(avatar).not.toHaveClass("border");
       fireEvent.load(img);
-      expect(avatar).not.toHaveTextContent("K");
+      expect(avatar).not.toHaveTextContent("A");
     });
 
     test("a complete image that decoded to nothing (broken) keeps the initials", () => {
@@ -370,9 +374,9 @@ describe("ActorAvatar", () => {
         true,
       );
       const { container } = render(
-        <ActorAvatar actor={{ name: "Kai", kind: "bot", photoUrl: photo }} />,
+        <ActorAvatar actor={{ name: "Alpha", kind: "bot", photoUrl: photo }} />,
       );
-      expect(container.firstElementChild).toHaveTextContent("K");
+      expect(container.firstElementChild).toHaveTextContent("A");
     });
   });
 

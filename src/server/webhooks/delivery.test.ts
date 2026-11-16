@@ -234,6 +234,64 @@ test("an issue, a comment and a status change each arrive once, signed, in order
   ).toBe(true);
 });
 
+test("a product event arrives twice for one release, as trail.product.* then the old trail.project.*, each its own delivery, in event order", async () => {
+  reset();
+  const key = await newProject();
+  await subscribe([key], "https://bot.example.com/renamed");
+  await api("PATCH", `/products/${key}`, { name: "Renamed" });
+  await api("POST", "/items", { type: "todo", product: key, title: "after" });
+  await api("PATCH", `/products/${key}`, { description: "again" });
+
+  const w = worker();
+  await until(w, () => received.length >= 5);
+  await w.tick();
+  const messages = received.map((r) => JSON.parse(r.body));
+  expect(messages.map((m) => m.type)).toEqual([
+    "trail.product.updated",
+    "trail.project.updated",
+    "trail.issue.created",
+    "trail.product.updated",
+    "trail.project.updated",
+  ]);
+  // the two of one event carry the same event, under their own delivery ids
+  const [renamed, legacy] = messages;
+  expect(legacy.data).toEqual(renamed.data);
+  expect(renamed.data).toMatchObject({
+    product: { key, name: "Renamed" },
+    payload: { name: { from: `Project ${key}`, to: "Renamed" } },
+  });
+  expect(
+    new Set(received.map((r) => r.headers["x-openbot-delivery-id"])).size,
+  ).toBe(5);
+  for (const r of received) {
+    expect(r.headers["x-openbot-signature"]).toBe(signatureOf(r));
+  }
+});
+
+test("a failing trail.product.* delivery holds its trail.project.* twin and everything after it", async () => {
+  reset();
+  const key = await newProject();
+  await subscribe([key], "https://bot.example.com/twin-retry");
+  await api("PATCH", `/products/${key}`, { name: "Held" });
+  statuses.push(500);
+  const w = worker();
+  await w.tick();
+  expect(received.map((r) => JSON.parse(r.body).type)).toEqual([
+    "trail.product.updated",
+  ]);
+  advance(SECOND);
+  await until(w, () => received.length >= 3);
+  expect(received.map((r) => JSON.parse(r.body).type)).toEqual([
+    "trail.product.updated",
+    "trail.product.updated",
+    "trail.project.updated",
+  ]);
+  // the retry is the same delivery: dedupe on its id
+  expect(received[1]?.headers["x-openbot-delivery-id"]).toBe(
+    received[0]?.headers["x-openbot-delivery-id"],
+  );
+});
+
 test("nothing arrives for a project the webhook doesn't follow, while its own project's events do", async () => {
   reset();
   const followed = await newProject();

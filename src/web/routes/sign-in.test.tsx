@@ -105,18 +105,18 @@ describe("the return address", () => {
 
   test("a /me refetch that lets the viewer in goes on to the return address", async () => {
     signedInAs("anonymous");
-    const { router } = renderApp("/sign-in?redirect=%2Fissues%2FTRL-14");
+    const { router } = renderApp("/sign-in?redirect=%2Fproducts%2FTRL%2F14");
     await screen.findByRole("heading", { name: "Sign in to trail" });
     signedInAs("member");
     server.use(
-      http.get("/api/web/issues/TRL-14", () => HttpResponse.json(issue())),
+      http.get("/api/web/items/TRL-14", () => HttpResponse.json(issue())),
     );
     act(() => {
       focusManager.setFocused(false);
       focusManager.setFocused(true);
     });
     await waitFor(() =>
-      expect(router.state.location.pathname).toBe("/issues/TRL-14"),
+      expect(router.state.location.pathname).toBe("/products/TRL/14"),
     );
     // the issue read is still in flight at the pathname change: wait for it to land so it
     // cannot reach a later test's handlers
@@ -126,11 +126,11 @@ describe("the return address", () => {
   test("a member on sign-in goes on to the return address", async () => {
     signedInAs("member");
     server.use(
-      http.get("/api/web/issues/TRL-14", () => HttpResponse.json(issue())),
+      http.get("/api/web/items/TRL-14", () => HttpResponse.json(issue())),
     );
-    const { router } = renderApp("/sign-in?redirect=%2Fissues%2FTRL-14");
+    const { router } = renderApp("/sign-in?redirect=%2Fproducts%2FTRL%2F14");
     await waitFor(() =>
-      expect(router.state.location.pathname).toBe("/issues/TRL-14"),
+      expect(router.state.location.pathname).toBe("/products/TRL/14"),
     );
     // the issue read is still in flight at the pathname change: wait for it to land so it
     // cannot reach a later test's handlers

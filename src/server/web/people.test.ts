@@ -38,10 +38,10 @@ const as =
   };
 const people = as(ownerCookie);
 
-test("the owner invites a username, lowercased, to projects; it is pending until that account signs in", async () => {
+test("the owner invites a username, lowercased, to products; it is pending until that account signs in", async () => {
   const created = await people("POST", "/people", {
     username: "  New-Person ",
-    projectKeys: [alpha.key.toLowerCase(), beta.key],
+    products: [alpha.key.toLowerCase(), beta.key],
   });
   expect(created).toEqual({
     status: 201,
@@ -52,7 +52,7 @@ test("the owner invites a username, lowercased, to projects; it is pending until
       pending: true,
       name: null,
       photoUrl: null,
-      projects: [
+      products: [
         { key: alpha.key, name: "Alpha" },
         { key: beta.key, name: "Beta" },
       ],
@@ -70,7 +70,7 @@ test("the owner invites a username, lowercased, to projects; it is pending until
     pending: false,
     name: "Olive Owner",
     photoUrl: null,
-    projects: expect.arrayContaining([{ key: alpha.key, name: "Alpha" }]),
+    products: expect.arrayContaining([{ key: alpha.key, name: "Alpha" }]),
     invitedAt: null,
   });
   expect(body.items).toContainEqual({
@@ -96,19 +96,19 @@ test.each([
     422,
   ],
 ])("inviting %s is a %i", async (_, { username }, status) => {
-  await people("POST", "/people", { username: "repeat", projectKeys: [] });
+  await people("POST", "/people", { username: "repeat", products: [] });
   await people("POST", "/people", {
     username: "repeat@example.com",
-    projectKeys: [],
+    products: [],
   });
-  const res = await people("POST", "/people", { username, projectKeys: [] });
+  const res = await people("POST", "/people", { username, products: [] });
   expect(res.status).toBe(status);
 });
 
-test("the owner invites an email address, lowercased, to projects; it is pending until that address signs in", async () => {
+test("the owner invites an email address, lowercased, to products; it is pending until that address signs in", async () => {
   const created = await people("POST", "/people", {
     username: "  Priya@Studio.Example ",
-    projectKeys: [alpha.key],
+    products: [alpha.key],
   });
   expect(created).toEqual({
     status: 201,
@@ -119,7 +119,7 @@ test("the owner invites an email address, lowercased, to projects; it is pending
       pending: true,
       name: null,
       photoUrl: null,
-      projects: [{ key: alpha.key, name: "Alpha" }],
+      products: [{ key: alpha.key, name: "Alpha" }],
       invitedAt: expect.any(String),
     },
   });
@@ -134,10 +134,10 @@ test("the owner invites an email address, lowercased, to projects; it is pending
 });
 
 test("the list carries both kinds of invite, oldest first, after the owner", async () => {
-  await people("POST", "/people", { username: "both-gh", projectKeys: [] });
+  await people("POST", "/people", { username: "both-gh", products: [] });
   await people("POST", "/people", {
     username: "both@example.com",
-    projectKeys: [],
+    products: [],
   });
   const { body } = await people("GET", "/people");
   const handles = body.items.map((p: Body) => p.username ?? p.email);
@@ -148,10 +148,24 @@ test("the list carries both kinds of invite, oldest first, after the owner", asy
   );
 });
 
+test("inviting the person who runs this trail is a 409 saying so", async () => {
+  expect(
+    await people("POST", "/people", { username: owner, products: [] }),
+  ).toEqual({
+    status: 409,
+    body: {
+      error: {
+        code: "conflict",
+        message: `@${owner} is the person who runs this trail, who sees every product`,
+      },
+    },
+  });
+});
+
 test("an entry that is neither a GitHub username nor an email address is a 422 saying what to enter", async () => {
   const res = await people("POST", "/people", {
     username: "devon@",
-    projectKeys: [],
+    products: [],
   });
   expect(res).toEqual({
     status: 422,
@@ -167,21 +181,21 @@ test("an entry that is neither a GitHub username nor an email address is a 422 s
 
 test.each([
   ["an email", "dana@example.com", "DANA@example.com", "dana@example.com"],
-  ["a GitHub username", "kai-dev", "Kai-Dev", "@kai-dev"],
+  ["a GitHub username", "beta-dev", "Beta-Dev", "@beta-dev"],
 ])(
   "inviting %s again, in any case, is a 409 naming it",
   async (_, first, again, named) => {
-    await people("POST", "/people", { username: first, projectKeys: [] });
+    await people("POST", "/people", { username: first, products: [] });
     const res = await people("POST", "/people", {
       username: again,
-      projectKeys: [],
+      products: [],
     });
     expect(res).toEqual({
       status: 409,
       body: {
         error: {
           code: "conflict",
-          message: `${named} is already invited. Change their projects in the list below.`,
+          message: `${named} is already invited: change their products in the list below.`,
         },
       },
     });
@@ -191,67 +205,76 @@ test.each([
 test("PUT and DELETE name an email invite by its address, in any case", async () => {
   await people("POST", "/people", {
     username: "edit@example.com",
-    projectKeys: [alpha.key],
+    products: [alpha.key],
   });
   syncEmailActor(db, "edit@example.com");
   const path = `/people/${encodeURIComponent("Edit@Example.com")}`;
 
-  const moved = await people("PUT", path, { projectKeys: [beta.key] });
+  const moved = await people("PUT", path, { products: [beta.key] });
   expect(moved.status).toBe(200);
   expect(moved.body).toMatchObject({
     email: "edit@example.com",
-    projects: [{ key: beta.key, name: "Beta" }],
+    products: [{ key: beta.key, name: "Beta" }],
   });
 
   expect(await people("DELETE", path)).toEqual({ status: 204, body: null });
   expect(accessOfEmail(db, "edit@example.com")).toBeNull();
   expect((await people("DELETE", path)).status).toBe(404);
   expect(
-    (await people("PUT", "/people/ghost@example.com", { projectKeys: [] }))
-      .status,
+    (await people("PUT", "/people/ghost@example.com", { products: [] })).status,
   ).toBe(404);
 });
 
-test("an unknown project key is a 422 naming the key, and invites no one", async () => {
+test("an unknown product key is a 422 naming the key, and invites no one", async () => {
   const res = await people("POST", "/people", {
     username: "keyless",
-    projectKeys: [alpha.key, "NOPE"],
+    products: [alpha.key, "NOPE"],
   });
   expect(res.status).toBe(422);
-  expect(res.body.error.message).toContain("NOPE");
+  expect(res.body.error.message).toBe(
+    "no product NOPE: pass the keys of existing products",
+  );
   const list = await people("GET", "/people");
   expect(list.body.items.map((p: Body) => p.username)).not.toContain("keyless");
 });
 
-test("PUT replaces a person's projects, and the member sees exactly the new set on its next request", async () => {
+test("an invite naming projectKeys, the field before products, is a 422", async () => {
+  const res = await people("POST", "/people", {
+    username: "old-client",
+    projectKeys: [alpha.key],
+  });
+  expect(res.status).toBe(422);
+});
+
+test("PUT replaces a person's products, and the member sees exactly the new set on its next request", async () => {
   const cookie = await addMember("mover", [alpha.id]);
   const moved = await people("PUT", "/people/Mover", {
-    projectKeys: [beta.key],
+    products: [beta.key],
   });
   expect(moved.status).toBe(200);
-  expect(moved.body.projects).toEqual([{ key: beta.key, name: "Beta" }]);
+  expect(moved.body.products).toEqual([{ key: beta.key, name: "Beta" }]);
   const me = await as(cookie)("GET", "/me");
-  expect(me.body.projects).toEqual([{ key: beta.key, name: "Beta" }]);
+  expect(me.body.products).toEqual([{ key: beta.key, name: "Beta" }]);
 
-  const emptied = await people("PUT", "/people/mover", { projectKeys: [] });
-  expect(emptied.body.projects).toEqual([]);
-  expect((await as(cookie)("GET", "/projects")).body.items).toEqual([]);
+  const emptied = await people("PUT", "/people/mover", { products: [] });
+  expect(emptied.body.products).toEqual([]);
+  expect((await as(cookie)("GET", "/products")).body.items).toEqual([]);
 });
 
 test("PUT or DELETE of a username with no invite is a 404", async () => {
-  expect(
-    (await people("PUT", "/people/ghost", { projectKeys: [] })).status,
-  ).toBe(404);
+  expect((await people("PUT", "/people/ghost", { products: [] })).status).toBe(
+    404,
+  );
   expect((await people("DELETE", "/people/ghost")).status).toBe(404);
   expect((await people("DELETE", `/people/${owner}`)).status).toBe(404);
 });
 
 test("DELETE removes the invite: the person is signed out at once, and its actor stays", async () => {
   const cookie = await addMember("leaver", [alpha.id], { githubId: 9001 });
-  expect((await as(cookie)("GET", "/projects")).status).toBe(200);
+  expect((await as(cookie)("GET", "/products")).status).toBe(200);
   const res = await people("DELETE", "/people/leaver");
   expect(res).toEqual({ status: 204, body: null });
-  expect((await as(cookie)("GET", "/projects")).status).toBe(401);
+  expect((await as(cookie)("GET", "/products")).status).toBe(401);
   expect(
     db.select().from(actor).where(eq(actor.githubId, 9001)).get(),
   ).toMatchObject({
@@ -268,8 +291,7 @@ test.each([
   "%s %s is, for a member, the same 404 as a route that does not exist",
   async (method, path) => {
     const member = as(await addMember(`m${method.toLowerCase()}`, [alpha.id]));
-    const json =
-      method === "GET" ? undefined : { username: "x", projectKeys: [] };
+    const json = method === "GET" ? undefined : { username: "x", products: [] };
     const res = await member(method, path, json);
     expect(res).toEqual({
       status: 404,
@@ -284,11 +306,11 @@ test.each([
 );
 
 test("an invite is pending until an account claims it, and then shows that account's name whatever its login becomes", async () => {
-  await people("POST", "/people", { username: "ren", projectKeys: [] });
+  await people("POST", "/people", { username: "ren", products: [] });
   await signIn("ren", { githubId: 7001, name: "Ren Original" });
   await signIn("ren-new", { githubId: 7001, name: "Ren Renamed" });
   // the account now holding ren-new already claimed "ren", so this invite stays unclaimed
-  await people("POST", "/people", { username: "ren-new", projectKeys: [] });
+  await people("POST", "/people", { username: "ren-new", products: [] });
   await signIn("ren-new", { githubId: 7001 });
 
   const { body } = await people("GET", "/people");
@@ -301,7 +323,7 @@ test("an invite is pending until an account claims it, and then shows that accou
 test("a 77-character username that only fits the shape is a 422", async () => {
   const res = await people("POST", "/people", {
     username: `a${"-b".repeat(38)}`,
-    projectKeys: [],
+    products: [],
   });
   expect(res.status).toBe(422);
 });
@@ -312,7 +334,7 @@ test("removing a GitHub invite ends its sessions, so a re-invite needs a fresh s
   expect(await viewerOf(cookie)).toMatchObject({ kind: "member" });
   expect((await people("DELETE", "/people/returner")).status).toBe(204);
   expect(
-    (await people("POST", "/people", { username: "returner", projectKeys: [] }))
+    (await people("POST", "/people", { username: "returner", products: [] }))
       .status,
   ).toBe(201);
   expect(await viewerOf(cookie)).toEqual({ kind: "anonymous" });
@@ -331,7 +353,7 @@ test("removing an email invite ends its sessions, so a re-invite needs a fresh s
     (
       await people("POST", "/people", {
         username: "again@example.com",
-        projectKeys: [alpha.key],
+        products: [alpha.key],
       })
     ).status,
   ).toBe(201);
@@ -344,17 +366,17 @@ test("removing an email invite ends its sessions, so a re-invite needs a fresh s
 test("a GitHub handle typed with a leading @ is the username, in POST, PUT and DELETE", async () => {
   const created = await people("POST", "/people", {
     username: " @At-Handle ",
-    projectKeys: [alpha.key],
+    products: [alpha.key],
   });
   expect(created.status).toBe(201);
   expect(created.body).toMatchObject({ username: "at-handle", email: null });
 
   const path = `/people/${encodeURIComponent("@At-Handle")}`;
-  const moved = await people("PUT", path, { projectKeys: [beta.key] });
+  const moved = await people("PUT", path, { products: [beta.key] });
   expect(moved.status).toBe(200);
   expect(moved.body).toMatchObject({
     username: "at-handle",
-    projects: [{ key: beta.key, name: "Beta" }],
+    products: [{ key: beta.key, name: "Beta" }],
   });
   expect(await people("DELETE", path)).toEqual({ status: 204, body: null });
   expect((await people("DELETE", "/people/at-handle")).status).toBe(404);
@@ -364,7 +386,7 @@ test.each(["@@double", "@dana@example.com", "@"])(
   "%j is neither a handle nor an address",
   async (entry) => {
     expect(
-      (await people("POST", "/people", { username: entry, projectKeys: [] }))
+      (await people("POST", "/people", { username: entry, products: [] }))
         .status,
     ).toBe(422);
   },

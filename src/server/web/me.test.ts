@@ -9,7 +9,7 @@ const me = async (cookie?: string) => {
   return { status: res.status, body: (await res.json()) as any };
 };
 
-test("an anonymous visitor gets 200 with no login, actor or projects, and the owner's login as ownerName before the owner signs in", async () => {
+test("an anonymous visitor gets 200 with no login, actor or products, and the owner's login as ownerName before the owner signs in", async () => {
   expect(await me()).toEqual({
     status: 200,
     body: {
@@ -17,7 +17,7 @@ test("an anonymous visitor gets 200 with no login, actor or projects, and the ow
       login: null,
       email: null,
       actor: null,
-      projects: [],
+      products: [],
       ownerName: owner,
       emailSignIn: true,
     },
@@ -33,14 +33,14 @@ test("an account not on the list gets 200 not_invited with its login and nothing
       login: "stranger",
       email: null,
       actor: null,
-      projects: [],
+      products: [],
       ownerName: owner,
       emailSignIn: true,
     },
   });
 });
 
-test("a member gets its actor and exactly its projects; the owner's display name replaces the login once the owner has signed in", async () => {
+test("a member gets its actor and exactly its products; the owner's display name replaces the login once the owner has signed in", async () => {
   const mine = addProject("Mine");
   addProject("Theirs");
   const cookie = await addMember("ada", [mine.id], { name: "Ada Lovelace" });
@@ -58,7 +58,7 @@ test("a member gets its actor and exactly its projects; the owner's display name
         photoUrl: null,
         title: null,
       },
-      projects: [{ key: mine.key, name: "Mine" }],
+      products: [{ key: mine.key, name: "Mine" }],
       ownerName: "Olive Owner",
       emailSignIn: true,
     },
@@ -69,7 +69,7 @@ test("the owner is state owner and sees every project", async () => {
   const a = addProject();
   const res = await me(await signIn(owner));
   expect(res.body).toMatchObject({ state: "owner", login: owner });
-  expect(res.body.projects).toContainEqual({ key: a.key, name: a.name });
+  expect(res.body.products).toContainEqual({ key: a.key, name: a.name });
 });
 
 test("ownerName follows the owner's account, not its login: a renamed owner keeps its name, and whoever later takes the old login is not the owner", async () => {

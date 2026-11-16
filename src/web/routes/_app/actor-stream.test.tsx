@@ -4,7 +4,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { RECONNECT_MS } from "@/lib/use-live-feed";
 import { meView, renderApp, serveFeed } from "@/test/app";
 import { FakeEventSource } from "@/test/event-source";
-import { issue, kai, statusEntry } from "@/test/fixtures";
+import { alpha, issue, statusEntry } from "@/test/fixtures";
 import { server } from "@/test/server";
 
 const issueTitle = "Team access: invite people by GitHub username";
@@ -21,7 +21,7 @@ function serveCounted() {
       reads.me += 1;
       return HttpResponse.json(meView("member"));
     }),
-    http.get("/api/web/issues/TRL-14", () => {
+    http.get("/api/web/items/TRL-14", () => {
       reads.issue += 1;
       return HttpResponse.json(issue());
     }),
@@ -34,7 +34,7 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
 
 async function openIssue() {
   const reads = serveCounted();
-  const app = renderApp("/issues/TRL-14");
+  const app = renderApp("/products/TRL/14");
   expect(await screen.findByText(issueTitle)).toBeInTheDocument();
   return { ...app, reads, stream: FakeEventSource.current };
 }
@@ -69,7 +69,10 @@ describe("the shell's actor stream", () => {
     await waitFor(() =>
       expect(document.querySelector('[data-entry-id="e3"]')).not.toBeNull(),
     );
-    await router.navigate({ to: "/issues/$key", params: { key: "TRL-14" } });
+    await router.navigate({
+      to: "/products/$key/$n",
+      params: { key: "TRL", n: "14" },
+    });
     expect(await screen.findByText(issueTitle)).toBeInTheDocument();
     const shell = FakeEventSource.current;
     expect(shell.url).toBe(actorsOnly);
@@ -93,7 +96,7 @@ describe("the shell's actor stream", () => {
     const { reads, stream } = await openIssue();
     stream.open();
     await waitFor(() => expect(reads.me).toBe(2));
-    stream.actor({ actorId: kai.id, photoUrl: null, title: null });
+    stream.actor({ actorId: alpha.id, photoUrl: null, title: null });
     await settle();
     expect(reads).toEqual({ me: 2, issue: 1 });
   });
@@ -125,7 +128,10 @@ describe("the shell's actor stream", () => {
       expect(document.querySelector('[data-entry-id="e3"]')).not.toBeNull(),
     );
     FakeEventSource.current.open();
-    await router.navigate({ to: "/issues/$key", params: { key: "TRL-14" } });
+    await router.navigate({
+      to: "/products/$key/$n",
+      params: { key: "TRL", n: "14" },
+    });
     expect(await screen.findByText(issueTitle)).toBeInTheDocument();
     const reopened = FakeEventSource.current;
     expect(reopened.url).toBe(actorsOnly);

@@ -17,6 +17,7 @@ import { newId } from "./id.js";
 
 export const actorKinds = ["human", "bot"] as const;
 export const issueStatuses = [
+  "triage",
   "open",
   "in_progress",
   "done",
@@ -27,8 +28,10 @@ const completedStatuses = [
   "done",
   "canceled",
 ] as const satisfies readonly IssueStatus[];
+export const issueTypes = ["issue", "todo"] as const;
 export const projectHealths = ["on_track", "at_risk", "off_track"] as const;
 export const activitySubjectTypes = [
+  "product",
   "project",
   "issue",
   "comment",
@@ -38,6 +41,7 @@ export const activitySubjectTypes = [
 
 export type ActorKind = (typeof actorKinds)[number];
 export type IssueStatus = (typeof issueStatuses)[number];
+export type IssueType = (typeof issueTypes)[number];
 export type ProjectHealth = (typeof projectHealths)[number];
 export type ActivitySubjectType = (typeof activitySubjectTypes)[number];
 export const apiKeyActions = [
@@ -238,17 +242,22 @@ export const apiKey = sqliteTable(
   ],
 );
 
-export const project = sqliteTable(
-  "project",
+export const product = sqliteTable(
+  "product",
   {
     id: id(),
-    // prefix of its issues' identifiers, as in TRL-12
+    // prefix of its items' identifiers, as in TRL-12
     key: text("key").notNull().unique(),
     name: text("name").notNull(),
     description: text("description").notNull().default(""),
-    // the highest issue number in this project, handed out or kept by an import
+    // the highest item number in this product, handed out or kept by an import
     issueSeq: integer("issue_seq").notNull().default(0),
     externalRef: text("external_ref"),
+    // the product's own bot: what it files are todos, what others file are issues. Nothing here
+    // pins it to a bot; whoever sets it must
+    ownerId: text("owner_id").references(() => actor.id),
+    // https://github.com/<owner>/<name>
+    repoUrl: text("repo_url"),
     createdBy: text("created_by")
       .notNull()
       .references(() => actor.id),
@@ -256,35 +265,40 @@ export const project = sqliteTable(
     updatedAt: updatedAt(),
   },
   (t) => [
-    check("project_name_check", sql`length(${c(t.name)}) > 0`),
+    check("product_name_check", sql`length(${c(t.name)}) > 0`),
     check(
-      "project_key_check",
+      "product_key_check",
       sql`length(${c(t.key)}) between 2 and 10 and ${c(t.key)} not glob '*[^A-Z0-9]*'`,
     ),
-    check("project_issue_seq_check", sql`${c(t.issueSeq)} >= 0`),
-    uniqueIndex("project_external_ref_unique")
+    check("product_issue_seq_check", sql`${c(t.issueSeq)} >= 0`),
+    // "https://github.com/" is 19 characters; one slash after it, both parts non-empty
+    check(
+      "product_repo_url_check",
+      sql`${c(t.repoUrl)} is null or (length(${c(t.repoUrl)}) <= 200 and ${c(t.repoUrl)} glob 'https://github.com/?*/?*' and ${c(t.repoUrl)} not glob 'https://github.com/*/*/*' and substr(${c(t.repoUrl)}, 20) not glob '*[^A-Za-z0-9._/-]*')`,
+    ),
+    uniqueIndex("product_external_ref_unique")
       .on(t.externalRef)
       .where(sql`${c(t.externalRef)} is not null`),
   ],
 );
 
-// the projects a key may touch; a key with no rows touches every project
-export const apiKeyProject = sqliteTable(
-  "api_key_project",
+// the products a key may touch; a key with no rows touches every product
+export const apiKeyProduct = sqliteTable(
+  "api_key_product",
   {
     apiKeyId: text("api_key_id")
       .notNull()
       .references(() => apiKey.id, { onDelete: "cascade" }),
-    // no cascade: deleting a project must not quietly widen or empty a key's scope.
+    // no cascade: deleting a product must not quietly widen or empty a key's scope.
     // no action, not restrict, which SQLite reports as SQLITE_CONSTRAINT_TRIGGER
-    projectId: text("project_id")
+    productId: text("product_id")
       .notNull()
-      .references(() => project.id),
+      .references(() => product.id),
   },
   (t) => [
-    // the key serves "which projects may this key touch"
-    primaryKey({ columns: [t.apiKeyId, t.projectId] }),
-    index("api_key_project_project_key_idx").on(t.projectId, t.apiKeyId),
+    // the key serves "which products may this key touch"
+    primaryKey({ columns: [t.apiKeyId, t.productId] }),
+    index("api_key_product_product_key_idx").on(t.productId, t.apiKeyId),
   ],
 );
 
@@ -329,35 +343,38 @@ export const invite = sqliteTable(
   ],
 );
 
-// the projects an invited person sees; an invite may hold none
-export const projectMember = sqliteTable(
-  "project_member",
+// the products an invited person sees; an invite may hold none
+export const productMember = sqliteTable(
+  "product_member",
   {
     inviteId: integer("invite_id")
       .notNull()
       .references(() => invite.id, { onDelete: "cascade" }),
-    projectId: text("project_id")
+    productId: text("product_id")
       .notNull()
-      .references(() => project.id, { onDelete: "cascade" }),
+      .references(() => product.id, { onDelete: "cascade" }),
     createdAt: createdAt(),
   },
   (t) => [
-    // the key serves "which projects can this invite see"
-    primaryKey({ columns: [t.inviteId, t.projectId] }),
-    index("project_member_project_invite_idx").on(t.projectId, t.inviteId),
+    // the key serves "which products can this invite see"
+    primaryKey({ columns: [t.inviteId, t.productId] }),
+    index("product_member_product_invite_idx").on(t.productId, t.inviteId),
   ],
 );
 
+// an item: an issue anyone filed, or a todo the product's own bot keeps
 export const issue = sqliteTable(
   "issue",
   {
     id: id(),
-    projectId: text("project_id")
+    productId: text("product_id")
       .notNull()
-      .references(() => project.id),
-    // unique within the project, from 1: project.issue_seq + 1 for a new issue, bumped in the same
+      .references(() => product.id),
+    // unique within the product, from 1: product.issue_seq + 1 for a new item, bumped in the same
     // transaction, or the number an import keeps from its source key
     number: integer("number").notNull(),
+    // no default: every writer decides it
+    type: text("type", { enum: issueTypes }).notNull(),
     title: text("title").notNull(),
     description: text("description").notNull().default(""),
     status: text("status", { enum: issueStatuses }).notNull().default("open"),
@@ -374,7 +391,7 @@ export const issue = sqliteTable(
     sourceAuthor: text("source_author"),
     // the imported row's workflow-state name in its source system, e.g. "In Review", kept for reference
     sourceStatus: text("source_status"),
-    // the imported row's identifier in its source system, uppercased (JUS-187); a lookup alias for the issue
+    // the imported row's identifier in its source system, uppercased (ABC-187); a lookup alias for the issue
     sourceKey: text("source_key"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -382,9 +399,15 @@ export const issue = sqliteTable(
   },
   (t) => [
     check("issue_status_check", oneOf(t.status, issueStatuses)),
+    check("issue_type_check", oneOf(t.type, issueTypes)),
+    // triage is where filed issues wait; a todo is the owner's own and starts open
+    check(
+      "issue_todo_status_check",
+      sql`${c(t.type)} <> 'todo' or ${c(t.status)} <> 'triage'`,
+    ),
     check("issue_title_check", sql`length(${c(t.title)}) > 0`),
     check("issue_number_check", sql`${c(t.number)} > 0`),
-    unique("issue_project_number_unique").on(t.projectId, t.number),
+    unique("issue_product_number_unique").on(t.productId, t.number),
     check("issue_estimate_check", sql`${c(t.estimate)} >= 0`),
     check("issue_priority_check", sql`${c(t.priority)} between 0 and 4`),
     check(
@@ -395,21 +418,21 @@ export const issue = sqliteTable(
       "issue_completed_at_check",
       sql`(${oneOf(t.status, completedStatuses)}) = (${c(t.completedAt)} is not null)`,
     ),
-    uniqueIndex("issue_project_external_ref_unique")
-      .on(t.projectId, t.externalRef)
+    uniqueIndex("issue_product_external_ref_unique")
+      .on(t.productId, t.externalRef)
       .where(sql`${c(t.externalRef)} is not null`),
     uniqueIndex("issue_source_key_unique")
       .on(t.sourceKey)
       .where(sql`${c(t.sourceKey)} is not null`),
-    // target of issue_label's (issue_id, project_id) key
-    unique("issue_id_project_unique").on(t.id, t.projectId),
-    index("issue_project_status_created_idx").on(
-      t.projectId,
+    // target of issue_label's and project_item's (issue_id, product_id) keys
+    unique("issue_id_product_unique").on(t.id, t.productId),
+    index("issue_product_status_created_idx").on(
+      t.productId,
       t.status,
       t.createdAt,
       t.id,
     ),
-    index("issue_project_created_idx").on(t.projectId, t.createdAt, t.id),
+    index("issue_product_created_idx").on(t.productId, t.createdAt, t.id),
     index("issue_assignee_created_idx")
       .on(t.assigneeId, t.createdAt, t.id)
       .where(sql`${c(t.assigneeId)} is not null`),
@@ -420,21 +443,21 @@ export const label = sqliteTable(
   "label",
   {
     id: id(),
-    projectId: text("project_id")
+    productId: text("product_id")
       .notNull()
-      .references(() => project.id),
+      .references(() => product.id),
     name: text("name").notNull(),
     createdAt: createdAt(),
   },
   (t) => [
     check("label_name_check", sql`length(${c(t.name)}) > 0`),
     // nocase folds ASCII only: 'Équipe' and 'équipe' are two labels
-    uniqueIndex("label_project_name_unique").on(
-      t.projectId,
+    uniqueIndex("label_product_name_unique").on(
+      t.productId,
       sql`${c(t.name)} collate nocase`,
     ),
-    // target of issue_label's (label_id, project_id) key
-    unique("label_id_project_unique").on(t.id, t.projectId),
+    // target of issue_label's (label_id, product_id) key
+    unique("label_id_product_unique").on(t.id, t.productId),
   ],
 );
 
@@ -443,18 +466,18 @@ export const issueLabel = sqliteTable(
   {
     issueId: text("issue_id").notNull(),
     labelId: text("label_id").notNull(),
-    // both keys below share it, so a label can only go on an issue in its own project
-    projectId: text("project_id").notNull(),
+    // both keys below share it, so a label can only go on an item in its own product
+    productId: text("product_id").notNull(),
   },
   (t) => [
     primaryKey({ columns: [t.issueId, t.labelId] }),
     foreignKey({
-      columns: [t.issueId, t.projectId],
-      foreignColumns: [issue.id, issue.projectId],
+      columns: [t.issueId, t.productId],
+      foreignColumns: [issue.id, issue.productId],
     }).onDelete("cascade"),
     foreignKey({
-      columns: [t.labelId, t.projectId],
-      foreignColumns: [label.id, label.projectId],
+      columns: [t.labelId, t.productId],
+      foreignColumns: [label.id, label.productId],
     }).onDelete("cascade"),
   ],
 );
@@ -477,6 +500,119 @@ export const issueLink = sqliteTable(
   ],
 );
 
+export const productStatusUpdate = sqliteTable(
+  "product_status_update",
+  {
+    id: id(),
+    productId: text("product_id")
+      .notNull()
+      .references(() => product.id),
+    authorId: text("author_id")
+      .notNull()
+      .references(() => actor.id),
+    body: text("body").notNull(),
+    health: text("health", { enum: projectHealths }).notNull(),
+    externalRef: text("external_ref"),
+    sourceAuthor: text("source_author"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check("product_status_update_body_check", sql`length(${c(t.body)}) > 0`),
+    check(
+      "product_status_update_health_check",
+      oneOf(t.health, projectHealths),
+    ),
+    index("product_status_update_product_created_idx").on(
+      t.productId,
+      t.createdAt,
+      t.id,
+    ),
+    uniqueIndex("product_status_update_product_external_ref_unique")
+      .on(t.productId, t.externalRef)
+      .where(sql`${c(t.externalRef)} is not null`),
+  ],
+);
+
+// a named group of items drawn from one or more products
+export const project = sqliteTable(
+  "project",
+  {
+    id: id(),
+    // how agents name it, e.g. launch-q4; lowercase, so it never collides with a product key
+    slug: text("slug").notNull().unique(),
+    name: text("name").notNull(),
+    goal: text("goal").notNull().default(""),
+    leadId: text("lead_id")
+      .notNull()
+      .references(() => actor.id),
+    // YYYY-MM-DD
+    targetDate: text("target_date"),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => actor.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    check(
+      "project_slug_check",
+      sql`length(${c(t.slug)}) between 2 and 39 and ${c(t.slug)} not glob '*[^a-z0-9-]*' and ${c(t.slug)} not glob '-*'`,
+    ),
+    check("project_name_check", sql`length(${c(t.name)}) > 0`),
+    // date() normalises, so a well-shaped but impossible day like 2026-02-30 fails the equality
+    check(
+      "project_target_date_check",
+      sql`${c(t.targetDate)} is null or (${c(t.targetDate)} glob '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' and date(${c(t.targetDate)}) = ${c(t.targetDate)})`,
+    ),
+  ],
+);
+
+// the products a project draws from; the service keeps at least one per project
+export const projectProduct = sqliteTable(
+  "project_product",
+  {
+    projectId: text("project_id")
+      .notNull()
+      .references(() => project.id),
+    // no cascade, as on api_key_product
+    productId: text("product_id")
+      .notNull()
+      .references(() => product.id),
+  },
+  (t) => [
+    primaryKey({ columns: [t.projectId, t.productId] }),
+    // which projects draw from these products: what a key or person may see
+    index("project_product_product_project_idx").on(t.productId, t.projectId),
+  ],
+);
+
+export const projectItem = sqliteTable(
+  "project_item",
+  {
+    projectId: text("project_id").notNull(),
+    issueId: text("issue_id").notNull(),
+    // both keys below share it, so an item joins only a project that draws from its product
+    productId: text("product_id").notNull(),
+    addedBy: text("added_by")
+      .notNull()
+      .references(() => actor.id),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.projectId, t.issueId] }),
+    foreignKey({
+      columns: [t.projectId, t.productId],
+      foreignColumns: [projectProduct.projectId, projectProduct.productId],
+    }),
+    foreignKey({
+      columns: [t.issueId, t.productId],
+      foreignColumns: [issue.id, issue.productId],
+    }),
+    // the projects an item belongs to
+    index("project_item_issue_idx").on(t.issueId),
+  ],
+);
+
 export const projectStatusUpdate = sqliteTable(
   "project_status_update",
   {
@@ -489,8 +625,6 @@ export const projectStatusUpdate = sqliteTable(
       .references(() => actor.id),
     body: text("body").notNull(),
     health: text("health", { enum: projectHealths }).notNull(),
-    externalRef: text("external_ref"),
-    sourceAuthor: text("source_author"),
     createdAt: createdAt(),
   },
   (t) => [
@@ -504,9 +638,6 @@ export const projectStatusUpdate = sqliteTable(
       t.createdAt,
       t.id,
     ),
-    uniqueIndex("project_status_update_project_external_ref_unique")
-      .on(t.projectId, t.externalRef)
-      .where(sql`${c(t.externalRef)} is not null`),
   ],
 );
 
@@ -586,6 +717,8 @@ export const activityEvent = sqliteTable(
     subjectType: text("subject_type", { enum: activitySubjectTypes }).notNull(),
     // polymorphic over subject_type, so no foreign key
     subjectId: text("subject_id").notNull(),
+    productId: text("product_id").references(() => product.id),
+    // set on a project's own events and on an item joining or leaving one
     projectId: text("project_id").references(() => project.id),
     action: text("action").notNull(),
     payload: text("payload", { mode: "json" })
@@ -602,12 +735,13 @@ export const activityEvent = sqliteTable(
     check("activity_event_action_check", sql`length(${c(t.action)}) > 0`),
     check("activity_event_payload_check", sql`json_valid(${c(t.payload)})`),
     check("activity_event_seq_check", sql`${c(t.seq)} > 0`),
-    // the feed's keyset, both directions, overall and per project or actor
+    // the feed's keyset, both directions, overall and per product, project or actor
     uniqueIndex("activity_event_seq_unique").on(t.seq),
+    index("activity_event_product_seq_idx").on(t.productId, t.seq),
     index("activity_event_project_seq_idx").on(t.projectId, t.seq),
     index("activity_event_actor_seq_idx").on(t.actorId, t.seq),
-    // has this actor acted in any of these projects — one probe per bot
-    index("activity_event_actor_project_idx").on(t.actorId, t.projectId),
+    // has this actor acted in any of these products — one probe per bot
+    index("activity_event_actor_product_idx").on(t.actorId, t.productId),
     // one subject's history in order — an issue's timeline
     index("activity_event_subject_seq_idx").on(t.subjectId, t.seq),
   ],
@@ -622,7 +756,7 @@ export type WebhookDeliveryStatus = (typeof webhookDeliveryStatuses)[number];
 
 /**
  * A bot's webhook: an https URL that receives signed POSTs for every activity
- * event of its projects. It belongs to the bot, not to the key that made it, so
+ * event of its products. It belongs to the bot, not to the key that made it, so
  * a key rotation keeps it.
  */
 export const webhookSubscription = sqliteTable(
@@ -656,23 +790,23 @@ export const webhookSubscription = sqliteTable(
   ],
 );
 
-// the projects a subscription follows
-export const webhookSubscriptionProject = sqliteTable(
-  "webhook_subscription_project",
+// the products a subscription follows
+export const webhookSubscriptionProduct = sqliteTable(
+  "webhook_subscription_product",
   {
     subscriptionId: text("subscription_id")
       .notNull()
       .references(() => webhookSubscription.id, { onDelete: "cascade" }),
-    // no cascade, as on api_key_project: deleting a project must not quietly empty a subscription
-    projectId: text("project_id")
+    // no cascade, as on api_key_product: deleting a product must not quietly empty a subscription
+    productId: text("product_id")
       .notNull()
-      .references(() => project.id),
+      .references(() => product.id),
   },
   (t) => [
-    primaryKey({ columns: [t.subscriptionId, t.projectId] }),
-    // an event's project finds the subscriptions that follow it
-    index("webhook_subscription_project_project_idx").on(
-      t.projectId,
+    primaryKey({ columns: [t.subscriptionId, t.productId] }),
+    // an event's product finds the subscriptions that follow it
+    index("webhook_subscription_product_product_idx").on(
+      t.productId,
       t.subscriptionId,
     ),
   ],
@@ -717,9 +851,11 @@ export const webhookDelivery = sqliteTable(
       oneOf(t.status, webhookDeliveryStatuses),
     ),
     check("webhook_delivery_attempts_check", sql`${c(t.attempts)} >= 0`),
-    unique("webhook_delivery_subscription_event_unique").on(
+    // one delivery per type of an event: a product event goes out under its old type too, for one release
+    unique("webhook_delivery_subscription_event_type_unique").on(
       t.subscriptionId,
       t.eventId,
+      t.type,
     ),
     // the head of a subscription's queue: its oldest pending delivery
     index("webhook_delivery_pending_idx")

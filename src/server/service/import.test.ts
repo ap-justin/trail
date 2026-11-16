@@ -102,7 +102,7 @@ const zero = {
 test("a first import creates every row and counts each kind as created", () => {
   const payload = linearProject();
   const result = service.importProject(bot, payload);
-  expect(result.project).toMatchObject({
+  expect(result.product).toMatchObject({
     key: payload.key,
     name: "Migrated",
     externalRef: payload.externalRef,
@@ -119,7 +119,7 @@ test("a first import creates every row and counts each kind as created", () => {
   expect(result.updated).toEqual(zero);
   expect(result.unchanged).toEqual(zero);
 
-  const issues = service.listIssues(bot, { projectId: payload.key }).items;
+  const issues = service.listItems(bot, { product: payload.key }).items;
   expect(
     issues
       .map((i) => [i.key, i.title, i.status])
@@ -157,15 +157,15 @@ test("re-running an import creates nothing, counts every row unchanged and write
   const payload = linearProject();
   const first = service.importProject(bot, payload);
   const before = rowCounts();
-  const issuesBefore = service.listIssues(bot, { projectId: payload.key });
+  const issuesBefore = service.listItems(bot, { product: payload.key });
 
   const second = service.importProject(bot, payload);
   expect(second.created).toEqual(zero);
   expect(second.updated).toEqual(zero);
   expect(second.unchanged).toEqual(first.created);
   expect(rowCounts()).toEqual(before);
-  expect(second.project).toEqual(first.project);
-  expect(service.listIssues(bot, { projectId: payload.key })).toEqual(
+  expect(second.product).toEqual(first.product);
+  expect(service.listItems(bot, { product: payload.key })).toEqual(
     issuesBefore,
   );
 });
@@ -175,8 +175,8 @@ test("a re-run with one changed field per kind counts those rows updated and the
   // on the fake clock an hour back, so the re-run's writes are visibly later
   atFakeTime([() => service.importProject(bot, payload)]);
   const [i1, i2, i3] = payload.issues ?? [];
-  const before = service.getIssue(bot, `${payload.key}-2`);
-  const untouched = service.getIssue(bot, `${payload.key}-3`);
+  const before = service.getItem(bot, `${payload.key}-2`);
+  const untouched = service.getItem(bot, `${payload.key}-3`);
 
   const changed: ImportPayload = {
     ...payload,
@@ -218,12 +218,12 @@ test("a re-run with one changed field per kind counts those rows updated and the
     links: 0,
     statusUpdates: 0,
   });
-  const after = service.getIssue(bot, `${payload.key}-2`);
+  const after = service.getItem(bot, `${payload.key}-2`);
   expect(after.title).toBe("second, retitled");
   expect(after.updatedAt.getTime()).toBeGreaterThan(before.updatedAt.getTime());
   expect(after.number).toBe(before.number);
-  expect(service.getIssue(bot, `${payload.key}-3`)).toEqual(untouched);
-  expect(service.getProject(bot, payload.key).name).toBe("Renamed");
+  expect(service.getItem(bot, `${payload.key}-3`)).toEqual(untouched);
+  expect(service.getProduct(bot, payload.key).name).toBe("Renamed");
   expect(
     service.listComments(bot, `${payload.key}-1`).items.map((c) => c.body),
   ).toEqual(["edited", "merged"]);
@@ -232,7 +232,7 @@ test("a re-run with one changed field per kind counts those rows updated and the
 test("imported rows keep their source createdAt, completedAt and author, credited to the importing bot", () => {
   const payload = linearProject();
   service.importProject(bot, payload);
-  const first = service.getIssue(bot, `${payload.key}-1`);
+  const first = service.getItem(bot, `${payload.key}-1`);
   expect(first).toMatchObject({
     createdAt: new Date("2026-01-02T03:04:05.000Z"),
     completedAt: null,
@@ -243,7 +243,7 @@ test("imported rows keep their source createdAt, completedAt and author, credite
     labels: ["Backend", "Bug"],
     links: [{ url: "https://github.com/o/r/pull/1", title: "PR 1" }],
   });
-  expect(service.getIssue(bot, `${payload.key}-2`)).toMatchObject({
+  expect(service.getItem(bot, `${payload.key}-2`)).toMatchObject({
     status: "done",
     completedAt: new Date("2026-01-06T00:00:00.000Z"),
     sourceAuthor: null,
@@ -257,7 +257,9 @@ test("imported rows keep their source createdAt, completedAt and author, credite
     },
     { body: "merged", authorId: bot.id, sourceAuthor: null },
   ]);
-  expect(service.listStatusUpdates(bot, payload.key).items).toMatchObject([
+  expect(
+    service.listStatusUpdates(bot, { product: payload.key }).items,
+  ).toMatchObject([
     {
       body: "on schedule",
       health: "on_track",
@@ -271,15 +273,15 @@ test("imported rows keep their source createdAt, completedAt and author, credite
 test("an import writes one project.imported event with the counts; a run that changes nothing writes none", () => {
   const payload = linearProject();
   const projectEvents = (projectId: string) =>
-    service.listActivity(bot, { projectId, limit: 200 }).items;
+    service.listActivity(bot, { product: projectId, limit: 200 }).items;
 
   const first = service.importProject(bot, payload);
-  expect(projectEvents(first.project.id)).toMatchObject([
+  expect(projectEvents(first.product.id)).toMatchObject([
     {
-      action: "project.imported",
+      action: "product.imported",
       actorId: bot.id,
-      subjectType: "project",
-      subjectId: first.project.id,
+      subjectType: "product",
+      subjectId: first.product.id,
       payload: {
         externalRef: payload.externalRef,
         created: first.created,
@@ -290,10 +292,10 @@ test("an import writes one project.imported event with the counts; a run that ch
   ]);
 
   service.importProject(bot, payload);
-  expect(projectEvents(first.project.id)).toHaveLength(1);
+  expect(projectEvents(first.product.id)).toHaveLength(1);
 
   const third = service.importProject(bot, { ...payload, name: "Renamed" });
-  const events = projectEvents(first.project.id);
+  const events = projectEvents(first.product.id);
   expect(events).toHaveLength(2);
   expect(events[0]?.payload).toMatchObject({
     updated: { ...zero, projects: 1 },
@@ -301,13 +303,15 @@ test("an import writes one project.imported event with the counts; a run that ch
   });
 });
 
-test("a second bot re-importing updates rows in place: the first stays their creator, the second is credited with the update", () => {
+test("a second bot re-importing a product with no owner updates rows in place: the first stays their creator, the second is credited with the update", () => {
   const second = createBot(db, "second migrator").actor;
   const payload = linearProject();
   atFakeTime([() => service.importProject(bot, payload)]);
+  // an owned product takes imports from its owner alone
+  service.updateProduct(bot, payload.key, { owner: null });
   const before = rowCounts();
-  const issuesBefore = service.listIssues(bot, {
-    projectId: payload.key,
+  const issuesBefore = service.listItems(bot, {
+    product: payload.key,
   }).items;
   const [i1, ...rest] = payload.issues ?? [];
 
@@ -322,7 +326,7 @@ test("a second bot re-importing updates rows in place: the first stays their cre
     activity_event: (before.activity_event as number) + 1,
   });
 
-  const issuesAfter = service.listIssues(bot, { projectId: payload.key }).items;
+  const issuesAfter = service.listItems(bot, { product: payload.key }).items;
   expect(issuesAfter.map((i) => i.createdBy)).toEqual(
     issuesBefore.map(() => bot.id),
   );
@@ -334,16 +338,16 @@ test("a second bot re-importing updates rows in place: the first stays their cre
   const untouched = (list: typeof issuesAfter) =>
     list.filter((i) => i.externalRef !== i1?.externalRef);
   expect(untouched(issuesAfter)).toEqual(untouched(issuesBefore));
-  expect(result.project.createdBy).toBe(bot.id);
+  expect(result.product.createdBy).toBe(bot.id);
   expect(
     service.listComments(bot, `${payload.key}-1`).items.map((c) => c.authorId),
   ).toEqual([bot.id, bot.id]);
 
   const [latest] = service.listActivity(bot, {
-    projectId: result.project.id,
+    product: result.product.id,
   }).items;
   expect(latest).toMatchObject({
-    action: "project.imported",
+    action: "product.imported",
     actorId: second.id,
   });
 });
@@ -359,12 +363,10 @@ test("a closed issue imported without completedAt is stamped once and keeps that
     },
   ];
   service.importProject(bot, payload);
-  const stamped = service.getIssue(bot, `${payload.key}-1`).completedAt;
+  const stamped = service.getItem(bot, `${payload.key}-1`).completedAt;
   expect(stamped).toBeInstanceOf(Date);
   expect(service.importProject(bot, payload).unchanged.issues).toBe(1);
-  expect(service.getIssue(bot, `${payload.key}-1`).completedAt).toEqual(
-    stamped,
-  );
+  expect(service.getItem(bot, `${payload.key}-1`).completedAt).toEqual(stamped);
 });
 
 const oneIssue = (issue: Partial<ImportIssue>): ImportPayload => ({
@@ -395,13 +397,13 @@ test.each([
 ])("source status %s imports as %s", (status, expected) => {
   const payload = oneIssue({ status });
   service.importProject(bot, payload);
-  expect(service.getIssue(bot, `${payload.key}-1`).status).toBe(expected);
+  expect(service.getItem(bot, `${payload.key}-1`).status).toBe(expected);
 });
 
 test("a custom state name with a statusType imports by the type and keeps the name as sourceStatus", () => {
   const payload = oneIssue({ status: "In Review", statusType: "started" });
   service.importProject(bot, payload);
-  expect(service.getIssue(bot, `${payload.key}-1`)).toMatchObject({
+  expect(service.getItem(bot, `${payload.key}-1`)).toMatchObject({
     status: "in_progress",
     sourceStatus: "In Review",
   });
@@ -412,13 +414,13 @@ test("a trail edit of an imported issue, status change included, leaves sourceSt
   service.importProject(bot, payload);
   const key = `${payload.key}-1`;
 
-  service.updateIssue(bot, key, { title: "retitled" });
-  expect(service.getIssue(bot, key)).toMatchObject({
+  service.updateItem(bot, key, { title: "retitled" });
+  expect(service.getItem(bot, key)).toMatchObject({
     title: "retitled",
     sourceStatus: "In Review",
   });
-  service.updateIssue(bot, key, { status: "done" });
-  expect(service.getIssue(bot, key)).toMatchObject({
+  service.updateItem(bot, key, { status: "done" });
+  expect(service.getItem(bot, key)).toMatchObject({
     status: "done",
     sourceStatus: "In Review",
   });
@@ -452,7 +454,7 @@ test.each([
   (statusType, expected) => {
     const payload = oneIssue({ status: "Todo", statusType });
     service.importProject(bot, payload);
-    expect(service.getIssue(bot, `${payload.key}-1`)).toMatchObject({
+    expect(service.getItem(bot, `${payload.key}-1`)).toMatchObject({
       status: expected,
       sourceStatus: "Todo",
     });
@@ -462,7 +464,7 @@ test.each([
 test("a statusType alone decides the status and leaves sourceStatus null", () => {
   const payload = oneIssue({ status: undefined, statusType: "completed" });
   service.importProject(bot, payload);
-  expect(service.getIssue(bot, `${payload.key}-1`)).toMatchObject({
+  expect(service.getItem(bot, `${payload.key}-1`)).toMatchObject({
     status: "done",
     sourceStatus: null,
   });
@@ -485,10 +487,10 @@ test("an issue with neither status nor statusType is refused, saying to send the
 test("a re-run leaves an unchanged sourceStatus alone and counts a renamed state as updated", () => {
   const payload = oneIssue({ status: "In Review", statusType: "started" });
   atFakeTime([() => service.importProject(bot, payload)]);
-  const before = service.getIssue(bot, `${payload.key}-1`);
+  const before = service.getItem(bot, `${payload.key}-1`);
 
   expect(service.importProject(bot, payload).unchanged.issues).toBe(1);
-  expect(service.getIssue(bot, `${payload.key}-1`)).toEqual(before);
+  expect(service.getItem(bot, `${payload.key}-1`)).toEqual(before);
 
   const renamed = oneIssue({ status: "Code Review", statusType: "started" });
   const result = service.importProject(bot, {
@@ -496,7 +498,7 @@ test("a re-run leaves an unchanged sourceStatus alone and counts a renamed state
     issues: renamed.issues,
   });
   expect(result.updated.issues).toBe(1);
-  const after = service.getIssue(bot, `${payload.key}-1`);
+  const after = service.getItem(bot, `${payload.key}-1`);
   expect(after).toMatchObject({
     status: "in_progress",
     sourceStatus: "Code Review",
@@ -514,7 +516,7 @@ test("a re-run that sends only statusType clears the previous sourceStatus", () 
     issues: typeOnly.issues,
   });
   expect(result.updated.issues).toBe(1);
-  expect(service.getIssue(bot, `${payload.key}-1`)).toMatchObject({
+  expect(service.getItem(bot, `${payload.key}-1`)).toMatchObject({
     status: "in_progress",
     sourceStatus: null,
   });
@@ -523,19 +525,19 @@ test("a re-run that sends only statusType clears the previous sourceStatus", () 
 test("a re-run moving statusType from started to completed closes the issue, stamped once", () => {
   const payload = oneIssue({ status: "In Review", statusType: "started" });
   service.importProject(bot, payload);
-  expect(service.getIssue(bot, `${payload.key}-1`).completedAt).toBeNull();
+  expect(service.getItem(bot, `${payload.key}-1`).completedAt).toBeNull();
 
   const closed = {
     ...payload,
     issues: oneIssue({ status: undefined, statusType: "completed" }).issues,
   };
   expect(service.importProject(bot, closed).updated.issues).toBe(1);
-  const done = service.getIssue(bot, `${payload.key}-1`);
+  const done = service.getItem(bot, `${payload.key}-1`);
   expect(done).toMatchObject({ status: "done", sourceStatus: null });
   expect(done.completedAt).toBeInstanceOf(Date);
 
   expect(service.importProject(bot, closed).unchanged.issues).toBe(1);
-  expect(service.getIssue(bot, `${payload.key}-1`).completedAt).toEqual(
+  expect(service.getItem(bot, `${payload.key}-1`).completedAt).toEqual(
     done.completedAt,
   );
 });
@@ -571,11 +573,11 @@ test("a new project whose key another project holds is a conflict; a project's k
   service.importProject(bot, holder);
   refused(
     { ...linearProject(), key: holder.key },
-    `project key ${holder.key} is taken`,
+    `product key ${holder.key} is taken`,
   );
   refused(
     { ...holder, key: projectKey() },
-    `project ${holder.externalRef} was imported with key ${holder.key}: send key ${holder.key}`,
+    `product ${holder.externalRef} was imported with key ${holder.key}: send key ${holder.key}`,
   );
 });
 
@@ -599,7 +601,7 @@ test("label names in one payload match across ASCII case only, as on later runs"
   expect(service.importProject(bot, payload).created.labels).toBe(3);
   const labelsOf = (title: string) =>
     service
-      .listIssues(bot, { projectId: payload.key })
+      .listItems(bot, { product: payload.key })
       .items.find((i) => i.title === title)?.labels;
   expect(labelsOf("i-1")).toEqual(["Foo", "Équipe", "équipe"]);
   expect(labelsOf("i-2")).toEqual(["Équipe"]);
@@ -631,7 +633,7 @@ test.each([
     });
     const keyOf = (title: string) =>
       service
-        .listIssues(bot, { projectId: payload.key })
+        .listItems(bot, { product: payload.key })
         .items.find((i) => i.title === title)?.key;
     expect(
       ["first", "by hand", "new-z", "new-a", "new-b", "new-c"].map(keyOf),
@@ -641,18 +643,18 @@ test.each([
 
 test("an issue whose externalRef is the project's own key keeps that number, and the sequence moves past it", () => {
   const payload: ImportPayload = {
-    externalRef: "linear-JUS",
-    key: "JUS",
-    name: "Justin",
-    issues: [todo("JUS-187"), todo("JUS-1"), todo("from-elsewhere")],
+    externalRef: "linear-ABC",
+    key: "ABC",
+    name: "Pat",
+    issues: [todo("ABC-187"), todo("ABC-1"), todo("from-elsewhere")],
   };
   service.importProject(bot, payload);
-  expect(service.getIssue(bot, "JUS-187").externalRef).toBe("JUS-187");
-  expect(service.getIssue(bot, "JUS-1").externalRef).toBe("JUS-1");
-  expect(service.getIssue(bot, "JUS-188").externalRef).toBe("from-elsewhere");
+  expect(service.getItem(bot, "ABC-187").externalRef).toBe("ABC-187");
+  expect(service.getItem(bot, "ABC-1").externalRef).toBe("ABC-1");
+  expect(service.getItem(bot, "ABC-188").externalRef).toBe("from-elsewhere");
   expect(
-    service.createIssue(bot, { projectId: "JUS", title: "by hand" }).key,
-  ).toBe("JUS-189");
+    service.createIssue(bot, { projectId: "ABC", title: "by hand" }).key,
+  ).toBe("ABC-189");
 
   const rerun = service.importProject(bot, payload);
   expect(rerun.created).toEqual(zero);
@@ -671,7 +673,7 @@ test("createIssue numbers past the highest kept number, across re-imports and a 
     service.createIssue(bot, { projectId: key, title: "by hand" }).key;
 
   service.importProject(bot, payload);
-  expect(service.getIssue(bot, `${key}-13`).externalRef).toBe("elsewhere-1");
+  expect(service.getItem(bot, `${key}-13`).externalRef).toBe("elsewhere-1");
   expect(nextKey()).toBe(`${key}-14`);
 
   service.importProject(bot, payload);
@@ -682,7 +684,7 @@ test("createIssue numbers past the highest kept number, across re-imports and a 
     issues: [...(payload.issues ?? []), todo(`${key}-187`), todo(`${key}-3`)],
   });
   expect(nextKey()).toBe(`${key}-188`);
-  expect(service.getIssue(bot, `${key}-3`).externalRef).toBe(`${key}-3`);
+  expect(service.getItem(bot, `${key}-3`).externalRef).toBe(`${key}-3`);
 });
 
 test("an issue keeping a number another issue holds takes the next number, and the result lists it", () => {
@@ -700,8 +702,8 @@ test("an issue keeping a number another issue holds takes the next number, and t
   expect(result.renumbered).toEqual([
     { externalRef: holder.key, sourceKey: null, key: `${payload.key}-${next}` },
   ]);
-  expect(service.getIssue(bot, holder.id).title).toBe("by hand");
-  expect(service.getIssue(bot, `${payload.key}-${next}`).externalRef).toBe(
+  expect(service.getItem(bot, holder.id).title).toBe("by hand");
+  expect(service.getItem(bot, `${payload.key}-${next}`).externalRef).toBe(
     holder.key,
   );
 });
@@ -723,10 +725,10 @@ test("issues sent with Linear UUIDs as externalRef keep the number of a sourceKe
       linearIssue("8f1c0f4e-0000-4000-8000-000000000012", `${key}-12`),
     ],
   });
-  expect(service.getIssue(bot, `${key}-187`).externalRef).toBe(
+  expect(service.getItem(bot, `${key}-187`).externalRef).toBe(
     "8f1c0f4e-0000-4000-8000-000000000187",
   );
-  expect(service.getIssue(bot, `${key}-12`).externalRef).toBe(
+  expect(service.getItem(bot, `${key}-12`).externalRef).toBe(
     "8f1c0f4e-0000-4000-8000-000000000012",
   );
 });
@@ -744,8 +746,8 @@ test("a sourceKey under another project's key gets the next number, even beside 
     ],
   });
   // the sequenced two tie on createdAt, so externalRef orders them
-  expect(service.getIssue(bot, `${key}-41`).externalRef).toBe(`${key}-90`);
-  expect(service.getIssue(bot, `${key}-42`).externalRef).toBe("uuid-moved");
+  expect(service.getItem(bot, `${key}-41`).externalRef).toBe(`${key}-90`);
+  expect(service.getItem(bot, `${key}-42`).externalRef).toBe("uuid-moved");
 });
 
 test("without a sourceKey, a key-form externalRef still keeps its number", () => {
@@ -756,7 +758,7 @@ test("without a sourceKey, a key-form externalRef still keeps its number", () =>
     name: "old payload",
     issues: [linearIssue(`${key}-9`)],
   });
-  expect(service.getIssue(bot, `${key}-9`).externalRef).toBe(`${key}-9`);
+  expect(service.getItem(bot, `${key}-9`).externalRef).toBe(`${key}-9`);
 });
 
 test("a re-run with a changed sourceKey leaves the matched issue's number alone, creates nothing and stores the new sourceKey", () => {
@@ -774,9 +776,9 @@ test("a re-run with a changed sourceKey leaves the matched issue's number alone,
   });
   expect(rerun.created).toEqual(zero);
   expect(rerun.updated.issues).toBe(1);
-  expect(service.getIssue(bot, `${key}-5`).externalRef).toBe("uuid-stays");
-  expect(service.getIssue(bot, `${key}-5`).sourceKey).toBe(`${key}-77`);
-  expect(service.getIssue(bot, `${key}-77`).key).toBe(`${key}-5`);
+  expect(service.getItem(bot, `${key}-5`).externalRef).toBe("uuid-stays");
+  expect(service.getItem(bot, `${key}-5`).sourceKey).toBe(`${key}-77`);
+  expect(service.getItem(bot, `${key}-77`).key).toBe(`${key}-5`);
 });
 
 test("a sourceKey whose number another issue holds gets the next number and still finds the issue by its sourceKey", () => {
@@ -795,8 +797,8 @@ test("a sourceKey whose number another issue holds gets the next number and stil
     { externalRef: "uuid-clash", sourceKey: holder.key, key },
   ]);
   // the trail key wins over the source key that looks the same
-  expect(service.getIssue(bot, holder.key).id).toBe(holder.id);
-  expect(service.getIssue(bot, key).sourceKey).toBe(holder.key);
+  expect(service.getItem(bot, holder.key).id).toBe(holder.id);
+  expect(service.getItem(bot, key).sourceKey).toBe(holder.key);
 });
 
 test("re-running a payload that renumbered an issue matches it by externalRef, keeps its new number and lists nothing", () => {
@@ -822,8 +824,8 @@ test("re-running a payload that renumbered an issue matches it by externalRef, k
   expect(again.created).toEqual(zero);
   expect(again.updated).toEqual(zero);
   expect(again.unchanged.issues).toBe((payload.issues ?? []).length + 1);
-  expect(service.getIssue(bot, newKey).externalRef).toBe("uuid-late");
-  expect(service.getIssue(bot, holder.key).id).toBe(holder.id);
+  expect(service.getItem(bot, newKey).externalRef).toBe("uuid-late");
+  expect(service.getItem(bot, holder.key).id).toBe(holder.id);
   expect(
     service.createIssue(bot, { projectId: payload.key, title: "n" }).number,
   ).toBe(holder.number + 2);
@@ -873,6 +875,6 @@ test("two new issues keeping one number are refused, naming both, and nothing is
 test("a sourceKey not shaped like an issue key is refused, naming it", () => {
   refused(
     { ...linearProject(), issues: [linearIssue("uuid-bad", "JUS187")] },
-    'issue JUS187 (externalRef uuid-bad): sourceKey "JUS187" is not an issue key: send Linear\'s identifier, like JUS-187',
+    'issue JUS187 (externalRef uuid-bad): sourceKey "JUS187" is not an issue key: send Linear\'s identifier, like ABC-187',
   );
 });

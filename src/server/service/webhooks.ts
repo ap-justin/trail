@@ -1,12 +1,22 @@
-import { and, asc, eq, inArray, notInArray, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  inArray,
+  isNull,
+  notInArray,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { Db } from "../db/client.js";
 import { newId } from "../db/id.js";
 import {
   activityEvent,
-  project,
+  product,
+  projectProduct,
   webhookDelivery,
   webhookSubscription,
-  webhookSubscriptionProject,
+  webhookSubscriptionProduct,
 } from "../db/schema.js";
 import type { Resolve } from "../webhooks/address.js";
 import { type SecretKey, sealSecret } from "../webhooks/secret.js";
@@ -47,7 +57,7 @@ export function webhookSettings(
 
 /** A bot's own limits: enough for a few routines, few enough that a loop of creates stops. */
 export const WEBHOOKS_PER_BOT_MAX = 20;
-export const WEBHOOK_PROJECTS_MAX = 50;
+export const WEBHOOK_PRODUCTS_MAX = 50;
 export const WEBHOOK_SECRET_MIN = 16;
 export const WEBHOOK_SECRET_MAX = 256;
 
@@ -86,8 +96,8 @@ export type Webhook = {
   id: string;
   actorId: string;
   url: string;
-  /** project keys, A to Z */
-  projects: string[];
+  /** product keys, A to Z */
+  products: string[];
   pausedAt: Date | null;
   consecutiveFailures: number;
   lastSuccessAt: Date | null;
@@ -112,29 +122,29 @@ export function validSecret(secret: string): string {
   return secret;
 }
 
-/** The subscriptions' views, each with its project keys. */
+/** The subscriptions' views, each with its product keys. */
 export function webhooksOf(db: Db | Tx, rows: SubscriptionRow[]): Webhook[] {
   if (rows.length === 0) return [];
   const links = db
     .select({
-      subscriptionId: webhookSubscriptionProject.subscriptionId,
-      key: project.key,
+      subscriptionId: webhookSubscriptionProduct.subscriptionId,
+      key: product.key,
     })
-    .from(webhookSubscriptionProject)
-    .innerJoin(project, eq(project.id, webhookSubscriptionProject.projectId))
+    .from(webhookSubscriptionProduct)
+    .innerJoin(product, eq(product.id, webhookSubscriptionProduct.productId))
     .where(
       inArray(
-        webhookSubscriptionProject.subscriptionId,
+        webhookSubscriptionProduct.subscriptionId,
         rows.map((r) => r.id),
       ),
     )
-    .orderBy(asc(project.key))
+    .orderBy(asc(product.key))
     .all();
   return rows.map((r) => ({
     id: r.id,
     actorId: r.actorId,
     url: r.url,
-    projects: links.filter((l) => l.subscriptionId === r.id).map((l) => l.key),
+    products: links.filter((l) => l.subscriptionId === r.id).map((l) => l.key),
     pausedAt: r.pausedAt,
     consecutiveFailures: r.consecutiveFailures,
     lastSuccessAt: r.lastSuccessAt,
@@ -148,7 +158,7 @@ export function webhooksOf(db: Db | Tx, rows: SubscriptionRow[]): Webhook[] {
 export function insertSubscription(
   tx: Tx,
   settings: WebhookSettings,
-  input: { actorId: string; url: string; secret: string; projectIds: string[] },
+  input: { actorId: string; url: string; secret: string; productIds: string[] },
 ): SubscriptionRow {
   const id = newId();
   const row = tx
@@ -161,7 +171,7 @@ export function insertSubscription(
     })
     .returning()
     .get();
-  setProjects(tx, id, input.projectIds);
+  setProducts(tx, id, input.productIds);
   return row;
 }
 
@@ -171,11 +181,15 @@ export function insertSubscription(
  */
 export const isPending = sql`${webhookDelivery.status} = 'pending'`;
 
-/** The subscription's pending deliveries whose event is in none of `projectIds`. */
+/**
+ * The subscription's pending deliveries whose event is in none of
+ * `productIds`: an event of another product, or a project's own event (which
+ * carries no product) when the project draws from none of them.
+ */
 export const unfollowedDeliveries = (
   tx: Tx | Db,
   subscriptionId: string,
-  projectIds: string[],
+  productIds: string[],
 ) =>
   tx
     .select({ id: webhookDelivery.id })
@@ -185,32 +199,46 @@ export const unfollowedDeliveries = (
       and(
         eq(webhookDelivery.subscriptionId, subscriptionId),
         isPending,
-        notInArray(activityEvent.projectId, projectIds),
+        or(
+          notInArray(activityEvent.productId, productIds),
+          and(
+            isNull(activityEvent.productId),
+            notInArray(
+              activityEvent.projectId,
+              tx
+                .select({ id: projectProduct.projectId })
+                .from(projectProduct)
+                .where(inArray(projectProduct.productId, productIds)),
+            ),
+          ),
+        ),
       ),
     );
 
 /**
- * Replaces the projects a subscription follows. Its pending deliveries for a
- * project it no longer follows go with them, since the worker never re-checks
- * following; sent and failed ones stay as history. A project followed again
+ * Replaces the products a subscription follows. Its pending deliveries for a
+ * product it no longer follows go with them, since the worker never re-checks
+ * following, and so do those of a project's own events (which carry no
+ * product) when the project draws from no product it still follows; sent and
+ * failed ones stay as history. A product followed again
  * later gets only the events committed after.
  */
-export function setProjects(
+export function setProducts(
   tx: Tx,
   subscriptionId: string,
-  projectIds: string[],
+  productIds: string[],
 ) {
-  tx.delete(webhookSubscriptionProject)
-    .where(eq(webhookSubscriptionProject.subscriptionId, subscriptionId))
+  tx.delete(webhookSubscriptionProduct)
+    .where(eq(webhookSubscriptionProduct.subscriptionId, subscriptionId))
     .run();
-  tx.insert(webhookSubscriptionProject)
-    .values(projectIds.map((projectId) => ({ subscriptionId, projectId })))
+  tx.insert(webhookSubscriptionProduct)
+    .values(productIds.map((productId) => ({ subscriptionId, productId })))
     .run();
   tx.delete(webhookDelivery)
     .where(
       inArray(
         webhookDelivery.id,
-        unfollowedDeliveries(tx, subscriptionId, projectIds),
+        unfollowedDeliveries(tx, subscriptionId, productIds),
       ),
     )
     .run();
@@ -246,33 +274,63 @@ export function resume(tx: Tx, subscriptionId: string, now: number) {
 }
 
 /**
- * Queues the committed event for every subscription following its project,
- * inside the transaction that wrote it: the outbox row exists exactly when the
- * event does. A paused subscription is queued too; its deliveries wait.
+ * Queues the committed event for every subscription following its product, or
+ * for a project's own event (which has no product) every subscription following
+ * any of the project's products now, inside the transaction that wrote it: the
+ * outbox row exists exactly when the event does. A paused subscription is
+ * queued too; its deliveries wait.
  */
 export function enqueueDeliveries(
   tx: Tx,
   event: typeof activityEvent.$inferSelect,
   now: number,
 ) {
-  if (event.projectId === null) return;
+  const followed =
+    event.productId !== null
+      ? eq(webhookSubscriptionProduct.productId, event.productId)
+      : event.projectId !== null
+        ? inArray(
+            webhookSubscriptionProduct.productId,
+            tx
+              .select({ id: projectProduct.productId })
+              .from(projectProduct)
+              .where(eq(projectProduct.projectId, event.projectId)),
+          )
+        : undefined;
+  if (followed === undefined) return;
   const followers = tx
-    .select({ id: webhookSubscriptionProject.subscriptionId })
-    .from(webhookSubscriptionProject)
-    .where(eq(webhookSubscriptionProject.projectId, event.projectId))
+    .selectDistinct({ id: webhookSubscriptionProduct.subscriptionId })
+    .from(webhookSubscriptionProduct)
+    .where(followed)
     .all();
   if (followers.length === 0) return;
+  const types = deliveryTypesOf(event.action);
+  // in this order: the worker sends one event's deliveries in insertion order
   tx.insert(webhookDelivery)
     .values(
-      followers.map((f) => ({
-        subscriptionId: f.id,
-        eventId: event.id,
-        seq: event.seq,
-        type: `trail.${event.action}`,
-        nextAttemptAt: new Date(now),
-      })),
+      followers.flatMap((f) =>
+        types.map((type) => ({
+          subscriptionId: f.id,
+          eventId: event.id,
+          seq: event.seq,
+          type,
+          nextAttemptAt: new Date(now),
+        })),
+      ),
     )
     .run();
+}
+
+/**
+ * The webhook types an event goes out as: trail.<action>, and for a product
+ * event also the trail.project.* it was sent as before products and projects
+ * split, kept for one release.
+ */
+export function deliveryTypesOf(action: string): string[] {
+  const type = `trail.${action}`;
+  return action.startsWith("product.")
+    ? [type, `trail.project.${action.slice("product.".length)}`]
+    : [type];
 }
 
 export const countOwn = (db: Db | Tx, actorId: string): number =>

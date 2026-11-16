@@ -10,7 +10,7 @@ import { useAction, useKeyedAction } from "@/lib/use-action";
 
 // id: the person's {username} path segment, a GitHub username or an email address
 type RowWrite =
-  | { action: "save"; id: string; projectKeys: string[] }
+  | { action: "save"; id: string; productKeys: string[] }
   | { action: "remove"; id: string };
 
 export const Route = createFileRoute("/_app/people")({
@@ -34,7 +34,7 @@ function PeoplePage() {
   const rowWrites = useKeyedAction(
     async (write: RowWrite) => {
       if (write.action === "save")
-        await api.setProjects(write.id, write.projectKeys);
+        await api.setProjects(write.id, write.productKeys);
       else await api.remove(write.id);
     },
     (write) => write.id,
@@ -46,9 +46,11 @@ function PeoplePage() {
       <PeopleView
         status={statusOf(people)}
         people={people.data?.items ?? []}
-        projects={session.projects}
+        products={session.products}
         onRetry={() => void people.refetch()}
-        onInvite={invite.run}
+        onInvite={({ username, productKeys }) =>
+          invite.run({ username, products: productKeys })
+        }
         invitePending={invite.pending}
         inviteError={
           invite.error && {
@@ -58,8 +60,8 @@ function PeoplePage() {
               invite.error instanceof ApiError && invite.error.status === 409,
           }
         }
-        onSaveProjects={(id, projectKeys) =>
-          rowWrites.run({ action: "save", id, projectKeys })
+        onSaveProducts={(id, productKeys) =>
+          rowWrites.run({ action: "save", id, productKeys })
         }
         onRemove={(id) => rowWrites.run({ action: "remove", id })}
         rowMutations={rowWrites.outcomes.map(({ vars, pending, error }) => ({

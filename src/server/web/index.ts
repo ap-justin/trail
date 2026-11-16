@@ -7,9 +7,10 @@ import type { Service } from "../service/index.js";
 import { createWebRouter, requireMember, requireOwnOrigin } from "./env.js";
 import { eventRoutes, type LiveStreams } from "./events.js";
 import { feedRoutes } from "./feed.js";
-import { issueRoutes } from "./issues.js";
+import { itemRoutes } from "./items.js";
 import { meRoutes } from "./me.js";
 import { peopleRoutes } from "./people.js";
+import { productRoutes } from "./products.js";
 import { projectRoutes } from "./projects.js";
 import { searchRoutes } from "./search.js";
 
@@ -38,8 +39,9 @@ export function createWeb({
   web.use(requireMember);
   web.use(requireOwnOrigin(auth));
   web.use(limitBody(MAX_BODY_BYTES));
+  web.route("/", productRoutes(db));
   web.route("/", projectRoutes(db));
-  web.route("/", issueRoutes(db, service));
+  web.route("/", itemRoutes(db, service));
   web.route("/", feedRoutes(db));
   web.route("/", searchRoutes(db));
   web.route("/", peopleRoutes(db));

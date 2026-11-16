@@ -40,7 +40,7 @@ test("migrate builds every table STRICT on an empty file", () => {
     { name: "actor", strict: 1 },
     { name: "actor_photo", strict: 1 },
     { name: "api_key", strict: 1 },
-    { name: "api_key_project", strict: 1 },
+    { name: "api_key_product", strict: 1 },
     { name: "comment", strict: 1 },
     { name: "idempotency_key", strict: 1 },
     { name: "invite", strict: 1 },
@@ -48,15 +48,19 @@ test("migrate builds every table STRICT on an empty file", () => {
     { name: "issue_label", strict: 1 },
     { name: "issue_link", strict: 1 },
     { name: "label", strict: 1 },
+    { name: "product", strict: 1 },
+    { name: "product_member", strict: 1 },
+    { name: "product_status_update", strict: 1 },
     { name: "project", strict: 1 },
-    { name: "project_member", strict: 1 },
+    { name: "project_item", strict: 1 },
+    { name: "project_product", strict: 1 },
     { name: "project_status_update", strict: 1 },
     { name: "session", strict: 1 },
     { name: "user", strict: 1 },
     { name: "verification", strict: 1 },
     { name: "webhook_delivery", strict: 1 },
     { name: "webhook_subscription", strict: 1 },
-    { name: "webhook_subscription_project", strict: 1 },
+    { name: "webhook_subscription_product", strict: 1 },
   ]);
   db.$client.close();
 });
@@ -90,22 +94,22 @@ function migrationsWith(
   return { folder, when };
 }
 
-// a drizzle-kit-shaped rebuild of `project`, which `issue` references
-const migrationsWithProjectRebuild = () =>
+// a drizzle-kit-shaped rebuild of `product`, which `issue` references
+const migrationsWithProductRebuild = () =>
   migrationsWith("9999_rebuild", [
     "PRAGMA foreign_keys=OFF;",
-    "CREATE TABLE `__new_project` (`id` text PRIMARY KEY NOT NULL, `key` text NOT NULL UNIQUE, `name` text NOT NULL, `description` text DEFAULT '' NOT NULL, `issue_seq` integer DEFAULT 0 NOT NULL, `external_ref` text, `created_by` text NOT NULL REFERENCES `actor`(`id`), `created_at` integer NOT NULL, `updated_at` integer NOT NULL) STRICT;",
-    "INSERT INTO `__new_project` SELECT * FROM `project`;",
-    "DROP TABLE `project`;",
-    "ALTER TABLE `__new_project` RENAME TO `project`;",
+    "CREATE TABLE `__new_product` (`id` text PRIMARY KEY NOT NULL, `key` text NOT NULL UNIQUE, `name` text NOT NULL, `description` text DEFAULT '' NOT NULL, `issue_seq` integer DEFAULT 0 NOT NULL, `external_ref` text, `owner_id` text REFERENCES `actor`(`id`), `repo_url` text, `created_by` text NOT NULL REFERENCES `actor`(`id`), `created_at` integer NOT NULL, `updated_at` integer NOT NULL) STRICT;",
+    "INSERT INTO `__new_product` SELECT * FROM `product`;",
+    "DROP TABLE `product`;",
+    "ALTER TABLE `__new_product` RENAME TO `product`;",
     "PRAGMA foreign_keys=ON;",
   ]);
 
 function seedIssue(db: Db) {
   db.$client.exec(`
     insert into actor (id, kind, display_name, created_at) values ('b', 'bot', 'builder', 0);
-    insert into project (id, key, name, created_by, created_at, updated_at) values ('p', 'TRL', 'trail', 'b', 0, 0);
-    insert into issue (id, project_id, number, title, created_by, created_at, updated_at) values ('i', 'p', 1, 'keep me', 'b', 0, 0);
+    insert into product (id, key, name, created_by, created_at, updated_at) values ('p', 'TRL', 'trail', 'b', 0, 0);
+    insert into issue (id, product_id, number, type, title, created_by, created_at, updated_at) values ('i', 'p', 1, 'issue', 'keep me', 'b', 0, 0);
   `);
 }
 
@@ -114,13 +118,13 @@ test("a table rebuild keeps the rows that reference it, after backing the file u
   const db = openDatabase(path);
   migrate(db);
   seedIssue(db);
-  const next = migrationsWithProjectRebuild();
+  const next = migrationsWithProductRebuild();
 
   migrate(db, next.folder);
 
   const count = (sql: string) => db.$client.prepare(sql).pluck().get();
-  expect(count("select count(*) from project")).toBe(1);
-  expect(count("select title from issue where project_id = 'p'")).toBe(
+  expect(count("select count(*) from product")).toBe(1);
+  expect(count("select title from issue where product_id = 'p'")).toBe(
     "keep me",
   );
   expect(db.$client.pragma("foreign_keys", { simple: true })).toBe(1);
@@ -131,7 +135,7 @@ test("a table rebuild keeps the rows that reference it, after backing the file u
 
 test("an older build refuses a file a newer build migrated", () => {
   const db = openDatabase(join(dir, "newer.db"));
-  migrate(db, migrationsWithProjectRebuild().folder);
+  migrate(db, migrationsWithProductRebuild().folder);
 
   expect(() => migrate(db)).toThrow(/migrated by a newer trail/);
   db.$client.close();
@@ -191,7 +195,7 @@ const backupsBeside = (path: string) =>
 
 test("a migration keeps only the newest two backups", () => {
   const { path, db } = withOldBackups("prune", [1, 2, 3, 4]);
-  const next = migrationsWithProjectRebuild();
+  const next = migrationsWithProductRebuild();
 
   migrate(db, next.folder);
 
@@ -214,7 +218,7 @@ test("a boot with no migration pending still keeps only the newest two backups",
 
 test("backups are ranked by their stamp as a number, not as text", () => {
   const { path, db } = withOldBackups("prune-numeric", [9, 10]);
-  const next = migrationsWithProjectRebuild();
+  const next = migrationsWithProductRebuild();
 
   migrate(db, next.folder);
 
@@ -225,7 +229,7 @@ test("backups are ranked by their stamp as a number, not as text", () => {
 });
 
 test("the backup this migration made survives even when two newer ones exist", () => {
-  const next = migrationsWithProjectRebuild();
+  const next = migrationsWithProductRebuild();
   const newer = [next.when + 1, next.when + 2];
   const { path, db } = withOldBackups("prune-keeps-own", [1, ...newer]);
 
@@ -250,7 +254,7 @@ test("pruning leaves partial copies, other databases' backups and look-alikes al
   ];
   for (const file of untouched) writeFileSync(join(folder, file), "not mine");
 
-  migrate(db, migrationsWithProjectRebuild().folder);
+  migrate(db, migrationsWithProductRebuild().folder);
 
   for (const file of untouched)
     expect(existsSync(join(folder, file))).toBe(true);
@@ -278,7 +282,7 @@ test("a backup that can't be deleted is warned about and the rest still go", () 
 
   try {
     expect(() =>
-      migrate(db, migrationsWithProjectRebuild().folder),
+      migrate(db, migrationsWithProductRebuild().folder),
     ).not.toThrow();
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining("trail.db.pre-2.bak"),
@@ -297,7 +301,7 @@ test("a copy cut off mid-write is replaced, not kept as the backup", () => {
   const db = openDatabase(path);
   migrate(db);
   seedIssue(db);
-  const next = migrationsWithProjectRebuild();
+  const next = migrationsWithProductRebuild();
   const backup = `${path}.pre-${next.when}.bak`;
   writeFileSync(`${backup}.partial`, "half a database");
 

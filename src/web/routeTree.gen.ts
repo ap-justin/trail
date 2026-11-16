@@ -17,8 +17,11 @@ import { Route as AppAccountRouteImport } from './routes/_app/account'
 import { Route as AppPeopleRouteImport } from './routes/_app/people'
 import { Route as SignInConfirmRouteImport } from './routes/sign-in_.confirm'
 import { Route as AppIssuesKeyRouteImport } from './routes/_app/issues/$key'
+import { Route as AppProductsIndexRouteImport } from './routes/_app/products/index'
 import { Route as AppProjectsIndexRouteImport } from './routes/_app/projects/index'
-import { Route as AppProjectsKeyRouteImport } from './routes/_app/projects/$key'
+import { Route as AppProjectsSlugRouteImport } from './routes/_app/projects/$slug'
+import { Route as AppProductsKeyIndexRouteImport } from './routes/_app/products/$key/index'
+import { Route as AppProductsKeyNRouteImport } from './routes/_app/products/$key/$n'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -59,14 +62,29 @@ const AppIssuesKeyRoute = AppIssuesKeyRouteImport.update({
   path: '/issues/$key',
   getParentRoute: () => AppRoute,
 } as any)
+const AppProductsIndexRoute = AppProductsIndexRouteImport.update({
+  id: '/products/',
+  path: '/products/',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppProjectsIndexRoute = AppProjectsIndexRouteImport.update({
   id: '/projects/',
   path: '/projects/',
   getParentRoute: () => AppRoute,
 } as any)
-const AppProjectsKeyRoute = AppProjectsKeyRouteImport.update({
-  id: '/projects/$key',
-  path: '/projects/$key',
+const AppProjectsSlugRoute = AppProjectsSlugRouteImport.update({
+  id: '/projects/$slug',
+  path: '/projects/$slug',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppProductsKeyIndexRoute = AppProductsKeyIndexRouteImport.update({
+  id: '/products/$key/',
+  path: '/products/$key/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppProductsKeyNRoute = AppProductsKeyNRouteImport.update({
+  id: '/products/$key/$n',
+  path: '/products/$key/$n',
   getParentRoute: () => AppRoute,
 } as any)
 
@@ -78,8 +96,11 @@ export interface FileRoutesByFullPath {
   '/people': typeof AppPeopleRoute
   '/sign-in/confirm': typeof SignInConfirmRoute
   '/issues/$key': typeof AppIssuesKeyRoute
-  '/projects/$key': typeof AppProjectsKeyRoute
+  '/projects/$slug': typeof AppProjectsSlugRoute
+  '/products/': typeof AppProductsIndexRoute
   '/projects/': typeof AppProjectsIndexRoute
+  '/products/$key/$n': typeof AppProductsKeyNRoute
+  '/products/$key/': typeof AppProductsKeyIndexRoute
 }
 export interface FileRoutesByTo {
   '/sign-in': typeof SignInRoute
@@ -89,8 +110,11 @@ export interface FileRoutesByTo {
   '/sign-in/confirm': typeof SignInConfirmRoute
   '/': typeof AppIndexRoute
   '/issues/$key': typeof AppIssuesKeyRoute
-  '/projects/$key': typeof AppProjectsKeyRoute
+  '/projects/$slug': typeof AppProjectsSlugRoute
+  '/products': typeof AppProductsIndexRoute
   '/projects': typeof AppProjectsIndexRoute
+  '/products/$key/$n': typeof AppProductsKeyNRoute
+  '/products/$key': typeof AppProductsKeyIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -102,8 +126,11 @@ export interface FileRoutesById {
   '/sign-in_/confirm': typeof SignInConfirmRoute
   '/_app/': typeof AppIndexRoute
   '/_app/issues/$key': typeof AppIssuesKeyRoute
-  '/_app/projects/$key': typeof AppProjectsKeyRoute
+  '/_app/projects/$slug': typeof AppProjectsSlugRoute
+  '/_app/products/': typeof AppProductsIndexRoute
   '/_app/projects/': typeof AppProjectsIndexRoute
+  '/_app/products/$key/$n': typeof AppProductsKeyNRoute
+  '/_app/products/$key/': typeof AppProductsKeyIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -115,8 +142,11 @@ export interface FileRouteTypes {
     | '/people'
     | '/sign-in/confirm'
     | '/issues/$key'
-    | '/projects/$key'
+    | '/projects/$slug'
+    | '/products/'
     | '/projects/'
+    | '/products/$key/$n'
+    | '/products/$key/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/sign-in'
@@ -126,8 +156,11 @@ export interface FileRouteTypes {
     | '/sign-in/confirm'
     | '/'
     | '/issues/$key'
-    | '/projects/$key'
+    | '/projects/$slug'
+    | '/products'
     | '/projects'
+    | '/products/$key/$n'
+    | '/products/$key'
   id:
     | '__root__'
     | '/_app'
@@ -138,8 +171,11 @@ export interface FileRouteTypes {
     | '/sign-in_/confirm'
     | '/_app/'
     | '/_app/issues/$key'
-    | '/_app/projects/$key'
+    | '/_app/projects/$slug'
+    | '/_app/products/'
     | '/_app/projects/'
+    | '/_app/products/$key/$n'
+    | '/_app/products/$key/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -206,6 +242,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppIssuesKeyRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/products/': {
+      id: '/_app/products/'
+      path: '/products'
+      fullPath: '/products/'
+      preLoaderRoute: typeof AppProductsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/projects/': {
       id: '/_app/projects/'
       path: '/projects'
@@ -213,11 +256,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppProjectsIndexRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/projects/$key': {
-      id: '/_app/projects/$key'
-      path: '/projects/$key'
-      fullPath: '/projects/$key'
-      preLoaderRoute: typeof AppProjectsKeyRouteImport
+    '/_app/projects/$slug': {
+      id: '/_app/projects/$slug'
+      path: '/projects/$slug'
+      fullPath: '/projects/$slug'
+      preLoaderRoute: typeof AppProjectsSlugRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/products/$key/': {
+      id: '/_app/products/$key/'
+      path: '/products/$key'
+      fullPath: '/products/$key/'
+      preLoaderRoute: typeof AppProductsKeyIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/products/$key/$n': {
+      id: '/_app/products/$key/$n'
+      path: '/products/$key/$n'
+      fullPath: '/products/$key/$n'
+      preLoaderRoute: typeof AppProductsKeyNRouteImport
       parentRoute: typeof AppRoute
     }
   }
@@ -229,8 +286,11 @@ interface AppRouteChildren {
   AppPeopleRoute: typeof AppPeopleRoute
   AppIndexRoute: typeof AppIndexRoute
   AppIssuesKeyRoute: typeof AppIssuesKeyRoute
-  AppProjectsKeyRoute: typeof AppProjectsKeyRoute
+  AppProjectsSlugRoute: typeof AppProjectsSlugRoute
+  AppProductsIndexRoute: typeof AppProductsIndexRoute
   AppProjectsIndexRoute: typeof AppProjectsIndexRoute
+  AppProductsKeyNRoute: typeof AppProductsKeyNRoute
+  AppProductsKeyIndexRoute: typeof AppProductsKeyIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
@@ -239,8 +299,11 @@ const AppRouteChildren: AppRouteChildren = {
   AppPeopleRoute: AppPeopleRoute,
   AppIndexRoute: AppIndexRoute,
   AppIssuesKeyRoute: AppIssuesKeyRoute,
-  AppProjectsKeyRoute: AppProjectsKeyRoute,
+  AppProjectsSlugRoute: AppProjectsSlugRoute,
+  AppProductsIndexRoute: AppProductsIndexRoute,
   AppProjectsIndexRoute: AppProjectsIndexRoute,
+  AppProductsKeyNRoute: AppProductsKeyNRoute,
+  AppProductsKeyIndexRoute: AppProductsKeyIndexRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

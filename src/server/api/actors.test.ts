@@ -16,9 +16,46 @@ test("GET /whoami answers the key's bot: id, kind, name, label, photoUrl and tit
     kind: "bot",
     name: "rest whoami",
     label: "agent-7",
-    scope: { projects: null, actions: null },
+    scope: { products: null, projects: null, actions: null },
+    ownProducts: [],
+    products: [],
     photoUrl: null,
     title: null,
+  });
+});
+
+test("GET /whoami lists the products the bot owns and every product its key reaches", async () => {
+  const owner = createBot(db, "rest owner");
+  const made = async (key: string) =>
+    (
+      await request("POST", "/api/v1/products", {
+        json: { key, name: key.toLowerCase() },
+        key: owner.key,
+      })
+    ).json();
+  await made("WHOA");
+  await request("POST", "/api/v1/products", {
+    json: { key: "WHOB", name: "whob", owner: null },
+    key: owner.key,
+  });
+  const scoped = createBot(db, "rest scoped", {
+    scope: { projects: ["WHOB"] },
+  });
+  const me = (await (
+    await request("GET", "/api/v1/whoami", { key: owner.key })
+  ).json()) as Body;
+  expect(me.ownProducts).toEqual([{ key: "WHOA", name: "whoa" }]);
+  expect(me.products).toEqual([
+    { key: "WHOA", name: "whoa" },
+    { key: "WHOB", name: "whob" },
+  ]);
+  const limited = (await (
+    await request("GET", "/api/v1/whoami", { key: scoped.key })
+  ).json()) as Body;
+  expect(limited).toMatchObject({
+    scope: { products: ["WHOB"], projects: ["WHOB"] },
+    ownProducts: [],
+    products: [{ key: "WHOB", name: "whob" }],
   });
 });
 

@@ -25,14 +25,14 @@ const me = async (cookie: string) =>
     await request("GET", "/api/web/me", { key: null, cookie })
   ).json()) as MeView;
 
-const projectKeys = async (cookie: string) => {
-  const res = await request("GET", "/api/web/projects", { key: null, cookie });
+const productKeys = async (cookie: string) => {
+  const res = await request("GET", "/api/web/products", { key: null, cookie });
   expect(res.status).toBe(200);
   const body = (await res.json()) as { items: { key: string }[] };
   return body.items.map((p) => p.key);
 };
 
-test("an email invitee signs in as a member and sees exactly its projects", async () => {
+test("an email invitee signs in as a member and sees exactly its products", async () => {
   const mine = addProject("Mine");
   addProject("Theirs");
   inviteEmail("lena@example.com", [mine.id]);
@@ -48,11 +48,11 @@ test("an email invitee signs in as a member and sees exactly its projects", asyn
       photoUrl: null,
       title: null,
     },
-    projects: [{ key: mine.key, name: "Mine" }],
+    products: [{ key: mine.key, name: "Mine" }],
     ownerName: owner,
     emailSignIn: true,
   });
-  expect(await projectKeys(cookie)).toEqual([mine.key]);
+  expect(await productKeys(cookie)).toEqual([mine.key]);
   expect(await isLetIn(cookie)).toBe(true);
 });
 
@@ -67,10 +67,10 @@ test("removing the email invite shuts a live session out on its next request", a
   const project = addProject();
   const inviteId = inviteEmail("nia@example.com", [project.id]);
   const cookie = await signInWithEmail("nia@example.com");
-  expect(await projectKeys(cookie)).toEqual([project.key]);
+  expect(await productKeys(cookie)).toEqual([project.key]);
 
   db.delete(invite).where(eq(invite.id, inviteId)).run();
-  const res = await request("GET", "/api/web/projects", { key: null, cookie });
+  const res = await request("GET", "/api/web/products", { key: null, cookie });
   expect(res.status).toBe(403);
   expect(await res.json()).toEqual({
     error: {
@@ -84,7 +84,7 @@ test("removing the email invite shuts a live session out on its next request", a
     login: null,
     email: "nia@example.com",
     actor: null,
-    projects: [],
+    products: [],
   });
   expect(await isLetIn(cookie)).toBe(false);
 });
@@ -104,6 +104,6 @@ test("a link whose invite was removed before it was opened signs in as not invit
     actor: null,
   });
   expect(
-    (await request("GET", "/api/web/projects", { key: null, cookie })).status,
+    (await request("GET", "/api/web/products", { key: null, cookie })).status,
   ).toBe(403);
 });

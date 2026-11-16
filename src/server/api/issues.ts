@@ -2,11 +2,14 @@ import { createRoute } from "@hono/zod-openapi";
 import {
   issueCreateSchema,
   issueListQuerySchema,
-  issueSchema,
   issueUpdateSchema,
+  legacyCreatedItemSchema,
+  legacyIssueSchema,
+  legacyUpdatedItemSchema,
   pageSchema,
 } from "../../shared/schemas.js";
 import type { Service } from "../service/index.js";
+import { deprecations } from "./deprecations.js";
 import { createRouter } from "./env.js";
 import {
   conflictError,
@@ -16,24 +19,40 @@ import {
   jsonBody,
   jsonContent,
   notFoundError,
+  OWNER_ONLY,
   readErrors,
   writeErrors,
 } from "./routes.js";
-import { toIssue, toPage } from "./serialize.js";
+import {
+  deprecated,
+  toLegacyIssue,
+  toPage,
+  withSkippedLabels,
+} from "./serialize.js";
 
-const tags = ["issues"];
+// The routes items had before todos: kept for one release, each answer carrying `deprecated`.
+const tags = ["issues (deprecated)"];
+
+const legacyPageSchema = pageSchema(
+  legacyIssueSchema.omit({ deprecated: true }),
+).extend({
+  deprecated: legacyIssueSchema.shape.deprecated,
+});
 
 const createIssue = createRoute({
   method: "post",
   path: "/issues",
-  summary: "Open an issue in a project",
+  summary: "Deprecated: create an item in a product (use POST /items)",
+  description:
+    "Deprecated alias of POST /items, removed after the next release. projectId takes the product's key. The item is a todo when the calling bot owns the product, else an issue in triage.",
+  deprecated: true,
   tags,
   request: {
     headers: idempotencyHeaders,
     body: jsonBody(issueCreateSchema),
   },
   responses: {
-    201: jsonContent(issueSchema, "The created issue"),
+    201: jsonContent(legacyCreatedItemSchema, "The created item"),
     ...forbiddenError("issues"),
     ...writeErrors,
     ...notFoundError,
@@ -44,11 +63,14 @@ const createIssue = createRoute({
 const listIssues = createRoute({
   method: "get",
   path: "/issues",
-  summary: "List issues, newest first, filtered by project, status or assignee",
+  summary: "Deprecated: list items (use GET /items)",
+  description:
+    "Deprecated alias of GET /items, removed after the next release; projectId takes the product's key, and status=open also lists issues waiting in triage (GET /items matches status exactly).",
+  deprecated: true,
   tags,
   request: { query: issueListQuerySchema },
   responses: {
-    200: jsonContent(pageSchema(issueSchema), "A page of issues"),
+    200: jsonContent(legacyPageSchema, "A page of items"),
     ...forbiddenError("read"),
     ...readErrors,
     ...notFoundError,
@@ -58,11 +80,12 @@ const listIssues = createRoute({
 const getIssue = createRoute({
   method: "get",
   path: "/issues/{id}",
-  summary: "Get an issue",
+  summary: "Deprecated: get an item (use GET /items/{key})",
+  deprecated: true,
   tags,
   request: { params: issueParam },
   responses: {
-    200: jsonContent(issueSchema, "The issue"),
+    200: jsonContent(legacyIssueSchema, "The item"),
     ...forbiddenError("read"),
     ...readErrors,
     ...notFoundError,
@@ -72,13 +95,18 @@ const getIssue = createRoute({
 const updateIssue = createRoute({
   method: "patch",
   path: "/issues/{id}",
-  summary:
-    "Update an issue's title, description, status, assignee, estimate, priority, labels or links; addLabels, removeLabels, addLinks and removeLinks change part of the set in the same transaction",
+  summary: "Deprecated: update an item (use PATCH /items/{key})",
+  description:
+    "Deprecated alias of PATCH /items/{key}, removed after the next release; assigneeId takes a bot's name or id.",
+  deprecated: true,
   tags,
   request: { params: issueParam, body: jsonBody(issueUpdateSchema) },
   responses: {
-    200: jsonContent(issueSchema, "The updated issue"),
-    ...forbiddenError("issues"),
+    200: jsonContent(
+      legacyUpdatedItemSchema,
+      "The updated item, with skippedLabels when labels another bot's product lacks were left off",
+    ),
+    ...forbiddenError("issues", { owner: OWNER_ONLY }),
     ...writeErrors,
     ...notFoundError,
   },
@@ -86,38 +114,57 @@ const updateIssue = createRoute({
 
 export function issueRoutes(service: Service) {
   return createRouter()
-    .openapi(createIssue, (c) =>
-      c.json(
-        toIssue(
-          service.createIssue(c.var.actor, c.req.valid("json"), {
-            idempotencyKey: c.req.valid("header")["idempotency-key"],
-          }),
+    .openapi(createIssue, (c) => {
+      const created = service.createIssue(c.var.actor, c.req.valid("json"), {
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+      });
+      return c.json(
+        deprecated(
+          withSkippedLabels(toLegacyIssue(created), created),
+          deprecations.createIssue,
         ),
         201,
-      ),
-    )
-    .openapi(listIssues, (c) =>
-      c.json(
-        toPage(service.listIssues(c.var.actor, c.req.valid("query")), toIssue),
+      );
+    })
+    .openapi(listIssues, (c) => {
+      const { projectId, assigneeId, ...query } = c.req.valid("query");
+      return c.json(
+        deprecated(
+          toPage(
+            service.listIssues(c.var.actor, {
+              ...query,
+              product: projectId,
+              assignee: assigneeId,
+            }),
+            toLegacyIssue,
+          ),
+          deprecations.listIssues,
+        ),
         200,
-      ),
-    )
+      );
+    })
     .openapi(getIssue, (c) =>
       c.json(
-        toIssue(service.getIssue(c.var.actor, c.req.valid("param").id)),
-        200,
-      ),
-    )
-    .openapi(updateIssue, (c) =>
-      c.json(
-        toIssue(
-          service.updateIssue(
-            c.var.actor,
-            c.req.valid("param").id,
-            c.req.valid("json"),
-          ),
+        deprecated(
+          toLegacyIssue(service.getItem(c.var.actor, c.req.valid("param").id)),
+          deprecations.getIssue,
         ),
         200,
       ),
-    );
+    )
+    .openapi(updateIssue, (c) => {
+      const updated = service.updateItem(
+        c.var.actor,
+        c.req.valid("param").id,
+        c.req.valid("json"),
+        { legacy: true },
+      );
+      return c.json(
+        deprecated(
+          withSkippedLabels(toLegacyIssue(updated), updated),
+          deprecations.updateIssue,
+        ),
+        200,
+      );
+    });
 }

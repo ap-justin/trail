@@ -9,7 +9,7 @@ import {
   activityEvent,
   actor,
   apiKey,
-  apiKeyProject,
+  apiKeyProduct,
   comment,
   idempotencyKey,
   invite,
@@ -17,10 +17,11 @@ import {
   issueLabel,
   issueLink,
   label,
+  product,
+  productMember,
+  productStatusUpdate,
   project,
   projectHealths,
-  projectMember,
-  projectStatusUpdate,
 } from "./schema.js";
 
 const dir = mkdtempSync(join(tmpdir(), "trail-schema-"));
@@ -55,11 +56,11 @@ const bot = db
   .get();
 const human = db
   .insert(actor)
-  .values({ kind: "human", displayName: "Justin", githubId: 89639563 })
+  .values({ kind: "human", displayName: "Maya Chen", githubId: 1001 })
   .returning()
   .get();
 const proj = db
-  .insert(project)
+  .insert(product)
   .values({ key: "TRL", name: "trail", createdBy: bot.id })
   .returning()
   .get();
@@ -68,8 +69,9 @@ test("a valid issue round-trips with its defaults", () => {
   const created = db
     .insert(issue)
     .values({
-      projectId: proj.id,
+      productId: proj.id,
       number: 1,
+      type: "issue",
       title: "Ship schema",
       createdBy: bot.id,
     })
@@ -90,7 +92,7 @@ test.each(["T", "TOOLONGKEY1", "trl", "TR-L", "TRÉ"])(
   (key) => {
     expect(
       errorCode(() =>
-        db.insert(project).values({ key, name: "x", createdBy: bot.id }).run(),
+        db.insert(product).values({ key, name: "x", createdBy: bot.id }).run(),
       ),
     ).toBe("SQLITE_CONSTRAINT_CHECK");
   },
@@ -100,7 +102,7 @@ test("a project key is unique", () => {
   expect(
     errorCode(() =>
       db
-        .insert(project)
+        .insert(product)
         .values({ key: "TRL", name: "again", createdBy: bot.id })
         .run(),
     ),
@@ -109,14 +111,20 @@ test("a project key is unique", () => {
 
 test("an issue number is unique within its project and starts at 1", () => {
   const other = db
-    .insert(project)
+    .insert(product)
     .values({ key: "OTH2", name: "other", createdBy: bot.id })
     .returning()
     .get();
   const numbered = (projectId: string, number: number) => () =>
     db
       .insert(issue)
-      .values({ projectId, number, title: "n", createdBy: bot.id })
+      .values({
+        productId: projectId,
+        number,
+        type: "issue",
+        title: "n",
+        createdBy: bot.id,
+      })
       .run();
   numbered(proj.id, 7)();
   numbered(other.id, 7)();
@@ -130,8 +138,9 @@ test("an issue in a missing project is rejected", () => {
       db
         .insert(issue)
         .values({
-          projectId: "nope",
+          productId: "nope",
           number: 1,
+          type: "issue",
           title: "Orphan",
           createdBy: bot.id,
         })
@@ -145,7 +154,7 @@ test("an issue status outside the enum is rejected", () => {
     errorCode(() =>
       sqlite
         .prepare(
-          "insert into issue (id, project_id, number, title, status, created_by, created_at, updated_at) values ('i1', ?, 99, 't', 'closed', ?, 0, 0)",
+          "insert into issue (id, product_id, number, type, title, status, created_by, created_at, updated_at) values ('i1', ?, 99, 'issue', 't', 'closed', ?, 0, 0)",
         )
         .run(proj.id, bot.id),
     ),
@@ -153,6 +162,7 @@ test("an issue status outside the enum is rejected", () => {
 });
 
 test.each([
+  ["triage", 1],
   ["open", 1],
   ["in_progress", 1],
   ["done", null],
@@ -164,7 +174,7 @@ test.each([
       errorCode(() =>
         sqlite
           .prepare(
-            "insert into issue (id, project_id, number, title, status, created_by, created_at, updated_at, completed_at) values ('i-c', ?, 98, 't', ?, ?, 0, 0, ?)",
+            "insert into issue (id, product_id, number, type, title, status, created_by, created_at, updated_at, completed_at) values ('i-c', ?, 98, 'issue', 't', ?, ?, 0, 0, ?)",
           )
           .run(proj.id, status, bot.id, completedAt),
       ),
@@ -247,11 +257,11 @@ test("a timestamp column refuses text", () => {
 
 // the shape service listIssues sends for a project with no status filter, first page and later
 test.each([
-  ["first page", eq(issue.projectId, proj.id)],
+  ["first page", eq(issue.productId, proj.id)],
   [
     "after a cursor",
     and(
-      eq(issue.projectId, proj.id),
+      eq(issue.productId, proj.id),
       or(
         lt(issue.createdAt, new Date(1)),
         and(eq(issue.createdAt, new Date(1)), lt(issue.id, "x")),
@@ -270,7 +280,7 @@ test.each([
         .limit(51)
         .toSQL(),
     );
-    expect(plan).toContain("issue_project_created_idx");
+    expect(plan).toContain("issue_product_created_idx");
     expect(plan).not.toContain("TEMP B-TREE");
   },
 );
@@ -282,8 +292,9 @@ const newIssue =
     db
       .insert(issue)
       .values({
-        projectId: proj.id,
+        productId: proj.id,
         number: nextNumber++,
+        type: "issue",
         title: "t",
         createdBy: bot.id,
         ...fields,
@@ -327,15 +338,15 @@ test("an issue's source status is null until given, and at most 200 characters",
 
 test("an issue's external ref is unique within its project only", () => {
   const other = db
-    .insert(project)
+    .insert(product)
     .values({ key: "REF", name: "refs", createdBy: bot.id })
     .returning()
     .get();
-  newIssue({ externalRef: "JUS-1" })();
-  newIssue({ externalRef: "JUS-1", projectId: other.id })();
+  newIssue({ externalRef: "ABC-1" })();
+  newIssue({ externalRef: "ABC-1", productId: other.id })();
   newIssue()();
   newIssue()();
-  expect(errorCode(newIssue({ externalRef: "JUS-1" }))).toBe(
+  expect(errorCode(newIssue({ externalRef: "ABC-1" }))).toBe(
     "SQLITE_CONSTRAINT_UNIQUE",
   );
 });
@@ -343,8 +354,8 @@ test("an issue's external ref is unique within its project only", () => {
 test("a project's external ref is unique across projects", () => {
   const withRef = (key: string) => () =>
     db
-      .insert(project)
-      .values({ key, name: "p", createdBy: bot.id, externalRef: "P-JUS-9" })
+      .insert(product)
+      .values({ key, name: "p", createdBy: bot.id, externalRef: "P-ABC-9" })
       .run();
   withRef("EXA")();
   expect(errorCode(withRef("EXB"))).toBe("SQLITE_CONSTRAINT_UNIQUE");
@@ -361,7 +372,7 @@ test("a comment's external ref is unique within its issue only", () => {
         authorId: bot.id,
         body: "imported",
         externalRef: "c-1",
-        sourceAuthor: "Justin",
+        sourceAuthor: "Maya Chen",
       })
       .run();
   commentOn(first.id)();
@@ -371,12 +382,12 @@ test("a comment's external ref is unique within its issue only", () => {
 
 test("a label name is unique within its project and non-empty", () => {
   const other = db
-    .insert(project)
+    .insert(product)
     .values({ key: "LBL", name: "labels", createdBy: bot.id })
     .returning()
     .get();
   const labelIn = (projectId: string, name: string) => () =>
-    db.insert(label).values({ projectId, name }).run();
+    db.insert(label).values({ productId: projectId, name }).run();
   labelIn(proj.id, "bug")();
   labelIn(other.id, "bug")();
   expect(errorCode(labelIn(proj.id, "bug"))).toBe("SQLITE_CONSTRAINT_UNIQUE");
@@ -385,12 +396,12 @@ test("a label name is unique within its project and non-empty", () => {
 
 test("a label name collides regardless of ASCII case, within its project only", () => {
   const other = db
-    .insert(project)
+    .insert(product)
     .values({ key: "LBC", name: "label case", createdBy: bot.id })
     .returning()
     .get();
   const labelIn = (projectId: string, name: string) => () =>
-    db.insert(label).values({ projectId, name }).run();
+    db.insert(label).values({ productId: projectId, name }).run();
   labelIn(proj.id, "Foo")();
   labelIn(other.id, "foo")();
   expect(errorCode(labelIn(proj.id, "foo"))).toBe("SQLITE_CONSTRAINT_UNIQUE");
@@ -398,7 +409,7 @@ test("a label name collides regardless of ASCII case, within its project only", 
     db
       .select({ name: label.name })
       .from(label)
-      .where(eq(label.projectId, proj.id))
+      .where(eq(label.productId, proj.id))
       .all()
       .map((l) => l.name),
   ).toContain("Foo");
@@ -406,18 +417,22 @@ test("a label name collides regardless of ASCII case, within its project only", 
 
 test("an issue takes labels from its own project only, and loses them with the label", () => {
   const other = db
-    .insert(project)
+    .insert(product)
     .values({ key: "LBX", name: "elsewhere", createdBy: bot.id })
     .returning()
     .get();
   const labelIn = (projectId: string) =>
-    db.insert(label).values({ projectId, name: "feature" }).returning().get();
+    db
+      .insert(label)
+      .values({ productId: projectId, name: "feature" })
+      .returning()
+      .get();
   const own = labelIn(proj.id);
   const foreign = labelIn(other.id);
   const labeled = newIssue()();
 
   db.insert(issueLabel)
-    .values({ issueId: labeled.id, labelId: own.id, projectId: proj.id })
+    .values({ issueId: labeled.id, labelId: own.id, productId: proj.id })
     .run();
   expect(
     errorCode(() =>
@@ -426,7 +441,7 @@ test("an issue takes labels from its own project only, and loses them with the l
         .values({
           issueId: labeled.id,
           labelId: foreign.id,
-          projectId: proj.id,
+          productId: proj.id,
         })
         .run(),
     ),
@@ -438,7 +453,7 @@ test("an issue takes labels from its own project only, and loses them with the l
         .values({
           issueId: labeled.id,
           labelId: foreign.id,
-          projectId: other.id,
+          productId: other.id,
         })
         .run(),
     ),
@@ -472,11 +487,11 @@ test("an issue links a url once", () => {
 
 test("a status update needs a body and a known health", () => {
   const update =
-    (fields: Partial<typeof projectStatusUpdate.$inferInsert>) => () =>
+    (fields: Partial<typeof productStatusUpdate.$inferInsert>) => () =>
       db
-        .insert(projectStatusUpdate)
+        .insert(productStatusUpdate)
         .values({
-          projectId: proj.id,
+          productId: proj.id,
           authorId: bot.id,
           body: "on schedule",
           health: "on_track",
@@ -494,7 +509,7 @@ test("a status update needs a body and a known health", () => {
     ),
   ).toBe("SQLITE_CONSTRAINT_CHECK");
   expect(errorCode(update({ body: "" }))).toBe("SQLITE_CONSTRAINT_CHECK");
-  update({ externalRef: "su-1", sourceAuthor: "Justin" })();
+  update({ externalRef: "su-1", sourceAuthor: "Maya Chen" })();
   expect(errorCode(update({ externalRef: "su-1" }))).toBe(
     "SQLITE_CONSTRAINT_UNIQUE",
   );
@@ -504,12 +519,12 @@ test("a status update needs a body and a known health", () => {
 test("a project's status updates are read newest first in index order", () => {
   const query = db
     .select()
-    .from(projectStatusUpdate)
-    .where(eq(projectStatusUpdate.projectId, proj.id))
-    .orderBy(desc(projectStatusUpdate.createdAt), desc(projectStatusUpdate.id))
+    .from(productStatusUpdate)
+    .where(eq(productStatusUpdate.productId, proj.id))
+    .orderBy(desc(productStatusUpdate.createdAt), desc(productStatusUpdate.id))
     .limit(51)
     .toSQL();
-  expect(planOf(query)).toContain("project_status_update_project_created_idx");
+  expect(planOf(query)).toContain("product_status_update_product_created_idx");
   expect(planOf(query)).not.toContain("TEMP B-TREE");
 });
 
@@ -570,10 +585,10 @@ const newEvent = (fields: Partial<typeof activityEvent.$inferInsert> = {}) =>
     .insert(activityEvent)
     .values({
       actorId: bot.id,
-      subjectType: "project",
+      subjectType: "product",
       subjectId: proj.id,
-      projectId: proj.id,
-      action: "project.updated",
+      productId: proj.id,
+      action: "product.updated",
       ...fields,
     })
     .returning()
@@ -639,8 +654,8 @@ test.each([
   ["all events", gt(activityEvent.seq, 3), "activity_event_seq_unique"],
   [
     "one project",
-    and(eq(activityEvent.projectId, proj.id), gt(activityEvent.seq, 3)),
-    "activity_event_project_seq_idx",
+    and(eq(activityEvent.productId, proj.id), gt(activityEvent.seq, 3)),
+    "activity_event_product_seq_idx",
   ],
   [
     "one actor",
@@ -670,7 +685,7 @@ test("a human carries a lowercased GitHub login, unique among actors; a bot carr
       db.insert(actor).values({ kind, displayName: "p", githubLogin }).run();
   withLogin("octo-cat9")();
   expect(errorCode(withLogin("octo-cat9"))).toBe("SQLITE_CONSTRAINT_UNIQUE");
-  expect(errorCode(withLogin("tara-bot", "bot"))).toBe(
+  expect(errorCode(withLogin("builder-bot", "bot"))).toBe(
     "SQLITE_CONSTRAINT_CHECK",
   );
   expect(errorCode(withLogin("a".repeat(39)))).toBe("no error");
@@ -718,7 +733,7 @@ test("a username is invited once, and its projects must exist", () => {
     ),
   ).toBe("SQLITE_CONSTRAINT_UNIQUE");
   const member = (inviteId: number, projectId: string) => () =>
-    db.insert(projectMember).values({ inviteId, projectId }).run();
+    db.insert(productMember).values({ inviteId, productId: projectId }).run();
   member(once.id, proj.id)();
   expect(errorCode(member(once.id, proj.id))).toBe(
     "SQLITE_CONSTRAINT_PRIMARYKEY",
@@ -804,7 +819,7 @@ test("one human at most is the owner, and a bot never is", () => {
 
 test("removing an invite drops its projects and keeps the person's actor and writing", () => {
   const other = db
-    .insert(project)
+    .insert(product)
     .values({ key: "MBR", name: "members", createdBy: bot.id })
     .returning()
     .get();
@@ -813,10 +828,10 @@ test("removing an invite drops its projects and keeps the person's actor and wri
     .values({ username: "leaver", invitedBy: human.id })
     .returning()
     .get();
-  db.insert(projectMember)
+  db.insert(productMember)
     .values([
-      { inviteId: leaver.id, projectId: proj.id },
-      { inviteId: leaver.id, projectId: other.id },
+      { inviteId: leaver.id, productId: proj.id },
+      { inviteId: leaver.id, productId: other.id },
     ])
     .run();
   const person = db
@@ -834,8 +849,8 @@ test("removing an invite drops its projects and keeps the person's actor and wri
   expect(
     db
       .select()
-      .from(projectMember)
-      .where(eq(projectMember.inviteId, leaver.id))
+      .from(productMember)
+      .where(eq(productMember.inviteId, leaver.id))
       .all(),
   ).toEqual([]);
   expect(
@@ -851,7 +866,7 @@ test("removing an invite drops its projects and keeps the person's actor and wri
 
 test("a project with issues cannot be deleted; one without drops its memberships", () => {
   const empty = db
-    .insert(project)
+    .insert(product)
     .values({ key: "GONE", name: "gone", createdBy: bot.id })
     .returning()
     .get();
@@ -860,23 +875,23 @@ test("a project with issues cannot be deleted; one without drops its memberships
     .values({ username: "viewer", invitedBy: human.id })
     .returning()
     .get();
-  db.insert(projectMember)
+  db.insert(productMember)
     .values([
-      { inviteId: viewer.id, projectId: proj.id },
-      { inviteId: viewer.id, projectId: empty.id },
+      { inviteId: viewer.id, productId: proj.id },
+      { inviteId: viewer.id, productId: empty.id },
     ])
     .run();
 
   expect(
-    errorCode(() => db.delete(project).where(eq(project.id, proj.id)).run()),
+    errorCode(() => db.delete(product).where(eq(product.id, proj.id)).run()),
   ).toBe("SQLITE_CONSTRAINT_FOREIGNKEY");
-  db.delete(project).where(eq(project.id, empty.id)).run();
+  db.delete(product).where(eq(product.id, empty.id)).run();
 
   expect(
     db
-      .select({ projectId: projectMember.projectId })
-      .from(projectMember)
-      .where(eq(projectMember.inviteId, viewer.id))
+      .select({ projectId: productMember.productId })
+      .from(productMember)
+      .where(eq(productMember.inviteId, viewer.id))
       .all(),
   ).toEqual([{ projectId: proj.id }]);
 });
@@ -884,16 +899,16 @@ test("a project with issues cannot be deleted; one without drops its memberships
 test.each([
   [
     "an invite's projects",
-    eq(projectMember.inviteId, 1),
-    "sqlite_autoindex_project_member_1",
+    eq(productMember.inviteId, 1),
+    "sqlite_autoindex_product_member_1",
   ],
   [
     "a project's invites",
-    eq(projectMember.projectId, proj.id),
-    "project_member_project_invite_idx",
+    eq(productMember.productId, proj.id),
+    "product_member_product_invite_idx",
   ],
 ])("%s are read from an index alone", (_, where, index) => {
-  const plan = planOf(db.select().from(projectMember).where(where).toSQL());
+  const plan = planOf(db.select().from(productMember).where(where).toSQL());
   expect(plan).toContain(index);
   expect(plan).not.toContain("SCAN");
 });
@@ -955,31 +970,31 @@ test("a key's allowlist names an existing key and project, each pair once", () =
     .values({ actorId: bot.id, prefix: "trl_allow", hash: "e".repeat(64) })
     .returning()
     .get();
-  db.insert(apiKeyProject)
-    .values({ apiKeyId: key.id, projectId: proj.id })
+  db.insert(apiKeyProduct)
+    .values({ apiKeyId: key.id, productId: proj.id })
     .run();
 
   expect(
     errorCode(() =>
       db
-        .insert(apiKeyProject)
-        .values({ apiKeyId: key.id, projectId: proj.id })
+        .insert(apiKeyProduct)
+        .values({ apiKeyId: key.id, productId: proj.id })
         .run(),
     ),
   ).toBe("SQLITE_CONSTRAINT_PRIMARYKEY");
   expect(
     errorCode(() =>
       db
-        .insert(apiKeyProject)
-        .values({ apiKeyId: "no-such-key", projectId: proj.id })
+        .insert(apiKeyProduct)
+        .values({ apiKeyId: "no-such-key", productId: proj.id })
         .run(),
     ),
   ).toBe("SQLITE_CONSTRAINT_FOREIGNKEY");
   expect(
     errorCode(() =>
       db
-        .insert(apiKeyProject)
-        .values({ apiKeyId: key.id, projectId: "no-such-project" })
+        .insert(apiKeyProduct)
+        .values({ apiKeyId: key.id, productId: "no-such-project" })
         .run(),
     ),
   ).toBe("SQLITE_CONSTRAINT_FOREIGNKEY");
@@ -987,7 +1002,7 @@ test("a key's allowlist names an existing key and project, each pair once", () =
 
 test("deleting a key drops its allowlist; a project on an allowlist cannot be deleted", () => {
   const scopedTo = db
-    .insert(project)
+    .insert(product)
     .values({ key: "BGP", name: "better giving", createdBy: bot.id })
     .returning()
     .get();
@@ -996,13 +1011,13 @@ test("deleting a key drops its allowlist; a project on an allowlist cannot be de
     .values({ actorId: bot.id, prefix: "trl_gone", hash: "f".repeat(64) })
     .returning()
     .get();
-  db.insert(apiKeyProject)
-    .values({ apiKeyId: key.id, projectId: scopedTo.id })
+  db.insert(apiKeyProduct)
+    .values({ apiKeyId: key.id, productId: scopedTo.id })
     .run();
 
   expect(
     errorCode(() =>
-      db.delete(project).where(eq(project.id, scopedTo.id)).run(),
+      db.delete(product).where(eq(product.id, scopedTo.id)).run(),
     ),
   ).toBe("SQLITE_CONSTRAINT_FOREIGNKEY");
 
@@ -1010,26 +1025,102 @@ test("deleting a key drops its allowlist; a project on an allowlist cannot be de
   expect(
     db
       .select()
-      .from(apiKeyProject)
-      .where(eq(apiKeyProject.apiKeyId, key.id))
+      .from(apiKeyProduct)
+      .where(eq(apiKeyProduct.apiKeyId, key.id))
       .all(),
   ).toEqual([]);
-  db.delete(project).where(eq(project.id, scopedTo.id)).run();
+  db.delete(product).where(eq(product.id, scopedTo.id)).run();
 });
 
 test.each([
   [
     "a key's projects",
-    eq(apiKeyProject.apiKeyId, "k"),
-    "sqlite_autoindex_api_key_project_1",
+    eq(apiKeyProduct.apiKeyId, "k"),
+    "sqlite_autoindex_api_key_product_1",
   ],
   [
     "a project's keys",
-    eq(apiKeyProject.projectId, proj.id),
-    "api_key_project_project_key_idx",
+    eq(apiKeyProduct.productId, proj.id),
+    "api_key_product_product_key_idx",
   ],
 ])("%s are read from an index alone", (_, where, index) => {
-  const plan = planOf(db.select().from(apiKeyProject).where(where).toSQL());
+  const plan = planOf(db.select().from(apiKeyProduct).where(where).toSQL());
   expect(plan).toContain(`USING COVERING INDEX ${index}`);
   expect(plan).not.toContain("SCAN");
+});
+
+const newProjectRow =
+  (fields: Partial<typeof project.$inferInsert> = {}) =>
+  () =>
+    db
+      .insert(project)
+      .values({
+        slug: `p-${newId().slice(-12)}`,
+        name: "Launch",
+        leadId: bot.id,
+        createdBy: bot.id,
+        ...fields,
+      })
+      .run();
+
+test.each(["a", "-launch", "Launch", "launch_q4", "l".repeat(40), "launch q4"])(
+  "a project slug %j is rejected",
+  (slug) => {
+    expect(errorCode(newProjectRow({ slug }))).toBe("SQLITE_CONSTRAINT_CHECK");
+  },
+);
+
+test("a project slug is lowercase letters, digits and hyphens, and unique", () => {
+  expect(errorCode(newProjectRow({ slug: "launch-q4" }))).toBe("no error");
+  expect(errorCode(newProjectRow({ slug: "q4" }))).toBe("no error");
+  expect(errorCode(newProjectRow({ slug: "l".repeat(39) }))).toBe("no error");
+  expect(errorCode(newProjectRow({ slug: "launch-q4" }))).toBe(
+    "SQLITE_CONSTRAINT_UNIQUE",
+  );
+});
+
+test.each(["2026-02-30", "2026-2-03", "20261203", "tomorrow"])(
+  "a project target date %j is rejected",
+  (targetDate) => {
+    expect(errorCode(newProjectRow({ targetDate }))).toBe(
+      "SQLITE_CONSTRAINT_CHECK",
+    );
+  },
+);
+
+test("a project target date is a calendar day, or none", () => {
+  expect(errorCode(newProjectRow({ targetDate: "2028-02-29" }))).toBe(
+    "no error",
+  );
+  expect(errorCode(newProjectRow({ targetDate: null }))).toBe("no error");
+});
+
+test.each([
+  "http://github.com/acme/trail",
+  "https://github.com/acme",
+  "https://github.com/acme/",
+  "https://github.com//trail",
+  "https://github.com/acme/trail/issues",
+  "https://github.com/acme/tr ail",
+  "https://gitlab.com/acme/trail",
+])("a product repo url %j is rejected", (repoUrl) => {
+  expect(
+    errorCode(() =>
+      db.update(product).set({ repoUrl }).where(eq(product.id, proj.id)).run(),
+    ),
+  ).toBe("SQLITE_CONSTRAINT_CHECK");
+});
+
+test("a product repo url is a GitHub repository, or none", () => {
+  for (const repoUrl of ["https://github.com/acme/trail.web", null]) {
+    expect(
+      errorCode(() =>
+        db
+          .update(product)
+          .set({ repoUrl })
+          .where(eq(product.id, proj.id))
+          .run(),
+      ),
+    ).toBe("no error");
+  }
 });

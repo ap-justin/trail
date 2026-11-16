@@ -2,10 +2,15 @@ import type {
   EntryView,
   PersonView,
   WebActorView,
-  WebIssueListView,
-  WebIssueRowView,
-  WebIssueView,
+  WebItemListView,
+  WebItemRowView,
+  WebItemView,
+  WebProductDetailView,
+  WebProductView,
+  WebProjectDetailView,
+  WebProjectItemsView,
   WebProjectView,
+  WebStatusCountsView,
   WebStatusUpdateView,
 } from "@/lib/api-types";
 
@@ -13,17 +18,17 @@ import type {
 export const photoUrlFor = (actorId: string, hexByte: string) =>
   `/api/photos/${actorId}/${hexByte.repeat(32)}`;
 
-export const kai: WebActorView = {
-  id: "a-kai",
-  name: "Kai",
+export const alpha: WebActorView = {
+  id: "a-alpha",
+  name: "Alpha",
   kind: "bot",
   photoUrl: null,
   title: null,
 };
-/** Kai with a photo on file. */
-export const kaiWithPhoto: WebActorView = {
-  ...kai,
-  photoUrl: photoUrlFor("a-kai", "3f"),
+/** Alpha with a photo on file. */
+export const alphaWithPhoto: WebActorView = {
+  ...alpha,
+  photoUrl: photoUrlFor("a-alpha", "3f"),
 };
 export const maya: WebActorView = {
   id: "a-maya",
@@ -44,9 +49,10 @@ export function commentEntry(
     kind: "comment",
     id,
     createdAt,
-    actor: kai,
-    project: trail,
-    issue: { key: "TRL-14", title: "Team access: invite people" },
+    actor: alpha,
+    product: trail,
+    project: null,
+    item: { key: "TRL-14", title: "Team access: invite people", type: "issue" },
     comment: {
       id: `c-${id}`,
       body: "Owner-only invite is right.",
@@ -56,16 +62,23 @@ export function commentEntry(
   };
 }
 
-export function statusEntry(id: string, createdAt: string): EntryView {
+export function statusEntry(
+  id: string,
+  createdAt: string,
+  change: Pick<
+    Extract<EntryView, { kind: "status_changed" }>,
+    "from" | "to"
+  > = { from: "in_progress", to: "done" },
+): EntryView {
   return {
     kind: "status_changed",
     id,
     createdAt,
-    actor: kai,
-    project: trail,
-    issue: { key: "TRL-12", title: "Stream the feed over SSE" },
-    from: "in_progress",
-    to: "done",
+    actor: alpha,
+    product: trail,
+    project: null,
+    item: { key: "TRL-12", title: "Stream the feed over SSE", type: "issue" },
+    ...change,
   };
 }
 
@@ -75,19 +88,20 @@ export function projectImportedEntry(
   imported: { issues: number; comments: number },
 ): EntryView {
   return {
-    kind: "project_imported",
+    kind: "product_imported",
     id,
     createdAt,
-    actor: kai,
-    project: trail,
-    issue: null,
+    actor: alpha,
+    product: trail,
+    project: null,
+    item: null,
     imported,
   };
 }
 
-export const tara: WebActorView = {
-  id: "a-tara",
-  name: "Tara",
+export const beta: WebActorView = {
+  id: "a-beta",
+  name: "Beta",
   kind: "bot",
   photoUrl: null,
   title: null,
@@ -100,67 +114,75 @@ export function statusUpdate(
     id: "su-1",
     body: "SSE feed shipped. Human UI design is in review.",
     health: "on_track",
-    author: tara,
+    author: beta,
     sourceAuthor: null,
     createdAt: "2026-11-11T09:12:00.000Z",
     ...overrides,
   };
 }
 
-export function project(
-  overrides: Partial<WebProjectView> = {},
-): WebProjectView {
+/** TRL as a row on the products list. */
+export function product(
+  overrides: Partial<WebProductView> = {},
+): WebProductView {
   return {
     ...trail,
     description: "Agent-first issue tracker",
+    repoUrl: null,
     health: "on_track",
     latestStatusUpdate: statusUpdate(),
-    openCount: 9,
-    inProgressCount: 3,
+    openIssues: 7,
+    openTodos: 2,
+    projectCount: 0,
     updatedAt: "2026-11-11T09:12:00.000Z",
     ...overrides,
   };
 }
 
 export function issueRow(
-  overrides: Partial<WebIssueRowView> = {},
-): WebIssueRowView {
+  overrides: Partial<WebItemRowView> = {},
+): WebItemRowView {
   return {
     key: "TRL-17",
+    type: "issue",
     title: "Human UI: feed, projects, issue page",
     status: "open",
     priority: 2,
     labels: ["ui", "design"],
-    assignee: tara,
+    assignee: beta,
     updatedAt: "2026-11-11T11:00:00.000Z",
     ...overrides,
   };
 }
 
 export function issueList(
-  items: WebIssueRowView[],
-  counts: Partial<WebIssueListView["counts"]> = {},
-): WebIssueListView {
-  return {
-    items,
-    nextCursor: null,
-    counts: {
-      all: 38,
-      open: 9,
-      in_progress: 3,
-      done: 24,
-      canceled: 2,
-      ...counts,
-    },
+  items: WebItemRowView[],
+  counts: Partial<WebItemListView["counts"]["all"]> = {},
+): WebItemListView {
+  const all = {
+    all: 38,
+    open: 9,
+    in_progress: 3,
+    done: 24,
+    canceled: 2,
+    ...counts,
   };
+  const none = { all: 0, open: 0, in_progress: 0, done: 0, canceled: 0 };
+  return { items, nextCursor: null, counts: { all, issue: all, todo: none } };
 }
 
-export function issue(overrides: Partial<WebIssueView> = {}): WebIssueView {
-  const on = { project: trail, issue: { key: "TRL-14", title: "Team access" } };
+export function issue(overrides: Partial<WebItemView> = {}): WebItemView {
+  const on = {
+    product: trail,
+    project: null,
+    item: { key: "TRL-14", title: "Team access", type: "issue" as const },
+  };
   return {
     key: "TRL-14",
+    type: "issue",
     sourceKey: null,
-    project: trail,
+    product: trail,
+    projects: [],
     title: "Team access: invite people by GitHub username",
     description: "Invited people sign in with GitHub.",
     status: "in_progress",
@@ -169,12 +191,12 @@ export function issue(overrides: Partial<WebIssueView> = {}): WebIssueView {
     labels: ["auth", "ui"],
     links: [
       {
-        url: "https://github.com/ap-justin/trail/pull/31",
+        url: "https://github.com/example/trail/pull/31",
         title: "Add project_member table and invite API #31",
       },
     ],
-    assignee: kai,
-    creator: tara,
+    assignee: alpha,
+    creator: beta,
     sourceAuthor: null,
     createdAt: "2026-11-09T14:02:00.000Z",
     updatedAt: "2026-11-11T09:44:00.000Z",
@@ -182,18 +204,19 @@ export function issue(overrides: Partial<WebIssueView> = {}): WebIssueView {
     timeline: [
       {
         ...on,
-        kind: "issue_created",
+        kind: "item_created",
         id: "t1",
         createdAt: "2026-11-09T14:02:00.000Z",
-        actor: tara,
+        actor: beta,
         sourceAuthor: null,
+        createdAs: "issue",
       },
       {
         ...on,
         kind: "priority_changed",
         id: "t2",
         createdAt: "2026-11-09T14:05:00.000Z",
-        actor: kai,
+        actor: alpha,
         from: 0,
         to: 2,
       },
@@ -214,7 +237,7 @@ export function issue(overrides: Partial<WebIssueView> = {}): WebIssueView {
         kind: "status_changed",
         id: "t4",
         createdAt: "2026-11-11T09:44:00.000Z",
-        actor: kai,
+        actor: alpha,
         from: "open",
         to: "in_progress",
       },
@@ -225,13 +248,13 @@ export function issue(overrides: Partial<WebIssueView> = {}): WebIssueView {
 
 export const people: PersonView[] = [
   {
-    username: "justinsalas",
+    username: "jordansmith",
     email: null,
     owner: true,
     pending: false,
-    name: "Justin Salas",
+    name: "Jordan Smith",
     photoUrl: null,
-    projects: [],
+    products: [],
     invitedAt: null,
   },
   {
@@ -241,23 +264,305 @@ export const people: PersonView[] = [
     pending: false,
     name: "Maya Chen",
     photoUrl: null,
-    projects: [trail, { key: "DOC", name: "Docs site" }],
+    products: [trail, { key: "DOC", name: "Docs site" }],
     invitedAt: "2026-11-09T10:00:00.000Z",
   },
   {
-    username: "kai-dev",
+    username: "alpha-dev",
     email: null,
     owner: false,
     pending: true,
     name: null,
     photoUrl: null,
-    projects: [{ key: "OPB", name: "OpenBot" }],
+    products: [{ key: "OPB", name: "OpenBot" }],
     invitedAt: "2026-11-10T10:00:00.000Z",
   },
 ];
 
-export const allProjects = [
+export const allProducts = [
   trail,
   { key: "OPB", name: "OpenBot" },
   { key: "DOC", name: "Docs site" },
 ];
+
+export const humanUi = { slug: "human-ui", name: "Human UI launch" };
+export const teamAccess = { slug: "team-access", name: "Team access" };
+
+/** TRL-15, a todo Alpha planned and owns, in the Human UI launch project. */
+export function todo(overrides: Partial<WebItemView> = {}): WebItemView {
+  const on = {
+    product: trail,
+    project: null,
+    item: { key: "TRL-15", title: "Back up the volume", type: "todo" as const },
+  };
+  return issue({
+    key: "TRL-15",
+    type: "todo",
+    projects: [humanUi],
+    title: "Back up the volume with Litestream",
+    description: "Stream the SQLite WAL off the Fly volume.",
+    labels: ["infra"],
+    links: [],
+    assignee: alpha,
+    creator: alpha,
+    timeline: [
+      {
+        ...on,
+        kind: "item_created",
+        id: "t1",
+        createdAt: "2026-11-11T10:15:00.000Z",
+        actor: alpha,
+        sourceAuthor: null,
+        createdAs: "todo",
+      },
+      {
+        ...on,
+        project: humanUi,
+        kind: "added_to_project",
+        id: "t2",
+        createdAt: "2026-11-11T10:16:00.000Z",
+        actor: alpha,
+      },
+    ],
+    ...overrides,
+  });
+}
+
+type Item = { key: string; title: string; type: "issue" | "todo" };
+const teamAccessIssue: Item = {
+  key: "TRL-14",
+  title: "Team access: invite people",
+  type: "issue",
+};
+
+export function itemCreatedEntry(
+  id: string,
+  createdAt: string,
+  {
+    actor = alpha,
+    item = teamAccessIssue,
+    createdAs = item.type,
+  }: { actor?: WebActorView; item?: Item; createdAs?: Item["type"] } = {},
+): EntryView {
+  return {
+    kind: "item_created",
+    id,
+    createdAt,
+    actor,
+    product: trail,
+    project: null,
+    item,
+    sourceAuthor: null,
+    createdAs,
+  };
+}
+
+export function typeChangedEntry(id: string, createdAt: string): EntryView {
+  return {
+    kind: "type_changed",
+    id,
+    createdAt,
+    actor: alpha,
+    product: trail,
+    project: null,
+    item: { ...teamAccessIssue, type: "todo" },
+    from: "issue",
+    to: "todo",
+  };
+}
+
+export function membershipEntry(
+  id: string,
+  createdAt: string,
+  kind: "added_to_project" | "removed_from_project",
+): EntryView {
+  return {
+    kind,
+    id,
+    createdAt,
+    actor: alpha,
+    product: trail,
+    project: humanUi,
+    item: teamAccessIssue,
+  };
+}
+
+export function productStatusUpdateEntry(
+  id: string,
+  createdAt: string,
+): EntryView {
+  return {
+    kind: "product_status_update",
+    id,
+    createdAt,
+    actor: alpha,
+    product: { key: "OPB", name: "OpenBot" },
+    project: null,
+    item: null,
+    statusUpdate: {
+      id: "su-p",
+      body: "Webhook retries stall after a 502.",
+      health: "at_risk",
+      sourceAuthor: null,
+    },
+  };
+}
+
+export function projectStatusUpdateEntry(
+  id: string,
+  createdAt: string,
+): EntryView {
+  return {
+    kind: "project_status_update",
+    id,
+    createdAt,
+    actor: alpha,
+    product: null,
+    project: humanUi,
+    item: null,
+    statusUpdate: {
+      id: "su-j",
+      body: "Feed and product pages are drawn.",
+      health: "at_risk",
+      sourceAuthor: null,
+    },
+  };
+}
+
+export function projectEntry(
+  id: string,
+  createdAt: string,
+  kind: "project_created" | "project_updated",
+): EntryView {
+  const base = {
+    id,
+    createdAt,
+    actor: alpha,
+    product: null,
+    project: humanUi,
+    item: null,
+  };
+  return kind === "project_created"
+    ? { ...base, kind }
+    : { ...base, kind, changed: ["goal", "targetDate"] };
+}
+
+/** A bot with a title, the lead of the Human UI launch project. */
+export const ada: WebActorView = {
+  id: "a-ada",
+  name: "Ada",
+  kind: "bot",
+  photoUrl: null,
+  title: "Better Giving Engineer",
+};
+export const openBot = { key: "OPB", name: "OpenBot" };
+export const docsSite = { key: "DOC", name: "Docs site" };
+
+/** TRL-22, a todo Beta owns. */
+export function todoRow(
+  overrides: Partial<WebItemRowView> = {},
+): WebItemRowView {
+  return issueRow({
+    key: "TRL-22",
+    type: "todo",
+    title: "Split Projects into Products and Projects in the nav",
+    priority: 3,
+    labels: ["ui"],
+    updatedAt: "2026-11-11T11:52:00.000Z",
+    ...overrides,
+  });
+}
+
+const tally = (items: WebItemRowView[]): WebStatusCountsView => {
+  const of = (status: WebItemRowView["status"]) =>
+    items.filter((i) => i.status === status).length;
+  return {
+    all: items.length,
+    open: of("open") + of("triage"),
+    in_progress: of("in_progress"),
+    done: of("done"),
+    canceled: of("canceled"),
+  };
+};
+
+/** Counts per type and status tab, as the server tallies them, for exactly these rows. */
+export function countsOf(items: WebItemRowView[]) {
+  return {
+    all: tally(items),
+    issue: tally(items.filter((i) => i.type === "issue")),
+    todo: tally(items.filter((i) => i.type === "todo")),
+  };
+}
+
+/** A product's item list whose counts are these rows' own. */
+export function itemList(items: WebItemRowView[]): WebItemListView {
+  return { items, nextCursor: null, counts: countsOf(items) };
+}
+
+/** The Human UI launch project as a row on the projects list. */
+export function projectRow(
+  overrides: Partial<WebProjectView> = {},
+): WebProjectView {
+  return {
+    ...humanUi,
+    goal: "People read the team's work in trail without asking a bot",
+    health: "at_risk",
+    latestStatusUpdate: statusUpdate({
+      id: "su-h",
+      body: "Feed and product pages are drawn. Docs site pages wait on the new logo.",
+      health: "at_risk",
+      author: ada,
+    }),
+    lead: ada,
+    targetDate: "2026-12-04",
+    products: [docsSite, openBot, trail],
+    openCount: 14,
+    updatedAt: "2026-11-11T09:12:00.000Z",
+    ...overrides,
+  };
+}
+
+export function projectDetail(
+  overrides: Partial<WebProjectDetailView> = {},
+): WebProjectDetailView {
+  return { ...projectRow(), hiddenProducts: false, ...overrides };
+}
+
+/** Team access: one product, Alpha leads, on track. */
+export const teamAccessRow = (): WebProjectView =>
+  projectRow({
+    ...teamAccess,
+    goal: "Invite people to the products they should see",
+    health: "on_track",
+    latestStatusUpdate: statusUpdate({ id: "su-t", author: alpha }),
+    lead: alpha,
+    targetDate: "2026-11-30",
+    products: [trail],
+    openCount: 5,
+  });
+
+/** TRL on its own page: a repo, an owner and two projects. */
+export function productDetail(
+  overrides: Partial<WebProductDetailView> = {},
+): WebProductDetailView {
+  return {
+    ...product({
+      repoUrl: "https://github.com/example/trail",
+      projectCount: 2,
+    }),
+    owner: alpha,
+    projects: [projectRow(), teamAccessRow()],
+    ...overrides,
+  };
+}
+
+/** A project's items in groups, each group's count its own rows'. */
+export function projectItems(
+  groups: { product: { key: string; name: string }; items: WebItemRowView[] }[],
+): WebProjectItemsView {
+  return {
+    groups: groups.map((g) => ({ ...g, count: g.items.length })),
+    nextCursor: null,
+    counts: countsOf(groups.flatMap((g) => g.items)),
+  };
+}

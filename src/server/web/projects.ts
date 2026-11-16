@@ -1,146 +1,330 @@
 import { createRoute, z } from "@hono/zod-openapi";
-import { and, asc, count, eq, inArray, max, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  inArray,
+  lt,
+  or,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import {
   errorSchema,
   pageQuerySchema,
+  type WebProjectDetailView,
   type WebProjectView,
-  type WebStatusUpdateView,
-  webProjectListSchema,
-  webProjectSchema,
+  webProjectDetailSchema,
+  webProjectItemsQuerySchema,
+  webProjectItemsSchema,
+  webProjectPageSchema,
   webStatusUpdatePageSchema,
 } from "../../shared/schemas.js";
 import { jsonContent } from "../api/routes.js";
 import type { Db } from "../db/client.js";
-import { issue, project, projectStatusUpdate } from "../db/schema.js";
-import { page } from "../service/paging.js";
+import {
+  issue,
+  product,
+  project,
+  projectItem,
+  projectProduct,
+  projectStatusUpdate,
+} from "../db/schema.js";
+import { NotFoundError, ValidationError } from "../service/errors.js";
+import { page, pageLimit } from "../service/paging.js";
 import { createWebRouter } from "./env.js";
-import { actorsById, visibleIds, visibleProject } from "./visible.js";
+import { itemCounts, itemFilters, itemRows } from "./items.js";
+import { projectSummaries, toStatusUpdates } from "./summaries.js";
+import { projectIdsAmong, visibleIds, visibleProject } from "./visible.js";
 
-export const keyParam = z.object({ key: z.string().min(1) });
+const slugParam = z.object({ slug: z.string().min(1).max(100) });
 
 const notFound = { 404: jsonContent(errorSchema, "No such project") };
 
 const listProjects = createRoute({
   method: "get",
   path: "/projects",
-  responses: { 200: jsonContent(webProjectListSchema, "The visible projects") },
+  request: { query: pageQuerySchema },
+  responses: {
+    200: jsonContent(
+      webProjectPageSchema,
+      "The projects drawing from a product the viewer sees, newest first",
+    ),
+  },
 });
 
 const getProject = createRoute({
   method: "get",
-  path: "/projects/{key}",
-  request: { params: keyParam },
-  responses: { 200: jsonContent(webProjectSchema, "The project"), ...notFound },
+  path: "/projects/{slug}",
+  request: { params: slugParam },
+  responses: {
+    200: jsonContent(webProjectDetailSchema, "The project"),
+    ...notFound,
+  },
+});
+
+const listItems = createRoute({
+  method: "get",
+  path: "/projects/{slug}/items",
+  request: { params: slugParam, query: webProjectItemsQuerySchema },
+  responses: {
+    200: jsonContent(
+      webProjectItemsSchema,
+      "The project's items of visible products, grouped by product",
+    ),
+    ...notFound,
+    422: jsonContent(
+      errorSchema,
+      "A cursor this list didn't issue, or one issued under other filters",
+    ),
+  },
 });
 
 const listStatusUpdates = createRoute({
   method: "get",
-  path: "/projects/{key}/status-updates",
-  request: { params: keyParam, query: pageQuerySchema },
+  path: "/projects/{slug}/status-updates",
+  request: { params: slugParam, query: pageQuerySchema },
   responses: {
     200: jsonContent(webStatusUpdatePageSchema, "Status updates, newest first"),
     ...notFound,
   },
 });
 
-type StatusUpdateRow = typeof projectStatusUpdate.$inferSelect;
+/** The filters a page was read under: its cursor pages only a list read under the same. */
+type ItemsFilters = {
+  product: string | null;
+  type: string | null;
+  status: string | null;
+};
 
-function toStatusUpdates(
-  db: Db,
-  rows: StatusUpdateRow[],
-): WebStatusUpdateView[] {
-  const actorOf = actorsById(
-    db,
-    rows.map((r) => r.authorId),
-  );
-  return rows.map((r) => ({
-    id: r.id,
-    body: r.body,
-    health: r.health,
-    author: actorOf(r.authorId),
-    sourceAuthor: r.sourceAuthor,
-    createdAt: r.createdAt.toISOString(),
-  }));
+const encodeCursor = (
+  row: { key: string; createdAt: Date; id: string },
+  filters: ItemsFilters,
+) =>
+  Buffer.from(
+    JSON.stringify([
+      row.key,
+      row.createdAt.getTime(),
+      row.id,
+      filters.product,
+      filters.type,
+      filters.status,
+    ]),
+  ).toString("base64url");
+
+function decodeCursor(cursor: string, filters: ItemsFilters) {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
+  } catch {}
+  const filterOrNull = (v: unknown) => v === null || typeof v === "string";
+  if (
+    !Array.isArray(parsed) ||
+    parsed.length !== 6 ||
+    typeof parsed[0] !== "string" ||
+    !Number.isSafeInteger(parsed[1]) ||
+    typeof parsed[2] !== "string" ||
+    !parsed.slice(3).every(filterOrNull)
+  ) {
+    throw new ValidationError(
+      "cursor is invalid: pass a nextCursor exactly as the previous page returned it, or leave cursor out for the first page",
+    );
+  }
+  if (
+    parsed[3] !== filters.product ||
+    parsed[4] !== filters.type ||
+    parsed[5] !== filters.status
+  ) {
+    throw new ValidationError(
+      "cursor was issued for other filters: it pages only the list it came from, so leave cursor out to start this list from its first page",
+    );
+  }
+  return {
+    key: parsed[0] as string,
+    createdAt: new Date(parsed[1] as number),
+    id: parsed[2] as string,
+  };
 }
 
-/** The projects with these ids, A to Z by key, each with its counts and latest status update. */
-export function projectSummaries(db: Db, ids: string[]): WebProjectView[] {
-  if (ids.length === 0) return [];
-  const rows = db
-    .select()
-    .from(project)
-    .where(inArray(project.id, ids))
-    .orderBy(asc(project.key))
-    .all();
-  const counts = db
-    .select({
-      projectId: issue.projectId,
-      status: issue.status,
-      n: count(),
-      updatedAt: max(issue.updatedAt),
-    })
-    .from(issue)
-    .where(inArray(issue.projectId, ids))
-    .groupBy(issue.projectId, issue.status)
-    .all();
-  const latest = db
-    .select()
-    .from(projectStatusUpdate)
-    .where(
-      and(
-        inArray(projectStatusUpdate.projectId, ids),
-        // the project's newest by (created_at, id), the order its list pages in
-        eq(
-          projectStatusUpdate.id,
-          sql`(select s.id from ${projectStatusUpdate} s where s.project_id = ${projectStatusUpdate.projectId} order by s.created_at desc, s.id desc limit 1)`,
-        ),
+/** Rows after the cursor in (product key A to Z, then newest first) order. */
+function pastCursor(cursor: string, filters: ItemsFilters): SQL {
+  const after = decodeCursor(cursor, filters);
+  return or(
+    gt(product.key, after.key),
+    and(
+      eq(product.key, after.key),
+      or(
+        lt(issue.createdAt, after.createdAt),
+        and(eq(issue.createdAt, after.createdAt), lt(issue.id, after.id)),
       ),
-    )
-    .all();
-  const views = toStatusUpdates(db, latest);
-  const updates = new Map(latest.map((row, i) => [row.projectId, views[i]]));
-  return rows.map((p) => {
-    const mine = counts.filter((c) => c.projectId === p.id);
-    const countOf = (status: string) =>
-      mine.find((c) => c.status === status)?.n ?? 0;
-    const update = updates.get(p.id) ?? null;
-    const times = [
-      p.updatedAt.getTime(),
-      ...mine.map((c) => c.updatedAt?.getTime() ?? 0),
-      update ? Date.parse(update.createdAt) : 0,
-    ];
-    return {
-      key: p.key,
-      name: p.name,
-      description: p.description,
-      health: update?.health ?? null,
-      latestStatusUpdate: update,
-      openCount: countOf("open"),
-      inProgressCount: countOf("in_progress"),
-      updatedAt: new Date(Math.max(...times)).toISOString(),
-    };
-  });
+    ),
+  ) as SQL;
 }
 
 export function projectRoutes(db: Db) {
   return createWebRouter()
-    .openapi(listProjects, (c) =>
-      c.json({ items: projectSummaries(db, visibleIds(c.var.member)) }, 200),
-    )
-    .openapi(getProject, (c) => {
-      const target = visibleProject(c.var.member, c.req.valid("param").key);
+    .openapi(listProjects, (c) => {
+      const ids = visibleIds(c.var.member);
+      const rows = page(
+        project,
+        "desc",
+        c.req.valid("query"),
+        [inArray(project.id, projectIdsAmong(db, ids))],
+        (where, orderBy, limit) =>
+          db
+            .select()
+            .from(project)
+            .where(where)
+            .orderBy(...orderBy)
+            .limit(limit)
+            .all(),
+      );
       return c.json(
-        projectSummaries(db, [target.id])[0] as WebProjectView,
+        {
+          items: projectSummaries(db, rows.items, ids),
+          nextCursor: rows.nextCursor,
+        },
+        200,
+      );
+    })
+    .openapi(getProject, (c) => {
+      const member = c.var.member;
+      const found = visibleProject(db, member, c.req.valid("param").slug);
+      const summary = projectSummaries(db, [found], visibleIds(member))[0];
+      const { n } = db
+        .select({ n: sql<number>`count(*)` })
+        .from(projectProduct)
+        .where(eq(projectProduct.projectId, found.id))
+        .get() ?? { n: 0 };
+      const view: WebProjectDetailView = {
+        ...(summary as WebProjectView),
+        hiddenProducts: (summary as WebProjectView).products.length < n,
+      };
+      return c.json(view, 200);
+    })
+    .openapi(listItems, (c) => {
+      const member = c.var.member;
+      const found = visibleProject(db, member, c.req.valid("param").slug);
+      const {
+        product: productKey,
+        type,
+        status,
+        cursor,
+        limit: asked,
+      } = c.req.valid("query");
+      const limit = pageLimit(asked);
+      // a hidden product of the project is as absent as one it never had
+      const visible = visibleIds(member);
+      const inProject = db
+        .select({ id: product.id, key: product.key, name: product.name })
+        .from(projectProduct)
+        .innerJoin(product, eq(product.id, projectProduct.productId))
+        .where(
+          and(
+            eq(projectProduct.projectId, found.id),
+            inArray(projectProduct.productId, visible),
+          ),
+        )
+        .orderBy(asc(product.key))
+        .all();
+      const groupsOf =
+        productKey === undefined
+          ? inProject
+          : inProject.filter((p) => p.key === productKey.toUpperCase());
+      if (groupsOf.length === 0 && productKey !== undefined) {
+        throw new NotFoundError(
+          `no product ${productKey} in project ${found.slug}`,
+        );
+      }
+      const scope = and(
+        eq(projectItem.projectId, found.id),
+        inArray(
+          projectItem.productId,
+          groupsOf.map((p) => p.id),
+        ),
+      );
+      const filters = itemFilters({ type, status });
+      const sentFilters: ItemsFilters = {
+        product: productKey?.toUpperCase() ?? null,
+        type: type ?? null,
+        status: status ?? null,
+      };
+      const rows = db
+        .select({ issue, key: product.key })
+        .from(projectItem)
+        .innerJoin(issue, eq(issue.id, projectItem.issueId))
+        .innerJoin(product, eq(product.id, projectItem.productId))
+        .where(
+          and(
+            scope,
+            ...filters,
+            cursor === undefined ? undefined : pastCursor(cursor, sentFilters),
+          ),
+        )
+        .orderBy(asc(product.key), desc(issue.createdAt), desc(issue.id))
+        .limit(limit + 1)
+        .all();
+      const shown = rows.slice(0, limit);
+      const last = shown.at(-1);
+      const counted = db
+        .select({ productId: projectItem.productId, n: sql<number>`count(*)` })
+        .from(projectItem)
+        .innerJoin(issue, eq(issue.id, projectItem.issueId))
+        .where(and(scope, ...filters))
+        .groupBy(projectItem.productId)
+        .all();
+      const listed = itemRows(
+        db,
+        shown.map((r) => ({ ...r.issue, productKey: r.key })),
+      );
+      const groups = groupsOf.flatMap((p) => {
+        const items = listed.filter((_, i) => shown[i]?.key === p.key);
+        if (items.length === 0) return [];
+        return [
+          {
+            product: { key: p.key, name: p.name },
+            count: counted.find((x) => x.productId === p.id)?.n ?? 0,
+            items,
+          },
+        ];
+      });
+      return c.json(
+        {
+          groups,
+          nextCursor:
+            rows.length > limit && last
+              ? encodeCursor(
+                  {
+                    key: last.key,
+                    createdAt: last.issue.createdAt,
+                    id: last.issue.id,
+                  },
+                  sentFilters,
+                )
+              : null,
+          counts: itemCounts(
+            db,
+            inArray(
+              issue.id,
+              db
+                .select({ id: projectItem.issueId })
+                .from(projectItem)
+                .where(scope),
+            ),
+          ),
+        },
         200,
       );
     })
     .openapi(listStatusUpdates, (c) => {
-      const target = visibleProject(c.var.member, c.req.valid("param").key);
+      const found = visibleProject(db, c.var.member, c.req.valid("param").slug);
       const rows = page(
         projectStatusUpdate,
         "desc",
         c.req.valid("query"),
-        [eq(projectStatusUpdate.projectId, target.id)],
+        [eq(projectStatusUpdate.projectId, found.id)],
         (where, orderBy, limit) =>
           db
             .select()

@@ -64,6 +64,23 @@ const keyed: [string, string, (k: string) => unknown][] = [
   ["GET", "/issues/{K}-1/comments", () => undefined],
   ["POST", "/issues/{K}-1/comments", () => ({ body: "c" })],
   ["GET", "/activity?projectId={K}", () => undefined],
+  ["GET", "/products/{K}", () => undefined],
+  ["PATCH", "/products/{K}", () => ({ name: "renamed" })],
+  ["GET", "/products/{K}/labels", () => undefined],
+  ["POST", "/products/{K}/labels", () => ({ name: "new" })],
+  ["GET", "/products/{K}/status-updates", () => undefined],
+  [
+    "POST",
+    "/products/{K}/status-updates",
+    () => ({ body: "x", health: "at_risk" }),
+  ],
+  ["GET", "/items?product={K}", () => undefined],
+  ["POST", "/items", (k) => ({ type: "todo", product: k, title: "t" })],
+  ["POST", "/items", (k) => ({ type: "issue", product: k, title: "t" })],
+  ["GET", "/items/{K}-1", () => undefined],
+  ["PATCH", "/items/{K}-1", () => ({ title: "t2" })],
+  ["GET", "/items/{K}-1/comments", () => undefined],
+  ["POST", "/items/{K}-1/comments", () => ({ body: "c" })],
 ];
 
 test("a project outside the key's projects answers exactly as one that doesn't exist, on every keyed route", async () => {
@@ -128,9 +145,9 @@ async function everyItem(path: string, key: string, param = "cursor") {
   throw new Error(`${path} did not end`);
 }
 
-test("lists show a scoped key only its projects and their issues", async () => {
+test("lists show a scoped key only its products and their items", async () => {
   const b = await hiddenProject();
-  const projects = await everyItem("/projects?limit=1", scoped.key);
+  const projects = await everyItem("/products?limit=1", scoped.key);
   expect(projects.map((p) => p.key)).toEqual([a.key]);
   const all = await everyItem("/issues", (await unscopedKey()).key);
   const inA = all.filter((i) => i.projectId === a.id).map((i) => i.key);
@@ -234,6 +251,79 @@ const gated = (): Gated[] => [
   },
   { route: "POST /import", action: "admin", json: importBody },
   { route: "GET /bots", action: "admin" },
+  { route: "GET /products", action: "read" },
+  { route: `GET /products/${a.key}`, action: "read" },
+  { route: `GET /products/${a.key}/labels`, action: "read" },
+  { route: `GET /products/${a.key}/status-updates`, action: "read" },
+  { route: `GET /items?product=${a.key}`, action: "read" },
+  { route: `GET /items/${issueA}`, action: "read" },
+  { route: `GET /items/${issueA}/comments`, action: "read" },
+  { route: `GET /projects/${projectSlugA}`, action: "read" },
+  { route: `GET /projects/${projectSlugA}/status-updates`, action: "read" },
+  {
+    route: "POST /items",
+    action: "issues",
+    json: () => ({ type: "todo", product: a.key, title: `t${++made}` }),
+  },
+  {
+    route: "POST /items",
+    action: "issues",
+    json: () => ({ type: "issue", product: a.key, title: `t${++made}` }),
+  },
+  {
+    route: `PATCH /items/${issueA}`,
+    action: "issues",
+    json: () => ({ title: `t${++made}` }),
+  },
+  {
+    route: "POST /projects",
+    action: "issues",
+    json: () => ({ name: `p${++made}`, products: [a.key] }),
+  },
+  {
+    route: `PATCH /projects/${projectSlugA}`,
+    action: "issues",
+    json: () => ({ goal: `g${++made}` }),
+  },
+  {
+    route: `POST /projects/${projectSlugA}/items`,
+    action: "issues",
+    json: () => ({ items: [issueA] }),
+  },
+  {
+    route: `DELETE /projects/${projectSlugA}/items/${issueA}`,
+    action: "issues",
+  },
+  {
+    route: `POST /items/${issueA}/comments`,
+    action: "comments",
+    json: () => ({ body: "hi" }),
+  },
+  {
+    route: `POST /products/${a.key}/status-updates`,
+    action: "status_updates",
+    json: () => ({ body: "ok", health: "on_track" }),
+  },
+  {
+    route: `POST /projects/${projectSlugA}/status-updates`,
+    action: "status_updates",
+    json: () => ({ body: "ok", health: "on_track" }),
+  },
+  {
+    route: "POST /products",
+    action: "admin",
+    json: () => ({ key: projectKey(), name: "new" }),
+  },
+  {
+    route: `PATCH /products/${a.key}`,
+    action: "admin",
+    json: () => ({ description: `d${++made}` }),
+  },
+  {
+    route: `POST /products/${a.key}/labels`,
+    action: "admin",
+    json: () => ({ name: `label ${++made}` }),
+  },
 ];
 
 const send = (row: Gated, key: string) => {
@@ -241,9 +331,21 @@ const send = (row: Gated, key: string) => {
   return request(method, `/api/v1${path}`, { key, json: row.json?.() });
 };
 
+let projectSlugA = "";
+
 test.each(["read", "issues", "comments", "status_updates", "admin"])(
   "a key with only %s passes exactly the routes that need it",
   async (action) => {
+    // made here, not in beforeAll: a project event in A's feed would join the activity lists above
+    if (!projectSlugA) {
+      projectSlugA = (
+        await seed("POST", "/api/v1/projects", {
+          name: "gate project",
+          slug: "gate-project",
+          products: [a.key],
+        })
+      ).slug;
+    }
     const only = createBot(db, `only ${action}`, {
       scope: { actions: [action] },
     });
@@ -361,7 +463,7 @@ test("a key limited to projects can't create one, even with admin, and learns no
   const refusal = {
     error: {
       code: "forbidden_scope",
-      message: `this key may not create a project: it reaches only project ${a.key}. Ask whoever minted the key for one with no project list.`,
+      message: `this key may not create a product: it reaches only product ${a.key}. Ask whoever minted the key for one with no product list.`,
     },
   };
   for (const key of [projectKey(), b.project.key]) {
@@ -373,6 +475,15 @@ test("a key limited to projects can't create one, even with admin, and learns no
     expect(await res.json()).toEqual(refusal);
   }
 });
+
+/** Clears the product's owner, so any bot reaching it may import into it. */
+async function unowned(productKey: string, key: string) {
+  const res = await request("PATCH", `/api/v1/products/${productKey}`, {
+    key,
+    json: { owner: null },
+  });
+  expect(res.status).toBe(200);
+}
 
 test("a key limited to projects imports into them, and an import outside them is refused alike whether the project exists or not", async () => {
   const unscoped = await unscopedKey();
@@ -395,6 +506,8 @@ test("a key limited to projects imports into them, and an import outside them is
     });
     expect(res.status).toBe(200);
   }
+  // an owned product takes imports from its owner alone
+  await unowned(inside, unscoped.key);
   const importer = createBot(db, "scoped importer", {
     scope: { projects: [inside, a.key], actions: ["admin"] },
   });
@@ -411,7 +524,7 @@ test("a key limited to projects imports into them, and an import outside them is
   const refusal = {
     error: {
       code: "forbidden_scope",
-      message: `this key may not import a project outside projects ${[a.key, inside].sort().join(" and ")}. Ask whoever minted the key for one that lists the project, or no project list.`,
+      message: `this key may not import a product outside products ${[a.key, inside].sort().join(" and ")}. Ask whoever minted the key for one that lists the product, or no product list.`,
     },
   };
   for (const json of [
@@ -437,7 +550,13 @@ test("whoami reports the calling key's scope, null where it is unrestricted", as
     kind: "bot",
     name: "bg-ivy",
     label: null,
-    scope: { projects: [a.key], actions: ["read", "issues", "comments"] },
+    scope: {
+      products: [a.key],
+      projects: [a.key],
+      actions: ["read", "issues", "comments"],
+    },
+    ownProducts: [],
+    products: [{ key: a.key, name: "A" }],
     photoUrl: null,
     title: null,
   });
@@ -445,6 +564,7 @@ test("whoami reports the calling key's scope, null where it is unrestricted", as
     key: (await unscopedKey()).key,
   });
   expect(((await unscopedMe.json()) as Body).scope).toEqual({
+    products: null,
     projects: null,
     actions: null,
   });
@@ -469,31 +589,52 @@ test("the spec documents each gated operation's 403 with the action it needs", a
   const needs = (action: string) =>
     `The key lacks the ${action} action (code forbidden_action)`;
   const orScope = (action: string) =>
-    `${needs(action)}, or reaches only some projects (code forbidden_scope)`;
+    `${needs(action)}, or reaches only some products (code forbidden_scope)`;
+  const orOwner = (action: string) =>
+    `${needs(action)}, or the product has an owner bot and the call is that bot's alone: adding a todo, moving an issue out of triage, canceling an item another bot filed, reopening a canceled issue another bot filed, or changing an item's type; the message names the owner and what to do instead (code forbidden)`;
+  const ownerLabels = `${needs("admin")}, or another bot owns the product: only its owner creates its labels (code forbidden)`;
   expect(forbidden).toEqual({
     "GET /activity": needs("read"),
     "GET /bots": needs("admin"),
+    "GET /items": needs("read"),
+    "GET /items/{key}": needs("read"),
+    "GET /items/{key}/comments": needs("read"),
     "GET /issues": needs("read"),
     "GET /issues/{id}": needs("read"),
     "GET /issues/{id}/comments": needs("read"),
+    "GET /products": needs("read"),
+    "GET /products/{key}": needs("read"),
+    "GET /products/{key}/labels": needs("read"),
+    "GET /products/{key}/status-updates": needs("read"),
     "GET /projects": needs("read"),
-    "GET /projects/{id}": needs("read"),
-    "GET /projects/{id}/labels": needs("read"),
-    "GET /projects/{id}/status-updates": needs("read"),
+    "GET /projects/{ref}": needs("read"),
+    "GET /projects/{ref}/labels": needs("read"),
+    "GET /projects/{ref}/status-updates": needs("read"),
     "GET /whoami": null,
     "GET /photos/{actorId}/{hash}": null,
     "DELETE /me/photo": null,
     "PUT /me/photo": null,
     "DELETE /me/title": null,
     "PUT /me/title": null,
-    "PATCH /issues/{id}": needs("issues"),
-    "PATCH /projects/{id}": needs("admin"),
-    "POST /import": orScope("admin"),
+    "PATCH /items/{key}": orOwner("issues"),
+    "PATCH /issues/{id}": orOwner("issues"),
+    "PATCH /products/{key}": `${needs("admin")}, or owner changes the owner of a product another bot owns (code forbidden)`,
+    "PATCH /projects/{ref}":
+      "The key lacks the issues action, or for a product key the admin action (code forbidden_action)",
+    "POST /import": `${orScope("admin")}, or the product exists and another bot owns it: only its owner imports into it (code forbidden)`,
+    "POST /items": orOwner("issues"),
+    "POST /items/{key}/comments": needs("comments"),
     "POST /issues": needs("issues"),
     "POST /issues/{id}/comments": needs("comments"),
-    "POST /projects": orScope("admin"),
-    "POST /projects/{id}/labels": needs("admin"),
-    "POST /projects/{id}/status-updates": needs("status_updates"),
+    "POST /products": orScope("admin"),
+    "POST /products/{key}/labels": ownerLabels,
+    "POST /products/{key}/status-updates": needs("status_updates"),
+    "POST /projects":
+      "The key lacks the issues action, or with key the admin action (code forbidden_action), or with key reaches only some products (code forbidden_scope)",
+    "POST /projects/{ref}/labels": ownerLabels,
+    "POST /projects/{ref}/status-updates": needs("status_updates"),
+    "POST /projects/{slug}/items": needs("issues"),
+    "DELETE /projects/{slug}/items/{key}": needs("issues"),
     "GET /webhooks": needs("read"),
     "POST /webhooks": needs("read"),
     "GET /webhooks/{id}": needs("read"),
@@ -578,6 +719,7 @@ test("an import whose source key a hidden issue holds is refused naming nothing 
     ).id as string;
   const hiddenId = await holderId("LIN-501");
   const visibleId = await holderId("LIN-502");
+  await unowned(inside, bot.key);
 
   const importer = createBot(db, "scoped source-key importer", {
     scope: { projects: [inside], actions: ["admin"] },

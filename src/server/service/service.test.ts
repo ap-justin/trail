@@ -8,12 +8,17 @@ import {
   describe,
   expect,
   test,
+  vi,
 } from "vitest";
 import { migrate, openDatabase } from "../db/client.js";
 import { type ActivityEvent, createEventBus } from "../events/bus.js";
 import { atFakeTime, projectKey, testWebhooks } from "../test-app.js";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors.js";
-import { createService, type Issue, type Project } from "./index.js";
+import {
+  createService,
+  type Issue,
+  type ProductView as Product,
+} from "./index.js";
 import { createBot, createHuman } from "./keys.js";
 
 const dir = mkdtempSync(join(tmpdir(), "trail-service-"));
@@ -33,7 +38,7 @@ beforeEach(() => {
 });
 
 const bot = createBot(db, "builder").actor;
-const human = createHuman(db, { displayName: "Justin" });
+const human = createHuman(db, { displayName: "Pat" });
 
 /** Every activity event, newest first, across pages (a single page caps at 200). */
 function allActivity(): ActivityEvent[] {
@@ -41,7 +46,10 @@ function allActivity(): ActivityEvent[] {
   let cursor: string | undefined;
   do {
     const page = service.listActivity(bot, { limit: 200, cursor });
-    events.push(...page.items);
+    // the bus carries the stored event; a listed one adds its product key and project slug
+    events.push(
+      ...page.items.map(({ productKey, projectSlug, ...event }) => event),
+    );
     cursor = page.nextCursor ?? undefined;
   } while (cursor);
   return events;
@@ -61,17 +69,17 @@ function onlyEventOf(write: () => unknown): ActivityEvent {
 test("creating a project commits one project.created event and publishes it", () => {
   let id = "";
   const event = onlyEventOf(() => {
-    id = service.createProject(bot, { key: projectKey(), name: "trail" }).id;
+    id = service.createProduct(bot, { key: projectKey(), name: "trail" }).id;
   });
   expect(event).toMatchObject({
     actorId: bot.id,
-    subjectType: "project",
+    subjectType: "product",
     subjectId: id,
-    projectId: id,
-    action: "project.created",
+    productId: id,
+    action: "product.created",
     payload: { name: "trail", description: "" },
   });
-  expect(service.getProject(bot, id).name).toBe("trail");
+  expect(service.getProduct(bot, id).name).toBe("trail");
 });
 
 /** Checks `write` throws `error` and commits no event and publishes nothing. */
@@ -86,17 +94,42 @@ function rejectsCleanly(
 }
 
 test("a project with a blank name is rejected with no row and no event", () => {
-  const before = service.listProjects(bot).items.length;
+  const before = service.listProducts(bot).items.length;
   rejectsCleanly(
-    () => service.createProject(bot, { key: projectKey(), name: "  " }),
+    () => service.createProduct(bot, { key: projectKey(), name: "  " }),
     ValidationError,
   );
-  expect(service.listProjects(bot).items).toHaveLength(before);
+  expect(service.listProducts(bot).items).toHaveLength(before);
 });
 
 test("a human cannot create a project", () => {
   rejectsCleanly(
-    () => service.createProject(human, { key: projectKey(), name: "mine" }),
+    () => service.createProduct(human, { key: projectKey(), name: "mine" }),
+    ForbiddenError,
+  );
+});
+
+test("a person can file an issue but not add a todo, nor create or fill a project", () => {
+  const target = service.createProduct(bot, { key: projectKey(), name: "p" });
+  const filed = service.fileIssue(human, { product: target.key, title: "x" });
+  expect(filed).toMatchObject({ type: "issue", status: "triage" });
+  published = [];
+  rejectsCleanly(
+    () => service.addTodo(human, { product: target.key, title: "plan" }),
+    ForbiddenError,
+  );
+  rejectsCleanly(
+    () =>
+      service.createProject(human, { name: "mine", products: [target.key] }),
+    ForbiddenError,
+  );
+  const made = service.createProject(bot, {
+    name: "theirs",
+    products: [target.key],
+  });
+  published = [];
+  rejectsCleanly(
+    () => service.addToProject(human, made.slug, [filed.key]),
     ForbiddenError,
   );
 });
@@ -107,7 +140,7 @@ test("a human can neither set nor clear a title", () => {
 });
 
 test("a human files an issue unassigned; naming an assignee is refused and writes nothing", () => {
-  const filed = service.createProject(bot, {
+  const filed = service.createProduct(bot, {
     key: projectKey(),
     name: "human filed",
   });
@@ -136,24 +169,51 @@ test("a human files an issue unassigned; naming an assignee is refused and write
       assigneeId: bot.id,
     }),
   ).toThrow(
-    "a human files an issue unassigned: drop assigneeId, and a bot assigns it",
+    "a person files an issue unassigned: drop the assignee, and the product's bot assigns it",
   );
   expect(
-    service.listIssues(bot, { projectId: filed.id }).items.map((i) => i.title),
+    service.listItems(bot, { product: filed.id }).items.map((i) => i.title),
   ).toEqual(["from a human"]);
 });
 
-const proj = service.createProject(bot, {
+// no owner, so what the bot creates in it are issues, as before products had owners
+const proj = service.createProduct(bot, {
   key: projectKey(),
   name: "fixtures",
+  owner: null,
+});
+
+test("the legacy create makes a todo when its product's owner files it, else an issue in triage", () => {
+  const owned = service.createProduct(bot, {
+    key: projectKey(),
+    name: "owned",
+  });
+  const other = createBot(db, "outsider").actor;
+  const filed = (actor: typeof bot | typeof human) =>
+    service.createIssue(actor, { projectId: owned.id, title: "t" });
+  expect(filed(bot)).toMatchObject({
+    type: "todo",
+    status: "open",
+    assigneeId: bot.id,
+  });
+  expect(filed(other)).toMatchObject({
+    type: "issue",
+    status: "triage",
+    assigneeId: null,
+  });
+  expect(filed(human)).toMatchObject({ type: "issue", status: "triage" });
+  // a product with no owner: even its creator files issues
+  expect(
+    service.createIssue(bot, { projectId: proj.id, title: "t" }),
+  ).toMatchObject({ type: "issue", status: "triage" });
 });
 
 test("updating a project records each changed field from and to", () => {
   const event = onlyEventOf(() =>
-    service.updateProject(bot, proj.id, { name: "renamed", description: "" }),
+    service.updateProduct(bot, proj.id, { name: "renamed", description: "" }),
   );
   expect(event).toMatchObject({
-    action: "project.updated",
+    action: "product.updated",
     subjectId: proj.id,
     payload: { name: { from: "fixtures", to: "renamed" } },
   });
@@ -161,14 +221,14 @@ test("updating a project records each changed field from and to", () => {
 });
 
 test("an update that changes nothing writes no event", () => {
-  const current = service.getProject(bot, proj.id);
+  const current = service.getProduct(bot, proj.id);
   rejectsNothing(() =>
-    service.updateProject(bot, proj.id, { name: current.name }),
+    service.updateProduct(bot, proj.id, { name: current.name }),
   );
   const issue = service.createIssue(bot, { projectId: proj.id, title: "same" });
   published = [];
   rejectsNothing(() =>
-    service.updateIssue(bot, issue.id, { title: "same", status: "open" }),
+    service.updateItem(bot, issue.id, { title: "same", status: "triage" }),
   );
 });
 
@@ -193,8 +253,8 @@ test("a human can file an issue and comment on it", () => {
     action: "issue.created",
     subjectType: "issue",
     subjectId: issueId,
-    projectId: proj.id,
-    payload: { title: "Bug from a human", status: "open", assigneeId: null },
+    productId: proj.id,
+    payload: { title: "Bug from a human", status: "triage", assigneeId: null },
   });
   published = [];
   let commentId = "";
@@ -206,7 +266,7 @@ test("a human can file an issue and comment on it", () => {
     action: "comment.created",
     subjectType: "comment",
     subjectId: commentId,
-    projectId: proj.id,
+    productId: proj.id,
     payload: { issueId, body: "repro steps" },
   });
   expect(service.listComments(human, issueId).items).toMatchObject([
@@ -218,14 +278,14 @@ test("a human cannot update a project or an issue", () => {
   const issue = service.createIssue(bot, { projectId: proj.id, title: "t" });
   published = [];
   rejectsCleanly(
-    () => service.updateProject(human, proj.id, { name: "x" }),
+    () => service.updateProduct(human, proj.id, { name: "x" }),
     ForbiddenError,
   );
   rejectsCleanly(
-    () => service.updateIssue(human, issue.id, { status: "done" }),
+    () => service.updateItem(human, issue.id, { status: "done" }),
     ForbiddenError,
   );
-  expect(service.getIssue(bot, issue.id).status).toBe("open");
+  expect(service.getItem(bot, issue.id).status).toBe("triage");
 });
 
 test.each([
@@ -233,14 +293,14 @@ test.each([
     "post a status update",
     () =>
       service.createStatusUpdate(human, {
-        projectId: proj.id,
+        product: proj.id,
         body: "all good",
         health: "on_track",
       }),
   ],
   [
     "create a label",
-    () => service.createLabel(human, { projectId: proj.id, name: "human" }),
+    () => service.createLabel(human, { productId: proj.id, name: "human" }),
   ],
   [
     "import a project",
@@ -260,25 +320,25 @@ test("a status change is issue.updated with status from and to", () => {
   const issue = service.createIssue(bot, { projectId: proj.id, title: "t" });
   published = [];
   const event = onlyEventOf(() =>
-    service.updateIssue(bot, issue.id, { status: "done", assigneeId: bot.id }),
+    service.updateItem(bot, issue.id, { status: "done", assigneeId: bot.id }),
   );
   expect(event).toMatchObject({
     action: "issue.updated",
     subjectId: issue.id,
-    projectId: proj.id,
+    productId: proj.id,
     payload: {
-      status: { from: "open", to: "done" },
+      status: { from: "triage", to: "done" },
       assigneeId: { from: null, to: bot.id },
     },
   });
-  expect(service.getIssue(bot, issue.id)).toMatchObject({
+  expect(service.getItem(bot, issue.id)).toMatchObject({
     status: "done",
     assigneeId: bot.id,
   });
 });
 
 test("label names match across ASCII case only, the same in one request as across requests", () => {
-  const p = service.createProject(bot, { key: projectKey(), name: "labels" });
+  const p = service.createProduct(bot, { key: projectKey(), name: "labels" });
   const issue = service.createIssue(bot, {
     projectId: p.id,
     title: "t",
@@ -287,7 +347,7 @@ test("label names match across ASCII case only, the same in one request as acros
   expect(issue.labels).toEqual(["Foo", "Équipe", "équipe"]);
   // "ÉQUIPE" differs from "Équipe" in A-Z only, so it is the same label
   expect(
-    service.updateIssue(bot, issue.id, { labels: ["FOO", "ÉQUIPE"] }).labels,
+    service.updateItem(bot, issue.id, { labels: ["FOO", "ÉQUIPE"] }).labels,
   ).toEqual(["Foo", "Équipe"]);
   expect(
     service
@@ -302,27 +362,27 @@ describe("completedAt", () => {
     const issue = service.createIssue(bot, { projectId: proj.id, title: "c" });
     expect(issue.completedAt).toBeNull();
     const [done] = atFakeTime([
-      () => service.updateIssue(bot, issue.id, { status: "done" }),
+      () => service.updateItem(bot, issue.id, { status: "done" }),
     ]);
     expect(done?.completedAt).toBeInstanceOf(Date);
     const doneAt = done?.completedAt?.getTime();
     expect(
-      service.updateIssue(bot, issue.id, { status: "canceled" }).completedAt,
+      service.updateItem(bot, issue.id, { status: "canceled" }).completedAt,
     ).toEqual(new Date(doneAt as number));
     expect(
-      service.updateIssue(bot, issue.id, { status: "in_progress" }).completedAt,
+      service.updateItem(bot, issue.id, { status: "in_progress" }).completedAt,
     ).toBeNull();
-    expect(service.getIssue(bot, issue.id).completedAt).toBeNull();
+    expect(service.getItem(bot, issue.id).completedAt).toBeNull();
   });
 
   test("is set when an open issue is canceled, and untouched by an edit that keeps it open", () => {
     const issue = service.createIssue(bot, { projectId: proj.id, title: "c" });
     expect(
-      service.updateIssue(bot, issue.id, { title: "c2" }).completedAt,
+      service.updateItem(bot, issue.id, { title: "c2" }).completedAt,
     ).toBeNull();
-    const canceled = service.updateIssue(bot, issue.id, { status: "canceled" });
+    const canceled = service.updateItem(bot, issue.id, { status: "canceled" });
     expect(canceled.completedAt).toBeInstanceOf(Date);
-    expect(service.getIssue(bot, issue.id).completedAt).toEqual(
+    expect(service.getItem(bot, issue.id).completedAt).toEqual(
       canceled.completedAt,
     );
   });
@@ -331,7 +391,7 @@ describe("completedAt", () => {
 test("failed issue and comment writes leave no row and no event", () => {
   const issue = service.createIssue(bot, { projectId: proj.id, title: "t" });
   published = [];
-  const issuesBefore = service.listIssues(bot, { limit: 200 }).items;
+  const issuesBefore = service.listItems(bot, { limit: 200 }).items;
   rejectsCleanly(
     () => service.createIssue(bot, { projectId: "missing", title: "orphan" }),
     NotFoundError,
@@ -349,13 +409,13 @@ test("failed issue and comment writes leave no row and no event", () => {
       }),
     ValidationError,
   );
-  expect(service.listIssues(bot, { limit: 200 }).items).toEqual(issuesBefore);
+  expect(service.listItems(bot, { limit: 200 }).items).toEqual(issuesBefore);
   rejectsCleanly(
-    () => service.updateIssue(bot, issue.id, { status: "closed" as "done" }),
+    () => service.updateItem(bot, issue.id, { status: "closed" as "done" }),
     ValidationError,
   );
   rejectsCleanly(
-    () => service.updateIssue(bot, "missing", { status: "done" }),
+    () => service.updateItem(bot, "missing", { status: "done" }),
     NotFoundError,
   );
   rejectsCleanly(
@@ -371,12 +431,12 @@ test("failed issue and comment writes leave no row and no event", () => {
 
 test("a write the database rejects leaves no row and no event", () => {
   const ghost = { id: "not-an-actor", kind: "bot" as const };
-  const before = service.listProjects(bot, { limit: 200 }).items;
+  const before = service.listProducts(bot, { limit: 200 }).items;
   rejectsCleanly(
-    () => service.createProject(ghost, { key: projectKey(), name: "x" }),
+    () => service.createProduct(ghost, { key: projectKey(), name: "x" }),
     Error,
   );
-  expect(service.listProjects(bot, { limit: 200 }).items).toEqual(before);
+  expect(service.listProducts(bot, { limit: 200 }).items).toEqual(before);
 });
 
 test("the bus publishes only once the event is visible to other connections", () => {
@@ -389,7 +449,7 @@ test("the bus publishes only once the event is visible to other connections", ()
     seenByOther.push(row !== undefined);
   });
   try {
-    service.createProject(bot, { key: projectKey(), name: "committed" });
+    service.createProduct(bot, { key: projectKey(), name: "committed" });
   } finally {
     unsubscribe();
     other.$client.close();
@@ -399,7 +459,7 @@ test("the bus publishes only once the event is visible to other connections", ()
 
 test("an update is attributed to the acting bot, not the row's creator", () => {
   const editor = createBot(db, "editor").actor;
-  const project = service.createProject(bot, {
+  const project = service.createProduct(bot, {
     key: projectKey(),
     name: "authored",
   });
@@ -410,44 +470,44 @@ test("an update is attributed to the acting bot, not the row's creator", () => {
   published = [];
 
   const projectEvent = onlyEventOf(() =>
-    service.updateProject(editor, project.id, { name: "edited" }),
+    service.updateProduct(editor, project.id, { name: "edited" }),
   );
   published = [];
   const issueEvent = onlyEventOf(() =>
-    service.updateIssue(editor, issue.id, { status: "done" }),
+    service.updateItem(editor, issue.id, { status: "done" }),
   );
 
   expect(projectEvent).toMatchObject({
-    action: "project.updated",
+    action: "product.updated",
     actorId: editor.id,
   });
   expect(issueEvent).toMatchObject({
     action: "issue.updated",
     actorId: editor.id,
   });
-  expect(service.getProject(bot, project.id).createdBy).toBe(bot.id);
-  expect(service.getIssue(bot, issue.id).createdBy).toBe(bot.id);
+  expect(service.getProduct(bot, project.id).createdBy).toBe(bot.id);
+  expect(service.getItem(bot, issue.id).createdBy).toBe(bot.id);
 });
 
 describe("updatedAt", () => {
   test("a project update moves updatedAt past createdAt and leaves createdAt alone", () => {
     const project = atFakeTime([
-      () => service.createProject(bot, { key: projectKey(), name: "ticking" }),
-    ])[0] as Project;
+      () => service.createProduct(bot, { key: projectKey(), name: "ticking" }),
+    ])[0] as Product;
     const updated = atFakeTime([
-      () => service.updateProject(bot, project.id, { name: "ticked" }),
-    ])[0] as Project;
+      () => service.updateProduct(bot, project.id, { name: "ticked" }),
+    ])[0] as Product;
     expect(updated.updatedAt.getTime()).toBeGreaterThan(
       project.updatedAt.getTime(),
     );
     expect(updated.createdAt).toEqual(project.createdAt);
-    expect(service.getProject(bot, project.id).updatedAt).toEqual(
+    expect(service.getProduct(bot, project.id).updatedAt).toEqual(
       updated.updatedAt,
     );
   });
 
   test("an issue update moves updatedAt past createdAt and leaves createdAt alone", () => {
-    const project = service.createProject(bot, {
+    const project = service.createProduct(bot, {
       key: projectKey(),
       name: "issue clock",
     });
@@ -455,41 +515,39 @@ describe("updatedAt", () => {
       () => service.createIssue(bot, { projectId: project.id, title: "tick" }),
     ])[0] as Issue;
     const updated = atFakeTime([
-      () => service.updateIssue(bot, issue.id, { status: "in_progress" }),
+      () => service.updateItem(bot, issue.id, { status: "in_progress" }),
     ])[0] as Issue;
     expect(updated.updatedAt.getTime()).toBeGreaterThan(
       issue.updatedAt.getTime(),
     );
     expect(updated.createdAt).toEqual(issue.createdAt);
-    expect(service.getIssue(bot, issue.id).updatedAt).toEqual(
-      updated.updatedAt,
-    );
+    expect(service.getItem(bot, issue.id).updatedAt).toEqual(updated.updatedAt);
   });
 
   test("a project patch that changes nothing leaves the row, updatedAt included, as it was", () => {
     const created = atFakeTime([
       () =>
-        service.createProject(bot, {
+        service.createProduct(bot, {
           key: projectKey(),
           name: "still",
           description: "d",
         }),
-    ])[0] as Project;
+    ])[0] as Product;
     published = [];
     const result = atFakeTime([
       () =>
-        service.updateProject(bot, created.id, {
+        service.updateProduct(bot, created.id, {
           name: "still",
           description: "d",
         }),
-    ])[0] as Project;
+    ])[0] as Product;
     expect(result).toEqual(created);
-    expect(service.getProject(bot, created.id)).toEqual(created);
+    expect(service.getProduct(bot, created.id)).toEqual(created);
     expect(published).toEqual([]);
   });
 
   test("an issue patch that changes nothing leaves the row, updatedAt included, as it was", () => {
-    const project = service.createProject(bot, {
+    const project = service.createProduct(bot, {
       key: projectKey(),
       name: "issue still",
     });
@@ -499,10 +557,10 @@ describe("updatedAt", () => {
     published = [];
     const result = atFakeTime([
       () =>
-        service.updateIssue(bot, created.id, { title: "same", status: "open" }),
+        service.updateItem(bot, created.id, { title: "same", status: "open" }),
     ])[0] as Issue;
     expect(result).toEqual(created);
-    expect(service.getIssue(bot, created.id)).toEqual(created);
+    expect(service.getItem(bot, created.id)).toEqual(created);
     expect(published).toEqual([]);
   });
 });
@@ -518,7 +576,7 @@ describe("a write and its activity event commit together", () => {
   afterEach(allowEvents);
 
   test("an event the database refuses rolls the write back; with the refusal lifted the same calls commit", () => {
-    const project = service.createProject(bot, {
+    const project = service.createProduct(bot, {
       key: projectKey(),
       name: "atomic",
     });
@@ -527,15 +585,15 @@ describe("a write and its activity event commit together", () => {
       title: "before",
     });
     published = [];
-    const issuesBefore = service.listIssues(bot, { projectId: project.id });
-    const issueBefore = service.getIssue(bot, issue.id);
+    const issuesBefore = service.listItems(bot, { product: project.id });
+    const issueBefore = service.getItem(bot, issue.id);
     const eventsBefore = allActivity();
 
     const writes = {
       createIssue: () =>
         service.createIssue(bot, { projectId: project.id, title: "after" }),
       updateIssue: () =>
-        service.updateIssue(bot, issue.id, { title: "after", status: "done" }),
+        service.updateItem(bot, issue.id, { title: "after", status: "done" }),
       addComment: () =>
         service.addComment(bot, { issueId: issue.id, body: "after" }),
     };
@@ -544,19 +602,19 @@ describe("a write and its activity event commit together", () => {
     for (const write of Object.values(writes)) {
       expect(write).toThrow("event rejected");
     }
-    expect(service.listIssues(bot, { projectId: project.id })).toEqual(
+    expect(service.listItems(bot, { product: project.id })).toEqual(
       issuesBefore,
     );
-    expect(service.getIssue(bot, issue.id)).toEqual(issueBefore);
+    expect(service.getItem(bot, issue.id)).toEqual(issueBefore);
     expect(service.listComments(bot, issue.id).items).toEqual([]);
     expect(allActivity()).toEqual(eventsBefore);
     expect(published).toEqual([]);
 
     allowEvents();
     for (const write of Object.values(writes)) write();
-    const issuesAfter = service.listIssues(bot, { projectId: project.id });
+    const issuesAfter = service.listItems(bot, { product: project.id });
     expect(issuesAfter.items).toHaveLength(2);
-    expect(service.getIssue(bot, issue.id)).toMatchObject({
+    expect(service.getItem(bot, issue.id)).toMatchObject({
       title: "after",
       status: "done",
     });
@@ -572,16 +630,21 @@ describe("a write and its activity event commit together", () => {
 describe("paging and filters", () => {
   const titles = ["one", "two", "three", "four", "five"];
   const [paged] = atFakeTime([
-    () => service.createProject(bot, { key: projectKey(), name: "paged" }),
-  ]) as [Project];
+    () =>
+      service.createProduct(bot, {
+        key: projectKey(),
+        name: "paged",
+        owner: null,
+      }),
+  ]) as [Product];
   const issues = atFakeTime(
     titles.map(
       (title) => () => service.createIssue(bot, { projectId: paged.id, title }),
     ),
   );
   atFakeTime([
-    () => service.updateIssue(bot, issues[1]?.id ?? "", { status: "done" }),
-    () => service.updateIssue(bot, issues[2]?.id ?? "", { assigneeId: bot.id }),
+    () => service.updateItem(bot, issues[1]?.id ?? "", { status: "done" }),
+    () => service.updateItem(bot, issues[2]?.id ?? "", { assigneeId: bot.id }),
   ]);
 
   /** Walks every page of `list` at `limit`, returning ids in order. */
@@ -602,13 +665,13 @@ describe("paging and filters", () => {
   test("issues page newest first and the cursor round-trips", () => {
     const ids = issues.map((i) => i.id).reverse();
     const pages = walk((cursor) =>
-      service.listIssues(bot, { projectId: paged.id, cursor, limit: 2 }),
+      service.listItems(bot, { product: paged.id, cursor, limit: 2 }),
     );
     expect(pages).toEqual([ids.slice(0, 2), ids.slice(2, 4), ids.slice(4)]);
   });
 
   test("rows sharing a millisecond each land on exactly one page", () => {
-    const tied = service.createProject(bot, {
+    const tied = service.createProduct(bot, {
       key: projectKey(),
       name: "tied",
     });
@@ -620,7 +683,7 @@ describe("paging and filters", () => {
       0,
     );
     const pages = walk((cursor) =>
-      service.listIssues(bot, { projectId: tied.id, cursor, limit: 1 }),
+      service.listItems(bot, { product: tied.id, cursor, limit: 1 }),
     );
     expect(pages.flat().sort()).toEqual([...ids].sort());
   });
@@ -628,33 +691,33 @@ describe("paging and filters", () => {
   test("issues filter by status and assignee", () => {
     expect(
       service
-        .listIssues(bot, { projectId: paged.id, status: "done" })
+        .listItems(bot, { product: paged.id, status: "done" })
         .items.map((i) => i.title),
     ).toEqual(["two"]);
     expect(
       service
-        .listIssues(bot, { projectId: paged.id, assigneeId: bot.id })
+        .listItems(bot, { product: paged.id, assignee: bot.id })
         .items.map((i) => i.title),
     ).toEqual(["three"]);
   });
 
   test("activity pages newest first, filtered by project and actor", () => {
-    const all = service.listActivity(bot, { projectId: paged.id }).items;
+    const all = service.listActivity(bot, { product: paged.id }).items;
     expect(all.map((e) => e.action)).toEqual([
       "issue.updated",
       "issue.updated",
       ...titles.map(() => "issue.created"),
-      "project.created",
+      "product.created",
     ]);
     const pages = walk((cursor) =>
-      service.listActivity(bot, { projectId: paged.id, cursor, limit: 3 }),
+      service.listActivity(bot, { product: paged.id, cursor, limit: 3 }),
     );
     expect(pages.flat()).toEqual(all.map((e) => e.id));
     expect(pages.map((p) => p.length)).toEqual([3, 3, 2]);
   });
 
   test("activity filters by actor within a project", () => {
-    const shared = service.createProject(bot, {
+    const shared = service.createProduct(bot, {
       key: projectKey(),
       name: "shared",
     });
@@ -667,15 +730,15 @@ describe("paging and filters", () => {
     ]);
     const mine = (actorId: string) =>
       service
-        .listActivity(bot, { projectId: shared.id, actorId })
+        .listActivity(bot, { product: shared.id, actorId })
         .items.map((e) => e.action);
     expect(mine(human.id)).toEqual(["issue.created"]);
-    expect(mine(bot.id)).toEqual(["project.created"]);
+    expect(mine(bot.id)).toEqual(["product.created"]);
     expect(filed?.createdBy).toBe(human.id);
   });
 
   test("a result that is an exact multiple of the limit ends without an empty page", () => {
-    const exact = service.createProject(bot, {
+    const exact = service.createProduct(bot, {
       key: projectKey(),
       name: "exact",
     });
@@ -685,11 +748,11 @@ describe("paging and filters", () => {
           service.createIssue(bot, { projectId: exact.id, title }).id,
       ),
     ).reverse();
-    const first = service.listIssues(bot, { projectId: exact.id, limit: 2 });
+    const first = service.listItems(bot, { product: exact.id, limit: 2 });
     expect(first.items.map((i) => i.id)).toEqual(ids.slice(0, 2));
     expect(first.nextCursor).not.toBeNull();
-    const second = service.listIssues(bot, {
-      projectId: exact.id,
+    const second = service.listItems(bot, {
+      product: exact.id,
       limit: 2,
       cursor: first.nextCursor ?? undefined,
     });
@@ -698,18 +761,18 @@ describe("paging and filters", () => {
   });
 
   test("an empty list is one page with no cursor", () => {
-    const empty = service.createProject(bot, {
+    const empty = service.createProduct(bot, {
       key: projectKey(),
       name: "empty",
     });
-    expect(service.listIssues(bot, { projectId: empty.id })).toEqual({
+    expect(service.listItems(bot, { product: empty.id })).toEqual({
       items: [],
       nextCursor: null,
     });
   });
 
   test("activity rows sharing a millisecond each land on exactly one page", () => {
-    const tied = service.createProject(bot, {
+    const tied = service.createProduct(bot, {
       key: projectKey(),
       name: "tied activity",
     });
@@ -723,7 +786,7 @@ describe("paging and filters", () => {
     const subjects = [tied.id, ...filed.map((i) => i.id)];
     const pages = walk(
       (cursor) =>
-        service.listActivity(bot, { projectId: tied.id, cursor, limit: 1 }),
+        service.listActivity(bot, { product: tied.id, cursor, limit: 1 }),
       (event) => event.subjectId,
     );
     expect(pages).toHaveLength(subjects.length);
@@ -731,7 +794,7 @@ describe("paging and filters", () => {
   });
 
   test("comments sharing a millisecond each land on exactly one page", () => {
-    const own = service.createProject(bot, {
+    const own = service.createProduct(bot, {
       key: projectKey(),
       name: "tied comments",
     });
@@ -750,7 +813,7 @@ describe("paging and filters", () => {
   });
 
   test("comments page oldest first", () => {
-    const own = service.createProject(bot, {
+    const own = service.createProduct(bot, {
       key: projectKey(),
       name: "comment paging",
     });
@@ -774,15 +837,13 @@ describe("paging and filters", () => {
     const wrongShape = Buffer.from('{"a":1}').toString("base64url");
     const badTime = Buffer.from('["soon","x"]').toString("base64url");
     for (const cursor of ["%%%", notJson, wrongShape, badTime]) {
-      expect(() => service.listIssues(bot, { cursor })).toThrow(
-        ValidationError,
-      );
+      expect(() => service.listItems(bot, { cursor })).toThrow(ValidationError);
       expect(() => service.listActivity(bot, { cursor })).toThrow(
         ValidationError,
       );
     }
     for (const limit of [0, 201, 1.5]) {
-      expect(() => service.listIssues(bot, { limit })).toThrow(ValidationError);
+      expect(() => service.listItems(bot, { limit })).toThrow(ValidationError);
     }
   });
 
@@ -793,11 +854,19 @@ describe("paging and filters", () => {
 
 test("whoami is the calling actor's row, label included", () => {
   const labelled = createBot(db, "whoami bot", { label: "agent-whoami" }).actor;
-  expect(service.whoami(labelled)).toEqual({ ...labelled, photoUrl: null });
+  expect(service.whoami(labelled)).toEqual({
+    ...labelled,
+    photoUrl: null,
+    ownProducts: [],
+    products: service
+      .listProducts(labelled, { limit: 200 })
+      .items.map(({ owner, ...row }) => row)
+      .sort((a, b) => (a.key < b.key ? -1 : 1)),
+  });
   expect(service.whoami(human)).toMatchObject({
     id: human.id,
     kind: "human",
-    displayName: "Justin",
+    displayName: "Pat",
     label: null,
   });
 });
@@ -820,4 +889,55 @@ test("listBots pages every bot oldest first, never a human", () => {
   expect(ids.indexOf(labelled.id)).toBe(1);
   expect(all[1]).toEqual({ ...labelled, photoUrl: null });
   expect(ids).toContain(bot.id);
+});
+
+describe("a page of projects or products", () => {
+  /** How many statements `read` prepares on the database connection. */
+  function statementsOf(read: () => unknown): number {
+    const prepare = vi.spyOn(db.$client, "prepare");
+    try {
+      read();
+      return prepare.mock.calls.length;
+    } finally {
+      prepare.mockRestore();
+    }
+  }
+
+  test("is read in as many statements for 50 rows as for 5", () => {
+    const lead = createBot(db, "batched lead").actor;
+    for (let n = 0; n < 50; n++) {
+      const owned = service.createProduct(lead, {
+        key: projectKey(),
+        name: `batched ${n}`,
+      });
+      service.createProject(lead, {
+        name: `batched ${n}`,
+        products: [owned.key],
+      });
+      service.addTodo(lead, { product: owned.key, title: `todo ${n}` });
+      if (n % 2 === 0) {
+        service.createStatusUpdate(lead, {
+          project: `batched-${n}`,
+          body: "going",
+          health: "on_track",
+        });
+      }
+    }
+    const projects = (limit: number) =>
+      statementsOf(() => {
+        const page = service.listProjects(lead, { limit });
+        expect(page.items).toHaveLength(limit);
+        expect(page.items.some((p) => p.latestStatusUpdate !== null)).toBe(
+          true,
+        );
+      });
+    const products = (limit: number) =>
+      statementsOf(() => {
+        const page = service.listProducts(lead, { limit });
+        expect(page.items).toHaveLength(limit);
+        expect(page.items[0]?.owner?.name).toBe("batched lead");
+      });
+    expect(projects(50)).toBe(projects(5));
+    expect(products(50)).toBe(products(5));
+  });
 });
