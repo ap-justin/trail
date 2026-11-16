@@ -683,7 +683,7 @@ const projectFields = {
     .max(SLUG_MAX)
     .optional()
     .meta({
-      description: `How agents name the project: 2 to ${SLUG_MAX} lowercase letters, digits and hyphens, like launch-q4, unique. Left out, it is derived from the name (Launch Q4 → launch-q4), with -2, -3 ... added when taken.`,
+      description: `How agents name the project: 2 to ${SLUG_MAX} lowercase letters, digits and hyphens, like launch-q4, unique. Left out, it is derived from the name (Launch Q4 gives launch-q4), with -2, -3 ... added when taken.`,
     }),
   goal: goal.optional(),
   lead: leadRef.optional().meta({

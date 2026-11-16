@@ -57,7 +57,7 @@ const usage = `Usage:
 
   --label <agent-id>  the bot's id in the system that runs it, unique among bots
   --products <keys>   scope: limit the key to these products, like BGP,ATL
-                      (--projects, its name before products, still works)
+                      (--projects, the old name, still works)
   --actions <actions> scope: limit the key to these of read, issues, comments,
                       status_updates and admin, like read,issues,comments
   --key-only          print only the key on stdout; the rest goes to stderr
@@ -80,7 +80,7 @@ const options = {
 type Flags = {
   label?: string;
   products?: string;
-  /** the name --products had before products; accepted with a notice */
+  /** the old name of --products; accepted with a notice */
   projects?: string;
   actions?: string;
   "key-only"?: boolean;
@@ -129,7 +129,7 @@ export function runCli(argv: readonly string[], io: CliIo): number {
     if (flags.projects !== undefined) {
       if (flags.products !== undefined) {
         throw new UsageError(
-          "send --products or --projects, not both: --projects is the name --products had before products",
+          "send --products or --projects, not both: --projects is the old name of --products",
         );
       }
       io.stderr.write("trail: --projects is deprecated: use --products\n");

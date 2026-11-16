@@ -581,7 +581,7 @@ export const projectProduct = sqliteTable(
   },
   (t) => [
     primaryKey({ columns: [t.projectId, t.productId] }),
-    // which projects draw from these products — what a key or person may see
+    // which projects draw from these products: what a key or person may see
     index("project_product_product_project_idx").on(t.productId, t.projectId),
   ],
 );

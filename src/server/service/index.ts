@@ -149,7 +149,7 @@ type IssueRow = typeof issue.$inferSelect;
 /** A bot or person as a row names it. */
 export type ActorRef = { id: string; name: string; kind: ActorKind };
 /**
- * An item with its key (as in TRL-12), its product's key, label names A–Z,
+ * An item with its key (as in TRL-12), its product's key, label names A to Z,
  * links in the order set, its assignee, and the projects it belongs to (all
  * visible to whoever sees the item: each draws from the item's product).
  */

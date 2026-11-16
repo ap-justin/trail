@@ -30,7 +30,7 @@ function FeedPage() {
       section="feed"
       heading="Feed"
       // nothing until the stream first opens: neither Live nor Reconnecting is true yet;
-      // nor while a member with no products has no rows, which hides the filters too —
+      // nor while a member with no products has no rows, which hides the filters too;
       // the stream checks access per event, so a product granted mid-view starts delivering
       headingAccessory={
         feed.connection === "open" &&
