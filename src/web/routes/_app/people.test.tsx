@@ -332,7 +332,7 @@ describe("managing people", () => {
             error: {
               code: "conflict",
               message:
-                "@mayachen is already invited. Change their projects in the list below.",
+                "@mayachen is already invited: change their products in the list below.",
             },
           },
           { status: 409 },
@@ -350,7 +350,7 @@ describe("managing people", () => {
     await waitFor(() => expect(field).toHaveAttribute("aria-invalid", "true"));
     expect(field).toHaveAccessibleDescription(
       expect.stringContaining(
-        "@mayachen is already invited. Change their projects in the list below.",
+        "@mayachen is already invited: change their products in the list below.",
       ),
     );
   });

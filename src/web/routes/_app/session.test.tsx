@@ -42,7 +42,9 @@ describe("session", () => {
     renderApp("/");
     expect(await screen.findByText("No products yet")).toBeInTheDocument();
     expect(
-      screen.getByText("Ask the owner to give you access to a product."),
+      screen.getByText(
+        "Ask the person who runs this trail to give you access to a product.",
+      ),
     ).toBeInTheDocument();
     expect(screen.queryByText("No activity yet")).not.toBeInTheDocument();
     expect(

@@ -5,10 +5,10 @@ import { AppLink } from "@/components/app-link";
 import { Markdown } from "@/components/markdown";
 import { IssueError, IssueSkeleton, NotFoundPanel } from "@/components/states";
 import {
+  changedStatusLabel,
   PriorityLabel,
   priorityLabel,
   StatusLabel,
-  statusLabel,
   TypeBadge,
 } from "@/components/status";
 import { KeyText, LabelChip } from "@/components/text";
@@ -103,6 +103,12 @@ const strong = (text: string) => (
   <span className="font-medium text-foreground">{text}</span>
 );
 
+/** The type the item was created as, which its current type loses once retyped. */
+function createdAs(issue: WebItemView): WebItemType {
+  const created = issue.timeline.find((e) => e.kind === "item_created");
+  return created?.kind === "item_created" ? created.createdAs : issue.type;
+}
+
 function Header({ issue }: { issue: WebItemView }) {
   return (
     <header className="flex flex-col gap-2 border-b px-4 pt-3.5 pb-3 lg:gap-1.5 lg:border-0 lg:p-0">
@@ -112,11 +118,7 @@ function Header({ issue }: { issue: WebItemView }) {
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground">
         <TypeBadge type={issue.type} />
         <KeyText>{issue.key}</KeyText>
-        <span>
-          {issue.creator.kind === "bot" && issue.type === "todo"
-            ? "planned by"
-            : "filed by"}
-        </span>
+        <span>{createdAs(issue) === "todo" ? "planned by" : "filed by"}</span>
         <Actor actor={issue.creator} withTitle={false} />
         <time dateTime={issue.createdAt}>
           <span className="max-lg:hidden">on </span>
@@ -355,17 +357,19 @@ const typeLabels: Record<WebItemType, string> = {
 /** The words after the actor in a one-line timeline entry. */
 function changePhrase(entry: EntryView): ReactNode {
   switch (entry.kind) {
-    // the item's type is its current one; people only file issues, so a person's todo was converted
     case "item_created":
-      return entry.actor.kind === "bot" && entry.item.type === "todo"
+      return entry.createdAs === "todo"
         ? "planned this todo"
         : "filed this issue";
     case "status_changed":
       return (
         <>
-          changed status from{" "}
-          {strong(entry.from === "triage" ? "Triage" : statusLabel(entry.from))}{" "}
-          to <StatusLabel status={entry.to} className="text-sm font-medium" />
+          changed status from {strong(changedStatusLabel(entry.from))} to{" "}
+          <StatusLabel
+            status={entry.to}
+            namesTriage
+            className="text-sm font-medium"
+          />
         </>
       );
     case "type_changed":

@@ -410,18 +410,11 @@ const statusUpdateVerb = (on: "product" | "project") => (
   </span>
 );
 
-// the item's type is its current one; people only file issues, so a todo a person created was converted
-function createdVerb(entry: Extract<EntryView, { kind: "item_created" }>) {
-  return entry.actor.kind === "bot" && entry.item.type === "todo"
-    ? "planned"
-    : "filed";
-}
-
 function sentenceFor(entry: EntryView): Sentence | null {
   switch (entry.kind) {
     case "item_created":
       return {
-        verb: muted(createdVerb(entry)),
+        verb: muted(entry.createdAs === "todo" ? "planned" : "filed"),
         subject: itemSubject(entry.item),
         title: entry.item.title,
         sourceAuthor: entry.sourceAuthor,
@@ -434,7 +427,7 @@ function sentenceFor(entry: EntryView): Sentence | null {
         tail: (
           <>
             {muted("to")}
-            <StatusLabel status={entry.to} />
+            <StatusLabel status={entry.to} namesTriage />
           </>
         ),
       };

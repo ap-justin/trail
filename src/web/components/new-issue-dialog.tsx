@@ -63,7 +63,7 @@ const TITLE_MAX = 300;
 function titleError(title: string) {
   const trimmed = title.trim();
   if (!trimmed) return "Required";
-  if (trimmed.length > TITLE_MAX) return `Keep it to ${TITLE_MAX} characters.`;
+  if (trimmed.length > TITLE_MAX) return `${TITLE_MAX} characters at most`;
   return undefined;
 }
 

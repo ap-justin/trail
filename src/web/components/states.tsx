@@ -162,13 +162,13 @@ export function FeedFilterEmpty({ onClear }: { onClear: () => void }) {
   );
 }
 
-/** A member the owner has not added to any product: nothing can appear until they do. */
+/** A member the person who runs this trail has not added to any product: nothing can appear until they do. */
 export function FeedNoProducts() {
   return (
     <EmptyState
       icon={PackageIcon}
       title="No products yet"
-      description="Ask the owner to give you access to a product."
+      description="Ask the person who runs this trail to give you access to a product."
     />
   );
 }
@@ -241,7 +241,7 @@ export function ItemListError({ onRetry }: { onRetry: () => void }) {
   );
 }
 
-/** A person given no products yet is pointed at the owner; the owner sees where products come from. */
+/** A person given no products yet is pointed at the person who runs this trail, who sees where products come from. */
 export function ProductsEmpty({
   ownerName,
   isOwner,

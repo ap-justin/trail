@@ -273,7 +273,9 @@ describe("feed states", () => {
       screen.getByRole("heading", { name: "No products yet" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Ask the owner to give you access to a product."),
+      screen.getByText(
+        "Ask the person who runs this trail to give you access to a product.",
+      ),
     ).toBeInTheDocument();
     expect(screen.queryByText("No activity yet")).not.toBeInTheDocument();
   });
@@ -475,18 +477,38 @@ describe("item events", () => {
     expect(within(rowFor("person")).getByText("filed")).toBeVisible();
   });
 
-  test("a person's issue a bot later made a todo still reads filed", () => {
+  test("an issue a bot filed and the owner accepted as a todo still reads filed", () => {
     renderFeed({
       entries: [
-        itemCreatedEntry("person-todo", minutesAgo(1), {
-          actor: maya,
+        itemCreatedEntry("accepted", minutesAgo(1), {
           item: { key: "TRL-15", title: "Back up the volume", type: "todo" },
+          createdAs: "issue",
         }),
       ],
     });
-    const row = rowFor("person-todo");
+    const row = rowFor("accepted");
     expect(within(row).getByText("filed")).toBeVisible();
     expect(within(row).queryByText("planned")).toBeNull();
+  });
+
+  test("a change into triage reads to Triage, not Open", () => {
+    renderFeed({
+      entries: [
+        statusEntry("e1", minutesAgo(1), { from: "open", to: "triage" }),
+      ],
+    });
+    const row = rowFor("e1");
+    expect(row).toHaveTextContent(/to\s*Triage/);
+    expect(row).not.toHaveTextContent("Open");
+  });
+
+  test("accepting an issue out of triage reads to Open", () => {
+    renderFeed({
+      entries: [
+        statusEntry("e1", minutesAgo(1), { from: "triage", to: "open" }),
+      ],
+    });
+    expect(rowFor("e1")).toHaveTextContent(/to\s*Open/);
   });
 
   test("a type change names the new type", () => {

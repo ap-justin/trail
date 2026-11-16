@@ -1609,7 +1609,7 @@ export const personSchema = z.object({
   }),
   owner: z.boolean().meta({
     description:
-      "The owner's row, which comes first, is not an invite, and sees all products.",
+      "The row of the person who runs this trail, which comes first, is not an invite, and sees all products.",
   }),
   pending: z.boolean().meta({
     description: "Invited, and the person hasn't signed in yet.",
@@ -1621,9 +1621,9 @@ export const personSchema = z.object({
   products: z.array(webProductRefSchema).meta({
     description: "The products the person sees, A to Z by key.",
   }),
-  invitedAt: timestamp
-    .nullable()
-    .meta({ description: "Null on the owner's row." }),
+  invitedAt: timestamp.nullable().meta({
+    description: "Null on the row of the person who runs this trail.",
+  }),
 });
 
 export const peopleSchema = z.object({ items: z.array(personSchema) });

@@ -62,7 +62,14 @@ export function commentEntry(
   };
 }
 
-export function statusEntry(id: string, createdAt: string): EntryView {
+export function statusEntry(
+  id: string,
+  createdAt: string,
+  change: Pick<
+    Extract<EntryView, { kind: "status_changed" }>,
+    "from" | "to"
+  > = { from: "in_progress", to: "done" },
+): EntryView {
   return {
     kind: "status_changed",
     id,
@@ -71,8 +78,7 @@ export function statusEntry(id: string, createdAt: string): EntryView {
     product: trail,
     project: null,
     item: { key: "TRL-12", title: "Stream the feed over SSE", type: "issue" },
-    from: "in_progress",
-    to: "done",
+    ...change,
   };
 }
 
@@ -335,7 +341,8 @@ export function itemCreatedEntry(
   {
     actor = alpha,
     item = teamAccessIssue,
-  }: { actor?: WebActorView; item?: Item } = {},
+    createdAs = item.type,
+  }: { actor?: WebActorView; item?: Item; createdAs?: Item["type"] } = {},
 ): EntryView {
   return {
     kind: "item_created",
@@ -346,7 +353,7 @@ export function itemCreatedEntry(
     project: null,
     item,
     sourceAuthor: null,
-    createdAs: item.type,
+    createdAs,
   };
 }
 

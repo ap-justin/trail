@@ -592,7 +592,7 @@ describe("invite", () => {
 describe("invite failure", () => {
   const already = {
     message:
-      "dana@example.com is already invited. Change their projects in the list below.",
+      "dana@example.com is already invited: change their products in the list below.",
     atField: true,
   };
 

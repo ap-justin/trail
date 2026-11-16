@@ -25,6 +25,16 @@ function renderIssue(overrides: Partial<IssueViewProps> = {}) {
 
 const absoluteTime = /^[A-Z][a-z]{2} \d{1,2}, \d{2}:\d{2}$/;
 
+/** TRL-15 as a todo whose created entry says Alpha filed it as an issue. */
+function acceptedAsTodo() {
+  const base = todo();
+  return todo({
+    timeline: base.timeline.map((e) =>
+      e.kind === "item_created" ? { ...e, createdAs: "issue" as const } : e,
+    ),
+  });
+}
+
 describe("properties", () => {
   test("are plain text: no select, menu or editable field anywhere but the comment box", () => {
     renderIssue();
@@ -150,6 +160,25 @@ describe("timeline", () => {
     });
     const status = entries().at(-1);
     expect(status).toHaveTextContent("changed status from Triage to Open");
+  });
+
+  test("a change into triage reads to Triage, not Open", () => {
+    const base = issue();
+    renderIssue({
+      issue: {
+        status: "ready",
+        data: {
+          ...base,
+          timeline: base.timeline.map((e) =>
+            e.kind === "status_changed"
+              ? { ...e, from: "open", to: "triage" }
+              : e,
+          ),
+        },
+      },
+    });
+    const status = entries().at(-1);
+    expect(status).toHaveTextContent("changed status from Open to Triage");
   });
 
   test("comments have no edit or delete", () => {
@@ -323,12 +352,20 @@ describe("item type", () => {
     expect(within(line).getByText("Human")).toBeInTheDocument();
   });
 
-  test("a person's issue a bot later made a todo is still filed by them", () => {
+  test("an issue a bot filed and the owner accepted as a todo is still filed by it", () => {
     renderIssue({
       issueKey: "TRL-15",
-      issue: { status: "ready", data: todo({ creator: maya }) },
+      issue: { status: "ready", data: acceptedAsTodo() },
     });
-    expect(byline()).toHaveTextContent(/Todo\s*TRL-15\s*filed by.*Maya Chen/);
+    expect(byline()).toHaveTextContent(/Todo\s*TRL-15\s*filed by.*Alpha/);
+  });
+
+  test("with no created entry in the timeline, the byline follows the current type", () => {
+    renderIssue({
+      issueKey: "TRL-15",
+      issue: { status: "ready", data: todo({ timeline: [] }) },
+    });
+    expect(byline()).toHaveTextContent(/Todo\s*TRL-15\s*planned by.*Alpha/);
   });
 
   test("an unassigned issue says Unassigned", () => {
@@ -461,40 +498,10 @@ describe("project and type events", () => {
     expect(typed).toHaveTextContent("changed type from Issue to Todo");
   });
 
-  test("a person's issue a bot later made a todo still opens with filed this issue", () => {
-    const base = todo();
+  test("an issue a bot filed and the owner accepted as a todo opens with filed this issue", () => {
     renderIssue({
       issueKey: "TRL-15",
-      issue: {
-        status: "ready",
-        data: todo({
-          creator: maya,
-          timeline: [
-            {
-              product: base.product,
-              item: { key: "TRL-15", title: base.title, type: "todo" },
-              project: null,
-              kind: "item_created",
-              id: "a",
-              createdAt: "2026-11-09T14:02:00.000Z",
-              actor: maya,
-              sourceAuthor: null,
-              createdAs: "issue",
-            },
-            {
-              product: base.product,
-              item: { key: "TRL-15", title: base.title, type: "todo" },
-              project: null,
-              kind: "type_changed",
-              id: "b",
-              createdAt: "2026-11-09T14:04:00.000Z",
-              actor: base.creator,
-              from: "issue",
-              to: "todo",
-            },
-          ],
-        }),
-      },
+      issue: { status: "ready", data: acceptedAsTodo() },
     });
     const [created] = [
       ...document.querySelectorAll<HTMLElement>("[data-entry-id]"),

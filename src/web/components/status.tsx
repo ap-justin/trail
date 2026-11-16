@@ -75,6 +75,11 @@ export function statusLabel(status: IssueStatus): string {
   return statuses[status].label;
 }
 
+/** The word for one side of a status change, which names triage outright. */
+export function changedStatusLabel(status: IssueStatus): string {
+  return status === "triage" ? "Triage" : statusLabel(status);
+}
+
 /**
  * The status glyph alone. With `label` it is an image named for the status (an
  * icon-only column); without, it is decorative beside a word that names it.
@@ -99,15 +104,21 @@ export function StatusIcon({
   );
 }
 
-/** Glyph plus word, in the status's ink. Never wraps. */
+/**
+ * Glyph plus word, in the status's ink. Never wraps. With `namesTriage` (a status
+ * change) triage reads Triage beside the Open glyph.
+ */
 export function StatusLabel({
   status,
+  namesTriage = false,
   className,
 }: {
   status: IssueStatus;
+  namesTriage?: boolean;
   className?: string;
 }) {
-  const { ink, label } = statuses[status];
+  const { ink } = statuses[status];
+  const label = namesTriage ? changedStatusLabel(status) : statusLabel(status);
   return (
     <span
       className={cn(

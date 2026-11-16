@@ -128,7 +128,7 @@ describe("new issue dialog", () => {
     );
     expect(title).toHaveFocus();
     expect(title).toHaveAttribute("aria-invalid", "true");
-    expect(title).toHaveAccessibleDescription("Keep it to 300 characters.");
+    expect(title).toHaveAccessibleDescription("300 characters at most");
     expect(props.onSubmit).not.toHaveBeenCalled();
   });
 
