@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { project, projectProduct } from "../db/schema.js";
 import { createBot } from "../service/keys.js";
 import { atFakeTimeAsync, setupTestApp } from "../test-app.js";
 import { type Body, mcpClients } from "./test-client.js";
@@ -121,18 +122,52 @@ test("create_project with key creates a product and says so; with project fields
 
 test("get_project and update_project take a slug first, else a product key by the old meaning with a deprecated note", async () => {
   const client = await connect(bot.key);
-  await call(client, "create_product", { key: "LGU", name: "fallback" });
-  await call(client, "create_project", {
-    name: "lgu",
-    slug: "lgu",
-    products: ["LGU"],
+  const lgu = await call(client, "create_product", {
+    key: "LGU",
+    name: "fallback",
   });
-  expect(await callError(client, "get_project", { project: "lgu" })).toBe(
-    "validation_failed: lgu names both project lgu and product LGU, so it is refused rather than guessed: use get_product or update_product (/products/LGU) for the product; list_projects (GET /projects) lists the project, and list_products (GET /products) the products",
-  );
   expect(
-    await callError(client, "update_project", { project: "lgu", name: "x" }),
-  ).toMatch(/^validation_failed: lgu names both project lgu and product LGU/);
+    await callError(client, "create_project", {
+      name: "lgu",
+      slug: "lgu",
+      products: ["LGU"],
+    }),
+  ).toBe(
+    "conflict: slug lgu is the key of product LGU, and a project's slug never matches a product's key: pick another slug, or leave slug out to derive a free one from the name",
+  );
+  // a slug equal to a product key, as data from before the rule may hold
+  const older = db
+    .insert(project)
+    .values({
+      slug: "lgu",
+      name: "older",
+      leadId: bot.actor.id,
+      createdBy: bot.actor.id,
+    })
+    .returning()
+    .get();
+  db.insert(projectProduct)
+    .values({ projectId: older.id, productId: lgu.id })
+    .run();
+  expect(await call(client, "get_project", { project: "lgu" })).toMatchObject({
+    slug: "lgu",
+    name: "older",
+  });
+  expect(
+    await call(client, "update_project", { project: "lgu", name: "x" }),
+  ).toMatchObject({ slug: "lgu", name: "x" });
+  expect(
+    await call(client, "post_status_update", {
+      project: "lgu",
+      body: "on the project",
+      health: "on_track",
+    }),
+  ).toMatchObject({ project: "lgu", product: null });
+  expect(
+    (await call(client, "list_status_updates", { project: "lgu" })).items.map(
+      (u: Body) => u.body,
+    ),
+  ).toEqual(["on the project"]);
   const product = await call(client, "get_project", { project: "LGU" });
   expect(product).toMatchObject({
     key: "LGU",
@@ -253,11 +288,11 @@ test("list_projects carries deprecated, pointing a caller after products to list
   const page = await call(client, "list_projects", {});
   expect(page.items.map((p: Body) => p.slug)).toContain(made.slug);
   expect(page.deprecated).toBe(
-    "list_projects lists projects (groups of items across products) since this release, no longer products: call list_products (GET /products) for those",
+    "list_projects now lists projects (groups of items across products), not products: call list_products (GET /products) for those",
   );
 });
 
-test("update_issue can't unassign a todo, and says it is refused by design and to reassign instead", async () => {
+test("update_issue can't unassign a todo, and says to reassign it instead", async () => {
   const owner = await connect(bot.key);
   await call(owner, "create_product", { key: "LGT", name: "legacy todo" });
   const todo = await call(owner, "add_todo", { product: "LGT", title: "kept" });
@@ -267,7 +302,7 @@ test("update_issue can't unassign a todo, and says it is refused by design and t
       assigneeId: null,
     }),
   ).toBe(
-    `validation_failed: ${todo.key} is a todo, and a todo always has an assignee by design, so it can't be unassigned: reassign it by sending assigneeId with another bot's name or id (list_bots lists them)`,
+    `validation_failed: ${todo.key} is a todo, and a todo always has an assignee, so it can't be unassigned: reassign it by sending assigneeId with another bot's name or id (list_bots lists them)`,
   );
   createBot(db, "lgt helper");
   expect(
@@ -276,6 +311,53 @@ test("update_issue can't unassign a todo, and says it is refused by design and t
       assigneeId: "lgt helper",
     }),
   ).toMatchObject({ assignee: { name: "lgt helper" } });
+});
+
+test("update_issue keeps the owner rule: an outsider can't accept, cancel or retype a triage issue, nor reopen one the filer canceled", async () => {
+  const owner = await connect(bot.key);
+  await call(owner, "create_product", { key: "LGO", name: "legacy owner" });
+  const filer = await connect(createBot(db, "legacy owner filer").key);
+  const outsider = await connect(createBot(db, "legacy outsider").key);
+  const filed = await call(filer, "create_issue", {
+    projectId: "LGO",
+    title: "owner decides",
+  });
+  for (const status of ["open", "canceled"]) {
+    expect(
+      await callError(outsider, "update_issue", {
+        issueId: filed.key,
+        status,
+      }),
+      status,
+    ).toBe(
+      `forbidden: ${filed.key} is in the triage of LGO, which tester owns: only tester accepts or cancels it, and its filer may cancel it. Comment on it with add_comment to ask tester`,
+    );
+  }
+  expect(
+    await callError(outsider, "update_issue", {
+      issueId: filed.key,
+      type: "todo",
+    }),
+  ).toContain('Unrecognized key "type"');
+  await call(filer, "update_issue", { issueId: filed.key, status: "canceled" });
+  expect(
+    await callError(filer, "update_issue", {
+      issueId: filed.key,
+      status: "open",
+    }),
+  ).toBe(
+    `forbidden: ${filed.key} was filed on LGO, which tester owns, and was canceled: only tester reopens it. Comment on it with add_comment to ask tester`,
+  );
+  expect(await call(owner, "get_item", { item: filed.key })).toMatchObject({
+    type: "issue",
+    status: "canceled",
+  });
+  expect(
+    await call(outsider, "update_issue", {
+      issueId: filed.key,
+      labels: ["outside-made"],
+    }),
+  ).toMatchObject({ labels: [], skippedLabels: ["outside-made"] });
 });
 
 test("an argument sent under its old name is refused naming the argument it became", async () => {

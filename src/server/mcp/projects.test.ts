@@ -23,8 +23,8 @@ let slugs = 0;
 const freshSlug = () => `proj-${++slugs}`;
 
 test("create_project defaults to the caller's one product and to the caller as lead, and derives the slug from the name", async () => {
-  const tara = await productBot("Tara");
-  const project = await call(tara.client, "create_project", {
+  const alpha = await productBot("Alpha");
+  const project = await call(alpha.client, "create_project", {
     name: "Launch Q4!",
     goal: "ship it",
     targetDate: "2026-12-01",
@@ -34,22 +34,22 @@ test("create_project defaults to the caller's one product and to the caller as l
     slug: "launch-q4",
     name: "Launch Q4!",
     goal: "ship it",
-    lead: { id: tara.actor.id, name: "Tara", kind: "bot" },
+    lead: { id: alpha.actor.id, name: "Alpha", kind: "bot" },
     targetDate: "2026-12-01",
-    products: [{ key: tara.product.key, name: "Tara's product" }],
+    products: [{ key: alpha.product.key, name: "Alpha's product" }],
     hiddenProducts: false,
     counts: { triage: 0, open: 0, in_progress: 0, done: 0, canceled: 0 },
     latestStatusUpdate: null,
-    createdBy: tara.actor.id,
+    createdBy: alpha.actor.id,
     createdAt: expect.any(String),
     updatedAt: expect.any(String),
   });
-  const again = await call(tara.client, "create_project", {
+  const again = await call(alpha.client, "create_project", {
     name: "launch q4",
   });
   expect(again.slug).toBe("launch-q4-2");
   expect(
-    await callError(tara.client, "create_project", {
+    await callError(alpha.client, "create_project", {
       name: "taken",
       slug: "Launch-Q4",
     }),
@@ -57,7 +57,7 @@ test("create_project defaults to the caller's one product and to the caller as l
     "conflict: slug launch-q4 is taken by another project: choose another slug, or leave slug out to derive a free one from the name",
   );
   expect(
-    await callError(tara.client, "create_project", {
+    await callError(alpha.client, "create_project", {
       name: "bad",
       slug: "-x",
     }),
@@ -65,37 +65,38 @@ test("create_project defaults to the caller's one product and to the caller as l
 });
 
 test("create_project takes a lead by name and several products, and refuses a product the key can't reach as missing", async () => {
-  const kai = await productBot("Kai");
-  const nia = await productBot("Nia");
-  const project = await call(kai.client, "create_project", {
+  const beta = await productBot("Beta");
+  const epsilon = await productBot("Epsilon");
+  const project = await call(beta.client, "create_project", {
     name: "Cross",
     slug: freshSlug(),
-    lead: "NIA",
-    products: [kai.product.key, nia.product.key.toLowerCase()],
+    lead: "EPSILON",
+    products: [beta.product.key, epsilon.product.key.toLowerCase()],
   });
-  expect(project.lead.name).toBe("Nia");
+  expect(project.lead.name).toBe("Epsilon");
   expect(project.products.map((p: Body) => p.key)).toEqual(
-    [kai.product.key, nia.product.key].sort(),
+    [beta.product.key, epsilon.product.key].sort(),
   );
 
   const scoped = await connect(
-    createBot(db, "Kai scoped", { scope: { projects: [kai.product.key] } }).key,
+    createBot(db, "Beta scoped", { scope: { projects: [beta.product.key] } })
+      .key,
   );
   expect(
     await callError(scoped, "create_project", {
       name: "reach",
-      products: [kai.product.key, nia.product.key],
+      products: [beta.product.key, epsilon.product.key],
     }),
   ).toBe(
-    `not_found: no product ${nia.product.key}: pass the key (like TRL) of a product this key reaches; list_products (GET /api/v1/products) lists them`,
+    `not_found: no product ${epsilon.product.key}: pass the key (like TRL) of a product this key reaches; list_products (GET /api/v1/products) lists them`,
   );
   expect(
     await callError(scoped, "create_project", { name: "none of mine" }),
   ).toBe(
-    `validation_failed: you own no product, so create_project needs products: send products with one or more of ${kai.product.key} (list_products describes each)`,
+    `validation_failed: you own no product, so create_project needs products: send products with one or more of ${beta.product.key} (list_products describes each)`,
   );
   expect(
-    await callError(kai.client, "create_project", {
+    await callError(beta.client, "create_project", {
       name: "led by a stranger",
       lead: "nobody",
     }),
@@ -105,10 +106,10 @@ test("create_project takes a lead by name and several products, and refuses a pr
 });
 
 test("update_project changes name, goal, lead and target date; a key reaching none of its products can't", async () => {
-  const quinn = await productBot("Quinn");
+  const kappa = await productBot("Kappa");
   const slug = freshSlug();
-  await call(quinn.client, "create_project", { name: "before", slug });
-  const updated = await call(quinn.client, "update_project", {
+  await call(kappa.client, "create_project", { name: "before", slug });
+  const updated = await call(kappa.client, "update_project", {
     project: slug,
     name: "after",
     goal: "a goal",
@@ -124,21 +125,21 @@ test("update_project changes name, goal, lead and target date; a key reaching no
   });
   expect(
     (
-      await call(quinn.client, "update_project", {
+      await call(kappa.client, "update_project", {
         project: slug,
         targetDate: null,
       })
     ).targetDate,
   ).toBeNull();
   expect(
-    await callError(quinn.client, "update_project", {
+    await callError(kappa.client, "update_project", {
       project: slug,
       targetDate: "2027-02-30",
     }),
   ).toMatch(/^validation_failed: targetDate must be a calendar day/);
-  const outsider = await productBot("Holly");
+  const outsider = await productBot("Pi");
   const scoped = await connect(
-    createBot(db, "Holly scoped", {
+    createBot(db, "Pi scoped", {
       scope: { projects: [outsider.product.key] },
     }).key,
   );
@@ -150,39 +151,39 @@ test("update_project changes name, goal, lead and target date; a key reaching no
 });
 
 test("add_to_project adds items from two products, adding the second product itself, and a repeat changes nothing", async () => {
-  const wren = await productBot("Wren");
-  const nora = await productBot("Nora");
+  const sigma = await productBot("Sigma");
+  const rho = await productBot("Rho");
   const slug = freshSlug();
-  await call(wren.client, "create_project", { name: "together", slug });
+  await call(sigma.client, "create_project", { name: "together", slug });
   // one stamp apiece: list_items orders newest first, and same-millisecond rows sort by random id
   const [mine, theirs] = await atFakeTimeAsync([
-    () => call(wren.client, "add_todo", { title: "mine" }),
-    () => call(nora.client, "add_todo", { title: "theirs" }),
+    () => call(sigma.client, "add_todo", { title: "mine" }),
+    () => call(rho.client, "add_todo", { title: "theirs" }),
   ]);
   if (!mine || !theirs) throw new Error("add_todo answered nothing");
 
-  const added = await call(wren.client, "add_to_project", {
+  const added = await call(sigma.client, "add_to_project", {
     project: slug,
     items: [mine.key, theirs.key],
   });
   expect(added.added).toEqual([mine.key, theirs.key]);
   expect(added.unchanged).toEqual([]);
   expect(added.project.products.map((p: Body) => p.key)).toEqual(
-    [wren.product.key, nora.product.key].sort(),
+    [sigma.product.key, rho.product.key].sort(),
   );
   expect(added.project.counts.open).toBe(2);
 
-  const repeat = await call(wren.client, "add_to_project", {
+  const repeat = await call(sigma.client, "add_to_project", {
     project: slug,
     items: [theirs.key.toLowerCase()],
   });
   expect(repeat).toMatchObject({ added: [], unchanged: [theirs.key] });
   expect(
-    (await call(wren.client, "get_item", { item: theirs.key })).projects,
+    (await call(sigma.client, "get_item", { item: theirs.key })).projects,
   ).toEqual([{ slug, name: "together" }]);
   expect(
     (
-      await call(wren.client, "list_items", {
+      await call(sigma.client, "list_items", {
         project: slug,
         type: "todo",
         status: "open",
@@ -190,14 +191,14 @@ test("add_to_project adds items from two products, adding the second product its
     ).items.map((i: Body) => i.key),
   ).toEqual([theirs.key, mine.key]);
 
-  const removed = await call(wren.client, "remove_from_project", {
+  const removed = await call(sigma.client, "remove_from_project", {
     project: slug,
     items: [mine.key, mine.key],
   });
   expect(removed).toMatchObject({ removed: [mine.key], unchanged: [] });
   expect(removed.project.products).toHaveLength(2);
   expect(
-    await call(wren.client, "remove_from_project", {
+    await call(sigma.client, "remove_from_project", {
       project: slug,
       items: [mine.key],
     }),
@@ -205,21 +206,20 @@ test("add_to_project adds items from two products, adding the second product its
 });
 
 test("add_to_project takes at most 100 items and refuses an item the key can't see as missing", async () => {
-  const rhea = await productBot("Rhea");
+  const mu = await productBot("Mu");
   const slug = freshSlug();
-  await call(rhea.client, "create_project", { name: "limits", slug });
+  await call(mu.client, "create_project", { name: "limits", slug });
   const items = Array.from(
     { length: 101 },
-    (_, i) => `${rhea.product.key}-${i + 1}`,
+    (_, i) => `${mu.product.key}-${i + 1}`,
   );
   expect(
-    await callError(rhea.client, "add_to_project", { project: slug, items }),
+    await callError(mu.client, "add_to_project", { project: slug, items }),
   ).toMatch(/^MCP error -32602: Input validation error: .*items/s);
-  const hidden = await productBot("Faye");
+  const hidden = await productBot("Omicron");
   const secret = await call(hidden.client, "add_todo", { title: "secret" });
   const scoped = await connect(
-    createBot(db, "Rhea scoped", { scope: { projects: [rhea.product.key] } })
-      .key,
+    createBot(db, "Mu scoped", { scope: { projects: [mu.product.key] } }).key,
   );
   expect(
     await callError(scoped, "add_to_project", {
@@ -230,32 +230,33 @@ test("add_to_project takes at most 100 items and refuses an item the key can't s
 });
 
 test("a key scoped to one product sees a cross-product project without any trace of the other product", async () => {
-  const remy = await productBot("Remy");
-  const juno = await productBot("Juno");
+  const lambda = await productBot("Lambda");
+  const eta = await productBot("Eta");
   const slug = freshSlug();
-  await call(remy.client, "create_project", {
+  await call(lambda.client, "create_project", {
     name: "shared",
     slug,
-    products: [remy.product.key, juno.product.key],
+    products: [lambda.product.key, eta.product.key],
   });
-  const visible = await call(remy.client, "add_todo", { title: "visible" });
+  const visible = await call(lambda.client, "add_todo", { title: "visible" });
   const hiddenItems = [
-    await call(juno.client, "add_todo", { title: "hidden one" }),
-    await call(juno.client, "add_todo", { title: "hidden two" }),
+    await call(eta.client, "add_todo", { title: "hidden one" }),
+    await call(eta.client, "add_todo", { title: "hidden two" }),
   ];
-  await call(remy.client, "add_to_project", {
+  await call(lambda.client, "add_to_project", {
     project: slug,
     items: [visible.key, ...hiddenItems.map((i) => i.key)],
   });
-  await call(juno.client, "post_status_update", {
+  await call(eta.client, "post_status_update", {
     project: slug,
     body: "all on track",
     health: "on_track",
   });
 
   const scoped = await connect(
-    createBot(db, "Remy scoped", { scope: { projects: [remy.product.key] } })
-      .key,
+    createBot(db, "Lambda scoped", {
+      scope: { projects: [lambda.product.key] },
+    }).key,
   );
   const seen: Body[] = [
     await call(scoped, "get_project", { project: slug }),
@@ -268,7 +269,7 @@ test("a key scoped to one product sees a cross-product project without any trace
   ];
   const project = seen[0] as Body;
   expect(project.products).toEqual([
-    { key: remy.product.key, name: "Remy's product" },
+    { key: lambda.product.key, name: "Lambda's product" },
   ]);
   expect(project.hiddenProducts).toBe(true);
   expect(project.counts).toEqual({
@@ -290,26 +291,26 @@ test("a key scoped to one product sees a cross-product project without any trace
   ]);
   const text = JSON.stringify(seen);
   for (const trace of [
-    juno.product.key,
-    juno.product.id,
-    "Juno's product",
+    eta.product.key,
+    eta.product.id,
+    "Eta's product",
     ...hiddenItems.flatMap((i) => [i.key, i.id]),
   ]) {
     expect(text, trace).not.toContain(trace);
   }
 
-  const wide = await call(remy.client, "get_project", { project: slug });
+  const wide = await call(lambda.client, "get_project", { project: slug });
   expect(wide).toMatchObject({ hiddenProducts: false });
   expect(wide.counts.open).toBe(3);
 });
 
 test("a project drawing only from products the key can't reach is the 404 an unknown slug is", async () => {
-  const lena = await productBot("Lena");
+  const theta = await productBot("Theta");
   const slug = freshSlug();
-  await call(lena.client, "create_project", { name: "private", slug });
-  const outsider = await productBot("Vera");
+  await call(theta.client, "create_project", { name: "private", slug });
+  const outsider = await productBot("Xi");
   const scoped = await connect(
-    createBot(db, "Vera scoped", {
+    createBot(db, "Xi scoped", {
       scope: { projects: [outsider.product.key] },
     }).key,
   );
@@ -326,10 +327,10 @@ test("a project drawing only from products the key can't reach is the 404 an unk
 });
 
 test("post_status_update and list_status_updates take exactly one of product and project", async () => {
-  const pia = await productBot("Pia");
+  const iota = await productBot("Iota");
   const slug = freshSlug();
-  await call(pia.client, "create_project", { name: "updates", slug });
-  const onProject = await call(pia.client, "post_status_update", {
+  await call(iota.client, "create_project", { name: "updates", slug });
+  const onProject = await call(iota.client, "post_status_update", {
     project: slug,
     body: "halfway",
     health: "at_risk",
@@ -339,39 +340,39 @@ test("post_status_update and list_status_updates take exactly one of product and
     project: slug,
     projectId: null,
     health: "at_risk",
-    authorId: pia.actor.id,
+    authorId: iota.actor.id,
   });
-  const onProduct = await call(pia.client, "post_status_update", {
-    product: pia.product.key,
+  const onProduct = await call(iota.client, "post_status_update", {
+    product: iota.product.key,
     body: "steady",
     health: "on_track",
   });
-  expect(onProduct).toMatchObject({ product: pia.product.key, project: null });
+  expect(onProduct).toMatchObject({ product: iota.product.key, project: null });
   expect(
-    (await call(pia.client, "list_status_updates", { project: slug })).items,
+    (await call(iota.client, "list_status_updates", { project: slug })).items,
   ).toEqual([onProject]);
   expect(
-    (await call(pia.client, "get_project", { project: slug }))
+    (await call(iota.client, "get_project", { project: slug }))
       .latestStatusUpdate,
   ).toEqual({
     ...onProject,
-    author: { id: pia.actor.id, name: "Pia", kind: "bot" },
+    author: { id: iota.actor.id, name: "Iota", kind: "bot" },
   });
   const one =
     "takes exactly one of product (a key like TRL) and project (a slug like launch-q4)";
   expect(
-    await callError(pia.client, "post_status_update", {
-      product: pia.product.key,
+    await callError(iota.client, "post_status_update", {
+      product: iota.product.key,
       project: slug,
       body: "x",
       health: "on_track",
     }),
   ).toBe(`validation_failed: post_status_update ${one}: send only one of them`);
-  expect(await callError(pia.client, "list_status_updates", {})).toBe(
+  expect(await callError(iota.client, "list_status_updates", {})).toBe(
     `validation_failed: list_status_updates ${one}: send one of them`,
   );
   expect(
-    await callError(pia.client, "post_status_update", {
+    await callError(iota.client, "post_status_update", {
       project: slug,
       body: "x",
       health: "on_track",
@@ -383,27 +384,27 @@ test("post_status_update and list_status_updates take exactly one of product and
 });
 
 test("project writes record project.created, project.updated and item_added and item_removed with the project's slug", async () => {
-  const skye = await productBot("Skye");
+  const nu = await productBot("Nu");
   const slug = freshSlug();
-  await call(skye.client, "create_project", { name: "events", slug });
-  const todo = await call(skye.client, "add_todo", { title: "evented" });
-  await call(skye.client, "update_project", { project: slug, goal: "g" });
-  await call(skye.client, "add_to_project", {
+  await call(nu.client, "create_project", { name: "events", slug });
+  const todo = await call(nu.client, "add_todo", { title: "evented" });
+  await call(nu.client, "update_project", { project: slug, goal: "g" });
+  await call(nu.client, "add_to_project", {
     project: slug,
     items: [todo.key],
   });
-  await call(skye.client, "remove_from_project", {
+  await call(nu.client, "remove_from_project", {
     project: slug,
     items: [todo.key],
   });
   const events = (
-    await call(skye.client, "list_activity", { project: slug, limit: 200 })
+    await call(nu.client, "list_activity", { project: slug, limit: 200 })
   ).items as Body[];
   expect(
     events.map((e) => [e.action, e.subjectType, e.product, e.projectSlug]),
   ).toEqual([
-    ["project.item_removed", "issue", skye.product.key, slug],
-    ["project.item_added", "issue", skye.product.key, slug],
+    ["project.item_removed", "issue", nu.product.key, slug],
+    ["project.item_added", "issue", nu.product.key, slug],
     ["project.updated", "project", null, slug],
     ["project.created", "project", null, slug],
   ]);
@@ -415,9 +416,9 @@ test("a project's own events reach webhooks following any of its products; an it
   onTestFinished(() => {
     db.delete(webhookSubscription).run();
   });
-  const ivy = await productBot("Ivy hooks");
-  const kai = await productBot("Kai hooks");
-  const follow = async (who: typeof ivy, url: string) =>
+  const zeta = await productBot("Zeta hooks");
+  const beta = await productBot("Beta hooks");
+  const follow = async (who: typeof zeta, url: string) =>
     (
       await call(who.client, "create_webhook", {
         url,
@@ -425,16 +426,16 @@ test("a project's own events reach webhooks following any of its products; an it
         products: [who.product.key],
       })
     ).id as string;
-  const ivyHook = await follow(ivy, "https://ivy.example.com/hook");
-  const kaiHook = await follow(kai, "https://kai.example.com/hook");
+  const ivyHook = await follow(zeta, "https://zeta.example.com/hook");
+  const kaiHook = await follow(beta, "https://beta.example.com/hook");
   const slug = freshSlug();
-  await call(ivy.client, "create_project", {
+  await call(zeta.client, "create_project", {
     name: "hooked",
     slug,
-    products: [ivy.product.key, kai.product.key],
+    products: [zeta.product.key, beta.product.key],
   });
-  const todo = await call(ivy.client, "add_todo", { title: "hooked item" });
-  await call(ivy.client, "add_to_project", {
+  const todo = await call(zeta.client, "add_todo", { title: "hooked item" });
+  await call(zeta.client, "add_to_project", {
     project: slug,
     items: [todo.key],
   });
@@ -456,18 +457,18 @@ test("a project's own events reach webhooks following any of its products; an it
 });
 
 test("a retried create_project with the same idempotency_key returns the first project", async () => {
-  const nia = await productBot("Nia retries");
+  const epsilon = await productBot("Epsilon retries");
   const args = { name: "Once only", idempotency_key: "project-once" };
-  const first = await call(nia.client, "create_project", args);
-  expect(await call(nia.client, "create_project", args)).toEqual(first);
+  const first = await call(epsilon.client, "create_project", args);
+  expect(await call(epsilon.client, "create_project", args)).toEqual(first);
   expect(
-    (await call(nia.client, "list_projects", { limit: 200 })).items.filter(
+    (await call(epsilon.client, "list_projects", { limit: 200 })).items.filter(
       (p: Body) => p.name === "Once only",
     ),
   ).toHaveLength(1);
 });
 
-test("a product key sent as project to list_items, the status update tools or list_activity is refused with a pointer to product", async () => {
+test("a product key sent as project to list_items, the status update tools or list_activity is refused with a pointer to product; add_to_project and remove_from_project point to project slugs", async () => {
   const owner = await productBot("Pointed");
   const key = owner.product.key;
   const told = `not_found: no project ${key}: that is a product key, send it as product (product: "${key}")`;
@@ -483,6 +484,21 @@ test("a product key sent as project to list_items, the status update tools or li
       told.replace(`project ${key}:`, `project ${args.project}:`),
     );
   }
+  const item = await call(owner.client, "add_todo", { title: "t" });
+  for (const [tool, route] of [
+    ["add_to_project", "POST /projects/{slug}/items"],
+    ["remove_from_project", "DELETE /projects/{slug}/items/{key}"],
+  ]) {
+    expect(
+      await callError(owner.client, tool as string, {
+        project: key,
+        items: [item.key],
+      }),
+      tool,
+    ).toBe(
+      `not_found: no project ${key}: that is a product key, and ${tool} (${route}) takes a project's slug; list_projects (GET /projects) lists them`,
+    );
+  }
   expect(
     await callError(owner.client, "list_items", { project: "no-such-slug" }),
   ).toBe(
@@ -494,26 +510,26 @@ test("a webhook that stops following a product drops the queued events of projec
   onTestFinished(() => {
     db.delete(webhookSubscription).run();
   });
-  const ivy = await productBot("Ivy unfollows");
-  const kai = await productBot("Kai unfollowed");
+  const zeta = await productBot("Zeta unfollows");
+  const beta = await productBot("Beta unfollowed");
   const hook = (
-    await call(ivy.client, "create_webhook", {
-      url: "https://ivy.example.com/unfollow",
+    await call(zeta.client, "create_webhook", {
+      url: "https://zeta.example.com/unfollow",
       secret: "whsec_projects_0123456789",
-      products: [ivy.product.key, kai.product.key],
+      products: [zeta.product.key, beta.product.key],
     })
   ).id as string;
   const kept = freshSlug();
   const dropped = freshSlug();
-  await call(ivy.client, "create_project", {
+  await call(zeta.client, "create_project", {
     name: "kept",
     slug: kept,
-    products: [ivy.product.key, kai.product.key],
+    products: [zeta.product.key, beta.product.key],
   });
-  await call(kai.client, "create_project", {
+  await call(beta.client, "create_project", {
     name: "dropped",
     slug: dropped,
-    products: [kai.product.key],
+    products: [beta.product.key],
   });
   const queued = () =>
     db
@@ -523,10 +539,10 @@ test("a webhook that stops following a product drops the queued events of projec
       .all();
   expect(queued()).toHaveLength(2);
 
-  await call(ivy.client, "update_webhook", {
+  await call(zeta.client, "update_webhook", {
     webhookId: hook,
-    products: [ivy.product.key],
+    products: [zeta.product.key],
   });
-  // the project still drawing from Ivy's product keeps its event
+  // the project still drawing from Zeta's product keeps its event
   expect(queued()).toEqual([{ type: "trail.project.created" }]);
 });

@@ -188,20 +188,22 @@ test("GET /products accepts the limit bounds 1 and 200", async () => {
   }
 });
 
-test("PATCH /products/:key with owner by an admin key that isn't the owner is a 403 naming the owner and the operator command", async () => {
+test("PATCH /products/:key handing over or clearing the owner by an admin key that isn't the owner is a 403 naming the owner and the operator command", async () => {
   const product = await createProduct("owned elsewhere");
   const outsider = addBot("owner grabber");
-  const res = await request("PATCH", `/api/v1/products/${product.key}`, {
-    json: { owner: "owner grabber" },
-    key: outsider.key,
-  });
-  expect(res.status).toBe(403);
-  expect(await res.json()).toEqual({
-    error: {
-      code: "forbidden",
-      message: `${product.key} is owned by tester: only tester may hand it to another bot or clear its owner over the API. The operator reassigns it with \`trail products set-owner ${product.key} <bot>\``,
-    },
-  });
+  for (const owner of ["owner grabber", null]) {
+    const res = await request("PATCH", `/api/v1/products/${product.key}`, {
+      json: { owner },
+      key: outsider.key,
+    });
+    expect(res.status, String(owner)).toBe(403);
+    expect(await res.json()).toEqual({
+      error: {
+        code: "forbidden",
+        message: `${product.key} is owned by tester: only tester may hand it to another bot or clear its owner over the API. The operator reassigns it with \`trail products set-owner ${product.key} <bot>\``,
+      },
+    });
+  }
   const after = await request("GET", `/api/v1/products/${product.key}`);
   expect(((await after.json()) as { owner: { id: string } }).owner.id).toBe(
     bot.actor.id,

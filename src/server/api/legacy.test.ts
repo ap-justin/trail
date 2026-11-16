@@ -1,7 +1,8 @@
 import { beforeAll, expect, test } from "vitest";
+import { project, projectProduct } from "../db/schema.js";
 import { atFakeTimeAsync, setupTestApp } from "../test-app.js";
 
-const { bot, addBot, request } = setupTestApp();
+const { db, bot, addBot, request } = setupTestApp();
 
 // biome-ignore lint/suspicious/noExplicitAny: loose response bodies for field reads
 type Body = Record<string, any>;
@@ -86,6 +87,64 @@ test("the /issues routes serve items, each answer carrying deprecated", async ()
   });
 });
 
+test("PATCH /issues/{id} keeps the owner rule: an outsider can't accept, cancel or retype a triage issue, nor reopen one the filer canceled", async () => {
+  const filer = addBot("legacy rest owner filer");
+  const outsider = addBot("legacy rest outsider");
+  const filed = await json(
+    await request("POST", "/api/v1/issues", {
+      json: { projectId: "LEG", title: "owner decides" },
+      key: filer.key,
+    }),
+  );
+  const patch = (body: Body, key: string) =>
+    request("PATCH", `/api/v1/issues/${filed.key}`, { json: body, key });
+  for (const status of ["open", "canceled"]) {
+    const res = await patch({ status }, outsider.key);
+    expect(res.status, status).toBe(403);
+    expect((await json(res)).error.message).toBe(
+      `${filed.key} is in the triage of LEG, which tester owns: only tester accepts or cancels it, and its filer may cancel it. Comment on it with add_comment to ask tester`,
+    );
+  }
+  const retyped = await patch({ type: "todo" }, outsider.key);
+  expect(retyped.status).toBe(422);
+  expect((await json(retyped)).error.message).toContain(
+    'Unrecognized key "type"',
+  );
+  expect((await patch({ status: "canceled" }, filer.key)).status).toBe(200);
+  const reopened = await patch({ status: "open" }, filer.key);
+  expect(reopened.status).toBe(403);
+  expect((await json(reopened)).error.message).toBe(
+    `${filed.key} was filed on LEG, which tester owns, and was canceled: only tester reopens it. Comment on it with add_comment to ask tester`,
+  );
+  expect(
+    await json(await request("GET", `/api/v1/items/${filed.key}`)),
+  ).toMatchObject({ type: "issue", status: "canceled" });
+});
+
+test("PATCH /issues/{id} by a bot outside the product creates no label, and says which it skipped", async () => {
+  const outsider = addBot("legacy rest label patcher");
+  const filed = await json(
+    await request("POST", "/api/v1/issues", {
+      json: { projectId: "LEG", title: "legacy labels" },
+      key: outsider.key,
+    }),
+  );
+  const res = await request("PATCH", `/api/v1/issues/${filed.key}`, {
+    json: { addLabels: ["legacy-made-up"] },
+    key: outsider.key,
+  });
+  expect(res.status).toBe(200);
+  expect(await json(res)).toMatchObject({
+    labels: [],
+    skippedLabels: ["legacy-made-up"],
+    deprecated: expect.stringMatching(/use update_item/),
+  });
+  const labels = await json(
+    await request("GET", "/api/v1/products/LEG/labels"),
+  );
+  expect(labels.items.map((l: Body) => l.name)).not.toContain("legacy-made-up");
+});
+
 test("/projects/{KEY} that matches no slug names the product, carrying deprecated", async () => {
   const got = await json(await request("GET", "/api/v1/projects/leg"));
   expect(got).toMatchObject({
@@ -131,28 +190,75 @@ test("/projects/{KEY} that matches no slug names the product, carrying deprecate
   ).toHaveLength(1);
 });
 
-test("a ref naming both a project's slug and a product's key is a 422 naming both, on every /projects/{ref} route", async () => {
-  const created = await request("POST", "/api/v1/projects", {
+test("a slug equal to a product's key is a 409, and a name that derives one gets a suffix", async () => {
+  const explicit = await request("POST", "/api/v1/projects", {
     json: { name: "leg", slug: "leg", products: ["LEG"] },
   });
-  expect(created.status).toBe(201);
-  const refusal =
-    "leg names both project leg and product LEG, so it is refused rather than guessed: use get_product or update_product (/products/LEG) for the product; list_projects (GET /projects) lists the project, and list_products (GET /products) the products";
-  for (const [method, path, body] of [
-    ["GET", "/api/v1/projects/leg", undefined],
-    ["PATCH", "/api/v1/projects/leg", { name: "renamed" }],
-    ["GET", "/api/v1/projects/leg/status-updates", undefined],
-    [
-      "POST",
-      "/api/v1/projects/leg/status-updates",
-      { body: "which one", health: "at_risk" },
-    ],
+  expect(explicit.status).toBe(409);
+  expect((await json(explicit)).error.message).toBe(
+    "slug leg is the key of product LEG, and a project's slug never matches a product's key: pick another slug, or leave slug out to derive a free one from the name",
+  );
+  const derived = await request("POST", "/api/v1/projects", {
+    json: { name: "Leg", products: ["LEG"] },
+  });
+  expect(derived.status).toBe(201);
+  expect((await json(derived)).slug).toBe("leg-2");
+});
+
+test("a product key equal to a project's slug, in any case, is a 409", async () => {
+  const made = await request("POST", "/api/v1/projects", {
+    json: { name: "slug first", slug: "lgsf", products: ["LEG"] },
+  });
+  expect(made.status).toBe(201);
+  for (const [path, body] of [
+    ["/api/v1/products", {}],
+    ["/api/v1/projects", {}],
+    ["/api/v1/import", { externalRef: "ext-lgsf", issues: [] }],
   ] as const) {
-    const res = await request(method, path, body ? { json: body } : {});
-    expect(res.status, `${method} ${path}`).toBe(422);
-    expect((await json(res)).error.message).toBe(refusal);
+    const res = await request("POST", path, {
+      json: { key: "lgsf", name: "key second", ...body },
+    });
+    expect(res.status, path).toBe(409);
+    expect((await json(res)).error.message, path).toBe(
+      "product key LGSF is the slug of project lgsf, and a product's key never matches a project's slug: choose another key",
+    );
   }
-  // the upper-case key still reaches the product: slugs are lowercase only
+});
+
+test("a ref that is both a project's slug and a product's key, from before slugs and keys were kept apart, names the project on every /projects/{ref} route", async () => {
+  const stored = db
+    .insert(project)
+    .values({
+      slug: "leg",
+      name: "older project",
+      leadId: bot.actor.id,
+      createdBy: bot.actor.id,
+    })
+    .returning()
+    .get();
+  db.insert(projectProduct)
+    .values({ projectId: stored.id, productId: product.id })
+    .run();
+  expect(
+    await json(await request("GET", "/api/v1/projects/leg")),
+  ).toMatchObject({ slug: "leg", name: "older project" });
+  const renamed = await json(
+    await request("PATCH", "/api/v1/projects/leg", {
+      json: { name: "renamed" },
+    }),
+  );
+  expect(renamed).toMatchObject({ slug: "leg", name: "renamed" });
+  expect(renamed).not.toHaveProperty("deprecated");
+  const posted = await request("POST", "/api/v1/projects/leg/status-updates", {
+    json: { body: "which one", health: "at_risk" },
+  });
+  expect(posted.status).toBe(201);
+  expect(await json(posted)).toMatchObject({ project: "leg", product: null });
+  const listed = await json(
+    await request("GET", "/api/v1/projects/leg/status-updates"),
+  );
+  expect(listed.items.map((u: Body) => u.body)).toEqual(["which one"]);
+  // the upper-case key matches no slug, so it still reaches the product
   expect(
     await json(await request("GET", "/api/v1/projects/LEG")),
   ).toMatchObject({ key: "LEG", name: "legacy" });
@@ -191,7 +297,7 @@ test("GET /projects lists projects, never products", async () => {
   expect(page.items.every((p: Body) => typeof p.slug === "string")).toBe(true);
   expect(page.items.some((p: Body) => "key" in p)).toBe(false);
   expect(page.deprecated).toBe(
-    "list_projects lists projects (groups of items across products) since this release, no longer products: call list_products (GET /products) for those",
+    "list_projects now lists projects (groups of items across products), not products: call list_products (GET /products) for those",
   );
 });
 

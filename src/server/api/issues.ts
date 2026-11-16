@@ -5,6 +5,7 @@ import {
   issueUpdateSchema,
   legacyCreatedItemSchema,
   legacyIssueSchema,
+  legacyUpdatedItemSchema,
   pageSchema,
 } from "../../shared/schemas.js";
 import type { Service } from "../service/index.js";
@@ -101,7 +102,10 @@ const updateIssue = createRoute({
   tags,
   request: { params: issueParam, body: jsonBody(issueUpdateSchema) },
   responses: {
-    200: jsonContent(legacyIssueSchema, "The updated item"),
+    200: jsonContent(
+      legacyUpdatedItemSchema,
+      "The updated item, with skippedLabels when labels another bot's product lacks were left off",
+    ),
     ...forbiddenError("issues", { owner: OWNER_ONLY }),
     ...writeErrors,
     ...notFoundError,
@@ -148,20 +152,19 @@ export function issueRoutes(service: Service) {
         200,
       ),
     )
-    .openapi(updateIssue, (c) =>
-      c.json(
+    .openapi(updateIssue, (c) => {
+      const updated = service.updateItem(
+        c.var.actor,
+        c.req.valid("param").id,
+        c.req.valid("json"),
+        { legacy: true },
+      );
+      return c.json(
         deprecated(
-          toLegacyIssue(
-            service.updateItem(
-              c.var.actor,
-              c.req.valid("param").id,
-              c.req.valid("json"),
-              { legacy: true },
-            ),
-          ),
+          withSkippedLabels(toLegacyIssue(updated), updated),
           deprecations.updateIssue,
         ),
         200,
-      ),
-    );
+      );
+    });
 }

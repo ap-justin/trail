@@ -18,68 +18,68 @@ async function productBot(name: string) {
 }
 
 test("the triage flow: another bot files an issue, the product's bot finds it in triage and accepts it", async () => {
-  const tara = await productBot("Thea");
-  const kai = await productBot("Kai");
+  const alpha = await productBot("Gamma");
+  const beta = await productBot("Beta");
 
-  const filed = await call(kai.client, "file_issue", {
-    product: tara.product.key,
+  const filed = await call(beta.client, "file_issue", {
+    product: alpha.product.key,
     title: "the export button does nothing",
     description: "steps: click Export",
   });
   expect(filed).toMatchObject({
-    key: `${tara.product.key}-1`,
+    key: `${alpha.product.key}-1`,
     type: "issue",
     status: "triage",
-    product: tara.product.key,
+    product: alpha.product.key,
     assignee: null,
-    createdBy: kai.actor.id,
+    createdBy: beta.actor.id,
   });
 
-  const triage = await call(tara.client, "list_items", {
-    product: tara.product.key,
+  const triage = await call(alpha.client, "list_items", {
+    product: alpha.product.key,
     status: "triage",
   });
   expect(triage.items.map((i: Body) => i.key)).toEqual([filed.key]);
 
-  await call(tara.client, "add_comment", {
+  await call(alpha.client, "add_comment", {
     item: filed.key,
     body: "which browser?",
   });
-  await call(kai.client, "add_comment", { item: filed.key, body: "Firefox" });
-  const thread = await call(tara.client, "list_comments", { item: filed.key });
+  await call(beta.client, "add_comment", { item: filed.key, body: "Firefox" });
+  const thread = await call(alpha.client, "list_comments", { item: filed.key });
   expect(thread.items.map((c: Body) => c.body)).toEqual([
     "which browser?",
     "Firefox",
   ]);
 
-  const accepted = await call(tara.client, "update_item", {
+  const accepted = await call(alpha.client, "update_item", {
     item: filed.key,
     status: "open",
-    assignee: "thea",
+    assignee: "gamma",
   });
   expect(accepted).toMatchObject({
     type: "issue",
     status: "open",
-    assignee: { id: tara.actor.id, name: "Thea", kind: "bot" },
+    assignee: { id: alpha.actor.id, name: "Gamma", kind: "bot" },
   });
   expect(
     (
-      await call(tara.client, "list_items", {
-        product: tara.product.key,
+      await call(alpha.client, "list_items", {
+        product: alpha.product.key,
         status: "triage",
       })
     ).items,
   ).toEqual([]);
 });
 
-test("Tara, who owns TRL, accepts a TRL issue from triage and adds a TRL todo, and files an issue on KRU, where add_todo is refused with the next step", async () => {
-  const tara = createBot(db, "Tara");
-  const tc = await connect(tara.key);
+test("Alpha, who owns TRL, accepts a TRL issue from triage and adds a TRL todo, and files an issue on ATL, where add_todo is refused with the next step", async () => {
+  const alpha = createBot(db, "Alpha");
+  const tc = await connect(alpha.key);
   const trl = await call(tc, "create_product", { key: "TRL", name: "trail" });
-  const kru = createBot(db, "Kru");
-  await call(await connect(kru.key), "create_product", {
-    key: "KRU",
-    name: "kru",
+  const tau = createBot(db, "Tau");
+  await call(await connect(tau.key), "create_product", {
+    key: "ATL",
+    name: "tau",
   });
 
   const filed = await call(await connect(bot.key), "file_issue", {
@@ -90,26 +90,26 @@ test("Tara, who owns TRL, accepts a TRL issue from triage and adds a TRL todo, a
     await call(tc, "update_item", {
       item: filed.key,
       status: "open",
-      assignee: "Tara",
+      assignee: "Alpha",
     }),
-  ).toMatchObject({ status: "open", assignee: { name: "Tara" } });
+  ).toMatchObject({ status: "open", assignee: { name: "Alpha" } });
   expect(await call(tc, "add_todo", { title: "fix the feed" })).toMatchObject({
     type: "todo",
     product: trl.key,
-    assignee: { name: "Tara" },
+    assignee: { name: "Alpha" },
   });
   expect(
-    await call(tc, "file_issue", { product: "KRU", title: "kru crashes" }),
-  ).toMatchObject({ type: "issue", status: "triage", product: "KRU" });
+    await call(tc, "file_issue", { product: "ATL", title: "tau crashes" }),
+  ).toMatchObject({ type: "issue", status: "triage", product: "ATL" });
   expect(
-    await callError(tc, "add_todo", { product: "KRU", title: "fix kru" }),
+    await callError(tc, "add_todo", { product: "ATL", title: "fix tau" }),
   ).toBe(
-    "forbidden: KRU is owned by Kru, so only Kru adds its todos: file the work as an issue with file_issue (POST /items with type issue), and Kru accepts it from triage",
+    "forbidden: ATL is owned by Tau, so only Tau adds its todos: file the work as an issue with file_issue (POST /items with type issue), and Tau accepts it from triage",
   );
 });
 
 test("on a product with an owner, only the owner accepts, cancels or retypes its triage issues; the filer may cancel its own", async () => {
-  const owner = await productBot("Opal");
+  const owner = await productBot("Delta");
   const filer = await connect(createBot(db, "Fern").key);
   const other = await connect(createBot(db, "Olin").key);
   const key = owner.product.key;
@@ -123,13 +123,13 @@ test("on a product with an owner, only the owner accepts, cancels or retypes its
       await callError(other, "update_item", { item: filed.key, ...patch }),
       JSON.stringify(patch),
     ).toBe(
-      `forbidden: ${filed.key} is in the triage of ${key}, which Opal owns: only Opal accepts or cancels it, and its filer may cancel it. Comment on it with add_comment to ask Opal`,
+      `forbidden: ${filed.key} is in the triage of ${key}, which Delta owns: only Delta accepts or cancels it, and its filer may cancel it. Comment on it with add_comment to ask Delta`,
     );
   }
   expect(
     await callError(other, "update_item", { item: filed.key, type: "todo" }),
   ).toBe(
-    `forbidden: only Opal, the owner of ${key}, changes an item's type between todo and issue: comment on ${filed.key} with add_comment to ask Opal`,
+    `forbidden: only Delta, the owner of ${key}, changes an item's type between todo and issue: comment on ${filed.key} with add_comment to ask Delta`,
   );
   expect(
     await call(other, "update_item", {
@@ -137,13 +137,98 @@ test("on a product with an owner, only the owner accepts, cancels or retypes its
       priority: 2,
       addLabels: ["bug"],
     }),
-  ).toMatchObject({ status: "triage", priority: 2, labels: ["bug"] });
+  ).toMatchObject({
+    status: "triage",
+    priority: 2,
+    labels: [],
+    skippedLabels: ["bug"],
+  });
   expect(
     await callError(filer, "update_item", { item: filed.key, status: "open" }),
   ).toMatch(/^forbidden: /);
   expect(
     await call(filer, "update_item", { item: filed.key, status: "canceled" }),
   ).toMatchObject({ status: "canceled" });
+});
+
+test("update_item on another bot's product attaches only labels the product has and lists the rest in skippedLabels; the owner creates them", async () => {
+  const owner = await productBot("alpha labels");
+  const outsider = await connect(createBot(db, "beta labels").key);
+  await call(owner.client, "create_label", {
+    product: owner.product.key,
+    name: "ui",
+  });
+  const filed = await call(outsider, "file_issue", {
+    product: owner.product.key,
+    title: "labels",
+  });
+  expect(
+    await call(outsider, "update_item", {
+      item: filed.key,
+      addLabels: ["UI", "made-up"],
+    }),
+  ).toMatchObject({ labels: ["ui"], skippedLabels: ["made-up"] });
+  expect(
+    await call(outsider, "update_item", {
+      item: filed.key,
+      labels: ["other-made-up"],
+    }),
+  ).toMatchObject({ labels: [], skippedLabels: ["other-made-up"] });
+  const unskipped = await call(outsider, "update_item", {
+    item: filed.key,
+    labels: ["ui"],
+  });
+  expect(unskipped.labels).toEqual(["ui"]);
+  expect(unskipped).not.toHaveProperty("skippedLabels");
+  const labels = await call(owner.client, "list_labels", {
+    product: owner.product.key,
+  });
+  expect(labels.items.map((l: Body) => l.name)).toEqual(["ui"]);
+  expect(
+    await call(owner.client, "update_item", {
+      item: filed.key,
+      addLabels: ["made-up"],
+    }),
+  ).toMatchObject({ labels: ["made-up", "ui"] });
+});
+
+test("reopening a canceled issue a non-owner filed is the owner's decision, so a filer's cancel is no way out of triage", async () => {
+  const owner = await productBot("alpha reopen");
+  const filer = await connect(createBot(db, "beta reopen").key);
+  const other = await connect(createBot(db, "gamma reopen").key);
+  const key = owner.product.key;
+  const refusal = (item: string) =>
+    `forbidden: ${item} was filed on ${key}, which alpha reopen owns, and was canceled: only alpha reopen reopens it. Comment on it with add_comment to ask alpha reopen`;
+
+  const own = await call(filer, "file_issue", { product: key, title: "a" });
+  await call(filer, "update_item", { item: own.key, status: "canceled" });
+  for (const status of ["open", "in_progress", "triage", "done"]) {
+    expect(
+      await callError(filer, "update_item", { item: own.key, status }),
+      status,
+    ).toBe(refusal(own.key));
+  }
+
+  const declined = await call(filer, "file_issue", {
+    product: key,
+    title: "b",
+  });
+  await call(owner.client, "update_item", {
+    item: declined.key,
+    status: "canceled",
+  });
+  expect(
+    await callError(other, "update_item", {
+      item: declined.key,
+      status: "open",
+    }),
+  ).toBe(refusal(declined.key));
+  expect(
+    await call(owner.client, "update_item", {
+      item: declined.key,
+      status: "open",
+    }),
+  ).toMatchObject({ status: "open" });
 });
 
 test("a product with no owner leaves todos and triage open to any bot that reaches it", async () => {
@@ -168,12 +253,12 @@ test("a product with no owner leaves todos and triage open to any bot that reach
 });
 
 test("accepting an issue from triage with status open and no assignee leaves it open and unassigned", async () => {
-  const tara = await productBot("Tara accepts");
+  const alpha = await productBot("Alpha accepts");
   const filed = await call(await connect(bot.key), "file_issue", {
-    product: tara.product.key,
+    product: alpha.product.key,
     title: "accept me bare",
   });
-  const accepted = await call(tara.client, "update_item", {
+  const accepted = await call(alpha.client, "update_item", {
     item: filed.key,
     status: "open",
   });
@@ -182,17 +267,17 @@ test("accepting an issue from triage with status open and no assignee leaves it 
     status: "open",
     assignee: null,
   });
-  const read = await call(tara.client, "get_item", { item: filed.key });
+  const read = await call(alpha.client, "get_item", { item: filed.key });
   expect(read).toMatchObject({ status: "open", assignee: null });
 });
 
 test("an issue in triage can be canceled by the product's bot", async () => {
-  const tara = await productBot("Tara cancels");
+  const alpha = await productBot("Alpha cancels");
   const filed = await call(await connect(bot.key), "file_issue", {
-    product: tara.product.key,
+    product: alpha.product.key,
     title: "duplicate",
   });
-  const canceled = await call(tara.client, "update_item", {
+  const canceled = await call(alpha.client, "update_item", {
     item: filed.key,
     status: "canceled",
   });
@@ -203,44 +288,46 @@ test("an issue in triage can be canceled by the product's bot", async () => {
 });
 
 test("add_todo goes to the caller's one own product, open and assigned to its owner", async () => {
-  const nia = await productBot("Nia");
-  const todo = await call(nia.client, "add_todo", { title: "ship the canvas" });
+  const epsilon = await productBot("Epsilon");
+  const todo = await call(epsilon.client, "add_todo", {
+    title: "ship the canvas",
+  });
   expect(todo).toMatchObject({
     type: "todo",
     status: "open",
-    product: nia.product.key,
-    project: nia.product.key,
-    assignee: { id: nia.actor.id, name: "Nia", kind: "bot" },
+    product: epsilon.product.key,
+    project: epsilon.product.key,
+    assignee: { id: epsilon.actor.id, name: "Epsilon", kind: "bot" },
   });
 });
 
 test("add_todo names the products to pick from when the caller owns none or several", async () => {
-  const quinn = await productBot("Quinn");
-  const second = await call(quinn.client, "create_product", {
+  const kappa = await productBot("Kappa");
+  const second = await call(kappa.client, "create_product", {
     key: projectKey(),
     name: "second",
   });
-  const keys = [quinn.product.key, second.key].sort();
-  expect(await callError(quinn.client, "add_todo", { title: "where" })).toBe(
+  const keys = [kappa.product.key, second.key].sort();
+  expect(await callError(kappa.client, "add_todo", { title: "where" })).toBe(
     `validation_failed: you own 2 products, so add_todo needs product: pick one of ${keys[0]} and ${keys[1]}`,
   );
 
-  const scoped = createBot(db, "Holly", {
-    scope: { projects: [quinn.product.key] },
+  const scoped = createBot(db, "Pi", {
+    scope: { projects: [kappa.product.key] },
   });
   expect(
     await callError(await connect(scoped.key), "add_todo", { title: "where" }),
   ).toBe(
-    `validation_failed: you own no product, so add_todo needs product: pick one of ${quinn.product.key} (list_products describes each)`,
+    `validation_failed: you own no product, so add_todo needs product: pick one of ${kappa.product.key} (list_products describes each)`,
   );
 });
 
 test("file_issue on a product the key doesn't reach is the 404 an unknown product is", async () => {
-  const rhea = await productBot("Rhea");
+  const mu = await productBot("Mu");
   const scoped = await connect(
-    createBot(db, "Faye", { scope: { projects: [rhea.product.key] } }).key,
+    createBot(db, "Omicron", { scope: { projects: [mu.product.key] } }).key,
   );
-  const hiddenOwner = await productBot("Remy");
+  const hiddenOwner = await productBot("Lambda");
   const hidden = await callError(scoped, "file_issue", {
     product: hiddenOwner.product.key,
     title: "x",
@@ -253,45 +340,45 @@ test("file_issue on a product the key doesn't reach is the 404 an unknown produc
   ).toBe(hidden?.replaceAll(hiddenOwner.product.key, "ZZZZ9"));
   expect(
     await call(scoped, "file_issue", {
-      product: rhea.product.key,
+      product: mu.product.key,
       title: "ok",
     }),
   ).toMatchObject({ status: "triage" });
 });
 
 test("update_item changes type: todo opens an issue in triage, and a todo never goes back to triage or loses its assignee", async () => {
-  const juno = await productBot("Juno");
-  const ivy = await connect(createBot(db, "Ivy").key);
-  const filed = await call(ivy, "file_issue", {
-    product: juno.product.key,
+  const eta = await productBot("Eta");
+  const zeta = await connect(createBot(db, "Zeta").key);
+  const filed = await call(zeta, "file_issue", {
+    product: eta.product.key,
     title: "make it a todo",
   });
-  const todo = await call(juno.client, "update_item", {
+  const todo = await call(eta.client, "update_item", {
     item: filed.key,
     type: "todo",
   });
   expect(todo).toMatchObject({
     type: "todo",
     status: "open",
-    assigneeId: juno.actor.id,
+    assigneeId: eta.actor.id,
   });
   expect(
-    await callError(juno.client, "update_item", {
+    await callError(eta.client, "update_item", {
       item: filed.key,
       status: "triage",
     }),
   ).toBe(
-    `validation_failed: ${filed.key} is a todo, and a todo is never in triage: send status open to accept it, or type issue to make it an issue first`,
+    `validation_failed: ${filed.key} is a todo, and a todo is never in triage: send type issue with status triage in the same update to put it in triage as an issue, or another status to keep it a todo`,
   );
   expect(
-    await callError(juno.client, "update_item", {
+    await callError(eta.client, "update_item", {
       item: filed.key,
       assignee: null,
     }),
   ).toBe(
     `validation_failed: ${filed.key} is a todo, and a todo always has an assignee: assign it to another bot, or send type issue to make it an unassigned issue`,
   );
-  const issue = await call(juno.client, "update_item", {
+  const issue = await call(eta.client, "update_item", {
     item: filed.key,
     type: "issue",
     assignee: null,
@@ -304,31 +391,31 @@ test("update_item changes type: todo opens an issue in triage, and a todo never 
 });
 
 test("list_items filters by product, type, status and assignee and pages with cursor", async () => {
-  const pia = await productBot("Pia");
-  const lena = await connect(createBot(db, "Lena").key);
+  const iota = await productBot("Iota");
+  const theta = await connect(createBot(db, "Theta").key);
   // one stamp apiece: same-millisecond rows would order by random id
   await atFakeTimeAsync([
     ...["t1", "t2", "t3"].map(
-      (title) => () => call(pia.client, "add_todo", { title }),
+      (title) => () => call(iota.client, "add_todo", { title }),
     ),
-    () => call(lena, "file_issue", { product: pia.product.key, title: "i1" }),
+    () => call(theta, "file_issue", { product: iota.product.key, title: "i1" }),
   ]);
   const keys = async (args: Body) =>
     (
-      await call(pia.client, "list_items", {
-        product: pia.product.key,
+      await call(iota.client, "list_items", {
+        product: iota.product.key,
         ...args,
       })
     ).items.map((i: Body) => i.title);
   expect(await keys({ type: "todo" })).toEqual(["t3", "t2", "t1"]);
   expect(await keys({ type: "issue", status: "triage" })).toEqual(["i1"]);
-  expect(await keys({ assignee: "PIA" })).toEqual(["t3", "t2", "t1"]);
+  expect(await keys({ assignee: "IOTA" })).toEqual(["t3", "t2", "t1"]);
 
   const seen: string[] = [];
   let cursor: string | undefined;
   do {
-    const page = await call(pia.client, "list_items", {
-      product: pia.product.key,
+    const page = await call(iota.client, "list_items", {
+      product: iota.product.key,
       limit: 2,
       cursor,
     });
@@ -337,52 +424,52 @@ test("list_items filters by product, type, status and assignee and pages with cu
   } while (cursor);
   expect(seen).toEqual(["i1", "t3", "t2", "t1"]);
   expect(
-    await callError(pia.client, "list_items", { assignee: "nobody at all" }),
+    await callError(iota.client, "list_items", { assignee: "nobody at all" }),
   ).toMatch(/^validation_failed: no bot or person nobody at all to filter by/);
 });
 
 test("add_comment and list_comments work on a todo and on an issue", async () => {
-  const vera = await productBot("Vera");
-  const todo = await call(vera.client, "add_todo", { title: "todo" });
+  const xi = await productBot("Xi");
+  const todo = await call(xi.client, "add_todo", { title: "todo" });
   const issue = await call(
-    await connect(createBot(db, "Skye").key),
+    await connect(createBot(db, "Nu").key),
     "file_issue",
-    { product: vera.product.key, title: "issue" },
+    { product: xi.product.key, title: "issue" },
   );
   for (const item of [todo.key, issue.key]) {
-    const comment = await call(vera.client, "add_comment", {
+    const comment = await call(xi.client, "add_comment", {
       item,
       body: `on ${item}`,
     });
-    expect(comment.authorId).toBe(vera.actor.id);
+    expect(comment.authorId).toBe(xi.actor.id);
     expect(
-      (await call(vera.client, "list_comments", { item })).items.map(
+      (await call(xi.client, "list_comments", { item })).items.map(
         (c: Body) => c.body,
       ),
     ).toEqual([`on ${item}`]);
   }
-  expect(await callError(vera.client, "add_comment", { body: "where" })).toBe(
+  expect(await callError(xi.client, "add_comment", { body: "where" })).toBe(
     "validation_failed: item is required: send the item's key, like TRL-12; list_items finds them",
   );
 });
 
 test("a retried add_todo or file_issue with the same idempotency_key returns the first item and writes nothing more", async () => {
-  const kai = await productBot("Kai retries");
+  const beta = await productBot("Beta retries");
   for (const [tool, args] of [
     ["add_todo", { title: "once" }],
-    ["file_issue", { product: kai.product.key, title: "once" }],
+    ["file_issue", { product: beta.product.key, title: "once" }],
   ] as const) {
     const sent = { ...args, idempotency_key: `retry-${tool}` };
-    const first = await call(kai.client, tool, sent);
-    expect(await call(kai.client, tool, sent), tool).toEqual(first);
+    const first = await call(beta.client, tool, sent);
+    expect(await call(beta.client, tool, sent), tool).toEqual(first);
   }
-  const all = await call(kai.client, "list_items", {
-    product: kai.product.key,
+  const all = await call(beta.client, "list_items", {
+    product: beta.product.key,
   });
   expect(all.items).toHaveLength(2);
   expect(
-    await callError(kai.client, "file_issue", {
-      product: kai.product.key,
+    await callError(beta.client, "file_issue", {
+      product: beta.product.key,
       title: "once",
       idempotency_key: "retry-add_todo",
     }),
@@ -428,6 +515,14 @@ test("update_product can't make a bot owner of another bot's product, so it can'
     `forbidden: ${key} is owned by Orla: only Orla may hand it to another bot or clear its owner over the API. The operator reassigns it with \`trail products set-owner ${key} <bot>\``,
   );
   expect(
+    await callError(grabber.client, "update_product", {
+      product: key,
+      owner: null,
+    }),
+  ).toBe(
+    `forbidden: ${key} is owned by Orla: only Orla may hand it to another bot or clear its owner over the API. The operator reassigns it with \`trail products set-owner ${key} <bot>\``,
+  );
+  expect(
     await callError(grabber.client, "add_todo", { product: key, title: "x" }),
   ).toMatch(/^forbidden: .* is owned by Orla/);
   expect(
@@ -442,7 +537,7 @@ test("update_product can't make a bot owner of another bot's product, so it can'
 });
 
 test("file_issue on another bot's product attaches only labels the product has, and lists the rest in skippedLabels", async () => {
-  const owner = await productBot("Lena labels");
+  const owner = await productBot("Theta labels");
   const key = owner.product.key;
   await call(owner.client, "create_label", { product: key, name: "Bug" });
   const filer = await connect(createBot(db, "Label filer").key);

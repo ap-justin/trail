@@ -20,7 +20,13 @@ import {
 } from "../../shared/schemas.js";
 import { jsonContent } from "../api/routes.js";
 import type { Db } from "../db/client.js";
-import { activityEvent, actor, project } from "../db/schema.js";
+import {
+  activityEvent,
+  actor,
+  type IssueType,
+  issue,
+  project,
+} from "../db/schema.js";
 import {
   decodeFeedCursor,
   encodeFeedCursor,
@@ -58,20 +64,34 @@ const getFeed = createRoute({
 export function feedFilters(
   db: Db,
   member: Member,
-  query: { actor?: string; product?: string; project?: string },
+  query: {
+    actor?: string;
+    product?: string;
+    project?: string;
+    type?: IssueType;
+  },
 ): FeedFilters {
+  const product =
+    query.product === undefined
+      ? undefined
+      : visibleProduct(member, query.product);
+  const group =
+    query.project === undefined
+      ? undefined
+      : visibleProject(db, member, query.project);
   return {
-    projectId:
-      query.product === undefined
-        ? null
-        : visibleProduct(member, query.product).id,
+    projectId: product?.id ?? null,
+    productKey: product?.key ?? null,
     actorId: query.actor ?? null,
-    groupId:
-      query.project === undefined
-        ? null
-        : visibleProject(db, member, query.project).id,
+    groupId: group?.id ?? null,
+    projectSlug: group?.slug ?? null,
+    type: query.type ?? null,
   };
 }
+
+/** Events of an item (its own, a comment on it, its joining or leaving a project) whose type is now `type`. */
+export const ofItemType = (type: IssueType): SQL =>
+  sql`exists (select 1 from ${issue} where ${issue.type} = ${type} and ${issue.id} = case ${activityEvent.subjectType} when 'issue' then ${activityEvent.subjectId} when 'comment' then json_extract(${activityEvent.payload}, '$.issueId') end)`;
 
 /** The events these filters show to a viewer of the products with these ids, the ids checked inside the query. */
 export function feedWhere(db: Db, productIds: string[], filters: FeedFilters) {
@@ -86,6 +106,7 @@ export function feedWhere(db: Db, productIds: string[], filters: FeedFilters) {
     filters.actorId === null
       ? undefined
       : eq(activityEvent.actorId, filters.actorId),
+    filters.type == null ? undefined : ofItemType(filters.type),
     shownEvent,
   ];
 }
@@ -118,6 +139,7 @@ function feedPage(
     actor?: string;
     product?: string;
     project?: string;
+    type?: IssueType;
   },
 ): FeedView {
   const limit = pageLimit(query.limit);

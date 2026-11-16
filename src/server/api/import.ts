@@ -23,16 +23,20 @@ const importProject = createRoute({
   summary:
     "Import a project from another tracker into a trail product, with its issues, comments, labels, links and status updates, matched by externalRef",
   description:
-    "Rows are matched by externalRef (Linear's id, a UUID), so a re-run never duplicates. Send each issue's sourceKey (Linear's identifier, like JUS-187): it is stored, so GET /items/JUS-187 finds the issue, and a new issue keeps that number when its prefix is the product's key. If another issue holds the number, the new one gets the product's next number and is listed in the result's renumbered: reach it by the key listed there, because its sourceKey is the other issue's key and finds that issue. Descriptions and comment bodies may be up to 1048576 characters and an issue may have up to 200 links. Each body is checked in two passes, and nothing is imported unless both pass. First its shape: a missing or unknown field, a value of the wrong type, the product's key, name, description or labels, and any row's externalRef, createdAt, completedAt, sourceAuthor or health; a 422 names every such failure by its path, like issues.3.createdAt. Then every other value; a 422 lists every failing row with its sourceKey or externalRef. A re-run sets each matched row's fields, labels and links to the payload's values, replacing changes made in trail since the last import, and never deletes rows.",
+    "Rows are matched by externalRef (Linear's id, a UUID), so a re-run never duplicates. Send each issue's sourceKey (the key it had in the tracker it comes from, like ABC-187): it is stored, so GET /items/ABC-187 finds the issue, and a new issue keeps that number when its prefix is the product's key. If another issue holds the number, the new one gets the product's next number and is listed in the result's renumbered: reach it by the key listed there, because its sourceKey is the other issue's key and finds that issue. Descriptions and comment bodies may be up to 1048576 characters and an issue may have up to 200 links. Each body is checked in two passes, and nothing is imported unless both pass. First its shape: a missing or unknown field, a value of the wrong type, the product's key, name, description or labels, and any row's externalRef, createdAt, completedAt, sourceAuthor or health; a 422 names every such failure by its path, like issues.3.createdAt. Then every other value; a 422 lists every failing row with its sourceKey or externalRef. A re-run sets each matched row's fields, labels and links to the payload's values, replacing changes made in trail since the last import, and never deletes rows.",
   tags: ["import"],
   middleware: [limitBody(IMPORT_MAX_BODY_BYTES)] as const,
   request: { body: jsonBody(importSchema) },
   responses: {
     200: jsonContent(
       importResultSchema,
-      "The product (project is its deprecated alias), per kind how many rows were created, updated and left unchanged (products counted under products; projects is its deprecated alias), and the issues that were renumbered. A product the import creates is owned by the calling bot. Imported items keep their status and are typed todo when the calling bot owns the product, else issue.",
+      "The product (project is its deprecated alias), per kind how many rows were created, updated and left unchanged (products counted under products; projects is its deprecated alias), and the issues that were renumbered. A product the import creates is owned by the calling bot; a product another bot owns takes imports from that bot alone. Imported items keep their status and are typed todo when the calling bot owns the product, else issue.",
     ),
-    ...forbiddenError("admin", { scope: true }),
+    ...forbiddenError("admin", {
+      scope: true,
+      owner:
+        "the product exists and another bot owns it: only its owner imports into it",
+    }),
     ...writeErrors,
     413: jsonContent(
       errorSchema,

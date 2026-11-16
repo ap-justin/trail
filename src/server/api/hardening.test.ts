@@ -39,7 +39,7 @@ async function tool(client: Client, name: string, args: Body = {}) {
 let refs = 0;
 let sourceKeys = 0;
 /** A source key no other test in this file has used; they share one database and source keys are unique across it. */
-const freshSourceKey = (prefix = "JUS") => `${prefix}-${++sourceKeys}`;
+const freshSourceKey = (prefix = "ABC") => `${prefix}-${++sourceKeys}`;
 const issueRow = (sourceKey: string | undefined, extra: Body = {}) => ({
   externalRef: `uuid-${++refs}`,
   ...(sourceKey === undefined ? {} : { sourceKey }),
@@ -209,12 +209,14 @@ test("bot names are unique ignoring case, and the refusal names the existing bot
 
 test("two bots adding different labels to one issue both keep theirs", async () => {
   const other = addBot("second labeller");
+  const key = (await importProject(projectKey(), [])).body.project.key;
+  // a bot outside the product attaches only labels the product already has
+  await request("POST", `/api/v1/products/${key}/labels`, {
+    json: { name: "beta" },
+  });
   const issue = (await (
     await request("POST", "/api/v1/issues", {
-      json: {
-        projectId: (await importProject(projectKey(), [])).body.project.key,
-        title: "shared",
-      },
+      json: { projectId: key, title: "shared" },
     })
   ).json()) as Body;
 

@@ -65,7 +65,7 @@ test("an unknown issue key is a 404 that says what to pass", async () => {
     const { status, body } = await send("GET", `/issues/${ref}`);
     expect(status).toBe(404);
     expect(body.error.message).toBe(
-      `no item ${ref}: pass the key (like TRL-12), the id or the source key (like JUS-187, kept from an import) of an item this key reaches; list_items (GET /api/v1/items) finds them`,
+      `no item ${ref}: pass the key (like TRL-12), the id or the source key (the key it had in the system it was imported from, like ABC-187) of an item this key reaches; list_items (GET /api/v1/items) finds them`,
     );
   }
 });
@@ -123,20 +123,20 @@ test("POST /issues sets estimate, priority, labels, links and externalRef", asyn
     priority: 2,
     labels: ["bug", "Backend", "BUG"],
     links: [
-      { url: "https://github.com/ap-justin/trail/pull/3", title: "PR #3" },
+      { url: "https://github.com/ap-pat/trail/pull/3", title: "PR #3" },
       { url: "https://example.com/spec" },
     ],
-    externalRef: "JUS-188",
+    externalRef: "ABC-188",
   });
   expect(issue).toMatchObject({
     estimate: 2.5,
     priority: 2,
     labels: ["Backend", "bug"],
     links: [
-      { url: "https://github.com/ap-justin/trail/pull/3", title: "PR #3" },
+      { url: "https://github.com/ap-pat/trail/pull/3", title: "PR #3" },
       { url: "https://example.com/spec", title: "https://example.com/spec" },
     ],
-    externalRef: "JUS-188",
+    externalRef: "ABC-188",
   });
   const { deprecated: _created, ...fields } = issue;
   expect((await send("GET", `/issues/${issue.key}`)).body).toEqual({
@@ -150,7 +150,7 @@ test("POST /issues sets estimate, priority, labels, links and externalRef", asyn
       estimate: 2.5,
       priority: 2,
       labels: ["Backend", "bug"],
-      externalRef: "JUS-188",
+      externalRef: "ABC-188",
     },
   });
 });
@@ -288,37 +288,37 @@ test("an externalRef already used in its scope is a 409 saying which row has it"
   const project = await created("/projects", {
     key: projectKey(),
     name: "refs",
-    externalRef: "P-JUS-9",
+    externalRef: "P-ABC-9",
   });
   const dupProject = await send("POST", "/projects", {
     key: projectKey(),
     name: "refs again",
-    externalRef: "P-JUS-9",
+    externalRef: "P-ABC-9",
   });
   expect(dupProject.status).toBe(409);
   expect(dupProject.body.error.message).toBe(
-    `externalRef P-JUS-9 is already on product ${project.key}: use that product, or send a different externalRef`,
+    `externalRef P-ABC-9 is already on product ${project.key}: use that product, or send a different externalRef`,
   );
 
   const issue = await created("/issues", {
     projectId: project.id,
     title: "linear issue",
-    externalRef: "JUS-1",
+    externalRef: "ABC-1",
   });
   const dupIssue = await send("POST", "/issues", {
     projectId: project.id,
     title: "again",
-    externalRef: "JUS-1",
+    externalRef: "ABC-1",
   });
   expect(dupIssue.status).toBe(409);
   expect(dupIssue.body.error.message).toBe(
-    `externalRef JUS-1 is already on item ${issue.key}: update that item with update_item, or send a different externalRef`,
+    `externalRef ABC-1 is already on item ${issue.key}: update that item with update_item, or send a different externalRef`,
   );
   // unique within the project only
   await created("/issues", {
     projectId: trl.id,
     title: "same ref elsewhere",
-    externalRef: "JUS-1",
+    externalRef: "ABC-1",
   });
 
   const comment = await created(`/issues/${issue.id}/comments`, {

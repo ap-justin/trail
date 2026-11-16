@@ -30,8 +30,8 @@ const botLabel = (row: { id: string; displayName: string }) =>
 
 /**
  * Makes the bot `botRef` names (id, label or name, as `renameBot` finds it)
- * the product's owner, whose items are todos. An operator write: no activity
- * event, as a bot rename has none.
+ * the product's owner: it adds todos and accepts or cancels triage issues. An
+ * operator write: no activity event, as a bot rename has none.
  */
 export function setProductOwner(
   db: Db,

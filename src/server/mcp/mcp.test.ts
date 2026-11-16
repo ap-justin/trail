@@ -338,7 +338,7 @@ test("list_activity resumes after a cursor and refuses it under other filters", 
   expect(
     await callError(client, "list_activity", { after: start.nextCursor }),
   ).toMatch(
-    /^validation_failed: cursor was issued for projectId=.* but this request has projectId=\(none\).*: repeat the cursor's filters, or drop the cursor to start over$/,
+    /^validation_failed: cursor was issued for product=MCA, actorId=\(none\) but this request has product=\(none\), actorId=\(none\): repeat the cursor's filters, or drop the cursor to start over$/,
   );
 });
 
@@ -595,7 +595,7 @@ test("whoami answers the key's bot and list_bots pages every bot with id, name, 
 test("a service refusal is a tool error saying what to send instead", async () => {
   const client = await connect(bot.key);
   expect(await callError(client, "get_item", { item: "NOPE-9" })).toBe(
-    "not_found: no item NOPE-9: pass the key (like TRL-12), the id or the source key (like JUS-187, kept from an import) of an item this key reaches; list_items (GET /api/v1/items) finds them",
+    "not_found: no item NOPE-9: pass the key (like TRL-12), the id or the source key (the key it had in the system it was imported from, like ABC-187) of an item this key reaches; list_items (GET /api/v1/items) finds them",
   );
   await call(client, "create_product", { key: "MCE", name: "errors" });
   expect(

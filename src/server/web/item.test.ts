@@ -198,7 +198,7 @@ test("an imported issue is found by its source key and credits the importing bot
       issues: [
         {
           externalRef: "iss-1",
-          sourceKey: "JUS-187",
+          sourceKey: "ABC-187",
           title: "From Linear",
           status: "Todo",
           createdAt: "2026-01-02T03:04:05.000Z",
@@ -218,7 +218,7 @@ test("an imported issue is found by its source key and credits the importing bot
   );
   expect(res.status).toBe(200);
 
-  const { status, body } = await get("/items/jus-187");
+  const { status, body } = await get("/items/abc-187");
   expect(status).toBe(200);
   const importerActor = {
     id: importer.actor.id,
@@ -229,7 +229,7 @@ test("an imported issue is found by its source key and credits the importing bot
   };
   expect(body).toMatchObject({
     key: "ALIAS-1",
-    sourceKey: "JUS-187",
+    sourceKey: "ABC-187",
     creator: importerActor,
     sourceAuthor: "Jane",
   });
@@ -327,4 +327,19 @@ test("an item of a product the member can't see is the same 404 as a missing one
   expect(missing.status).toBe(404);
   expect(found.body.error.message).toBe(`no item ${key}`);
   expect(missing.body.error.message).toBe("no item NOPE-1");
+});
+
+test("an item's key reads it in lower case and with its number zero-padded", async () => {
+  const p = addProject("Padded");
+  const key = await seed.item(p.key, "issue");
+  const [prefix, number] = key.split("-") as [string, string];
+  for (const ref of [
+    key.toLowerCase(),
+    `${prefix}-00${number}`,
+    `${prefix.toLowerCase()}-0${number}`,
+  ]) {
+    const { status, body } = await get(`/items/${ref}`);
+    expect(status, ref).toBe(200);
+    expect(body.key, ref).toBe(key);
+  }
 });

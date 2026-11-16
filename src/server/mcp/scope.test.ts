@@ -375,6 +375,8 @@ test("import_project refuses a source key a hidden issue holds naming nothing of
   );
   const hiddenId = (await call(wide, "get_item", { item: "LIN-601" })).id;
   const visibleId = (await call(wide, "get_item", { item: "LIN-602" })).id;
+  // an owned product takes imports from its owner alone
+  await call(wide, "update_product", { product: inside, owner: null });
 
   const importer = await connect(
     createBot(db, "mcp scoped source-key importer", {

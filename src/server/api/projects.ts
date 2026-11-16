@@ -104,7 +104,7 @@ const getProject = createRoute({
   path: "/projects/{ref}",
   summary: "Get a project by slug",
   description:
-    "Deprecated: a product key that matches no slug returns the product, carrying deprecated; use GET /products/{key}. A ref that is both a project's slug and a product's key (trl, beside project trl and product TRL) is a 422 naming both. The project's items are listed by GET /items?project={slug}.",
+    "Deprecated: a product key that matches no slug returns the product, carrying deprecated; use GET /products/{key}. The project's items are listed by GET /items?project={slug}.",
   tags,
   request: { params: projectParam },
   responses: {
@@ -119,7 +119,7 @@ const updateProject = createRoute({
   method: "patch",
   path: "/projects/{ref}",
   summary: "Change a project's name, goal, lead or targetDate",
-  description: `${WHO_CHANGES} Fields left out stay as they are. Deprecated: a product key that matches no slug changes that product's name or description (admin action), carrying deprecated; use PATCH /products/{key}. A ref that is both a project's slug and a product's key (trl, beside project trl and product TRL) is a 422 naming both.`,
+  description: `${WHO_CHANGES} Fields left out stay as they are. Deprecated: a product key that matches no slug changes that product's name or description (admin action), carrying deprecated; use PATCH /products/{key}.`,
   tags,
   request: { params: projectParam, body: jsonBody(projectUpdateSchema) },
   responses: {
@@ -168,7 +168,7 @@ const postStatusUpdate = createRoute({
   path: "/projects/{ref}/status-updates",
   summary: "Post a project status update: a body and a health",
   description:
-    "Needs the status_updates action on a key that reaches one of the project's products. externalRef is refused here with a 422, since only a product's update keeps one: send the Idempotency-Key header to make the post safe to retry. Deprecated: a product key that matches no slug posts on that product, carrying deprecated; use POST /products/{key}/status-updates. A ref that is both a project's slug and a product's key (trl, beside project trl and product TRL) is a 422 naming both.",
+    "Needs the status_updates action on a key that reaches one of the project's products. externalRef is refused here with a 422, since only a product's update keeps one: send the Idempotency-Key header to make the post safe to retry. Deprecated: a product key that matches no slug posts on that product, carrying deprecated; use POST /products/{key}/status-updates.",
   tags,
   request: {
     params: projectParam,
@@ -192,7 +192,7 @@ const listStatusUpdates = createRoute({
   path: "/projects/{ref}/status-updates",
   summary: "List a project's status updates, newest first",
   description:
-    "Deprecated: a product key that matches no slug lists that product's, carrying deprecated; use GET /products/{key}/status-updates. A ref that is both a project's slug and a product's key (trl, beside project trl and product TRL) is a 422 naming both.",
+    "Deprecated: a product key that matches no slug lists that product's, carrying deprecated; use GET /products/{key}/status-updates.",
   tags,
   request: { params: projectParam, query: pageQuerySchema },
   responses: {

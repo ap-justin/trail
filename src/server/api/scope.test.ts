@@ -476,6 +476,15 @@ test("a key limited to projects can't create one, even with admin, and learns no
   }
 });
 
+/** Clears the product's owner, so any bot reaching it may import into it. */
+async function unowned(productKey: string, key: string) {
+  const res = await request("PATCH", `/api/v1/products/${productKey}`, {
+    key,
+    json: { owner: null },
+  });
+  expect(res.status).toBe(200);
+}
+
 test("a key limited to projects imports into them, and an import outside them is refused alike whether the project exists or not", async () => {
   const unscoped = await unscopedKey();
   const imported = (externalRef: string, key: string) => ({
@@ -497,6 +506,8 @@ test("a key limited to projects imports into them, and an import outside them is
     });
     expect(res.status).toBe(200);
   }
+  // an owned product takes imports from its owner alone
+  await unowned(inside, unscoped.key);
   const importer = createBot(db, "scoped importer", {
     scope: { projects: [inside, a.key], actions: ["admin"] },
   });
@@ -580,7 +591,7 @@ test("the spec documents each gated operation's 403 with the action it needs", a
   const orScope = (action: string) =>
     `${needs(action)}, or reaches only some products (code forbidden_scope)`;
   const orOwner = (action: string) =>
-    `${needs(action)}, or the product has an owner bot and the call is that bot's alone: adding a todo, moving an issue out of triage (its filer may cancel it), or changing an item's type; the message names the owner and what to do instead (code forbidden)`;
+    `${needs(action)}, or the product has an owner bot and the call is that bot's alone: adding a todo, moving an issue out of triage (its filer may cancel it), reopening a canceled issue another bot filed, or changing an item's type; the message names the owner and what to do instead (code forbidden)`;
   expect(forbidden).toEqual({
     "GET /activity": needs("read"),
     "GET /bots": needs("admin"),
@@ -609,7 +620,7 @@ test("the spec documents each gated operation's 403 with the action it needs", a
     "PATCH /products/{key}": `${needs("admin")}, or owner changes the owner of a product another bot owns (code forbidden)`,
     "PATCH /projects/{ref}":
       "The key lacks the issues action, or for a product key the admin action (code forbidden_action)",
-    "POST /import": orScope("admin"),
+    "POST /import": `${orScope("admin")}, or the product exists and another bot owns it: only its owner imports into it (code forbidden)`,
     "POST /items": orOwner("issues"),
     "POST /items/{key}/comments": needs("comments"),
     "POST /issues": needs("issues"),
@@ -707,6 +718,7 @@ test("an import whose source key a hidden issue holds is refused naming nothing 
     ).id as string;
   const hiddenId = await holderId("LIN-501");
   const visibleId = await holderId("LIN-502");
+  await unowned(inside, bot.key);
 
   const importer = createBot(db, "scoped source-key importer", {
     scope: { projects: [inside], actions: ["admin"] },

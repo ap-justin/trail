@@ -303,10 +303,12 @@ test("an import writes one project.imported event with the counts; a run that ch
   });
 });
 
-test("a second bot re-importing updates rows in place: the first stays their creator, the second is credited with the update", () => {
+test("a second bot re-importing a product with no owner updates rows in place: the first stays their creator, the second is credited with the update", () => {
   const second = createBot(db, "second migrator").actor;
   const payload = linearProject();
   atFakeTime([() => service.importProject(bot, payload)]);
+  // an owned product takes imports from its owner alone
+  service.updateProduct(bot, payload.key, { owner: null });
   const before = rowCounts();
   const issuesBefore = service.listItems(bot, {
     product: payload.key,
@@ -641,18 +643,18 @@ test.each([
 
 test("an issue whose externalRef is the project's own key keeps that number, and the sequence moves past it", () => {
   const payload: ImportPayload = {
-    externalRef: "linear-JUS",
-    key: "JUS",
-    name: "Justin",
-    issues: [todo("JUS-187"), todo("JUS-1"), todo("from-elsewhere")],
+    externalRef: "linear-ABC",
+    key: "ABC",
+    name: "Pat",
+    issues: [todo("ABC-187"), todo("ABC-1"), todo("from-elsewhere")],
   };
   service.importProject(bot, payload);
-  expect(service.getItem(bot, "JUS-187").externalRef).toBe("JUS-187");
-  expect(service.getItem(bot, "JUS-1").externalRef).toBe("JUS-1");
-  expect(service.getItem(bot, "JUS-188").externalRef).toBe("from-elsewhere");
+  expect(service.getItem(bot, "ABC-187").externalRef).toBe("ABC-187");
+  expect(service.getItem(bot, "ABC-1").externalRef).toBe("ABC-1");
+  expect(service.getItem(bot, "ABC-188").externalRef).toBe("from-elsewhere");
   expect(
-    service.createIssue(bot, { projectId: "JUS", title: "by hand" }).key,
-  ).toBe("JUS-189");
+    service.createIssue(bot, { projectId: "ABC", title: "by hand" }).key,
+  ).toBe("ABC-189");
 
   const rerun = service.importProject(bot, payload);
   expect(rerun.created).toEqual(zero);
@@ -873,6 +875,6 @@ test("two new issues keeping one number are refused, naming both, and nothing is
 test("a sourceKey not shaped like an issue key is refused, naming it", () => {
   refused(
     { ...linearProject(), issues: [linearIssue("uuid-bad", "JUS187")] },
-    'issue JUS187 (externalRef uuid-bad): sourceKey "JUS187" is not an issue key: send Linear\'s identifier, like JUS-187',
+    'issue JUS187 (externalRef uuid-bad): sourceKey "JUS187" is not an issue key: send Linear\'s identifier, like ABC-187',
   );
 });

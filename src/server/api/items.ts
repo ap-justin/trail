@@ -9,6 +9,7 @@ import {
   itemUpdateSchema,
   pageQuerySchema,
   pageSchema,
+  updatedItemSchema,
 } from "../../shared/schemas.js";
 import type { Service } from "../service/index.js";
 import { createRouter } from "./env.js";
@@ -84,11 +85,14 @@ const updateItem = createRoute({
   path: "/items/{key}",
   summary:
     "Change an item's type, status, assignee, title, description, estimate, priority, labels or links",
-  description: `Needs the issues action. ${TODO_OR_ISSUE} Accept an issue from triage with status open and assignee, the bot that will work on it (status open alone leaves it unassigned), or drop it with canceled. type todo on an item in triage opens it and assigns the product's owner when it has no assignee; a todo never goes back to triage and never loses its assignee. Fields left out stay as they are; addLabels, removeLabels, addLinks and removeLinks change part of a set in the same transaction. Moving to done or canceled stamps completedAt; reopening clears it.`,
+  description: `Needs the issues action. ${TODO_OR_ISSUE} Accept an issue from triage with status open and assignee, the bot that will work on it (status open alone leaves it unassigned), or drop it with canceled. type todo on an item in triage opens it and assigns the product's owner when it has no assignee; a todo never goes back to triage and never loses its assignee. Fields left out stay as they are; addLabels, removeLabels, addLinks and removeLinks change part of a set in the same transaction. On a product another bot owns, labels and addLabels attach only the product's existing labels and create none; the answer lists the names left off in skippedLabels. Moving to done or canceled stamps completedAt; reopening clears it.`,
   tags,
   request: { params: itemParam, body: jsonBody(itemUpdateSchema) },
   responses: {
-    200: jsonContent(issueSchema, "The updated item"),
+    200: jsonContent(
+      updatedItemSchema,
+      "The updated item, with skippedLabels when labels another bot's product lacks were left off",
+    ),
     ...forbiddenError("issues", { owner: OWNER_ONLY }),
     ...writeErrors,
     ...notFoundError,
@@ -155,15 +159,12 @@ export function itemRoutes(service: Service) {
     )
     .openapi(updateItem, (c) => {
       const { assignee, ...patch } = c.req.valid("json");
-      return c.json(
-        toIssue(
-          service.updateItem(c.var.actor, c.req.valid("param").key, {
-            ...patch,
-            assigneeId: assignee,
-          }),
-        ),
-        200,
+      const updated = service.updateItem(
+        c.var.actor,
+        c.req.valid("param").key,
+        { ...patch, assigneeId: assignee },
       );
+      return c.json(withSkippedLabels(toIssue(updated), updated), 200);
     })
     .openapi(addComment, (c) =>
       c.json(

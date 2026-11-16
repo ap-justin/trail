@@ -253,7 +253,11 @@ test("an empty Idempotency-Key is a 422", async () => {
 
 describe("a key stored before items had products and types", () => {
   // the request issue.create hashed and the item it stored before migration 0015
-  function storeLegacyCreate(idempotencyKey: string, itemId: string) {
+  function storeLegacyCreate(
+    idempotencyKey: string,
+    itemId: string,
+    sent: { assigneeId?: string; labels?: string[]; links?: unknown[] } = {},
+  ) {
     const row = db
       .select()
       .from(issueTable)
@@ -272,12 +276,12 @@ describe("a key stored before items had products and types", () => {
             projectId: productId,
             title: row.title,
             description: row.description,
-            assigneeId: null,
+            assigneeId: sent.assigneeId ?? null,
             estimate: null,
             priority: 0,
             externalRef: null,
-            labels: [],
-            links: [],
+            labels: sent.labels ?? [],
+            links: sent.links ?? [],
           },
         },
         {
@@ -311,6 +315,36 @@ describe("a key stored before items had products and types", () => {
     expect(body.key).toBe(first.key);
     expect(body.product).toBe("IDEM");
     expect(db.select().from(issueTable).all().length).toBe(items);
+  });
+
+  test("replays a stored create that named an assignee, labels and links in today's shape", async () => {
+    const sent = {
+      projectId: project.id,
+      title: "assigned before the release",
+      assigneeId: "tester",
+      labels: ["legacy-bug"],
+      links: [{ url: "https://example.com/pull/1", title: "the fix" }],
+    };
+    const first = (await (
+      await request("POST", "/api/v1/issues", { json: sent })
+    ).json()) as Body;
+    storeLegacyCreate("legacy assigned", first.id, {
+      assigneeId: bot.actor.id,
+      labels: ["legacy-bug"],
+      links: [{ url: "https://example.com/pull/1", title: "the fix" }],
+    });
+
+    const again = await post("/issues", sent, "legacy assigned");
+    expect(again.status).toBe(201);
+    expect(await again.json()).toMatchObject({
+      id: first.id,
+      key: first.key,
+      type: "todo",
+      product: "IDEM",
+      assigneeId: bot.actor.id,
+      labels: ["legacy-bug"],
+      links: [{ url: "https://example.com/pull/1", title: "the fix" }],
+    });
   });
 
   test("a different create under that key is still a 422", async () => {

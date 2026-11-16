@@ -236,7 +236,7 @@ export function peopleRoutes(db: Db) {
           const productIds = productIdsOf(tx, products);
           if (tx.select().from(invite).where(inviteFor(invitee)).get()) {
             throw new ConflictError(
-              `${handleOf(invitee)} is already invited. Change their products in the list below.`,
+              `${handleOf(invitee)} is already invited: change their products in People.`,
             );
           }
           const { id } = tx

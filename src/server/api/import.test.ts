@@ -2,13 +2,13 @@ import { expect, test } from "vitest";
 import { setupTestApp } from "../test-app.js";
 import { IMPORT_MAX_BODY_BYTES, MAX_BODY_BYTES } from "./routes.js";
 
-const { bot, request } = setupTestApp();
+const { bot, addBot, request } = setupTestApp();
 
 // biome-ignore lint/suspicious/noExplicitAny: loose response bodies for field reads
 type Body = Record<string, any>;
 
 const payload = {
-  externalRef: "P-JUS-9",
+  externalRef: "P-ABC-9",
   key: "IMP",
   name: "Imported",
   issues: [
@@ -49,7 +49,7 @@ test("POST /import upserts the project and answers the per-kind counts", async (
   expect(body).toEqual({
     product: expect.objectContaining({
       key: "IMP",
-      externalRef: "P-JUS-9",
+      externalRef: "P-ABC-9",
       createdBy: bot.actor.id,
       // the importing bot owns the product it creates, so its rows are its todos
       owner: { id: bot.actor.id, name: "tester", kind: "bot" },
@@ -83,6 +83,49 @@ test("POST /import upserts the project and answers the per-kind counts", async (
   ).json()) as Body;
   expect(again.created).toEqual(counts({}));
   expect(again.unchanged).toEqual(body.created);
+});
+
+test("POST /import into a product another bot owns is a 403 naming the owner and changes nothing; into an unowned or own product it goes ahead", async () => {
+  const importer = addBot("import outsider");
+  const owned = { ...payload, externalRef: "P-OWNED", key: "OWN", issues: [] };
+  expect(
+    (await request("POST", "/api/v1/import", { json: owned })).status,
+  ).toBe(200);
+  const refused = await request("POST", "/api/v1/import", {
+    json: { ...owned, name: "renamed", issues: payload.issues },
+    key: importer.key,
+  });
+  expect(refused.status).toBe(403);
+  expect(((await refused.json()) as Body).error).toEqual({
+    code: "forbidden",
+    message:
+      "OWN is owned by tester, so only tester imports into it: ask tester to run this import, or file the work as issues with file_issue (POST /items with type issue), and tester accepts them from triage",
+  });
+  const product = (await (
+    await request("GET", "/api/v1/products/OWN")
+  ).json()) as Body;
+  expect(product.name).toBe("Imported");
+  const items = (await (
+    await request("GET", "/api/v1/items?product=OWN")
+  ).json()) as Body;
+  expect(items.items).toEqual([]);
+
+  const again = await request("POST", "/api/v1/import", {
+    json: { ...owned, name: "renamed" },
+  });
+  expect(again.status).toBe(200);
+  expect(((await again.json()) as Body).product.name).toBe("renamed");
+
+  const unowned = await request("PATCH", "/api/v1/products/OWN", {
+    json: { owner: null },
+  });
+  expect(unowned.status).toBe(200);
+  const byOutsider = await request("POST", "/api/v1/import", {
+    json: { ...owned, name: "anyone's" },
+    key: importer.key,
+  });
+  expect(byOutsider.status).toBe(200);
+  expect(((await byOutsider.json()) as Body).product.name).toBe("anyone's");
 });
 
 test("POST /import keeps an issue's number from an externalRef in the project's key form; one already held is renumbered", async () => {

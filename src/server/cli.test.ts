@@ -208,7 +208,7 @@ test.each([
   [
     "an unknown product key",
     ["--products", "BGP,nope"],
-    /^trail: no product with key NOPE: /,
+    /^trail: no product NOPE: scope the key to products that exist, which are ATL, BGP\n/,
   ],
   [
     "an unknown action",

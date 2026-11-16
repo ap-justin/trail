@@ -33,7 +33,7 @@ export type ImportPayload = {
 export type ImportIssue = {
   externalRef: string;
   /**
-   * The source's human key (Linear's identifier, JUS-187). A new issue keeps
+   * The source's human key (Linear's identifier, ABC-187). A new issue keeps
    * its number when the prefix is the project's key, and is stored (uppercased)
    * so the issue is found by it.
    */
@@ -299,7 +299,7 @@ function validSourceKey(
   const key = raw.trim();
   if (!sourceKeyPattern.test(key)) {
     throw new ValidationError(
-      `${where}: sourceKey "${raw}" is not an issue key: send Linear's identifier, like JUS-187`,
+      `${where}: sourceKey "${raw}" is not an issue key: send Linear's identifier, like ABC-187`,
     );
   }
   return key.toUpperCase();

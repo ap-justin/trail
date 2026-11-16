@@ -18,7 +18,7 @@ const json_ = (res: Response | Promise<Response>) =>
   json<Record<string, any>>(res);
 
 async function newProject(name: string, key?: string) {
-  return json<{ id: string }>(
+  return json<{ id: string; key: string }>(
     request("POST", "/api/v1/projects", {
       json: { key: projectKey(), name },
       key,
@@ -347,7 +347,7 @@ describe("GET /activity?after= resumes the feed oldest first", () => {
           code: "validation_failed",
           message: expect.stringMatching(
             new RegExp(
-              `^cursor was issued for projectId=${a.id}, actorId=\\(none\\) but this request has .*: repeat the cursor's filters, or drop the cursor to start over$`,
+              `^cursor was issued for product=${a.key}, actorId=\\(none\\) but this request has .*: repeat the cursor's filters, or drop the cursor to start over$`,
             ),
           ),
         },

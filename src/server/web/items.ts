@@ -71,7 +71,7 @@ const itemKeyPattern = /^([A-Za-z0-9]{2,10})-(\d+)$/;
 
 /**
  * The item in a visible product with this key (TRL-12), else this source key
- * (JUS-187), in any case. Only visible items are searched, so a hidden item
+ * (ABC-187), in any case. Only visible items are searched, so a hidden item
  * is found no more than a missing one.
  */
 export function visibleItem(db: Db, member: Member, ref: string) {

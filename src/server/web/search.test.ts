@@ -92,3 +92,33 @@ test("an item whose key is the query comes first, ahead of the 20 newest items w
   expect(items).toHaveLength(20);
   expect(items[0]).toMatchObject({ key: `${many.key}-1`, title: "item 1" });
 });
+
+test("an item whose source key is the query comes first, ahead of the 20 newest items whose source keys only contain it", async () => {
+  const issues = [1, ...Array.from({ length: 30 }, (_, i) => 100 + i)].map(
+    (n, i) => ({
+      externalRef: `src-${n}`,
+      sourceKey: `SRC-${n}`,
+      title: `imported ${n}`,
+      status: "Todo",
+      createdAt: new Date(Date.UTC(2026, 0, 1, 0, i)).toISOString(),
+    }),
+  );
+  const imported = await request("POST", "/api/v1/import", {
+    json: {
+      externalRef: "src-product",
+      key: "SRCP",
+      name: "Imported keys",
+      issues,
+    },
+  });
+  expect(imported.status).toBe(200);
+  const { product } = (await imported.json()) as Body;
+  const reader = await addMember("source-key-searcher", [product.id]);
+  const res = await request("GET", "/api/web/search?q=src-1", {
+    key: null,
+    cookie: reader,
+  });
+  const { items } = (await res.json()) as Body;
+  expect(items).toHaveLength(20);
+  expect(items[0]).toMatchObject({ sourceKey: "SRC-1", title: "imported 1" });
+});

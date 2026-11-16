@@ -49,10 +49,11 @@ const usage = `Usage:
   trail key revoke <prefix>        revoke a key by its prefix or the full key
   trail products owners            list each product's current owner bot, or none
   trail products set-owner <key> <bot-id-label-or-name>
-                                   make a bot the product's owner, whose items
-                                   are todos
-  trail products set-repo <key> <https://github.com/owner/name>
-                                   set the product's GitHub repository
+                                   make a bot the product's owner: it adds
+                                   todos and accepts or cancels triage issues
+  trail products set-repo <key> <url>
+                                   set the product's GitHub repository,
+                                   https://github.com/<owner>/<name>
 
   --label <agent-id>  the bot's id in the system that runs it, unique among bots
   --products <keys>   scope: limit the key to these products, like BGP,ATL

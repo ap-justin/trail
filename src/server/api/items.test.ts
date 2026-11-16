@@ -134,7 +134,11 @@ test("PATCH /items/:key by a bot that doesn't own the product can't accept, canc
     { type: "issue", product: own.key, title: "owner decides" },
     filer.key,
   );
-  for (const json of [{ status: "open" }, { type: "todo" }]) {
+  for (const json of [
+    { status: "open" },
+    { status: "canceled" },
+    { type: "todo" },
+  ]) {
     const res = await request("PATCH", `/api/v1/items/${key}`, {
       json,
       key: outsider.key,
@@ -144,6 +148,33 @@ test("PATCH /items/:key by a bot that doesn't own the product can't accept, canc
   }
   const after = await request("GET", `/api/v1/items/${key}`);
   expect(await after.json()).toMatchObject({ type: "issue", status: "triage" });
+});
+
+test("PATCH /items/:key lets the filer cancel its own triage issue, and reopening it is the owner's", async () => {
+  const filer = addBot("rest cancel filer");
+  const { key } = await createItem(
+    { type: "issue", product: own.key, title: "filed in error" },
+    filer.key,
+  );
+  const canceled = await request("PATCH", `/api/v1/items/${key}`, {
+    json: { status: "canceled" },
+    key: filer.key,
+  });
+  expect(canceled.status).toBe(200);
+  expect(await canceled.json()).toMatchObject({ status: "canceled" });
+
+  const reopened = await request("PATCH", `/api/v1/items/${key}`, {
+    json: { status: "open" },
+    key: filer.key,
+  });
+  expect(reopened.status).toBe(403);
+  expect(((await reopened.json()) as Body).error.message).toBe(
+    `${key} was filed on ${own.key}, which tester owns, and was canceled: only tester reopens it. Comment on it with add_comment to ask tester`,
+  );
+  const byOwner = await request("PATCH", `/api/v1/items/${key}`, {
+    json: { status: "triage" },
+  });
+  expect(await byOwner.json()).toMatchObject({ status: "triage" });
 });
 
 test("an issue on a product the key doesn't reach is the 404 an unknown one is", async () => {
@@ -227,7 +258,7 @@ test("a todo is never in triage and never unassigned", async () => {
   });
   expect(triage.status).toBe(422);
   expect(((await triage.json()) as Body).error.message).toBe(
-    `${key} is a todo, and a todo is never in triage: send status open to accept it, or type issue to make it an issue first`,
+    `${key} is a todo, and a todo is never in triage: send type issue with status triage in the same update to put it in triage as an issue, or another status to keep it a todo`,
   );
   const unassigned = await request("PATCH", `/api/v1/items/${key}`, {
     json: { assignee: null },
@@ -240,6 +271,14 @@ test("a todo is never in triage and never unassigned", async () => {
     json: { type: "todo", product: own.key, title: "x", assignee: null },
   });
   expect(created.status).toBe(422);
+  const toTriage = await request("PATCH", `/api/v1/items/${key}`, {
+    json: { type: "issue", status: "triage" },
+  });
+  expect(toTriage.status).toBe(200);
+  expect(await toTriage.json()).toMatchObject({
+    type: "issue",
+    status: "triage",
+  });
 });
 
 test("PATCH /items/:key with an unknown status is a 422 and changes nothing", async () => {
@@ -425,6 +464,42 @@ test("a field sent under its old name is a 422 naming the field it became", asyn
   expect(((await unknown.json()) as Body).error.message).toBe(
     'Unrecognized key: "colour"',
   );
+});
+
+test("PATCH /items/:key by a bot outside the product creates no label, and says which it skipped; the owner's patch creates them", async () => {
+  const other = addBot("rest label patcher");
+  const { key } = await createItem(
+    { type: "issue", product: own.key, title: "patched labels" },
+    other.key,
+  );
+  for (const json of [
+    { addLabels: ["patched-in"] },
+    { labels: ["patched-in"] },
+  ]) {
+    const res = await request("PATCH", `/api/v1/items/${key}`, {
+      json,
+      key: other.key,
+    });
+    expect(res.status, JSON.stringify(json)).toBe(200);
+    expect(await res.json(), JSON.stringify(json)).toMatchObject({
+      labels: [],
+      skippedLabels: ["patched-in"],
+    });
+  }
+  const names = async () =>
+    (
+      (await (
+        await request("GET", `/api/v1/products/${own.key}/labels`)
+      ).json()) as Body
+    ).items.map((l: Body) => l.name);
+  expect(await names()).not.toContain("patched-in");
+  const byOwner = await request("PATCH", `/api/v1/items/${key}`, {
+    json: { addLabels: ["patched-in"] },
+  });
+  const body = (await byOwner.json()) as Body;
+  expect(body.labels).toEqual(["patched-in"]);
+  expect(body).not.toHaveProperty("skippedLabels");
+  expect(await names()).toContain("patched-in");
 });
 
 test("POST /items filing an issue on another bot's product creates no label, and says which it skipped", async () => {

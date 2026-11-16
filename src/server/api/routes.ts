@@ -93,7 +93,7 @@ export const forbiddenError = (
 
 /** The 403 a write only a product's owner makes adds to `forbiddenError`. */
 export const OWNER_ONLY =
-  "the product has an owner bot and the call is that bot's alone: adding a todo, moving an issue out of triage (its filer may cancel it), or changing an item's type; the message names the owner and what to do instead";
+  "the product has an owner bot and the call is that bot's alone: adding a todo, moving an issue out of triage (its filer may cancel it), reopening a canceled issue another bot filed, or changing an item's type; the message names the owner and what to do instead";
 
 /** Spread only into operations whose service call can throw `ConflictError`. */
 export const conflictError = {
@@ -133,7 +133,7 @@ export const itemParam = z.object({
     .openapi({
       param: { name: "key", in: "path" },
       description:
-        "The item's key (like TRL-12), its id, or its source key (like JUS-187, kept from an import). Looked up in that order, so a key beats a source key that looks the same.",
+        "The item's key (like TRL-12), its id, or its source key (the key it had in the system it was imported from, like ABC-187). Looked up in that order, so a key beats a source key that looks the same.",
       example: "TRL-12",
     }),
 });
@@ -145,7 +145,7 @@ export const issueParam = z.object({
     .openapi({
       param: { name: "id", in: "path" },
       description:
-        "The item's id, its key (like TRL-12) or its source key (like JUS-187, kept from an import).",
+        "The item's id, its key (like TRL-12) or its source key (the key it had in the system it was imported from, like ABC-187).",
       example: "TRL-12",
     }),
 });

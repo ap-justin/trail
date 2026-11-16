@@ -167,7 +167,7 @@ test("an entry that is neither a GitHub username nor an email address is a 422 s
 
 test.each([
   ["an email", "dana@example.com", "DANA@example.com", "dana@example.com"],
-  ["a GitHub username", "kai-dev", "Kai-Dev", "@kai-dev"],
+  ["a GitHub username", "beta-dev", "Beta-Dev", "@beta-dev"],
 ])(
   "inviting %s again, in any case, is a 409 naming it",
   async (_, first, again, named) => {
@@ -181,7 +181,7 @@ test.each([
       body: {
         error: {
           code: "conflict",
-          message: `${named} is already invited. Change their products in the list below.`,
+          message: `${named} is already invited: change their products in People.`,
         },
       },
     });

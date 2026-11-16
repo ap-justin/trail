@@ -714,10 +714,16 @@ export function createService({
       .get();
   }
 
+  /**
+   * The project with exactly this slug. A product key gets a 404 pointing to
+   * the caller's product argument, or, for a caller with none, saying that
+   * `slugOnly` (its tool and route) takes a project's slug.
+   */
   function resolveProject(
     tx: Tx | Db,
     slug: string,
     actor: ActingActor,
+    slugOnly?: string,
   ): ProjectRow {
     const found = findProject(tx, slug, actor);
     if (found) return found;
@@ -730,16 +736,19 @@ export function createService({
     // items carry their product's key as project, so a bot reading one sends it here
     if (named) {
       throw new NotFoundError(
-        `no project ${slug}: that is a product key, send it as product (product: "${named.key}")`,
+        slugOnly === undefined
+          ? `no project ${slug}: that is a product key, send it as product (product: "${named.key}")`
+          : `no project ${slug}: that is a product key, and ${slugOnly} takes a project's slug; list_projects (GET /projects) lists them`,
       );
     }
     throw noProject(slug);
   }
 
   /**
-   * A project by exact slug, or a product by key or id (the meaning `project`
-   * had before projects). A ref naming both, among those the actor reaches, is
-   * refused: an old client meaning the product must not edit the project.
+   * A project by exact slug, else a product by key or id (the meaning
+   * `project` had before projects). A slug matching a product's key predates
+   * the rule keeping them apart; the project wins, and the key in upper case,
+   * which no slug matches, still reaches the product.
    */
   function resolveProjectOrProduct(
     tx: Tx | Db,
@@ -747,25 +756,18 @@ export function createService({
     actor: ActingActor,
   ): { project: ProjectRow } | { product: Product } {
     const found = findProject(tx, ref, actor);
-    let named: Product | undefined;
+    if (found) return { project: found };
     try {
-      named = resolveProduct(tx, ref, actor);
+      return { product: resolveProduct(tx, ref, actor) };
     } catch (error) {
       if (!(error instanceof NotFoundError)) throw error;
     }
-    if (found && named) {
-      throw new ValidationError(
-        `${ref} names both project ${found.slug} and product ${named.key}, so it is refused rather than guessed: use get_product or update_product (/products/${named.key}) for the product; list_projects (GET /projects) lists the project, and list_products (GET /products) the products`,
-      );
-    }
-    if (found) return { project: found };
-    if (named) return { product: named };
     throw noProject(ref);
   }
 
   /**
    * The item the actor sees with this id, else this key (TRL-12, the product
-   * key in any case), else this source key (JUS-187, any case): a trail key
+   * key in any case), else this source key (ABC-187, any case): a trail key
    * wins over a source key that looks the same. Only visible items are
    * searched, so a hidden one shadows nothing.
    */
@@ -1004,6 +1006,16 @@ export function createService({
     );
   }
 
+  function ownerIdOf(tx: Tx | Db, productId: string): string | null {
+    return (
+      tx
+        .select({ ownerId: product.ownerId })
+        .from(product)
+        .where(eq(product.id, productId))
+        .get()?.ownerId ?? null
+    );
+  }
+
   /**
    * Refuses `actor` a write only the product's owner makes, unless the product
    * has no owner or `actor` is it; `refusal` words the 403 from the owner's name.
@@ -1025,11 +1037,19 @@ export function createService({
   }
 
   function productView(tx: Tx | Db, row: Product): ProductView {
-    const owner =
-      row.ownerId === null
-        ? null
-        : (actorRefs(tx, [row.ownerId]).get(row.ownerId) ?? null);
-    return { ...row, owner };
+    return productViews(tx, [row])[0] as ProductView;
+  }
+
+  /** `productView` of each row, in order, in one query however many rows. */
+  function productViews(tx: Tx | Db, rows: Product[]): ProductView[] {
+    const owners = actorRefs(
+      tx,
+      rows.map((r) => r.ownerId),
+    );
+    return rows.map((row) => ({
+      ...row,
+      owner: row.ownerId === null ? null : (owners.get(row.ownerId) ?? null),
+    }));
   }
 
   function statusUpdateViews(
@@ -1089,60 +1109,98 @@ export function createService({
     row: ProjectRow,
     actor: ActingActor,
   ): ProjectView {
+    return projectViews(tx, [row], actor)[0] as ProjectView;
+  }
+
+  const noItems = (): ItemCounts => ({
+    triage: 0,
+    open: 0,
+    in_progress: 0,
+    done: 0,
+    canceled: 0,
+  });
+
+  /** `projectView` of each row, in order, in a fixed number of queries however many rows. */
+  function projectViews(
+    tx: Tx | Db,
+    rows: ProjectRow[],
+    actor: ActingActor,
+  ): ProjectView[] {
+    if (rows.length === 0) return [];
+    const projectIds = rows.map((r) => r.id);
     const ids = visibleIdsOf(actor);
-    const all = tx
-      .select({ id: product.id, key: product.key, name: product.name })
+    const productsOf = new Map<
+      string,
+      { id: string; key: string; name: string }[]
+    >();
+    for (const { projectId, ...p } of tx
+      .select({
+        projectId: projectProduct.projectId,
+        id: product.id,
+        key: product.key,
+        name: product.name,
+      })
       .from(projectProduct)
       .innerJoin(product, eq(product.id, projectProduct.productId))
-      .where(eq(projectProduct.projectId, row.id))
+      .where(inArray(projectProduct.projectId, projectIds))
       .orderBy(asc(product.key))
-      .all();
-    const products = all.filter((p) => ids === null || ids.includes(p.id));
-    const counts: ItemCounts = {
-      triage: 0,
-      open: 0,
-      in_progress: 0,
-      done: 0,
-      canceled: 0,
-    };
-    for (const { status, n } of tx
-      .select({ status: issue.status, n: sql<number>`count(*)` })
+      .all()) {
+      productsOf.set(projectId, [...(productsOf.get(projectId) ?? []), p]);
+    }
+    const countsOf = new Map<string, ItemCounts>();
+    for (const { projectId, status, n } of tx
+      .select({
+        projectId: projectItem.projectId,
+        status: issue.status,
+        n: sql<number>`count(*)`,
+      })
       .from(projectItem)
       .innerJoin(issue, eq(issue.id, projectItem.issueId))
       .where(
         and(
-          eq(projectItem.projectId, row.id),
+          inArray(projectItem.projectId, projectIds),
           amongVisible(projectItem.productId, ids),
         ),
       )
-      .groupBy(issue.status)
+      .groupBy(projectItem.projectId, issue.status)
       .all()) {
+      const counts = countsOf.get(projectId) ?? noItems();
       counts[status] = n;
+      countsOf.set(projectId, counts);
     }
-    const latest = tx
+    const latestRows = tx
       .select()
       .from(projectStatusUpdate)
-      .where(eq(projectStatusUpdate.projectId, row.id))
-      .orderBy(
-        desc(projectStatusUpdate.createdAt),
-        desc(projectStatusUpdate.id),
+      .where(
+        and(
+          inArray(projectStatusUpdate.projectId, projectIds),
+          sql`${projectStatusUpdate.id} = (select s.id from project_status_update s where s.project_id = ${projectStatusUpdate.projectId} order by s.created_at desc, s.id desc limit 1)`,
+        ),
       )
-      .limit(1)
-      .get();
-    const refs = actorRefs(tx, [row.leadId, latest?.authorId ?? null]);
-    return {
-      ...row,
-      lead: refs.get(row.leadId) as ActorRef,
-      products,
-      hiddenProducts: products.length < all.length,
-      counts,
-      latestStatusUpdate: latest
-        ? {
-            ...(statusUpdateViews(tx, [latest])[0] as StatusUpdate),
-            author: refs.get(latest.authorId) as ActorRef,
-          }
-        : null,
-    };
+      .all();
+    const latestViews = statusUpdateViews(tx, latestRows);
+    const latestOf = new Map(
+      latestRows.map((r, i) => [r.projectId, latestViews[i] as StatusUpdate]),
+    );
+    const refs = actorRefs(tx, [
+      ...rows.map((r) => r.leadId),
+      ...latestRows.map((r) => r.authorId),
+    ]);
+    return rows.map((row) => {
+      const all = productsOf.get(row.id) ?? [];
+      const products = all.filter((p) => ids === null || ids.includes(p.id));
+      const latest = latestOf.get(row.id);
+      return {
+        ...row,
+        lead: refs.get(row.leadId) as ActorRef,
+        products,
+        hiddenProducts: products.length < all.length,
+        counts: countsOf.get(row.id) ?? noItems(),
+        latestStatusUpdate: latest
+          ? { ...latest, author: refs.get(latest.authorId) as ActorRef }
+          : null,
+      };
+    });
   }
 
   function findLabel(tx: Tx, projectId: string, name: string) {
@@ -1211,7 +1269,7 @@ export function createService({
   /**
    * The numbers of the issues an import creates, by externalRef. One whose
    * sourceKey, or with none its externalRef, is in the product's own key form
-   * (JUS-187) keeps that number, so its key still resolves; the product's
+   * (ABC-187) keeps that number, so its key still resolves; the product's
    * sequence moves up to the highest kept, then numbers the rest after it by
    * (createdAt, externalRef), whatever the payload order. One whose number
    * another issue already holds is numbered with the rest and listed in
@@ -1314,6 +1372,7 @@ export function createService({
           `product key ${input.key} is taken by product ${taken.id} ("${taken.name}", externalRef ${taken.externalRef ?? "none"}): send another key for ${input.externalRef}`,
         );
       }
+      requireKeyNoSlug(tx, input.key);
       tally.created.projects++;
       return tx
         .insert(product)
@@ -1330,6 +1389,13 @@ export function createService({
         .returning()
         .get();
     }
+    requireOwner(
+      tx,
+      actor,
+      existing.id,
+      (owner, key) =>
+        `${key} is owned by ${owner}, so only ${owner} imports into it: ask ${owner} to run this import, or file the work as issues with file_issue (POST /items with type issue), and ${owner} accepts them from triage`,
+    );
     if (existing.key !== input.key) {
       throw new ConflictError(
         `product ${input.externalRef} was imported with key ${existing.key}: send key ${existing.key}, since a product's key never changes`,
@@ -1636,11 +1702,34 @@ export function createService({
     projectId: string;
   };
 
-  /** A created item, with the label names an issue filed on another bot's product left off. */
-  type CreatedItem = Issue & { skippedLabels?: string[] };
+  /** A created or updated item, with the label names a bot outside its product sent that the product has no label for. */
+  type WrittenItem = Issue & { skippedLabels?: string[] };
+
+  /**
+   * The product's labels by these names; an `outsider` attaches only those the
+   * product has, the rest are `skipped`, while anyone else creates the missing.
+   */
+  function labelsFor(
+    tx: Tx,
+    productId: string,
+    names: string[],
+    outsider: boolean,
+  ): { labels: Label[]; skipped: string[] } {
+    if (!outsider) {
+      return { labels: labelsNamed(tx, productId, names), skipped: [] };
+    }
+    const found = names.map((name) => findLabel(tx, productId, name));
+    return {
+      labels: found.filter((l) => l !== undefined),
+      skipped: names.filter((_, i) => found[i] === undefined),
+    };
+  }
+
+  const withSkipped = (item: Issue, skipped: string[]): WrittenItem =>
+    skipped.length === 0 ? item : { ...item, skippedLabels: skipped };
 
   /** A stored replay from before items carried their product key and projects, brought to today's shape. */
-  function currentShape(item: CreatedItem | LegacyStoredItem): CreatedItem {
+  function currentShape(item: WrittenItem | LegacyStoredItem): WrittenItem {
     if ("productKey" in item) return item;
     const { projectId, ...stored } = item;
     // the stored item has no type: the one migration 0015 gave the row
@@ -1675,7 +1764,7 @@ export function createService({
       fallback?: (tx: Tx) => Product;
       typeOf: (target: Product) => IssueType;
     },
-  ): CreatedItem {
+  ): WrittenItem {
     if (actor.kind === "human" && input.assignee != null) {
       throw new ForbiddenError(
         "a person files an issue unassigned: drop the assignee, and the product's bot assigns it",
@@ -1777,26 +1866,19 @@ export function createService({
               .returning()
               .get();
             // a filer outside the product attaches the owner's labels, never adds its own to the set
-            const outsider =
-              type === "issue" &&
-              product.ownerId !== null &&
-              product.ownerId !== actor.id;
-            const found = outsider
-              ? labelNames.map((name) => findLabel(tx, product.id, name))
-              : labelsNamed(tx, product.id, labelNames);
-            const skipped = labelNames.filter((_, i) => found[i] === undefined);
-            setLabels(
+            const { labels, skipped } = labelsFor(
               tx,
-              row,
-              found.filter((l) => l !== undefined),
+              product.id,
+              labelNames,
+              type === "issue" &&
+                product.ownerId !== null &&
+                product.ownerId !== actor.id,
             );
+            setLabels(tx, row, labels);
             setLinks(tx, row.id, links);
             const created = hydrateOne(tx, row);
             return {
-              result:
-                skipped.length === 0
-                  ? created
-                  : { ...created, skippedLabels: skipped },
+              result: withSkipped(created, skipped),
               event: itemCreated(actor, created),
             };
           },
@@ -1827,21 +1909,45 @@ export function createService({
     actor: ActingActor,
     doing: string,
     slug: string,
+    slugOnly?: string,
   ): void {
     requireBot(actor, doing);
     requireAction(actor, "issues", doing, () =>
-      resolveProject(db, slug, actor),
+      resolveProject(db, slug, actor, slugOnly),
     );
   }
 
-  /** `base`, or `base-2`, `base-3`, ... : the first slug no project holds. */
+  /** The product whose key is `slug` in upper case: refs match keys in any case, so a slug never may. */
+  function productKeyedAs(tx: Tx, slug: string): Product | undefined {
+    return tx
+      .select()
+      .from(product)
+      .where(eq(product.key, slug.toUpperCase()))
+      .get();
+  }
+
+  /** Refuses a new product's key that is a project's slug in another case. */
+  function requireKeyNoSlug(tx: Tx, key: string): void {
+    const clash = tx
+      .select({ slug: project.slug })
+      .from(project)
+      .where(eq(project.slug, key.toLowerCase()))
+      .get();
+    if (clash) {
+      throw new ConflictError(
+        `product key ${key} is the slug of project ${clash.slug}, and a product's key never matches a project's slug: choose another key`,
+      );
+    }
+  }
+
+  /** `base`, or `base-2`, `base-3`, ... : the first slug no project holds and no product key matches. */
   function freeSlug(tx: Tx, base: string): string {
     const taken = (slug: string) =>
       tx
         .select({ id: project.id })
         .from(project)
         .where(eq(project.slug, slug))
-        .get() !== undefined;
+        .get() !== undefined || productKeyedAs(tx, slug) !== undefined;
     if (!taken(base)) return base;
     for (let n = 2; ; n++) {
       const suffix = `-${n}`;
@@ -1956,6 +2062,7 @@ export function createService({
                 `product key ${fields.key} is taken by product "${taken.name}": choose another key`,
               );
             }
+            requireKeyNoSlug(tx, fields.key);
             if (fields.externalRef !== null) {
               const twin = tx
                 .select()
@@ -2086,7 +2193,7 @@ export function createService({
             .limit(limit)
             .all(),
       );
-      return { ...found, items: found.items.map((p) => productView(db, p)) };
+      return { ...found, items: productViews(db, found.items) };
     },
 
     /**
@@ -2098,7 +2205,7 @@ export function createService({
       actor: ActingActor,
       input: ItemInput,
       options: WriteOptions = {},
-    ): CreatedItem {
+    ): WrittenItem {
       requireAction(actor, "issues", "add a todo", () =>
         input.product === undefined
           ? undefined
@@ -2116,7 +2223,7 @@ export function createService({
       actor: ActingActor,
       input: ItemInput,
       options: WriteOptions = {},
-    ): CreatedItem {
+    ): WrittenItem {
       const ref = input.product;
       if (ref === undefined || ref.trim() === "") {
         throw new ValidationError(
@@ -2137,7 +2244,7 @@ export function createService({
       actor: ActingActor,
       input: IssueInput,
       options: WriteOptions = {},
-    ): CreatedItem {
+    ): WrittenItem {
       requireAction(actor, "issues", "create an issue", () =>
         resolveProduct(db, input.projectId, actor),
       );
@@ -2166,7 +2273,7 @@ export function createService({
       ref: string,
       patch: IssuePatch,
       { legacy = false }: { legacy?: boolean } = {},
-    ): Issue {
+    ): WrittenItem {
       requireBot(actor, "update an item");
       requireAction(actor, "issues", "update an item", () =>
         resolveIssueRow(db, ref, actor),
@@ -2226,7 +2333,7 @@ export function createService({
         const type = patch.type ?? row.type;
         if (type === "todo" && status === "triage") {
           throw new ValidationError(
-            `${current.key} is a todo, and a todo is never in triage: send status open to accept it, or type issue to make it an issue first`,
+            `${current.key} is a todo, and a todo is never in triage: send type issue with status triage in the same update to put it in triage as an issue, or another status to keep it a todo`,
           );
         }
         let assigneeId =
@@ -2239,16 +2346,11 @@ export function createService({
           if (patch.assigneeId === null) {
             throw new ValidationError(
               legacy
-                ? `${current.key} is a todo, and a todo always has an assignee by design, so it can't be unassigned: reassign it by sending assigneeId with another bot's name or id (list_bots lists them)`
+                ? `${current.key} is a todo, and a todo always has an assignee, so it can't be unassigned: reassign it by sending assigneeId with another bot's name or id (list_bots lists them)`
                 : `${current.key} is a todo, and a todo always has an assignee: assign it to another bot, or send type issue to make it an unassigned issue`,
             );
           }
-          const owner = tx
-            .select({ ownerId: product.ownerId })
-            .from(product)
-            .where(eq(product.id, row.productId))
-            .get()?.ownerId;
-          assigneeId = owner ?? actor.id;
+          assigneeId = ownerIdOf(tx, row.productId) ?? actor.id;
         }
         const nextStatus =
           status ??
@@ -2277,6 +2379,21 @@ export function createService({
               `${current.key} is in the triage of ${key}, which ${owner} owns: only ${owner} accepts or cancels it, and its filer may cancel it. Comment on it with add_comment to ask ${owner}`,
           );
         }
+        // an issue filed from outside reached canceled through triage or after it, so reopening it decides triage again
+        if (
+          row.type === "issue" &&
+          row.status === "canceled" &&
+          nextStatus !== "canceled" &&
+          row.createdBy !== ownerIdOf(tx, row.productId)
+        ) {
+          requireOwner(
+            tx,
+            actor,
+            row.productId,
+            (owner, key) =>
+              `${current.key} was filed on ${key}, which ${owner} owns, and was canceled: only ${owner} reopens it. Comment on it with add_comment to ask ${owner}`,
+          );
+        }
         const fields = { ...next, type, status: nextStatus, assigneeId };
         const changes = changesOf<IssueRow>(row, fields);
         // the add and remove forms edit the set read here, under the write lock this transaction holds
@@ -2292,8 +2409,15 @@ export function createService({
                 "labels",
               ));
         let labels: Label[] | undefined;
+        let skipped: string[] = [];
         if (wantedLabels !== undefined) {
-          labels = labelsNamed(tx, row.productId, wantedLabels);
+          const ownerId = ownerIdOf(tx, row.productId);
+          ({ labels, skipped } = labelsFor(
+            tx,
+            row.productId,
+            wantedLabels,
+            ownerId !== null && ownerId !== actor.id,
+          ));
           const to = sortedNames(labels);
           if (!sameJson(current.labels, to)) {
             changes.labels = { from: current.labels, to };
@@ -2318,7 +2442,7 @@ export function createService({
           changes.links = { from: current.links, to: links };
         }
         if (isEmpty(changes)) {
-          return { result: current, event: null };
+          return { result: withSkipped(current, skipped), event: null };
         }
         const now = new Date();
         const updatedRow = tx
@@ -2334,7 +2458,7 @@ export function createService({
         if (labels && "labels" in changes) setLabels(tx, row, labels);
         if (links && "links" in changes) setLinks(tx, row.id, links);
         return {
-          result: hydrateOne(tx, updatedRow),
+          result: withSkipped(hydrateOne(tx, updatedRow), skipped),
           event: {
             actorId: actor.id,
             subjectType: "issue",
@@ -2620,6 +2744,13 @@ export function createService({
                 `slug ${slug} is taken by another project: choose another slug, or leave slug out to derive a free one from the name`,
               );
             }
+            const keyed =
+              slug === undefined ? undefined : productKeyedAs(tx, slug);
+            if (keyed) {
+              throw new ConflictError(
+                `slug ${slug} is the key of product ${keyed.key}, and a project's slug never matches a product's key: pick another slug, or leave slug out to derive a free one from the name`,
+              );
+            }
             const created = tx
               .insert(project)
               .values({
@@ -2826,10 +2957,7 @@ export function createService({
             .limit(limit)
             .all(),
       );
-      return {
-        ...found,
-        items: found.items.map((p) => projectView(db, p, actor)),
-      };
+      return { ...found, items: projectViews(db, found.items, actor) };
     },
 
     /**
@@ -2842,9 +2970,10 @@ export function createService({
       itemRefs: string[],
     ): { project: ProjectView; added: string[]; unchanged: string[] } {
       validItemRefs(itemRefs, "add_to_project");
-      requireProjectWrite(actor, "add items to a project", slug);
+      const takes = "add_to_project (POST /projects/{slug}/items)";
+      requireProjectWrite(actor, "add items to a project", slug, takes);
       return commit((tx) => {
-        const target = resolveProject(tx, slug, actor);
+        const target = resolveProject(tx, slug, actor, takes);
         const items = hydrate(tx, [
           ...new Map(
             itemRefs
@@ -2918,9 +3047,10 @@ export function createService({
       itemRefs: string[],
     ): { project: ProjectView; removed: string[]; unchanged: string[] } {
       validItemRefs(itemRefs, "remove_from_project");
-      requireProjectWrite(actor, "remove items from a project", slug);
+      const takes = "remove_from_project (DELETE /projects/{slug}/items/{key})";
+      requireProjectWrite(actor, "remove items from a project", slug, takes);
       return commit((tx) => {
-        const target = resolveProject(tx, slug, actor);
+        const target = resolveProject(tx, slug, actor, takes);
         const items = hydrate(tx, [
           ...new Map(
             itemRefs
@@ -3312,16 +3442,20 @@ export function createService({
         );
       }
       const limit = pageLimit(query.limit);
+      const named =
+        query.product === undefined
+          ? undefined
+          : resolveProduct(db, query.product, actor);
+      const group =
+        query.project === undefined
+          ? undefined
+          : resolveProject(db, query.project, actor);
       const filters: FeedFilters = {
-        projectId:
-          query.product === undefined
-            ? null
-            : resolveProduct(db, query.product, actor).id,
+        projectId: named?.id ?? null,
+        productKey: named?.key ?? null,
         actorId: query.actorId ?? null,
-        groupId:
-          query.project === undefined
-            ? null
-            : resolveProject(db, query.project, actor).id,
+        groupId: group?.id ?? null,
+        projectSlug: group?.slug ?? null,
       };
       const ids = visibleIdsOf(actor);
       const where: (SQL | undefined)[] = [

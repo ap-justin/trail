@@ -18,7 +18,7 @@ import type { ActivityEvent, ActorUpdate, EventBus } from "../events/bus.js";
 import type { FeedFilters } from "../service/paging.js";
 import { entriesByEvent } from "./entries.js";
 import { createWebRouter, type Member } from "./env.js";
-import { eventsAfter, feedFilters } from "./feed.js";
+import { eventsAfter, feedFilters, ofItemType } from "./feed.js";
 import { visibleIds } from "./visible.js";
 
 // under the idle timeout of Fly's proxy, which drops a stream that sends nothing
@@ -202,6 +202,32 @@ const matches = (filters: FeedFilters, event: ActivityEvent) =>
   (filters.groupId == null || event.projectId === filters.groupId) &&
   (filters.actorId === null || event.actorId === filters.actorId);
 
+/** Those of `events` the type filter keeps, read in one query: the item's type is the row's now. */
+function ofType(
+  db: Db,
+  filters: FeedFilters,
+  events: ActivityEvent[],
+): ActivityEvent[] {
+  if (filters.type == null || events.length === 0) return events;
+  const kept = new Set(
+    db
+      .select({ id: activityEvent.id })
+      .from(activityEvent)
+      .where(
+        and(
+          inArray(
+            activityEvent.id,
+            events.map((e) => e.id),
+          ),
+          ofItemType(filters.type),
+        ),
+      )
+      .all()
+      .map((e) => e.id),
+  );
+  return events.filter((e) => kept.has(e.id));
+}
+
 const newestSeq = (db: Db) =>
   db
     .select({ seq: max(activityEvent.seq) })
@@ -294,8 +320,10 @@ export function eventRoutes(
           if (fresh.length === 0) return;
           lastSeq = Math.max(...fresh.map((e) => e.seq));
           const visible = productsNow(db, member);
-          const shown = fresh.filter(
-            (e) => matches(filters, e) && mayShow(db, e, visible),
+          const shown = ofType(
+            db,
+            filters,
+            fresh.filter((e) => matches(filters, e) && mayShow(db, e, visible)),
           );
           for (const [i, entries] of entriesByEvent(db, shown).entries()) {
             for (const entry of entries) {

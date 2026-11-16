@@ -286,3 +286,88 @@ describe("GET /feed with projects", () => {
     ]);
   });
 });
+
+describe("GET /feed by item type", () => {
+  const seed = webSeed(request);
+  const typed = addProject("Typed");
+  let cookie = "";
+  const keys = { issue: "", todo: "", retyped: "" };
+  beforeAll(async () => {
+    cookie = await addMember("type-reader", [typed.id]);
+    keys.issue = await seed.item(typed.key, "issue");
+    keys.todo = await seed.item(typed.key, "todo");
+    const slug = await seed.project(
+      "Typed plan",
+      [typed.key],
+      [keys.issue, keys.todo],
+    );
+    await v1("PATCH", `/items/${keys.issue}`, { status: "open" });
+    await v1("POST", `/items/${keys.todo}/comments`, { body: "on the todo" });
+    await seed.statusUpdate({ product: typed.key }, "product news");
+    await v1("PATCH", `/projects/${slug}`, { goal: "typed goal" });
+    await v1("DELETE", `/projects/${slug}/items/${keys.issue}`);
+    keys.retyped = await seed.item(typed.key, "issue");
+    await v1("PATCH", `/items/${keys.retyped}`, { type: "todo" });
+  });
+
+  const feed = async (query: string) => {
+    const res = await request("GET", `/api/web/feed${query}`, {
+      key: null,
+      cookie,
+    });
+    return { status: res.status, body: (await res.json()) as Body };
+  };
+  const entries = (body: Body) =>
+    body.items.map((e: Body) => [e.kind, e.item?.key ?? null]);
+
+  test("type=issue keeps only the entries of items that are issues", async () => {
+    const { status, body } = await feed(`?product=${typed.key}&type=issue`);
+    expect(status).toBe(200);
+    expect(entries(body)).toEqual([
+      ["removed_from_project", keys.issue],
+      ["status_changed", keys.issue],
+      ["added_to_project", keys.issue],
+      ["item_created", keys.issue],
+    ]);
+  });
+
+  test("type=todo keeps only the entries of items that are todos now, a retyped item's included", async () => {
+    const { body } = await feed("?type=todo");
+    // accepting the issue as a todo opened and assigned it in the same change
+    expect(entries(body)).toEqual([
+      ["status_changed", keys.retyped],
+      ["type_changed", keys.retyped],
+      ["assignee_changed", keys.retyped],
+      ["item_created", keys.retyped],
+      ["comment", keys.todo],
+      ["added_to_project", keys.todo],
+      ["item_created", keys.todo],
+    ]);
+  });
+
+  test("without type the same feed shows the status updates and project events too", async () => {
+    const { body } = await feed("");
+    expect(body.items.map((e: Body) => e.kind)).toEqual(
+      expect.arrayContaining([
+        "product_status_update",
+        "project_updated",
+        "project_created",
+      ]),
+    );
+  });
+
+  test("a type other than issue or todo is a 422", async () => {
+    expect((await feed("?type=epic")).status).toBe(422);
+  });
+
+  test("a cursor goes back only with the type it was issued under", async () => {
+    const first = await feed("?limit=1&type=issue");
+    expect(
+      (await feed(`?limit=1&cursor=${first.body.nextCursor}`)).status,
+    ).toBe(422);
+    const next = await feed(
+      `?limit=1&type=issue&cursor=${first.body.nextCursor}`,
+    );
+    expect(entries(next.body)).toEqual([["status_changed", keys.issue]]);
+  });
+});

@@ -37,5 +37,5 @@ export const noIssue = (ref: string) =>
   notFound(
     "item",
     ref,
-    "pass the key (like TRL-12), the id or the source key (like JUS-187, kept from an import) of an item this key reaches; list_items (GET /api/v1/items) finds them",
+    "pass the key (like TRL-12), the id or the source key (the key it had in the system it was imported from, like ABC-187) of an item this key reaches; list_items (GET /api/v1/items) finds them",
   );

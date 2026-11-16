@@ -279,6 +279,66 @@ test("the actor and product filters narrow the stream like the feed's", async ()
   await stream.cancel();
 });
 
+test("a type filter keeps only its type's items, live and on resume, and no product's or project's own entry", async () => {
+  const p = addProject("StreamTyped");
+  await request("POST", "/api/v1/projects", {
+    json: { name: "Stream typed", products: [p.key] },
+  });
+  const item = async (type: string, title: string) => {
+    const res = await request("POST", "/api/v1/items", {
+      json: { type, product: p.key, title },
+    });
+    return ((await res.json()) as { key: string }).key;
+  };
+  const stream = await openStream(ownerCookie, {
+    query: `?product=${p.key}&type=todo`,
+  });
+  const issue = await item("issue", "an issue");
+  await request("POST", `/api/v1/products/${p.key}/status-updates`, {
+    json: { body: "news", health: "on_track" },
+  });
+  await request("POST", `/api/v1/items/${issue}/comments`, {
+    json: { body: "on the issue" },
+  });
+  const todo = await item("todo", "a todo");
+  const live = await stream.nextEntry();
+  expect(live).toMatchObject({
+    kind: "item_created",
+    item: { key: todo, type: "todo" },
+  });
+  await stream.cancel();
+
+  await request("POST", "/api/v1/projects/stream-typed/items", {
+    json: { items: [issue, todo] },
+  });
+  await request("PATCH", "/api/v1/projects/stream-typed", {
+    json: { goal: "typed" },
+  });
+  const resumed = await openStream(ownerCookie, {
+    query: "?type=issue",
+    lastEventId: live?.seq,
+  });
+  expect(await resumed.nextEntry()).toMatchObject({
+    kind: "added_to_project",
+    item: { key: issue, type: "issue" },
+  });
+  await item("issue", "live issue");
+  expect(await resumed.nextEntry()).toMatchObject({
+    kind: "item_created",
+    item: { title: "live issue", type: "issue" },
+  });
+  await resumed.cancel();
+});
+
+test("a type filter other than issue or todo, or beside only=actors, is a 422", async () => {
+  for (const query of ["?type=epic", "?only=actors&type=issue"]) {
+    const res = await app.request(`/api/web/events${query}`, {
+      headers: { cookie: ownerCookie },
+    });
+    expect(res.status, query).toBe(422);
+  }
+});
+
 afterEach(() => {
   vi.useRealTimers();
 });

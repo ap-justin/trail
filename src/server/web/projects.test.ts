@@ -275,6 +275,41 @@ describe("GET /projects/:slug/items", () => {
     expect(kept.status).toBe(200);
   });
 
+  test("a cursor issued under a filter pages on under that filter, the product in any case", async () => {
+    for (const product of [beta.key, beta.key.toLowerCase()]) {
+      const first = await get(
+        `/projects/launch/items?limit=1&product=${product}`,
+        member,
+      );
+      expect(first.body.groups[0].items.map((i: Body) => i.key)).toEqual([
+        keys.b2,
+      ]);
+      const next = await get(
+        `/projects/launch/items?limit=1&product=${product}&cursor=${first.body.nextCursor}`,
+        member,
+      );
+      expect(next.status, product).toBe(200);
+      expect(next.body).toMatchObject({
+        groups: [{ product: { key: beta.key }, items: [{ key: keys.b1 }] }],
+        nextCursor: null,
+      });
+    }
+    const typed = await get(
+      "/projects/launch/items?limit=1&type=issue",
+      member,
+    );
+    const nextTyped = await get(
+      `/projects/launch/items?limit=1&type=issue&cursor=${typed.body.nextCursor}`,
+      member,
+    );
+    expect(nextTyped.status).toBe(200);
+    expect(
+      [...typed.body.groups, ...nextTyped.body.groups].flatMap((g: Body) =>
+        g.items.map((i: Body) => i.key),
+      ),
+    ).toEqual([keys.a1, keys.b1]);
+  });
+
   test("a project with no items has no groups and zero counts", async () => {
     const { body } = await get("/projects/seen-only/items", member);
     expect(body.groups).toEqual([]);

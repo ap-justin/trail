@@ -78,7 +78,7 @@ test("a bot needs a display name", () => {
 });
 
 test("a human can be created with a GitHub id and has no key", () => {
-  const human = createHuman(db, { displayName: "Justin", githubId: 42 });
+  const human = createHuman(db, { displayName: "Pat", githubId: 42 });
   expect(human).toMatchObject({ kind: "human", githubId: 42 });
   const keys = db.select().from(apiKey).all();
   expect(keys.some((r) => r.actorId === human.id)).toBe(false);
@@ -104,7 +104,7 @@ describe("a key's scope", () => {
   });
 
   test("createBot stores the projects by id and the actions, both read back on the key", () => {
-    const { actor, key } = createBot(db, "bg-ivy", {
+    const { actor, key } = createBot(db, "bg-zeta", {
       scope: { projects: ["bgp", "OPS"], actions: ["comments", "read"] },
     });
     expect(authenticateKey(db, key)).toEqual({
@@ -149,7 +149,7 @@ describe("a key's scope", () => {
       }),
     ).toThrow(
       new ValidationError(
-        "no product with key NOPE, ZZ: scope the key to the keys of existing products, like TRL",
+        "no product NOPE, ZZ: scope the key to products that exist, which are BGP, OPS",
       ),
     );
     // listKeys joins api_key, so an orphaned bot row is only visible on actor

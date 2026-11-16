@@ -8,6 +8,7 @@ import {
   describe,
   expect,
   test,
+  vi,
 } from "vitest";
 import { migrate, openDatabase } from "../db/client.js";
 import { type ActivityEvent, createEventBus } from "../events/bus.js";
@@ -37,7 +38,7 @@ beforeEach(() => {
 });
 
 const bot = createBot(db, "builder").actor;
-const human = createHuman(db, { displayName: "Justin" });
+const human = createHuman(db, { displayName: "Pat" });
 
 /** Every activity event, newest first, across pages (a single page caps at 200). */
 function allActivity(): ActivityEvent[] {
@@ -865,7 +866,7 @@ test("whoami is the calling actor's row, label included", () => {
   expect(service.whoami(human)).toMatchObject({
     id: human.id,
     kind: "human",
-    displayName: "Justin",
+    displayName: "Pat",
     label: null,
   });
 });
@@ -888,4 +889,55 @@ test("listBots pages every bot oldest first, never a human", () => {
   expect(ids.indexOf(labelled.id)).toBe(1);
   expect(all[1]).toEqual({ ...labelled, photoUrl: null });
   expect(ids).toContain(bot.id);
+});
+
+describe("a page of projects or products", () => {
+  /** How many statements `read` prepares on the database connection. */
+  function statementsOf(read: () => unknown): number {
+    const prepare = vi.spyOn(db.$client, "prepare");
+    try {
+      read();
+      return prepare.mock.calls.length;
+    } finally {
+      prepare.mockRestore();
+    }
+  }
+
+  test("is read in as many statements for 50 rows as for 5", () => {
+    const lead = createBot(db, "batched lead").actor;
+    for (let n = 0; n < 50; n++) {
+      const owned = service.createProduct(lead, {
+        key: projectKey(),
+        name: `batched ${n}`,
+      });
+      service.createProject(lead, {
+        name: `batched ${n}`,
+        products: [owned.key],
+      });
+      service.addTodo(lead, { product: owned.key, title: `todo ${n}` });
+      if (n % 2 === 0) {
+        service.createStatusUpdate(lead, {
+          project: `batched-${n}`,
+          body: "going",
+          health: "on_track",
+        });
+      }
+    }
+    const projects = (limit: number) =>
+      statementsOf(() => {
+        const page = service.listProjects(lead, { limit });
+        expect(page.items).toHaveLength(limit);
+        expect(page.items.some((p) => p.latestStatusUpdate !== null)).toBe(
+          true,
+        );
+      });
+    const products = (limit: number) =>
+      statementsOf(() => {
+        const page = service.listProducts(lead, { limit });
+        expect(page.items).toHaveLength(limit);
+        expect(page.items[0]?.owner?.name).toBe("batched lead");
+      });
+    expect(projects(50)).toBe(projects(5));
+    expect(products(50)).toBe(products(5));
+  });
 });

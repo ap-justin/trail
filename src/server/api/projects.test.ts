@@ -89,6 +89,37 @@ test("POST /projects/{slug}/items adds items from two products and DELETE takes 
   expect(again).toMatchObject({ removed: [], unchanged: [own.key] });
 });
 
+test("a product key sent as the slug to add or take out items is a 404 saying the route takes a project's slug", async () => {
+  const todo = await json(
+    await request("POST", "/api/v1/items", {
+      json: { type: "todo", product: mine.key, title: "not a project" },
+    }),
+  );
+  for (const [method, path, json, route] of [
+    [
+      "POST",
+      `/api/v1/projects/${mine.key}/items`,
+      { items: [todo.key] },
+      "add_to_project (POST /projects/{slug}/items)",
+    ],
+    [
+      "DELETE",
+      `/api/v1/projects/${mine.key}/items/${todo.key}`,
+      undefined,
+      "remove_from_project (DELETE /projects/{slug}/items/{key})",
+    ],
+  ] as const) {
+    const res = await request(method, path, json ? { json } : {});
+    expect(res.status, method).toBe(404);
+    expect((await res.json()) as Body, method).toEqual({
+      error: {
+        code: "not_found",
+        message: `no project ${mine.key}: that is a product key, and ${route} takes a project's slug; list_projects (GET /projects) lists them`,
+      },
+    });
+  }
+});
+
 test("POST /projects/{slug}/items refuses more than 100 items and an empty list", async () => {
   for (const items of [[], Array.from({ length: 101 }, (_, i) => `X-${i}`)]) {
     const res = await request("POST", "/api/v1/projects/rest-items/items", {

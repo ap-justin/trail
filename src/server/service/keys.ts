@@ -97,8 +97,18 @@ function productIdsOf(tx: Tx, keys: string[] | undefined): string[] | null {
     .all();
   const unknown = wanted.filter((k) => !found.some((p) => p.key === k));
   if (unknown.length > 0) {
+    const existing = tx
+      .select({ key: product.key })
+      .from(product)
+      .orderBy(asc(product.key))
+      .all()
+      .map((p) => p.key);
     throw new ValidationError(
-      `no product with key ${unknown.join(", ")}: scope the key to the keys of existing products, like TRL`,
+      `no product ${unknown.join(", ")}: ${
+        existing.length === 0
+          ? "there is no product yet, so leave products out"
+          : `scope the key to products that exist, which are ${existing.join(", ")}`
+      }`,
     );
   }
   return found.map((p) => p.id);

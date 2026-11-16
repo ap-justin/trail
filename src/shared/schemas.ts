@@ -36,8 +36,8 @@ const priority = z.int().min(0).max(4).meta({
 const estimate = z.number().min(0).meta({ description: "Hours." });
 const externalRef = z.string().min(1).max(200).meta({
   description:
-    "The row's id in the system it came from, like JUS-167; unique within its scope, so a second create with it is a 409.",
-  example: "JUS-167",
+    "The row's id in the system it came from, like ABC-167; unique within its scope, so a second create with it is a 409.",
+  example: "ABC-167",
 });
 const labelName = z.string().min(1).max(100);
 const linkSchema = z
@@ -132,8 +132,8 @@ export const issueSchema = z
       .meta({ description: "The projects the item is in, by slug A to Z." }),
     sourceKey: z.string().nullable().meta({
       description:
-        "On an imported item, its key in the system it came from, uppercased (like JUS-187). Any argument or path that takes the item's id or key takes this too.",
-      example: "JUS-187",
+        "On an imported item, its key in the system it came from, uppercased (like ABC-187). Any argument or path that takes the item's id or key takes this too.",
+      example: "ABC-187",
     }),
     projectId: id.meta({ description: "Deprecated: the product's id." }),
     title: z.string(),
@@ -163,13 +163,18 @@ export const issueSchema = z
 
 const skippedLabels = z.array(z.string()).optional().meta({
   description:
-    "On an issue filed on a product another bot owns: the label names sent that the product has no label for. Only the product's own labels are attached, and none is created; left out when every name matched.",
+    "When the labels came from a bot other than the owner of the item's product: the names sent that the product has no label for. Only the product's own labels are attached, and none is created; left out when every name matched.",
 });
 
 /** The answer to a create: the item, with skippedLabels when some were left off. */
 export const createdItemSchema = issueSchema
   .extend({ skippedLabels })
   .openapi("CreatedItem");
+
+/** The answer to an update: the item, with skippedLabels when some were left off. */
+export const updatedItemSchema = issueSchema
+  .extend({ skippedLabels })
+  .openapi("UpdatedItem");
 
 export const legacyIssueSchema = issueSchema
   .extend({
@@ -187,6 +192,10 @@ export const legacyIssueSchema = issueSchema
 export const legacyCreatedItemSchema = legacyIssueSchema
   .extend({ skippedLabels })
   .openapi("LegacyCreatedItem");
+
+export const legacyUpdatedItemSchema = legacyIssueSchema
+  .extend({ skippedLabels })
+  .openapi("LegacyUpdatedItem");
 
 export const commentSchema = z
   .object({
@@ -317,7 +326,7 @@ export const activityEventSchema = z
         "The slug of the project on a project's own event and on project.item_added and project.item_removed; else null.",
     }),
     projectId: id.nullable().meta({
-      description: "Deprecated: the product's id, as in product.",
+      description: "Deprecated: the id of the product that product names.",
     }),
     action: z.string().meta({
       description:
@@ -625,7 +634,7 @@ const productFields = {
   name,
   key: productKey.meta({
     description:
-      "2 to 10 letters A-Z or digits, unique across products; lowercase is stored uppercased. Its items' keys are this, a dash and their number: TRL-12. Never changes.",
+      "2 to 10 letters A-Z or digits, unique across products and never a project's slug in any case (a 409); lowercase is stored uppercased. Its items' keys are this, a dash and their number: TRL-12. Never changes.",
     example: "TRL",
   }),
   description: text.optional(),
@@ -683,7 +692,7 @@ const projectFields = {
     .max(SLUG_MAX)
     .optional()
     .meta({
-      description: `How agents name the project: 2 to ${SLUG_MAX} lowercase letters, digits and hyphens, like launch-q4, unique. Left out, it is derived from the name (Launch Q4 gives launch-q4), with -2, -3 ... added when taken.`,
+      description: `How agents name the project: 2 to ${SLUG_MAX} lowercase letters, digits and hyphens, like launch-q4, unique, and never a product's key in any case (a 409). Left out, it is derived from the name (Launch Q4 gives launch-q4), with -2, -3 ... added when a project or a product's key holds it.`,
     }),
   goal: goal.optional(),
   lead: leadRef.optional().meta({
@@ -699,7 +708,7 @@ const projectFields = {
     .meta({
       description:
         "Keys (like TRL) of the products the project draws items from; the key must reach each. Left out: the one product you own. add_to_project adds an item's product by itself.",
-      example: ["TRL", "KRU"],
+      example: ["TRL", "ATL"],
     }),
 };
 
@@ -753,7 +762,7 @@ export const projectItemsSchema = z
       .meta({
         description:
           "Item keys like TRL-12, at most 100; items of several products may go together.",
-        example: ["TRL-12", "KRU-3"],
+        example: ["TRL-12", "ATL-3"],
       }),
   })
   .openapi("ProjectItems");
@@ -878,6 +887,8 @@ export const issueCreateSchema = z
   )
   .openapi("IssueCreate");
 
+const UPDATE_LABEL_NAMES =
+  "A name matches the product's label ignoring the case of A-Z. A new name creates the label, except on a product another bot owns: there only the product's labels attach, and the others are listed in skippedLabels.";
 const itemPatchFields = {
   title: title.optional(),
   description: text.optional(),
@@ -891,14 +902,13 @@ const itemPatchFields = {
     .meta({ description: "Hours; null clears." }),
   priority: priority.optional(),
   labels: labelNames.optional().meta({
-    description: "Replaces the item's labels; [] removes them all.",
+    description: `Replaces the item's labels; [] removes them all. ${UPDATE_LABEL_NAMES}`,
   }),
   links: links.optional().meta({
     description: "Replaces the item's links; [] removes them all.",
   }),
   addLabels: labelNames.optional().meta({
-    description:
-      "Labels to add, keeping the item's others, even those another bot added a moment ago. A name matches the product's label ignoring the case of A-Z; a new name creates the label. Not with labels.",
+    description: `Labels to add, keeping the item's others, even those another bot added a moment ago. ${UPDATE_LABEL_NAMES} Not with labels.`,
   }),
   removeLabels: z.array(labelName).max(50).optional().meta({
     description:
@@ -969,7 +979,7 @@ const sourceTimestamp = z.iso
   .meta({ example: "2026-01-02T03:04:05.000Z" });
 const sourceRef = z.string().min(1).max(200).meta({
   description:
-    "The row's id in the system it came from: Linear's id, a UUID, not an identifier like JUS-187, which Linear changes when an issue moves team. A re-run matches rows by it: the product across trail, an issue within its product, a comment within its issue, a status update within its product.",
+    "The row's id in the system it came from: Linear's id, a UUID, not an identifier like ABC-187, which Linear changes when an issue moves team. A re-run matches rows by it: the product across trail, an issue within its product, a comment within its issue, a status update within its product.",
   example: "2b5f6e1c-7d0a-4c3e-9f1b-8a6d4e2c1f07",
 });
 const sourceAuthorInput = z
@@ -1020,8 +1030,8 @@ const importIssueSchema = z
     sourceKey: z.string().optional().meta({
       pattern: "^[A-Za-z0-9]{2,10}-[1-9]\\d*$",
       description:
-        "The issue's key in the system it came from (Linear's identifier, like JUS-187; a letter-or-digit prefix, a dash and a number). It is stored uppercased, and the issue is found by it wherever an id or key is taken, after them: an id or key that looks the same wins; a re-run sets it to the value sent. When its prefix is the product's key, a new issue keeps that number, so JUS-187 in Linear is JUS-187 in trail; if another issue already holds the number, the new one gets the product's next number and is listed in the result's renumbered, and is reached by the key listed there, since its sourceKey finds the issue holding that key. An imported issue's number never changes on a re-run. Unique across trail. Without it, an externalRef shaped like JUS-187 keeps its number instead.",
-      example: "JUS-187",
+        "The issue's key in the system it came from (Linear's identifier, like ABC-187; a letter-or-digit prefix, a dash and a number). It is stored uppercased, and the issue is found by it wherever an id or key is taken, after them: an id or key that looks the same wins; a re-run sets it to the value sent. When its prefix is the product's key, a new issue keeps that number, so ABC-187 in Linear is ABC-187 in trail; if another issue already holds the number, the new one gets the product's next number and is listed in the result's renumbered, and is reached by the key listed there, since its sourceKey finds the issue holding that key. An imported issue's number never changes on a re-run. Unique across trail. Without it, an externalRef shaped like ABC-187 keeps its number instead.",
+      example: "ABC-187",
     }),
     title: z.string().meta({ description: "1 to 300 characters." }),
     description: importText("The issue's description").optional(),
@@ -1676,6 +1686,10 @@ const feedFilterQuery = {
     description:
       "A project's slug: its own events and its items being added or removed.",
   }),
+  type: itemTypeSchema.optional().meta({
+    description:
+      "issue or todo: only the entries of items of that type now (created, changed, commented on, added to or taken out of a project), and no product's or project's own entry.",
+  }),
 };
 
 export const feedQuerySchema = pageQuerySchema.extend(feedFilterQuery);
@@ -1692,9 +1706,10 @@ export const eventsQuerySchema = z
       q.only === undefined ||
       (q.actor === undefined &&
         q.product === undefined &&
-        q.project === undefined),
+        q.project === undefined &&
+        q.type === undefined),
     {
-      message: "only=actors takes no actor, product or project filter",
+      message: "only=actors takes no actor, product, project or type filter",
       path: ["only"],
     },
   );
