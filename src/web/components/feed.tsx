@@ -607,7 +607,7 @@ function sentenceFor(entry: EntryView): Sentence | null {
 const countOf = (n: number, noun: string) =>
   `${n} ${noun}${n === 1 ? "" : "s"}`;
 
-function RowTime({ iso, now }: { iso: string; now: Date }) {
+export function RowTime({ iso, now }: { iso: string; now: Date }) {
   return (
     <time dateTime={iso} title={formatAbsolute(iso)}>
       {formatRelative(iso, now)}
