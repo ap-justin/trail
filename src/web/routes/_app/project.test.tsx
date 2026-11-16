@@ -72,6 +72,22 @@ describe("project page", () => {
     expect(asked).toEqual(["product=TRL type=todo status=open"]);
   });
 
+  test("?product= in lowercase is that product, in the request and the filter", async () => {
+    signedInAs("member");
+    const asked = serveProject(
+      projectDetail({ products: [{ key: "ATL", name: "Atlas" }] }),
+    );
+    renderApp("/projects/human-ui?product=atl");
+    await waitFor(() =>
+      expect(asked).toEqual(["product=ATL type=null status=null"]),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getAllByRole("combobox", { name: "Filter by product" })[0],
+      ).toHaveTextContent("Atlas"),
+    );
+  });
+
   test("a product the project doesn't draw from, or an unknown type or status, is All", async () => {
     signedInAs("member");
     const asked = serveProject();
@@ -159,16 +175,35 @@ describe("while the next filter loads", () => {
 
   const allTab = () => screen.getByRole("tab", { name: /^All/ });
 
-  test("a new status tab keeps the last list and its counts", async () => {
+  test("a new status tab never shows the last list's group counts, which counted every status", async () => {
     signedInAs("member");
-    const release = serveHeld();
+    serveProject();
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.get("/api/web/projects/human-ui/items", async ({ request }) => {
+        const list = projectItems([{ product: trail, items: [todoRow()] }]);
+        if (new URL(request.url).searchParams.has("status")) {
+          await held;
+          return HttpResponse.json(list);
+        }
+        // under All the group counts its rows of every status
+        return HttpResponse.json({
+          ...list,
+          groups: list.groups.map((g) => ({ ...g, count: 3 })),
+        });
+      }),
+    );
     renderApp("/projects/human-ui");
-    expect(await screen.findAllByText(todoRow().title)).not.toHaveLength(0);
-    expect(allTab()).toHaveTextContent("2");
+    expect(await screen.findAllByText("3 items")).not.toHaveLength(0);
     await userEvent.click(screen.getByRole("tab", { name: /^Open/ }));
-    expect(screen.getAllByText(todoRow().title)).not.toHaveLength(0);
-    expect(allTab()).toHaveTextContent("2");
+    await waitFor(() =>
+      expect(screen.queryAllByText("3 items")).toHaveLength(0),
+    );
     release();
+    expect(await screen.findAllByText("1 item")).not.toHaveLength(0);
   });
 
   test("a new product drops the last counts, which counted the other products", async () => {

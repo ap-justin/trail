@@ -2,6 +2,7 @@ import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { keys } from "@/lib/queries";
 import {
   feedPage,
   notFound,
@@ -505,5 +506,184 @@ describe("the type filter", () => {
     await userEvent.click(await screen.findByRole("option", { name: "Todos" }));
     await waitFor(() => expect(asked.at(-1)?.get("type")).toBe("todo"));
     expect(FakeEventSource.current.url).toBe("/api/web/events?type=todo");
+  });
+});
+
+describe("filters in the URL", () => {
+  const atlas = { key: "ATL", name: "Atlas" };
+  const bastion = { key: "BTL", name: "Bastion" };
+
+  /** Answers /feed with `e2` and ATL and BTL as product options, recording each query. */
+  function serveNeutralFeed() {
+    const asked: URLSearchParams[] = [];
+    const page = feedPage([statusEntry("e2", minutesAgo(30))]);
+    server.use(
+      http.get("/api/web/feed", ({ request }) => {
+        asked.push(new URL(request.url).searchParams);
+        return HttpResponse.json({
+          ...page,
+          filters: { ...page.filters, products: [atlas, bastion] },
+        });
+      }),
+    );
+    return asked;
+  }
+
+  test("a link with ?product=atl&type=todo reads and streams the feed by both", async () => {
+    signedInAs("member");
+    const asked = serveNeutralFeed();
+    renderApp("/?product=atl&type=todo");
+    await waitFor(() => expect(rowFor("e2")).not.toBeNull());
+    expect(asked[0]?.get("product")).toBe("ATL");
+    expect(asked[0]?.get("type")).toBe("todo");
+    expect(FakeEventSource.current.url).toBe(
+      "/api/web/events?product=ATL&type=todo",
+    );
+  });
+
+  test("a filter picked survives going to another page and back", async () => {
+    signedInAs("member");
+    const asked = serveNeutralFeed();
+    server.use(
+      http.get("/api/web/products", () =>
+        HttpResponse.json({ items: [], nextCursor: null }),
+      ),
+    );
+    const { router } = renderApp("/");
+    await waitFor(() => expect(rowFor("e2")).not.toBeNull());
+    await userEvent.click(
+      screen.getByRole("combobox", { name: "Filter by product" }),
+    );
+    await userEvent.click(
+      await screen.findByRole("option", { name: "ATL Atlas" }),
+    );
+    await waitFor(() =>
+      expect(router.state.location.search).toEqual({ product: "ATL" }),
+    );
+
+    await router.navigate({ to: "/products" });
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe("/products"),
+    );
+    router.history.back();
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/"));
+    expect(router.state.location.search).toEqual({ product: "ATL" });
+    await waitFor(() =>
+      expect(FakeEventSource.current.url).toBe("/api/web/events?product=ATL"),
+    );
+    expect(asked.at(-1)?.get("product")).toBe("ATL");
+    await waitFor(() =>
+      expect(
+        screen.getByRole("combobox", { name: "Filter by product" }),
+      ).toHaveTextContent("Atlas"),
+    );
+  });
+
+  test("an empty value or an unknown type is no filter", async () => {
+    signedInAs("member");
+    const asked = serveNeutralFeed();
+    renderApp("/?product=&actor=&project=&type=epic");
+    await waitFor(() => expect(rowFor("e2")).not.toBeNull());
+    expect([...(asked[0]?.keys() ?? [])]).toEqual(["limit"]);
+    expect(FakeEventSource.current.url).toBe("/api/web/events");
+  });
+
+  test("choosing All takes the filter out of the URL and keeps the others", async () => {
+    signedInAs("member");
+    serveNeutralFeed();
+    const { router } = renderApp("/?product=ATL&type=todo");
+    await waitFor(() => expect(rowFor("e2")).not.toBeNull());
+    await userEvent.click(
+      screen.getByRole("combobox", { name: "Filter by type" }),
+    );
+    await userEvent.click(await screen.findByRole("option", { name: /^All/ }));
+    await waitFor(() =>
+      expect(router.state.location.search).toEqual({ product: "ATL" }),
+    );
+    await waitFor(() =>
+      expect(FakeEventSource.current.url).toBe("/api/web/events?product=ATL"),
+    );
+  });
+
+  test("a product found gone after another was picked leaves the new one", async () => {
+    signedInAs("member");
+    const page = feedPage([statusEntry("e2", minutesAgo(30))]);
+    const withProducts = {
+      ...page,
+      filters: { ...page.filters, products: [atlas, bastion] },
+    };
+    server.use(
+      http.get("/api/web/feed", () => HttpResponse.json(withProducts)),
+    );
+    const { router, queryClient } = renderApp("/?product=ATL");
+    await waitFor(() => expect(rowFor("e2")).not.toBeNull());
+    const filtered = FakeEventSource.current;
+    expect(filtered.url).toBe("/api/web/events?product=ATL");
+
+    // ATL's 404 waits until BTL has been picked
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let atlAsked = false;
+    server.use(
+      http.get("/api/web/feed", async ({ request }) => {
+        if (new URL(request.url).searchParams.get("product") !== "ATL") {
+          return HttpResponse.json(withProducts);
+        }
+        atlAsked = true;
+        await held;
+        return notFound();
+      }),
+    );
+    filtered.fail({ closed: true });
+    await waitFor(() => expect(atlAsked).toBe(true));
+    await userEvent.click(
+      screen.getByRole("combobox", { name: "Filter by product" }),
+    );
+    await userEvent.click(
+      await screen.findByRole("option", { name: "BTL Bastion" }),
+    );
+    await waitFor(() =>
+      expect(FakeEventSource.current.url).toBe("/api/web/events?product=BTL"),
+    );
+    release();
+
+    // the ATL read has answered 404; clearing on it would replace the URL straight after
+    const atlRead = keys.feed({
+      actor: null,
+      product: "ATL",
+      project: null,
+      type: null,
+    });
+    await waitFor(() =>
+      expect(queryClient.getQueryState(atlRead)?.status).toBe("error"),
+    );
+    await act(() => Promise.resolve());
+    expect(router.history.location.search).toBe("?product=BTL");
+    expect(router.state.location.search).toEqual({ product: "BTL" });
+    expect(FakeEventSource.current.url).toBe("/api/web/events?product=BTL");
+  });
+
+  test("a bot the feed no longer offers leaves the URL; one it offers stays", async () => {
+    signedInAs("member");
+    const asked = serveNeutralFeed();
+    const { router } = renderApp("/?actor=a-gone&type=todo");
+    await waitFor(() =>
+      expect(router.state.location.search).toEqual({ type: "todo" }),
+    );
+    await waitFor(() =>
+      expect(FakeEventSource.current.url).toBe("/api/web/events?type=todo"),
+    );
+    expect(asked.at(-1)?.has("actor")).toBe(false);
+
+    await router.navigate({ to: "/", search: { actor: "a-alpha" } });
+    await waitFor(() =>
+      expect(FakeEventSource.current.url).toBe("/api/web/events?actor=a-alpha"),
+    );
+    await waitFor(() => expect(asked.at(-1)?.get("actor")).toBe("a-alpha"));
+    await act(() => Promise.resolve());
+    expect(router.state.location.search).toEqual({ actor: "a-alpha" });
   });
 });

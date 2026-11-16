@@ -1554,7 +1554,7 @@ export const webItemSchema = z.object({
     .meta({ description: "Null: unassigned, which a todo never is." }),
   creator: webActorSchema.meta({
     description:
-      "Who reported the issue, or planned the todo: the byline reads `reported by` or `planned by` after `type`.",
+      "Who filed the issue, or planned the todo: the byline reads `filed by` or `planned by` after `type`.",
   }),
   sourceAuthor,
   createdAt: timestamp,

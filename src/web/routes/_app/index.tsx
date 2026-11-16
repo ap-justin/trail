@@ -1,28 +1,35 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
 import { AppPage, useChrome } from "@/app/chrome";
 import { FeedView, LiveIndicator } from "@/components/feed";
 import type { FeedFilter } from "@/lib/api";
+import { type FeedSearch, validateFeedSearch } from "@/lib/item-search";
 import { useLiveFeed } from "@/lib/use-live-feed";
 
 export const Route = createFileRoute("/_app/")({
+  validateSearch: validateFeedSearch,
   component: FeedPage,
 });
 
 function FeedPage() {
-  const [filter, setFilter] = useState<FeedFilter>({
-    actor: null,
-    product: null,
-    project: null,
-    type: null,
-  });
+  const search = Route.useSearch();
+  const navigate = Route.useNavigate();
+  const filter: FeedFilter = {
+    actor: search.actor ?? null,
+    product: search.product ?? null,
+    project: search.project ?? null,
+    type: search.type ?? null,
+  };
+  // replace: a filter is a view of this page, so Back leaves the feed rather than stepping through them
+  const setSearch = (change: (prev: FeedSearch) => FeedSearch) =>
+    void navigate({ search: change, replace: true });
   const { session } = useChrome();
   const feed = useLiveFeed(filter, {
     onFilterGone: (gone) =>
-      setFilter((f) => ({
-        ...f,
-        product: gone.product ? null : f.product,
-        project: gone.project ? null : f.project,
+      setSearch((prev) => ({
+        ...prev,
+        actor: prev.actor === gone.actor ? undefined : prev.actor,
+        product: prev.product === gone.product ? undefined : prev.product,
+        project: prev.project === gone.project ? undefined : prev.project,
       })),
   });
   const noProducts = !session.viewer.isOwner && session.products.length === 0;
@@ -55,14 +62,18 @@ function FeedPage() {
         productFilter={filter.product}
         projectFilter={filter.project}
         typeFilter={filter.type}
-        onActorFilterChange={(actor) => setFilter((f) => ({ ...f, actor }))}
+        onActorFilterChange={(actor) =>
+          setSearch((prev) => ({ ...prev, actor: actor ?? undefined }))
+        }
         onProductFilterChange={(product) =>
-          setFilter((f) => ({ ...f, product }))
+          setSearch((prev) => ({ ...prev, product: product ?? undefined }))
         }
         onProjectFilterChange={(project) =>
-          setFilter((f) => ({ ...f, project }))
+          setSearch((prev) => ({ ...prev, project: project ?? undefined }))
         }
-        onTypeFilterChange={(type) => setFilter((f) => ({ ...f, type }))}
+        onTypeFilterChange={(type) =>
+          setSearch((prev) => ({ ...prev, type: type ?? undefined }))
+        }
         onRetry={feed.retry}
         noProducts={noProducts}
       />

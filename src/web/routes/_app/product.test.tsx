@@ -118,6 +118,36 @@ describe("while the next filter loads", () => {
     release();
   });
 
+  test("the last list's page-cap line is not shown under the new tab", async () => {
+    signedInAs("member");
+    const { release, held } = serveHeld();
+    server.use(
+      http.get("/api/web/products/TRL/items", async ({ request }) => {
+        const query = new URL(request.url).searchParams;
+        if (query.get("status") === null) {
+          const n = Number(query.get("cursor") ?? 0);
+          const row = issueRow({ key: `TRL-${n}`, title: `Row ${n}` });
+          return HttpResponse.json({
+            ...issueList([row]),
+            nextCursor: `${n + 1}`,
+          });
+        }
+        await held;
+        return HttpResponse.json(issueList([]));
+      }),
+    );
+    renderApp("/products/TRL");
+    expect(
+      await screen.findAllByText(
+        `Only the first ${ITEM_PAGES_MAX} items are shown.`,
+      ),
+    ).not.toHaveLength(0);
+    await userEvent.click(screen.getByRole("tab", { name: /^Done/ }));
+    expect(selectedTab()).toMatch(/^Done/);
+    expect(screen.queryAllByText(/items are shown/)).toHaveLength(0);
+    release();
+  });
+
   test("another product's list is never shown while this one loads", async () => {
     signedInAs("member");
     const { release, held } = serveHeld();

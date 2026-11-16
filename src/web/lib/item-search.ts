@@ -26,6 +26,29 @@ export const validateItemSearch = (
   type: isType(search.type) ? search.type : undefined,
 });
 
+const nonEmpty = (value: unknown) =>
+  typeof value === "string" && value !== "" ? value : undefined;
+
+/** The feed's `?actor=`, `?product=`, `?project=` and `?type=`; absent is All. */
+export type FeedSearch = {
+  actor?: string;
+  /** Uppercase, as product keys are. */
+  product?: string;
+  /** A project slug. */
+  project?: string;
+  type?: ItemType;
+};
+
+/** The feed's filters; an empty value or an unknown type is All. */
+export const validateFeedSearch = (
+  search: Record<string, unknown>,
+): FeedSearch => ({
+  actor: nonEmpty(search.actor),
+  product: nonEmpty(search.product)?.toUpperCase(),
+  project: nonEmpty(search.project),
+  type: isType(search.type) ? search.type : undefined,
+});
+
 /** The filters back to search params, leaving All out of the URL. */
 export const itemSearchOf = (filters: ItemFilters): ItemSearch => ({
   ...(filters.status && { status: filters.status }),

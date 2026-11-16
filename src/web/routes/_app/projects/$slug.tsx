@@ -27,7 +27,11 @@ type ProjectSearch = ItemSearch & { product?: string };
 export const Route = createFileRoute("/_app/projects/$slug")({
   validateSearch: (search: Record<string, unknown>): ProjectSearch => ({
     ...validateItemSearch(search),
-    product: typeof search.product === "string" ? search.product : undefined,
+    // product keys are uppercase; the server reads ?product= in any case
+    product:
+      typeof search.product === "string"
+        ? search.product.toUpperCase()
+        : undefined,
   }),
   beforeLoad: ({ params, search }) => {
     if (productKey.test(params.slug)) {

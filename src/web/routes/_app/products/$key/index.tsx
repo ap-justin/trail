@@ -73,8 +73,9 @@ function ProductPage() {
         onRetryItems={() => void items.refetch()}
         onRetryStatusUpdates={() => void updates.refetch()}
         footer={
+          // the last filter's list stands in until this one loads, and its cap isn't this one's
           <RowsMissing
-            list={items.data}
+            list={items.isPlaceholderData ? undefined : items.data}
             shown={items.data?.items.length ?? 0}
           />
         }

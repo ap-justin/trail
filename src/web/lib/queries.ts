@@ -64,22 +64,6 @@ export const projectsQuery = queryOptions({
     (await readPages(api.projects, PROJECT_PAGES_MAX)).flatMap((p) => p.items),
 });
 
-/**
- * The last list read for the same `scope` (the query key up to its type and status) while
- * the next filter's loads, so tabs and counts stay put. The views filter rows by the active
- * filters, and counts don't follow type or status, so neither is wrong in the meantime.
- */
-const keepWithin =
-  (scope: readonly unknown[]) =>
-  <T>(
-    previous: T | undefined,
-    previousQuery?: { queryKey: readonly unknown[] },
-  ) =>
-    previousQuery &&
-    scope.every((part, i) => previousQuery.queryKey[i] === part)
-      ? previous
-      : undefined;
-
 /** Pages of a product's or project's items the page reads before it stops: neither has Load more. */
 export const ITEM_PAGES_MAX = 10;
 
@@ -100,7 +84,11 @@ export const productItemsQuery = (key: string, filters: ItemQuery) =>
         ...page,
         items: [...read.items, ...page.items],
       })),
-    placeholderData: keepWithin(["product", key, "items"]),
+    // the same product's last list while the next filter's loads, so tabs and counts stay
+    // put: the view filters rows by the active filters, and a product's counts don't follow
+    // type or status
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === key ? previous : undefined,
   });
 
 type ItemGroup = WebProjectItemsView["groups"][number];
@@ -136,8 +124,7 @@ export const projectItemsQuery = (slug: string, filters: ProjectItemQuery) =>
         ...page,
         groups: joinGroups(read.groups, page.groups),
       })),
-    // counts follow the product filter, so another product's list would miscount
-    placeholderData: keepWithin(["project", slug, "items", filters.product]),
+    // no placeholder: a group's count follows every filter, so any other list's would miscount
   });
 
 export const meQuery = queryOptions({

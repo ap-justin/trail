@@ -20,8 +20,11 @@ export const FRESH_MS = 2000;
 /** The wait before opening a new stream once the browser has given up on one. */
 export const RECONNECT_MS = 5000;
 
-/** Which feed filters named something the viewer can no longer see. */
-export type FilterGone = { product: boolean; project: boolean };
+/**
+ * The feed filter values found naming something the viewer can no longer see. The filter
+ * may have moved on while the check ran, so a caller clears only a filter still at its value.
+ */
+export type FilterGone = { actor?: string; product?: string; project?: string };
 
 export type LiveConnection = "connecting" | "open" | "reconnecting";
 
@@ -91,7 +94,7 @@ function arrivals(state: Arrivals, action: ArrivalAction): Arrivals {
  * The feed under `filter`: the newest page from `/feed`, with entries from the
  * `/events` stream merged on top. The stream reopens when the filter changes.
  * `onFilterGone` runs when the filtered product or project turns out to be hidden or missing,
- * naming which.
+ * or the filtered bot is no longer among the feed's options, with the value that was.
  */
 export function useLiveFeed(
   filter: FeedFilter,
@@ -206,10 +209,16 @@ export function useLiveFeed(
         feedGone({ actor, product: null, project, type }),
       ]);
       if (productGone || projectGone) {
-        onFilterGone({ product: productGone, project: projectGone });
+        onFilterGone({
+          ...(productGone && { product }),
+          ...(projectGone && { project }),
+        });
       }
     } else if (product !== null || project !== null) {
-      onFilterGone({ product: product !== null, project: project !== null });
+      onFilterGone({
+        product: product ?? undefined,
+        project: project ?? undefined,
+      });
     }
   });
 
@@ -251,6 +260,22 @@ export function useLiveFeed(
       clearTimeout(retry);
     };
   }, [actor, product, project, type, attempt]);
+
+  // the options list every bot acting in a visible product, whatever the filter
+  const actorOptions =
+    feed.isSuccess && !loading ? feed.data.filters.actors : null;
+  const goneActor =
+    actor !== null &&
+    actorOptions !== null &&
+    !actorOptions.some((a) => a.id === actor)
+      ? actor
+      : null;
+  const actorGone = useEffectEvent((gone: string) =>
+    onFilterGone({ actor: gone }),
+  );
+  useEffect(() => {
+    if (goneActor !== null) actorGone(goneActor);
+  }, [goneActor]);
 
   // the shell's own stream stays closed while this one carries the actor changes
   useEffect(() => holdFeedStream(), []);
