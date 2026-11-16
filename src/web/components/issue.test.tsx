@@ -133,6 +133,25 @@ describe("timeline", () => {
     expect(status).toHaveTextContent("changed status from Open to In progress");
   });
 
+  test("accepting an issue reads as a change from Triage, not Open to Open", () => {
+    const base = issue();
+    renderIssue({
+      issue: {
+        status: "ready",
+        data: {
+          ...base,
+          timeline: base.timeline.map((e) =>
+            e.kind === "status_changed"
+              ? { ...e, from: "triage", to: "open" }
+              : e,
+          ),
+        },
+      },
+    });
+    const status = entries().at(-1);
+    expect(status).toHaveTextContent("changed status from Triage to Open");
+  });
+
   test("comments have no edit or delete", () => {
     renderIssue();
     const [, , comment] = entries();

@@ -363,8 +363,9 @@ function changePhrase(entry: EntryView): ReactNode {
     case "status_changed":
       return (
         <>
-          changed status from {strong(statusLabel(entry.from))} to{" "}
-          <StatusLabel status={entry.to} className="text-sm font-medium" />
+          changed status from{" "}
+          {strong(entry.from === "triage" ? "Triage" : statusLabel(entry.from))}{" "}
+          to <StatusLabel status={entry.to} className="text-sm font-medium" />
         </>
       );
     case "type_changed":
