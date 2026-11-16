@@ -5,18 +5,18 @@ const { bot, request } = setupTestApp();
 
 let issueId = "";
 beforeAll(async () => {
-  const project = await request("POST", "/api/v1/projects", {
+  const project = await request("POST", "/api/v1/products", {
     json: { key: projectKey(), name: "comments" },
   });
   const { id: projectId } = (await project.json()) as { id: string };
-  const issue = await request("POST", "/api/v1/issues", {
-    json: { projectId, title: "talk about it" },
+  const issue = await request("POST", "/api/v1/items", {
+    json: { type: "todo", product: projectId, title: "talk about it" },
   });
   issueId = ((await issue.json()) as { id: string }).id;
 });
 
-test("POST /issues/:id/comments adds a comment as the bot and returns 201", async () => {
-  const res = await request("POST", `/api/v1/issues/${issueId}/comments`, {
+test("POST /items/:key/comments adds a comment as the bot and returns 201", async () => {
+  const res = await request("POST", `/api/v1/items/${issueId}/comments`, {
     json: { body: "  looks good\n" },
   });
   expect(res.status).toBe(201);
@@ -31,8 +31,8 @@ test("POST /issues/:id/comments adds a comment as the bot and returns 201", asyn
   });
 });
 
-test("POST /issues/:id/comments on an unknown issue is a 404", async () => {
-  const res = await request("POST", "/api/v1/issues/nope/comments", {
+test("POST /items/:key/comments on an unknown issue is a 404", async () => {
+  const res = await request("POST", "/api/v1/items/nope/comments", {
     json: { body: "hello?" },
   });
   expect(res.status).toBe(404);
@@ -40,42 +40,42 @@ test("POST /issues/:id/comments on an unknown issue is a 404", async () => {
     error: {
       code: "not_found",
       message:
-        "no issue nope: pass the id, the key (like TRL-12) or the source key (like JUS-187, kept from an import) of an existing issue",
+        "no item nope: pass the key (like TRL-12), the id or the source key (like JUS-187, kept from an import) of an item this key reaches; list_items (GET /api/v1/items) finds them",
     },
   });
 });
 
-test("POST /issues/:id/comments with a blank body is a 422", async () => {
+test("POST /items/:key/comments with a blank body is a 422", async () => {
   for (const body of ["", "   "]) {
-    const res = await request("POST", `/api/v1/issues/${issueId}/comments`, {
+    const res = await request("POST", `/api/v1/items/${issueId}/comments`, {
       json: { body },
     });
     expect(res.status).toBe(422);
   }
 });
 
-test("GET /issues/:id/comments lists the thread oldest first, paged", async () => {
+test("GET /items/:key/comments lists the thread oldest first, paged", async () => {
   const { id: projectId } = (await (
-    await request("POST", "/api/v1/projects", {
+    await request("POST", "/api/v1/products", {
       json: { key: projectKey(), name: "thread" },
     })
   ).json()) as { id: string };
   const { id: threadId } = (await (
-    await request("POST", "/api/v1/issues", {
-      json: { projectId, title: "thread" },
+    await request("POST", "/api/v1/items", {
+      json: { type: "todo", product: projectId, title: "thread" },
     })
   ).json()) as { id: string };
   await atFakeTimeAsync(
     ["first", "second", "third"].map(
       (body) => () =>
-        request("POST", `/api/v1/issues/${threadId}/comments`, {
+        request("POST", `/api/v1/items/${threadId}/comments`, {
           json: { body },
         }),
     ),
   );
   const first = await request(
     "GET",
-    `/api/v1/issues/${threadId}/comments?limit=2`,
+    `/api/v1/items/${threadId}/comments?limit=2`,
   );
   expect(first.status).toBe(200);
   const page = (await first.json()) as {
@@ -85,7 +85,7 @@ test("GET /issues/:id/comments lists the thread oldest first, paged", async () =
   expect(page.items.map((c) => c.body)).toEqual(["first", "second"]);
   const rest = await request(
     "GET",
-    `/api/v1/issues/${threadId}/comments?limit=2&cursor=${page.nextCursor}`,
+    `/api/v1/items/${threadId}/comments?limit=2&cursor=${page.nextCursor}`,
   );
   expect(await rest.json()).toMatchObject({
     items: [{ body: "third" }],
@@ -93,22 +93,22 @@ test("GET /issues/:id/comments lists the thread oldest first, paged", async () =
   });
 });
 
-test("GET /issues/:id/comments on an issue with none is one empty page", async () => {
-  const { projectId } = (await (
-    await request("GET", `/api/v1/issues/${issueId}`)
-  ).json()) as { projectId: string };
+test("GET /items/:key/comments on an issue with none is one empty page", async () => {
+  const { product: projectId } = (await (
+    await request("GET", `/api/v1/items/${issueId}`)
+  ).json()) as { product: string };
   const quiet = (await (
-    await request("POST", "/api/v1/issues", {
-      json: { projectId, title: "quiet" },
+    await request("POST", "/api/v1/items", {
+      json: { type: "todo", product: projectId, title: "quiet" },
     })
   ).json()) as { id: string };
-  const res = await request("GET", `/api/v1/issues/${quiet.id}/comments`);
+  const res = await request("GET", `/api/v1/items/${quiet.id}/comments`);
   expect(res.status).toBe(200);
   expect(await res.json()).toEqual({ items: [], nextCursor: null });
 });
 
-test("GET /issues/:id/comments on an unknown issue is a 404", async () => {
-  expect((await request("GET", "/api/v1/issues/nope/comments")).status).toBe(
+test("GET /items/:key/comments on an unknown issue is a 404", async () => {
+  expect((await request("GET", "/api/v1/items/nope/comments")).status).toBe(
     404,
   );
 });

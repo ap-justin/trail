@@ -45,11 +45,14 @@ test("POST /import upserts the project and answers the per-kind counts", async (
   expect(res.status).toBe(200);
   const body = (await res.json()) as Body;
   expect(body).toEqual({
-    project: expect.objectContaining({
+    product: expect.objectContaining({
       key: "IMP",
       externalRef: "P-JUS-9",
       createdBy: bot.actor.id,
+      // an import names no owner: its rows are issues, whoever imports them
+      owner: null,
     }),
+    project: body.product,
     renumbered: [],
     created: counts({ projects: 1, issues: 1, comments: 1, labels: 1 }),
     updated: counts({}),

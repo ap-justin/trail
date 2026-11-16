@@ -128,9 +128,9 @@ async function everyItem(path: string, key: string, param = "cursor") {
   throw new Error(`${path} did not end`);
 }
 
-test("lists show a scoped key only its projects and their issues", async () => {
+test("lists show a scoped key only its products and their items", async () => {
   const b = await hiddenProject();
-  const projects = await everyItem("/projects?limit=1", scoped.key);
+  const projects = await everyItem("/products?limit=1", scoped.key);
   expect(projects.map((p) => p.key)).toEqual([a.key]);
   const all = await everyItem("/issues", (await unscopedKey()).key);
   const inA = all.filter((i) => i.projectId === a.id).map((i) => i.key);
@@ -361,7 +361,7 @@ test("a key limited to projects can't create one, even with admin, and learns no
   const refusal = {
     error: {
       code: "forbidden_scope",
-      message: `this key may not create a project: it reaches only project ${a.key}. Ask whoever minted the key for one with no project list.`,
+      message: `this key may not create a product: it reaches only product ${a.key}. Ask whoever minted the key for one with no product list.`,
     },
   };
   for (const key of [projectKey(), b.project.key]) {
@@ -411,7 +411,7 @@ test("a key limited to projects imports into them, and an import outside them is
   const refusal = {
     error: {
       code: "forbidden_scope",
-      message: `this key may not import a project outside projects ${[a.key, inside].sort().join(" and ")}. Ask whoever minted the key for one that lists the project, or no project list.`,
+      message: `this key may not import a product outside products ${[a.key, inside].sort().join(" and ")}. Ask whoever minted the key for one that lists the product, or no product list.`,
     },
   };
   for (const json of [
@@ -437,7 +437,13 @@ test("whoami reports the calling key's scope, null where it is unrestricted", as
     kind: "bot",
     name: "bg-ivy",
     label: null,
-    scope: { projects: [a.key], actions: ["read", "issues", "comments"] },
+    scope: {
+      products: [a.key],
+      projects: [a.key],
+      actions: ["read", "issues", "comments"],
+    },
+    ownProducts: [],
+    products: [{ key: a.key, name: "A" }],
     photoUrl: null,
     title: null,
   });
@@ -445,6 +451,7 @@ test("whoami reports the calling key's scope, null where it is unrestricted", as
     key: (await unscopedKey()).key,
   });
   expect(((await unscopedMe.json()) as Body).scope).toEqual({
+    products: null,
     projects: null,
     actions: null,
   });
@@ -469,31 +476,49 @@ test("the spec documents each gated operation's 403 with the action it needs", a
   const needs = (action: string) =>
     `The key lacks the ${action} action (code forbidden_action)`;
   const orScope = (action: string) =>
-    `${needs(action)}, or reaches only some projects (code forbidden_scope)`;
+    `${needs(action)}, or reaches only some products (code forbidden_scope)`;
   expect(forbidden).toEqual({
     "GET /activity": needs("read"),
     "GET /bots": needs("admin"),
+    "GET /items": needs("read"),
+    "GET /items/{key}": needs("read"),
+    "GET /items/{key}/comments": needs("read"),
     "GET /issues": needs("read"),
     "GET /issues/{id}": needs("read"),
     "GET /issues/{id}/comments": needs("read"),
+    "GET /products": needs("read"),
+    "GET /products/{key}": needs("read"),
+    "GET /products/{key}/labels": needs("read"),
+    "GET /products/{key}/status-updates": needs("read"),
     "GET /projects": needs("read"),
-    "GET /projects/{id}": needs("read"),
-    "GET /projects/{id}/labels": needs("read"),
-    "GET /projects/{id}/status-updates": needs("read"),
+    "GET /projects/{ref}": needs("read"),
+    "GET /projects/{ref}/labels": needs("read"),
+    "GET /projects/{ref}/status-updates": needs("read"),
     "GET /whoami": null,
     "GET /photos/{actorId}/{hash}": null,
     "DELETE /me/photo": null,
     "PUT /me/photo": null,
     "DELETE /me/title": null,
     "PUT /me/title": null,
+    "PATCH /items/{key}": needs("issues"),
     "PATCH /issues/{id}": needs("issues"),
-    "PATCH /projects/{id}": needs("admin"),
+    "PATCH /products/{key}": needs("admin"),
+    "PATCH /projects/{ref}":
+      "The key lacks the issues action, or for a product key the admin action (code forbidden_action)",
     "POST /import": orScope("admin"),
+    "POST /items": needs("issues"),
+    "POST /items/{key}/comments": needs("comments"),
     "POST /issues": needs("issues"),
     "POST /issues/{id}/comments": needs("comments"),
-    "POST /projects": orScope("admin"),
-    "POST /projects/{id}/labels": needs("admin"),
-    "POST /projects/{id}/status-updates": needs("status_updates"),
+    "POST /products": orScope("admin"),
+    "POST /products/{key}/labels": needs("admin"),
+    "POST /products/{key}/status-updates": needs("status_updates"),
+    "POST /projects":
+      "The key lacks the issues action, or with key the admin action (code forbidden_action), or with key reaches only some products (code forbidden_scope)",
+    "POST /projects/{ref}/labels": needs("admin"),
+    "POST /projects/{ref}/status-updates": needs("status_updates"),
+    "POST /projects/{slug}/items": needs("issues"),
+    "DELETE /projects/{slug}/items/{key}": needs("issues"),
     "GET /webhooks": needs("read"),
     "POST /webhooks": needs("read"),
     "GET /webhooks/{id}": needs("read"),

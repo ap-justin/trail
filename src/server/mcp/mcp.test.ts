@@ -84,28 +84,39 @@ test("tools/list offers one tool per operation, none naming who writes", async (
   const { tools } = await client.listTools();
   expect(tools.map((t) => t.name).sort()).toEqual(
     [
+      "add_todo",
+      "file_issue",
+      "get_item",
+      "update_item",
+      "list_items",
       "add_comment",
-      "create_issue",
-      "create_label",
-      "create_project",
-      "get_issue",
-      "get_project",
-      "import_project",
-      "list_activity",
-      "list_bots",
       "list_comments",
-      "list_issues",
-      "list_labels",
+      "create_project",
+      "update_project",
+      "add_to_project",
+      "remove_from_project",
       "list_projects",
-      "list_status_updates",
+      "get_project",
+      "list_products",
+      "get_product",
+      "create_product",
+      "update_product",
       "post_status_update",
+      "list_status_updates",
+      "create_label",
+      "list_labels",
+      "list_activity",
+      "whoami",
+      "list_bots",
+      "import_project",
+      "create_issue",
+      "get_issue",
+      "update_issue",
+      "list_issues",
       "clear_my_photo",
       "set_my_photo",
       "clear_my_title",
       "set_my_title",
-      "update_issue",
-      "update_project",
-      "whoami",
       "create_webhook",
       "list_webhooks",
       "update_webhook",
@@ -128,7 +139,7 @@ test("tools/list offers one tool per operation, none naming who writes", async (
 test("tool arguments carry the shared schemas' descriptions", async () => {
   const client = await connect(bot.key);
   const { tools } = await client.listTools();
-  const createIssue = tools.find((t) => t.name === "create_issue");
+  const createIssue = tools.find((t) => t.name === "add_todo");
   const props = createIssue?.inputSchema.properties as Record<
     string,
     { description?: string }
@@ -157,38 +168,71 @@ async function callError(client: Client, name: string, args: Body = {}) {
   return (result.content as { text: string }[])[0]?.text;
 }
 
-test("project tools create, get, list and update as the key's bot; a retried create returns the first", async () => {
-  const other = createBot(db, "mcp project bot");
+test("product tools create, get, list and update as the key's bot; a retried create returns the first", async () => {
+  const other = createBot(db, "mcp product bot");
   const client = await connect(other.key);
   const args = { key: "MCP", name: "over mcp", idempotency_key: "run-1" };
-  const created = await call(client, "create_project", args);
+  const created = await call(client, "create_product", args);
   expect(created).toMatchObject({
     key: "MCP",
     name: "over mcp",
+    owner: { id: other.actor.id, name: "mcp product bot", kind: "bot" },
+    repoUrl: null,
     createdBy: other.actor.id,
   });
-  expect(await call(client, "create_project", args)).toEqual(created);
+  expect(await call(client, "create_product", args)).toEqual(created);
 
-  expect(await call(client, "get_project", { projectId: "mcp" })).toEqual(
+  expect(await call(client, "get_product", { product: "mcp" })).toEqual(
     created,
   );
-  const listed = await call(client, "list_projects", { limit: 200 });
+  const listed = await call(client, "list_products", { limit: 200 });
   expect(
     listed.items.filter((p: Body) => p.key === "MCP").map((p: Body) => p.id),
   ).toEqual([created.id]);
   expect(
-    await call(client, "update_project", {
-      projectId: "MCP",
+    await call(client, "update_product", {
+      product: "MCP",
       name: "renamed",
+      repoUrl: "https://github.com/acme/mcp.git",
+      owner: "TESTER",
     }),
-  ).toMatchObject({ id: created.id, name: "renamed" });
+  ).toMatchObject({
+    id: created.id,
+    name: "renamed",
+    repoUrl: "https://github.com/acme/mcp",
+    owner: { id: bot.actor.id, name: "tester", kind: "bot" },
+  });
+});
+
+test("update_product refuses a repoUrl that is not a GitHub repository and an owner that is no bot", async () => {
+  const client = await connect(bot.key);
+  await call(client, "create_product", { key: "MCG", name: "repo" });
+  expect(
+    await callError(client, "update_product", {
+      product: "MCG",
+      repoUrl: "https://gitlab.com/acme/trail",
+    }),
+  ).toBe(
+    'validation_failed: repoUrl must be a GitHub repository as https://github.com/<owner>/<name>, like https://github.com/acme/trail; got "https://gitlab.com/acme/trail". Send null to clear it',
+  );
+  expect(
+    await callError(client, "update_product", {
+      product: "MCG",
+      owner: "nobody here",
+    }),
+  ).toBe(
+    "validation_failed: owner names no bot nobody here: pass a bot's name or id (list_bots lists them, and whoami gives your own)",
+  );
+  expect(
+    await call(client, "update_product", { product: "MCG", owner: null }),
+  ).toMatchObject({ owner: null });
 });
 
 test("issue tools file, read, list and update an issue with its fields, labels and links", async () => {
   const client = await connect(bot.key);
-  await call(client, "create_project", { key: "MCI", name: "issues" });
-  const created = await call(client, "create_issue", {
-    projectId: "MCI",
+  await call(client, "create_product", { key: "MCI", name: "issues" });
+  const created = await call(client, "add_todo", {
+    product: "MCI",
     title: "wire it",
     estimate: 1.5,
     priority: 2,
@@ -205,12 +249,10 @@ test("issue tools file, read, list and update an issue with its fields, labels a
     createdBy: bot.actor.id,
     completedAt: null,
   });
-  expect(await call(client, "get_issue", { issueId: "MCI-1" })).toEqual(
-    created,
-  );
+  expect(await call(client, "get_item", { item: "MCI-1" })).toEqual(created);
 
-  const done = await call(client, "update_issue", {
-    issueId: "mci-1",
+  const done = await call(client, "update_item", {
+    item: "mci-1",
     status: "done",
     labels: ["api", "shipped"],
   });
@@ -219,77 +261,77 @@ test("issue tools file, read, list and update an issue with its fields, labels a
     labels: ["api", "shipped"],
     completedAt: expect.any(String),
   });
-  const listed = await call(client, "list_issues", {
-    projectId: "MCI",
+  const listed = await call(client, "list_items", {
+    product: "MCI",
     status: "done",
   });
   expect(listed.items.map((i: Body) => i.key)).toEqual(["MCI-1"]);
   expect(
-    (await call(client, "list_issues", { projectId: "MCI", status: "open" }))
+    (await call(client, "list_items", { product: "MCI", status: "open" }))
       .items,
   ).toEqual([]);
 });
 
 test("comment, label and status update tools write and list", async () => {
   const client = await connect(bot.key);
-  await call(client, "create_project", { key: "MCC", name: "threads" });
-  await call(client, "create_issue", { projectId: "MCC", title: "talk" });
+  await call(client, "create_product", { key: "MCC", name: "threads" });
+  await call(client, "add_todo", { product: "MCC", title: "talk" });
   const comment = await call(client, "add_comment", {
-    issueId: "MCC-1",
+    item: "MCC-1",
     body: "first",
     idempotency_key: "c-1",
   });
   expect(comment).toMatchObject({ body: "first", authorId: bot.actor.id });
   expect(
     await call(client, "add_comment", {
-      issueId: "MCC-1",
+      item: "MCC-1",
       body: "first",
       idempotency_key: "c-1",
     }),
   ).toEqual(comment);
   expect(
-    (await call(client, "list_comments", { issueId: "MCC-1" })).items,
+    (await call(client, "list_comments", { item: "MCC-1" })).items,
   ).toEqual([comment]);
 
   const label = await call(client, "create_label", {
-    projectId: "MCC",
+    product: "MCC",
     name: "Bug",
   });
-  expect(
-    (await call(client, "list_labels", { projectId: "MCC" })).items,
-  ).toEqual([label]);
+  expect((await call(client, "list_labels", { product: "MCC" })).items).toEqual(
+    [label],
+  );
 
   const update = await call(client, "post_status_update", {
-    projectId: "MCC",
+    product: "MCC",
     body: "on schedule",
     health: "on_track",
   });
   expect(update).toMatchObject({ health: "on_track", authorId: bot.actor.id });
   expect(
-    (await call(client, "list_status_updates", { projectId: "MCC" })).items,
+    (await call(client, "list_status_updates", { product: "MCC" })).items,
   ).toEqual([update]);
 });
 
 test("list_activity resumes after a cursor and refuses it under other filters", async () => {
   const client = await connect(bot.key);
-  const project = await call(client, "create_project", {
+  const project = await call(client, "create_product", {
     key: "MCA",
     name: "feed",
   });
-  await call(client, "create_issue", { projectId: "MCA", title: "one" });
+  await call(client, "add_todo", { product: "MCA", title: "one" });
   const start = await call(client, "list_activity", {
     after: "",
-    projectId: "MCA",
+    product: "MCA",
   });
   expect(start.items.map((e: Body) => e.action)).toEqual([
-    "project.created",
+    "product.created",
     "issue.created",
   ]);
 
-  await call(client, "create_issue", { projectId: "MCA", title: "two" });
+  await call(client, "add_todo", { product: "MCA", title: "two" });
   const resumed = await call(client, "list_activity", {
     after: start.nextCursor,
-    projectId: project.id,
+    product: project.id,
   });
   expect(resumed.items.map((e: Body) => e.payload.title)).toEqual(["two"]);
 
@@ -302,57 +344,57 @@ test("list_activity resumes after a cursor and refuses it under other filters", 
 
 test("list_activity refuses a cursor sent on the other parameter, naming the one to use", async () => {
   const client = await connect(bot.key);
-  await call(client, "create_project", { key: "MCD", name: "direction" });
-  await call(client, "create_issue", { projectId: "MCD", title: "one" });
+  await call(client, "create_product", { key: "MCD", name: "direction" });
+  await call(client, "add_todo", { product: "MCD", title: "one" });
   const oldestFirst = await call(client, "list_activity", {
     after: "",
-    projectId: "MCD",
+    product: "MCD",
   });
   const newestFirst = await call(client, "list_activity", {
     limit: 1,
-    projectId: "MCD",
+    product: "MCD",
   });
 
   expect(
     await callError(client, "list_activity", {
       cursor: oldestFirst.nextCursor,
-      projectId: "MCD",
+      product: "MCD",
     }),
   ).toMatch(/^validation_failed: .*: send it as after, not as cursor$/);
   expect(
     await callError(client, "list_activity", {
       after: newestFirst.nextCursor,
-      projectId: "MCD",
+      product: "MCD",
     }),
   ).toMatch(/^validation_failed: .*: send it as cursor, not as after$/);
 });
 
 test("a retried create on the other create tools returns the first and writes nothing more", async () => {
   const client = await connect(createBot(db, "mcp retry bot").key);
-  await call(client, "create_project", { key: "MCR", name: "retries" });
+  await call(client, "create_product", { key: "MCR", name: "retries" });
   const issues = (id: string) => ({
-    projectId: "MCR",
+    product: "MCR",
     title: id,
     idempotency_key: id,
   });
   const creates: [string, Body, string, Body][] = [
-    ["create_issue", issues("r-issue"), "list_issues", { projectId: "MCR" }],
+    ["add_todo", issues("r-issue"), "list_items", { product: "MCR" }],
     [
       "create_label",
-      { projectId: "MCR", name: "Retry", idempotency_key: "r-label" },
+      { product: "MCR", name: "Retry", idempotency_key: "r-label" },
       "list_labels",
-      { projectId: "MCR" },
+      { product: "MCR" },
     ],
     [
       "post_status_update",
       {
-        projectId: "MCR",
+        product: "MCR",
         body: "steady",
         health: "on_track",
         idempotency_key: "r-status",
       },
       "list_status_updates",
-      { projectId: "MCR" },
+      { product: "MCR" },
     ],
   ];
   for (const [tool, args, list, listArgs] of creates) {
@@ -364,21 +406,21 @@ test("a retried create on the other create tools returns the first and writes no
 
 test("an idempotency_key reused with a changed body is a tool error and writes nothing", async () => {
   const client = await connect(createBot(db, "mcp reuse bot").key);
-  await call(client, "create_project", { key: "MCK", name: "reuse" });
-  await call(client, "create_issue", {
-    projectId: "MCK",
+  await call(client, "create_product", { key: "MCK", name: "reuse" });
+  await call(client, "add_todo", {
+    product: "MCK",
     title: "first",
     idempotency_key: "reused",
   });
   expect(
-    await callError(client, "create_issue", {
-      projectId: "MCK",
+    await callError(client, "add_todo", {
+      product: "MCK",
       title: "changed",
       idempotency_key: "reused",
     }),
   ).toMatch(/^idempotency_key_reused: /);
   expect(
-    (await call(client, "list_issues", { projectId: "MCK" })).items.map(
+    (await call(client, "list_items", { product: "MCK" })).items.map(
       (i: Body) => i.title,
     ),
   ).toEqual(["first"]);
@@ -387,18 +429,18 @@ test("an idempotency_key reused with a changed body is a tool error and writes n
 test("a key revoked after the client connected is refused on the next call and writes nothing", async () => {
   const other = createBot(db, "mcp revoked later");
   const client = await connect(other.key);
-  await call(client, "create_project", { key: "MCV", name: "before" });
+  await call(client, "create_product", { key: "MCV", name: "before" });
   revokeKey(db, other.key.split("_")[1] as string);
   await expect(
     client.callTool({
-      name: "create_issue",
-      arguments: { projectId: "MCV", title: "after revoke" },
+      name: "add_todo",
+      arguments: { product: "MCV", title: "after revoke" },
     }),
   ).rejects.toThrow(/"code":"unauthorized"/);
   const reader = await connect(bot.key);
-  expect(
-    (await call(reader, "list_issues", { projectId: "MCV" })).items,
-  ).toEqual([]);
+  expect((await call(reader, "list_items", { product: "MCV" })).items).toEqual(
+    [],
+  );
 });
 
 test("import_project imports a project and a re-run changes nothing", async () => {
@@ -436,14 +478,14 @@ test("import_project imports a project and a re-run changes nothing", async () =
     statusUpdates: 0,
   });
   expect(second.unchanged).toEqual(first.created);
-  expect(await call(client, "get_issue", { issueId: "MCL-1" })).toMatchObject({
+  expect(await call(client, "get_item", { item: "MCL-1" })).toMatchObject({
     status: "done",
     createdAt: "2026-01-01T00:00:00.000Z",
     completedAt: "2026-01-02T00:00:00.000Z",
   });
 });
 
-test("create_issue after import_project numbers past the highest kept Linear number", async () => {
+test("add_todo after import_project numbers past the highest kept Linear number", async () => {
   const client = await connect(bot.key);
   const issue = (externalRef: string) => ({
     externalRef,
@@ -462,8 +504,8 @@ test("create_issue after import_project numbers past the highest kept Linear num
     ...payload,
     issues: [issue("MKN-12"), issue("MKN-187")],
   });
-  const created = await call(client, "create_issue", {
-    projectId: "MKN",
+  const created = await call(client, "add_todo", {
+    product: "MKN",
     title: "by hand",
   });
   expect(created.key).toBe("MKN-188");
@@ -480,7 +522,9 @@ test("whoami answers the key's bot and list_bots pages every bot with id, name, 
     kind: "bot",
     name: "mcp whoami",
     label: "agent-mcp",
-    scope: { projects: null, actions: null },
+    scope: { products: null, projects: null, actions: null },
+    ownProducts: [],
+    products: expect.arrayContaining([{ key: "MCP", name: "renamed" }]),
     photoUrl: null,
     title: null,
   });
@@ -518,13 +562,15 @@ test("whoami answers the key's bot and list_bots pages every bot with id, name, 
 
 test("a service refusal is a tool error saying what to send instead", async () => {
   const client = await connect(bot.key);
-  expect(await callError(client, "get_issue", { issueId: "NOPE-9" })).toBe(
-    "not_found: no issue NOPE-9: pass the id, the key (like TRL-12) or the source key (like JUS-187, kept from an import) of an existing issue",
+  expect(await callError(client, "get_item", { item: "NOPE-9" })).toBe(
+    "not_found: no item NOPE-9: pass the key (like TRL-12), the id or the source key (like JUS-187, kept from an import) of an item this key reaches; list_items (GET /api/v1/items) finds them",
   );
-  await call(client, "create_project", { key: "MCE", name: "errors" });
+  await call(client, "create_product", { key: "MCE", name: "errors" });
   expect(
-    await callError(client, "create_project", { key: "MCE", name: "again" }),
-  ).toMatch(/^conflict: project key MCE is taken .*: choose another key$/);
+    await callError(client, "create_product", { key: "MCE", name: "again" }),
+  ).toBe(
+    'conflict: product key MCE is taken by product "errors": choose another key',
+  );
   expect(
     await callError(client, "import_project", {
       externalRef: "lin-bad",
@@ -551,11 +597,11 @@ test("a misspelled argument is a tool error naming it", async () => {
 
 test("a link that is not http or https is a tool error naming the url", async () => {
   const client = await connect(bot.key);
-  await call(client, "create_project", { key: "MCU", name: "links" });
+  await call(client, "create_product", { key: "MCU", name: "links" });
   for (const url of ["javascript:alert(1)", "data:text/html,<b>x</b>"]) {
     expect(
-      await callError(client, "create_issue", {
-        projectId: "MCU",
+      await callError(client, "add_todo", {
+        product: "MCU",
         title: "bad link",
         links: [{ url }],
       }),
@@ -567,7 +613,7 @@ test("a link that is not http or https is a tool error naming the url", async ()
 test("project key arguments advertise the key rule as a pattern", async () => {
   const client = await connect(bot.key);
   const { tools } = await client.listTools();
-  for (const name of ["create_project", "import_project"]) {
+  for (const name of ["create_product", "create_project", "import_project"]) {
     const props = tools.find((t) => t.name === name)?.inputSchema
       .properties as Record<string, { pattern?: string }>;
     expect(props.key?.pattern, name).toBe("^[A-Za-z0-9]{2,10}$");
@@ -593,11 +639,11 @@ test("import_project advertises Linear's seven state types for statusType", asyn
   ]);
 });
 
-test("list_bots says an id that matches no bot is a human's", async () => {
+test("list_bots says an id that matches no bot is a person's", async () => {
   const client = await connect(bot.key);
   const { tools } = await client.listTools();
   expect(tools.find((t) => t.name === "list_bots")?.description).toMatch(
-    /an id that matches no bot is a human's/,
+    /an id that matches no bot is a person's/,
   );
 });
 
@@ -619,7 +665,7 @@ test("import_project keeps a sourceKey's number for an issue matched by its UUID
     ],
   });
   expect(
-    (await call(client, "get_issue", { issueId: "MSK-187" })).externalRef,
+    (await call(client, "get_item", { item: "MSK-187" })).externalRef,
   ).toBe(uuid);
 });
 
@@ -646,7 +692,7 @@ const reviewIssue = {
   createdAt: "2026-01-01T00:00:00.000Z",
 };
 
-test("import_project takes statusType over MCP: the type sets the status and get_issue shows the state name as sourceStatus", async () => {
+test("import_project takes statusType over MCP: the type sets the status and get_item shows the state name as sourceStatus", async () => {
   const client = await connect(bot.key);
   await call(client, "import_project", {
     externalRef: "lin-mcp-type",
@@ -654,13 +700,13 @@ test("import_project takes statusType over MCP: the type sets the status and get
     name: "by type",
     issues: [reviewIssue],
   });
-  expect(await call(client, "get_issue", { issueId: "MST-1" })).toMatchObject({
+  expect(await call(client, "get_item", { item: "MST-1" })).toMatchObject({
     status: "in_progress",
     sourceStatus: "In Review",
   });
 });
 
-test("update_issue on an imported issue, status change included, leaves sourceStatus as imported", async () => {
+test("update_item on an imported item, status change included, leaves sourceStatus as imported", async () => {
   const client = await connect(bot.key);
   await call(client, "import_project", {
     externalRef: "lin-mcp-edit",
@@ -669,22 +715,22 @@ test("update_issue on an imported issue, status change included, leaves sourceSt
     issues: [reviewIssue],
   });
   expect(
-    await call(client, "update_issue", { issueId: "MSE-1", status: "done" }),
+    await call(client, "update_item", { item: "MSE-1", status: "done" }),
   ).toMatchObject({ status: "done", sourceStatus: "In Review" });
-  expect(await call(client, "get_issue", { issueId: "MSE-1" })).toMatchObject({
+  expect(await call(client, "get_item", { item: "MSE-1" })).toMatchObject({
     status: "done",
     sourceStatus: "In Review",
   });
 });
 
-test("update_issue and import_project are attributed in the feed to the bot whose key called, not the row's creator", async () => {
+test("update_item and import_project are attributed in the feed to the bot whose key called, not the row's creator", async () => {
   const author = createBot(db, "mcp attr author");
   const editor = createBot(db, "mcp attr editor");
   const authorClient = await connect(author.key);
   const editorClient = await connect(editor.key);
-  await call(authorClient, "create_project", { key: "MCT", name: "attr" });
-  await call(authorClient, "create_issue", { projectId: "MCT", title: "t" });
-  await call(editorClient, "update_issue", { issueId: "MCT-1", title: "u" });
+  await call(authorClient, "create_product", { key: "MCT", name: "attr" });
+  await call(authorClient, "add_todo", { product: "MCT", title: "t" });
+  await call(editorClient, "update_item", { item: "MCT-1", title: "u" });
   const imported = await call(editorClient, "import_project", {
     externalRef: "lin-attr",
     key: "MCW",
@@ -692,8 +738,8 @@ test("update_issue and import_project are attributed in the feed to the bot whos
     issues: [reviewIssue],
   });
 
-  const feed = async (projectId: string) =>
-    (await call(editorClient, "list_activity", { projectId, limit: 200 }))
+  const feed = async (product: string) =>
+    (await call(editorClient, "list_activity", { product, limit: 200 }))
       .items as Body[];
   const actorsOf = (items: Body[], action: string) =>
     items.filter((e) => e.action === action).map((e) => e.actorId);
@@ -703,82 +749,83 @@ test("update_issue and import_project are attributed in the feed to the bot whos
   expect(actorsOf(await feed("MCT"), "issue.updated")).toEqual([
     editor.actor.id,
   ]);
-  expect(actorsOf(await feed(imported.project.id), "project.imported")).toEqual(
+  expect(actorsOf(await feed(imported.product.id), "product.imported")).toEqual(
     [editor.actor.id],
   );
 });
 
 test("a create sent over REST and retried over MCP with the same idempotency key returns the first issue and writes nothing more", async () => {
   const client = await connect(bot.key);
-  await call(client, "create_project", { key: "MXT", name: "transports" });
-  const res = await app.request("/api/v1/issues", {
+  await call(client, "create_product", { key: "MXT", name: "transports" });
+  const res = await app.request("/api/v1/items", {
     method: "POST",
     headers: {
       authorization: `Bearer ${bot.key}`,
       "content-type": "application/json",
       "idempotency-key": "switch-1",
     },
-    body: JSON.stringify({ projectId: "MXT", title: "once" }),
+    body: JSON.stringify({ type: "todo", product: "MXT", title: "once" }),
   });
   expect(res.status).toBe(201);
   const first = (await res.json()) as Body;
 
-  const retried = await call(client, "create_issue", {
-    projectId: "MXT",
+  const retried = await call(client, "add_todo", {
+    product: "MXT",
     title: "once",
     idempotency_key: "switch-1",
   });
   expect(retried.id).toBe(first.id);
   expect(
-    (await call(client, "list_issues", { projectId: "MXT" })).items.map(
+    (await call(client, "list_items", { product: "MXT" })).items.map(
       (i: Body) => i.id,
     ),
   ).toEqual([first.id]);
 });
 
-test("update_issue edits part of the label and link sets over MCP, and refuses a full replace beside an add or remove", async () => {
+test("update_item edits part of the label and link sets over MCP, and refuses a full replace beside an add or remove", async () => {
   const client = await connect(bot.key);
-  await call(client, "create_project", { key: "MUL", name: "partial sets" });
-  await call(client, "create_issue", {
-    projectId: "MUL",
+  await call(client, "create_product", { key: "MUL", name: "partial sets" });
+  await call(client, "add_todo", {
+    product: "MUL",
     title: "sets",
     labels: ["keep", "drop"],
     links: [{ url: "https://example.com/a", title: "A" }],
   });
 
-  const labels = await call(client, "update_issue", {
-    issueId: "MUL-1",
+  const labels = await call(client, "update_item", {
+    item: "MUL-1",
     removeLabels: ["DROP", "never-there"],
     addLabels: ["added"],
   });
   expect(labels.labels).toEqual(["added", "keep"]);
 
-  const added = await call(client, "update_issue", {
-    issueId: "MUL-1",
+  const added = await call(client, "update_item", {
+    item: "MUL-1",
     addLinks: [{ url: "https://example.com/b", title: "B" }],
   });
   expect(added.links).toEqual([
     { url: "https://example.com/a", title: "A" },
     { url: "https://example.com/b", title: "B" },
   ]);
-  const removed = await call(client, "update_issue", {
-    issueId: "MUL-1",
+  const removed = await call(client, "update_item", {
+    item: "MUL-1",
     removeLinks: ["https://example.com/a"],
   });
   expect(removed.links).toEqual([{ url: "https://example.com/b", title: "B" }]);
 
   expect(
-    await callError(client, "update_issue", {
-      issueId: "MUL-1",
+    await callError(client, "update_item", {
+      item: "MUL-1",
       labels: ["x"],
       addLabels: ["y"],
     }),
   ).toMatch(
     /^validation_failed: .*replaces the whole set, so it cannot go with addLabels or removeLabels: send labels alone to replace the set/,
   );
-  expect(
-    (await call(client, "get_issue", { issueId: "MUL-1" })).labels,
-  ).toEqual(["added", "keep"]);
+  expect((await call(client, "get_item", { item: "MUL-1" })).labels).toEqual([
+    "added",
+    "keep",
+  ]);
 });
 
 test("import_project's result lists an issue renumbered because its number was taken", async () => {
@@ -790,8 +837,8 @@ test("import_project's result lists an issue renumbered because its number was t
     issues: [] as Body[],
   };
   await call(client, "import_project", payload);
-  const held = await call(client, "create_issue", {
-    projectId: "MRN",
+  const held = await call(client, "add_todo", {
+    product: "MRN",
     title: "by hand",
   });
   const result = await call(client, "import_project", {

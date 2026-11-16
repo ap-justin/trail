@@ -19,9 +19,8 @@ async function fileIssues(projectId: string, statuses: string[]) {
   for (const [i, status] of statuses.entries()) {
     const res = await bot("/issues", { projectId, title: `issue ${i}` });
     const { id } = (await res.json()) as { id: string };
-    if (status !== "open") {
-      await request("PATCH", `/api/v1/issues/${id}`, { json: { status } });
-    }
+    // a bot's issue on another's product files into triage; set the status the test wants
+    await request("PATCH", `/api/v1/issues/${id}`, { json: { status } });
   }
 }
 
@@ -150,6 +149,10 @@ describe("GET /projects/:key/issues", () => {
       assigneeId: assignee.actor.id,
     });
     expect(res.status).toBe(201);
+    const { id } = (await res.json()) as { id: string };
+    await request("PATCH", `/api/v1/issues/${id}`, {
+      json: { status: "open" },
+    });
     cookie = await addMember("lister", [p.id]);
   });
 

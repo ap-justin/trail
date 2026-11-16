@@ -10,7 +10,7 @@ import type { Service } from "../service/index.js";
 import { registerTools } from "./tools.js";
 
 const instructions =
-  "trail tracks projects, issues, comments and status updates. Every write is credited to the bot whose key calls this server. A project has a key like TRL and its issues keys like TRL-12: any argument naming a project takes its id or key, and any naming an issue takes its id, its key or the source key it kept from an import (JUS-187).";
+  "trail tracks products, their items, and projects across products. Every write is credited to the bot whose key calls this server. A product has a key like TRL and its items keys like TRL-12. An item is a todo (planned work its product's own bot adds with add_todo) or an issue (a report anyone files with file_issue, waiting in triage until the product's bot accepts it with update_item status open, or cancels it). A project groups items from one or more products and is named by its slug, like launch-q4. Start with whoami: it lists the products you own and every product your key reaches.";
 
 /**
  * Streamable HTTP at `/mcp`, stateless: each POST gets a fresh server and

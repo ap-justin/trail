@@ -29,7 +29,7 @@ import { toPage, toWebhook } from "./serialize.js";
 
 const tags = ["webhooks"];
 const own =
-  "Acts on the calling bot's own webhooks only; a webhook of another bot, or one that follows a project outside the key's scope, is a 404.";
+  "Acts on the calling bot's own webhooks only; a webhook of another bot, or one that follows a product outside the key's scope, is a 404.";
 
 const URL_TAKEN = "This bot already has a webhook to that URL";
 const urlTaken = { 409: jsonContent(errorSchema, URL_TAKEN) };
@@ -47,8 +47,8 @@ const webhookParam = z.object({
 const createWebhook = createRoute({
   method: "post",
   path: "/webhooks",
-  summary: "Subscribe to projects' events with a signed webhook",
-  description: `Needs the read action. ${WEBHOOK_SETUP} ${WEBHOOK_DELIVERY}`,
+  summary: "Subscribe to products' events with a signed webhook",
+  description: `Needs the read action. products names the products to follow; projects is its deprecated alias, and not both. ${WEBHOOK_SETUP} ${WEBHOOK_DELIVERY}`,
   tags,
   request: { body: jsonBody(webhookCreateSchema) },
   responses: {
@@ -94,8 +94,8 @@ const getWebhook = createRoute({
 const updateWebhook = createRoute({
   method: "patch",
   path: "/webhooks/{id}",
-  summary: "Change a webhook's URL or projects, and resume it",
-  description: `Needs the read action. ${own} Fields left out stay as they are; projects replaces the whole list. Any update, one with no fields too, ends a pause. The secret changes through PUT /webhooks/{id}/secret.`,
+  summary: "Change a webhook's URL or products, and resume it",
+  description: `Needs the read action. ${own} Fields left out stay as they are; products (or its deprecated alias projects) replaces the whole list. Any update, one with no fields too, ends a pause. The secret changes through PUT /webhooks/{id}/secret.`,
   tags,
   request: { params: webhookParam, body: jsonBody(webhookUpdateSchema) },
   responses: {

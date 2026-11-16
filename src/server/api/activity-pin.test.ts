@@ -46,12 +46,15 @@ test("an issue.updated event reads on /api/v1/activity exactly as bots have alwa
         actorId: bot.actor.id,
         subjectType: "issue",
         subjectId: issue.id,
+        product: "PIN",
+        projectSlug: null,
         projectId: project.id,
         action: "issue.updated",
         payload: {
           title: { from: "Pinned", to: "Pinned down" },
           status: { from: "open", to: "in_progress" },
-          assigneeId: { from: null, to: worker.actor.id },
+          // the product's creator owns it, so its item is a todo assigned to that bot
+          assigneeId: { from: bot.actor.id, to: worker.actor.id },
           estimate: { from: null, to: 1.5 },
           priority: { from: 0, to: 2 },
           labels: { from: ["old"], to: ["new"] },

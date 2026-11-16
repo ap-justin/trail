@@ -1,16 +1,16 @@
 import { eq, inArray } from "drizzle-orm";
-import type { WebActorView } from "../../shared/schemas.js";
+import type { WebActorView, webIssueStatuses } from "../../shared/schemas.js";
 import type { VisibleProject } from "../auth/viewer.js";
 import type { Db } from "../db/client.js";
-import { actor, actorPhoto } from "../db/schema.js";
+import { actor, actorPhoto, type IssueStatus } from "../db/schema.js";
+import { NotFoundError } from "../service/errors.js";
 import { photoUrl } from "../service/photos.js";
-import { noProject } from "../service/visible.js";
 import type { Member } from "./env.js";
 
 /** The visible project with this key, in any case. */
 export function visibleProject(member: Member, key: string): VisibleProject {
   const found = member.projects.find((p) => p.key === key.toUpperCase());
-  if (!found) throw noProject(key);
+  if (!found) throw new NotFoundError(`no project ${key}`);
   return found;
 }
 
@@ -49,3 +49,8 @@ export function actorsById(
   const byId = new Map(rows.map((r) => [r.id, toWebActor(r)]));
   return (id) => byId.get(id) as WebActorView;
 }
+
+/** A status as the SPA draws it: an item in triage reads as open until the web API takes triage. */
+export const webStatus = (
+  status: IssueStatus,
+): (typeof webIssueStatuses)[number] => (status === "triage" ? "open" : status);

@@ -47,7 +47,7 @@ describe("each REST write yields exactly one activity_event and one bus event", 
       "POST",
       () => "/api/v1/projects",
       () => ({ key: projectKey(), name: "p" }),
-      // the stored row; the API serves it as project.created
+      // a body with key creates a product, the meaning POST /projects had before projects
       "product.created",
     ],
     [
@@ -121,8 +121,8 @@ test("GET /activity lists newest first, filters by project and actor, and pages"
     request("GET", `/api/v1/activity?projectId=${a.id}`),
   );
   expect(byProject.items.map((e) => e.action)).toEqual([
-    "project.updated",
-    "project.created",
+    "product.updated",
+    "product.created",
   ]);
 
   const byActor = await json<Page>(
@@ -130,10 +130,10 @@ test("GET /activity lists newest first, filters by project and actor, and pages"
   );
   expect(byActor.items).toEqual([
     expect.objectContaining({
-      action: "project.created",
+      action: "product.created",
       projectId: b.id,
       actorId: other.actor.id,
-      subjectType: "project",
+      subjectType: "product",
       subjectId: b.id,
       payload: expect.objectContaining({ name: "activity-b", description: "" }),
       createdAt: expect.any(String),
@@ -191,7 +191,7 @@ test("each write is attributed to the bot whose key made it", async () => {
       .sort((x, y) => x.localeCompare(y)),
   ).toEqual(
     [
-      `project.created:${first.actor.id}`,
+      `product.created:${first.actor.id}`,
       `issue.created:${second.actor.id}`,
       `comment.created:${first.actor.id}`,
       `comment.created:${second.actor.id}`,
@@ -232,7 +232,7 @@ test("an update is attributed to the bot that PATCHed, not the one that created 
       .sort((x, y) => x.localeCompare(y)),
   ).toEqual([
     `issue.updated:${editor.actor.id}`,
-    `project.updated:${editor.actor.id}`,
+    `product.updated:${editor.actor.id}`,
   ]);
   expect(
     published
@@ -275,7 +275,7 @@ describe("GET /activity?after= resumes the feed oldest first", () => {
 
     const first = await feed(`${scope}&after=&limit=2`);
     expect(first.items.map((e) => e.action)).toEqual([
-      "project.created",
+      "product.created",
       "issue.created",
     ]);
     const second = await feed(`${scope}&after=${first.nextCursor}&limit=2`);
@@ -327,7 +327,7 @@ describe("GET /activity?after= resumes the feed oldest first", () => {
     const next = await feed(
       `actorId=${quiet.actor.id}&after=${empty.nextCursor}`,
     );
-    expect(next.items.map((e) => e.action)).toEqual(["project.created"]);
+    expect(next.items.map((e) => e.action)).toEqual(["product.created"]);
   });
 
   test("a cursor used under other filters is a 422 that says to reuse them or drop it", async () => {

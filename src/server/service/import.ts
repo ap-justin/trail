@@ -11,7 +11,7 @@ import {
   validLabelNames,
   validLinks,
   validPriority,
-  validProjectKey,
+  validProductKey,
 } from "./validate.js";
 
 /**
@@ -499,7 +499,7 @@ export function normalImport(payload: ImportPayload): NormalImport {
   uniqueRefs(statusUpdates, "statusUpdates", problems);
   const project = (run: () => unknown) => attempt(problems, "project", run);
   const externalRef = project(() => requireRef(payload.externalRef, "project"));
-  const key = project(() => validProjectKey(payload.key));
+  const key = project(() => validProductKey(payload.key));
   const name = project(() => nonBlank(payload.name, "name"));
   const createdAt = project(() =>
     payload.createdAt === undefined

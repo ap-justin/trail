@@ -1,10 +1,12 @@
 import { z } from "@hono/zod-openapi";
 import {
+  activitySubjectTypes,
   actorKinds,
   apiKeyActions,
+  issueStatuses,
+  issueTypes,
   projectHealths,
 } from "../server/db/schema.js";
-import { legacySubjectTypes } from "../server/events/legacy.js";
 import {
   IMPORT_LINKS_MAX,
   IMPORT_TEXT_MAX,
@@ -15,17 +17,18 @@ import {
   botTitleCharacterProblem,
   ISSUE_LABELS_MAX,
   ISSUE_LINKS_MAX,
-  settableStatuses,
+  SLUG_MAX,
 } from "../server/service/validate.js";
 import {
-  WEBHOOK_PROJECTS_MAX,
+  WEBHOOK_PRODUCTS_MAX,
   WEBHOOK_SECRET_MAX,
   WEBHOOK_SECRET_MIN,
 } from "../server/service/webhooks.js";
 
 // Field docs go in .meta(), which both the OpenAPI spec and the MCP tools' JSON
 // Schema read; .openapi({ description }) reaches only the spec.
-const issueStatusSchema = z.enum(settableStatuses).openapi("IssueStatus");
+const issueStatusSchema = z.enum(issueStatuses).openapi("IssueStatus");
+const itemTypeSchema = z.enum(issueTypes).openapi("ItemType");
 const healthSchema = z.enum(projectHealths).openapi("ProjectHealth");
 const priority = z.int().min(0).max(4).meta({
   description: "0 none, 1 urgent, 2 high, 3 medium, 4 low.",
@@ -60,33 +63,79 @@ export const errorSchema = z
   })
   .openapi("Error");
 
-export const projectSchema = z
+const actorRefSchema = z
+  .object({ id, name: z.string(), kind: z.enum(actorKinds) })
+  .openapi("ActorRef");
+
+/** The note a response carries when it came through a deprecated tool, route or field. */
+const deprecatedNote = z.string().meta({
+  description:
+    "Present when the call used a deprecated tool, route or field: names its replacement. Switch to that before the next release removes the old one.",
+  example: "create_issue is deprecated: use add_todo or file_issue",
+});
+
+export const productSchema = z
   .object({
     id,
-    key: z.string().meta({ example: "TRL" }),
+    key: z.string().meta({
+      description: "Prefixes its items' keys, as in TRL-12.",
+      example: "TRL",
+    }),
     name: z.string(),
     description: z.string(),
+    repoUrl: z.string().nullable().meta({
+      description: "The product's GitHub repository; null when unset.",
+      example: "https://github.com/acme/trail",
+    }),
+    owner: actorRefSchema.nullable().meta({
+      description:
+        "The product's own bot: it adds the product's todos and accepts issues from triage. Null when the product has none.",
+    }),
     externalRef: z.string().nullable(),
     createdBy: id,
     createdAt: timestamp,
     updatedAt: timestamp,
   })
-  .openapi("Project");
+  .openapi("Product");
+
+export const legacyProductSchema = productSchema
+  .extend({ deprecated: deprecatedNote })
+  .openapi("LegacyProduct");
+
+const productRefSchema = z
+  .object({ key: z.string(), name: z.string() })
+  .openapi("ProductRef");
 
 export const issueSchema = z
   .object({
     id,
     key: z.string().meta({
-      description: "The project's key and the issue's number.",
+      description: "The product's key and the item's number.",
       example: "TRL-12",
     }),
     number: z.int().meta({ example: 12 }),
+    type: itemTypeSchema.meta({
+      description:
+        "todo: planned work of the product's own bot, open from the start and always assigned. issue: a report to the product's bot, filed in triage until that bot accepts it (status open) or cancels it.",
+    }),
+    product: z.string().meta({
+      description: "The key of the product the item belongs to.",
+      example: "TRL",
+    }),
+    project: z.string().meta({
+      description:
+        "Deprecated alias of product (the product's key), kept for one release; projects lists the projects the item is in.",
+      example: "TRL",
+    }),
+    projects: z
+      .array(z.object({ slug: z.string(), name: z.string() }))
+      .meta({ description: "The projects the item is in, by slug A to Z." }),
     sourceKey: z.string().nullable().meta({
       description:
-        "On an imported issue, its key in the system it came from, uppercased (like JUS-187). Any argument or path that takes the issue's id or key takes this too.",
+        "On an imported item, its key in the system it came from, uppercased (like JUS-187). Any argument or path that takes the item's id or key takes this too.",
       example: "JUS-187",
     }),
-    projectId: id,
+    projectId: id.meta({ description: "Deprecated: the product's id." }),
     title: z.string(),
     description: z.string(),
     status: issueStatusSchema,
@@ -94,22 +143,27 @@ export const issueSchema = z
     estimate: estimate.nullable(),
     labels: z.array(z.string()).meta({ description: "Names, A to Z." }),
     links: z.array(linkSchema),
+    assignee: actorRefSchema.nullable(),
     assigneeId: id.nullable(),
     externalRef: z.string().nullable(),
     sourceAuthor,
     sourceStatus: z.string().nullable().meta({
       description:
-        "On an imported issue, its state's name in the system it came from (like In Review), kept for reference; status is what trail goes by.",
+        "On an imported item, its state's name in the system it came from (like In Review), kept for reference; status is what trail goes by.",
     }),
     createdBy: id,
     createdAt: timestamp,
     updatedAt: timestamp,
     completedAt: timestamp.nullable().meta({
       description:
-        "When the issue moved to done or canceled; null while it is open or in progress.",
+        "When the item moved to done or canceled; null while it is in triage, open or in progress.",
     }),
   })
-  .openapi("Issue");
+  .openapi("Item");
+
+export const legacyIssueSchema = issueSchema
+  .extend({ deprecated: deprecatedNote })
+  .openapi("LegacyItem");
 
 export const commentSchema = z
   .object({
@@ -126,7 +180,16 @@ export const commentSchema = z
 export const statusUpdateSchema = z
   .object({
     id,
-    projectId: id,
+    product: z.string().nullable().meta({
+      description: "The product's key, on a product's update; else null.",
+    }),
+    project: z.string().nullable().meta({
+      description: "The project's slug, on a project's update; else null.",
+    }),
+    projectId: id.nullable().meta({
+      description:
+        "Deprecated: the product's id on a product's update, null on a project's.",
+    }),
     authorId: id,
     body: z.string(),
     health: healthSchema,
@@ -137,17 +200,107 @@ export const statusUpdateSchema = z
   .openapi("StatusUpdate");
 
 export const labelSchema = z
-  .object({ id, projectId: id, name: z.string(), createdAt: timestamp })
+  .object({
+    id,
+    projectId: id.meta({ description: "Deprecated: the product's id." }),
+    name: z.string(),
+    createdAt: timestamp,
+  })
   .openapi("Label");
+
+const countsSchema = z
+  .object({
+    triage: z.int(),
+    open: z.int(),
+    in_progress: z.int(),
+    done: z.int(),
+    canceled: z.int(),
+  })
+  .openapi("ItemCounts");
+
+export const projectSchema = z
+  .object({
+    id,
+    slug: z.string().meta({
+      description: "How every tool and route names the project.",
+      example: "launch-q4",
+    }),
+    name: z.string(),
+    goal: z.string(),
+    lead: actorRefSchema,
+    targetDate: z.string().nullable().meta({
+      description: "YYYY-MM-DD; null when unset.",
+      example: "2026-12-01",
+    }),
+    products: z.array(productRefSchema).meta({
+      description:
+        "The products it draws items from that this key reaches, A to Z.",
+    }),
+    hiddenProducts: z.boolean().meta({
+      description:
+        "True when it also draws from products this key can't reach: their items are left out of counts and lists, and nothing names them.",
+    }),
+    counts: countsSchema.meta({
+      description: "Its items per status, of the products listed only.",
+    }),
+    latestStatusUpdate: statusUpdateSchema
+      .extend({ author: actorRefSchema })
+      .nullable(),
+    createdBy: id,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  })
+  .openapi("Project");
+
+export const projectItemsAddedSchema = z
+  .object({
+    project: projectSchema,
+    added: z
+      .array(z.string())
+      .meta({ description: "Keys of the items added." }),
+    unchanged: z
+      .array(z.string())
+      .meta({ description: "Keys of the items that were in it already." }),
+  })
+  .openapi("ProjectItemsAdded");
+
+export const projectItemsRemovedSchema = z
+  .object({
+    project: projectSchema,
+    removed: z
+      .array(z.string())
+      .meta({ description: "Keys of the items taken out." }),
+    unchanged: z
+      .array(z.string())
+      .meta({ description: "Keys of the items that were not in it." }),
+  })
+  .openapi("ProjectItemsRemoved");
 
 export const activityEventSchema = z
   .object({
     id,
     actorId: id,
-    subjectType: z.enum(legacySubjectTypes),
+    subjectType: z.enum(activitySubjectTypes).meta({
+      description:
+        "product, project, issue (any item, todo or issue), comment, label or status_update; ignore one you don't know, as trail adds them over time.",
+    }),
     subjectId: id,
-    projectId: id.nullable(),
-    action: z.string().meta({ example: "issue.updated" }),
+    product: z.string().nullable().meta({
+      description:
+        "The key of the product the event is in; null on a project's own events (project.created, project.updated, a project's status update).",
+    }),
+    projectSlug: z.string().nullable().meta({
+      description:
+        "The slug of the project on a project's own event and on project.item_added and project.item_removed; else null.",
+    }),
+    projectId: id.nullable().meta({
+      description: "Deprecated: the product's id, as in product.",
+    }),
+    action: z.string().meta({
+      description:
+        "Like issue.created, issue.updated, comment.created, product.created, product.updated, product.imported, project.created, project.updated, project.item_added, project.item_removed, status_update.created, label.created; ignore one you don't know.",
+      example: "issue.updated",
+    }),
     payload: z.record(z.string(), z.unknown()),
     createdAt: timestamp,
   })
@@ -193,24 +346,36 @@ export const whoamiSchema = actorSchema
   .extend({
     scope: z
       .object({
-        projects: z
+        products: z
           .array(z.string())
           .nullable()
           .meta({
             description:
-              "The keys of the only projects this key reaches; null when it reaches every project.",
+              "The keys of the only products this key reaches; null when it reaches every product.",
             example: ["TRL"],
           }),
+        projects: z
+          .array(z.string())
+          .nullable()
+          .meta({ description: "Deprecated alias of products." }),
         actions: z
           .array(z.enum(apiKeyActions))
           .nullable()
           .meta({
             description:
-              "What this key may do: read, issues (create and update issues), comments, status_updates and admin (create, update and import projects, create labels, list bots). null when it may do all of them.",
+              "What this key may do: read, issues (add todos, file issues, update items, create and change projects), comments, status_updates and admin (create, update and import products, create labels, list bots). null when it may do all of them.",
             example: ["read", "issues", "comments"],
           }),
       })
       .meta({ description: "What the calling key reaches." }),
+    ownProducts: z.array(productRefSchema).meta({
+      description:
+        "The products whose own bot you are, A to Z: add_todo goes to yours when you have exactly one.",
+    }),
+    products: z.array(productRefSchema).meta({
+      description:
+        "Every product this key reaches, A to Z: file issues on any of them.",
+    }),
     photoUrl,
     title: actorTitle,
   })
@@ -269,9 +434,12 @@ export const webhookSchema = z
   .object({
     id,
     url: z.string(),
+    products: z
+      .array(z.string())
+      .meta({ description: "The keys of the products it follows, A to Z." }),
     projects: z
       .array(z.string())
-      .meta({ description: "The keys of the projects it follows, A to Z." }),
+      .meta({ description: "Deprecated alias of products." }),
     paused: z.boolean().meta({
       description:
         "True after repeated failures; deliveries wait until an update or a rotate resumes it.",
@@ -302,28 +470,38 @@ const webhookSecret = z
   .meta({
     description: `The signing secret of your OpenBot webhook routine, ${WEBHOOK_SECRET_MIN} to ${WEBHOOK_SECRET_MAX} characters. Read it from a key in a script; never send it through chat. Never returned.`,
   });
-const webhookProjects = z
+const webhookProducts = z
   .array(z.string().min(1))
   .min(1)
-  .max(WEBHOOK_PROJECTS_MAX)
+  .max(WEBHOOK_PRODUCTS_MAX)
   .meta({
     description:
-      "Keys (like TRL) of the projects to follow; a project the key can't read is a 404, as a missing one is.",
+      "Keys (like TRL) of the products to follow: you get their items' events, and the events of every project drawing from one of them. A product the key can't read is a 404, as a missing one is.",
     example: ["BGP"],
+  });
+const webhookProjectsAlias = z
+  .array(z.string().min(1))
+  .min(1)
+  .max(WEBHOOK_PRODUCTS_MAX)
+  .meta({
+    description:
+      "Deprecated alias of products: product keys. Send products instead; not both.",
   });
 
 export const webhookCreateSchema = z
   .strictObject({
     url: webhookUrl,
     secret: webhookSecret,
-    projects: webhookProjects,
+    products: webhookProducts.optional(),
+    projects: webhookProjectsAlias.optional(),
   })
   .openapi("WebhookCreate");
 
 export const webhookUpdateSchema = z
   .strictObject({
     url: webhookUrl.optional(),
-    projects: webhookProjects.optional(),
+    products: webhookProducts.optional(),
+    projects: webhookProjectsAlias.optional(),
   })
   .openapi("WebhookUpdate");
 
@@ -369,12 +547,23 @@ const title = z.string().min(1).max(300);
 const text = z.string().max(64 * 1024);
 
 // Strict, so a misspelled field is a 422 rather than a write that silently skips it.
-const projectRef = id.meta({
-  description: "The project's id or its key, like TRL.",
+const productRef = id.meta({
+  description:
+    "The product's key (like TRL, any case) or id; list_products lists them.",
 });
+/** The legacy argument naming a product, from before projects. */
+const projectRef = id.meta({
+  description: "Deprecated: the product's key (like TRL) or id.",
+});
+const projectSlug = z.string().min(1).max(SLUG_MAX).meta({
+  description:
+    "The project's slug, like launch-q4, exactly; list_projects lists them.",
+  example: "launch-q4",
+});
+const botRef = z.string().min(1).max(200);
 const labelNames = z.array(labelName).max(ISSUE_LABELS_MAX).meta({
   description:
-    "Label names. A name matches the project's label ignoring the case of A-Z; a new name creates the label.",
+    "Label names. A name matches the product's label ignoring the case of A-Z; a new name creates the label.",
 });
 const links = z
   .array(
@@ -393,83 +582,275 @@ const links = z
   .max(ISSUE_LINKS_MAX);
 
 // the service's rule (service/validate.ts) before it uppercases, so the spec and MCP schema carry it
-const projectKey = z
+const productKey = z
   .string()
   .regex(
     /^[A-Za-z0-9]{2,10}$/,
     "must be 2 to 10 letters A-Z or digits, like TRL",
   );
+const repoUrl = z.string().max(300).meta({
+  description:
+    "The product's GitHub repository, https://github.com/<owner>/<name>; a trailing slash or .git is dropped.",
+  example: "https://github.com/acme/trail",
+});
+const ownerRef = botRef.meta({
+  description:
+    "The product's own bot, by name (any case) or id: what it adds are todos, and it accepts issues from triage.",
+});
 
-export const projectCreateSchema = z
+const productFields = {
+  name,
+  key: productKey.meta({
+    description:
+      "2 to 10 letters A-Z or digits, unique across products; lowercase is stored uppercased. Its items' keys are this, a dash and their number: TRL-12. Never changes.",
+    example: "TRL",
+  }),
+  description: text.optional(),
+  externalRef: externalRef.optional(),
+};
+
+export const productCreateSchema = z
   .strictObject({
-    name,
-    key: projectKey.meta({
+    ...productFields,
+    repoUrl: repoUrl.nullable().optional(),
+    owner: ownerRef.nullable().optional().meta({
       description:
-        "2 to 10 letters A-Z or digits, unique across projects; lowercase is stored uppercased. Its issues' keys are this, a dash and their number: TRL-12.",
-      example: "TRL",
+        "The product's own bot, by name (any case) or id; you by default, null for none. Its todos go to it, and it accepts issues from triage.",
     }),
-    description: text.optional(),
-    externalRef: externalRef.optional(),
   })
-  .openapi("ProjectCreate");
+  .openapi("ProductCreate");
 
-export const projectUpdateSchema = z
+export const productUpdateSchema = z
   .strictObject({
     name: name.optional(),
     description: text.optional(),
+    repoUrl: repoUrl
+      .nullable()
+      .optional()
+      .meta({ description: "null clears it." }),
+    owner: ownerRef.nullable().optional().meta({
+      description:
+        "The product's own bot, by name (any case) or id; null leaves the product without one.",
+    }),
+  })
+  .openapi("ProductUpdate");
+
+const goal = text.meta({
+  description: "What the project is for, in a sentence or a few.",
+});
+const targetDate = z.string().max(10).meta({
+  description: "A calendar day as YYYY-MM-DD.",
+  example: "2026-12-01",
+});
+const leadRef = botRef.meta({
+  description: "The bot leading the project, by name (any case) or id.",
+});
+const projectFields = {
+  name,
+  slug: z
+    .string()
+    .min(1)
+    .max(100)
+    .optional()
+    .meta({
+      description: `How agents name the project: 2 to ${SLUG_MAX} lowercase letters, digits and hyphens, like launch-q4, unique. Left out, it is derived from the name (Launch Q4 → launch-q4), with -2, -3 ... added when taken.`,
+    }),
+  goal: goal.optional(),
+  lead: leadRef.optional().meta({
+    description:
+      "The bot leading the project, by name (any case) or id; you by default.",
+  }),
+  targetDate: targetDate.nullable().optional(),
+  products: z
+    .array(z.string().min(1).max(10))
+    .min(1)
+    .max(50)
+    .optional()
+    .meta({
+      description:
+        "Keys (like TRL) of the products the project draws items from; the key must reach each. Left out: the one product you own. add_to_project adds an item's product by itself.",
+      example: ["TRL", "KRU"],
+    }),
+};
+
+/**
+ * create_project and POST /projects: a project, or with `key` the deprecated
+ * create of a product. Legacy fields are documented as such; the service
+ * refuses a mix.
+ */
+export const projectCreateSchema = z
+  .strictObject({
+    ...projectFields,
+    key: productKey.optional().meta({
+      deprecated: true,
+      description:
+        "Deprecated: sending key creates a product, as this call did before projects; use create_product (POST /products) instead.",
+    }),
+    description: text.optional().meta({
+      deprecated: true,
+      description: "Deprecated, with key: the product's description.",
+    }),
+    externalRef: externalRef.optional().meta({
+      deprecated: true,
+      description: "Deprecated, with key: the product's externalRef.",
+    }),
+  })
+  .openapi("ProjectCreate");
+
+/** update_project and PATCH /projects/{ref}: a project's fields, or a product's name and description by the legacy meaning. */
+export const projectUpdateSchema = z
+  .strictObject({
+    name: name.optional(),
+    goal: goal.optional(),
+    lead: leadRef.optional(),
+    targetDate: targetDate.nullable().optional().meta({
+      description: "A calendar day as YYYY-MM-DD; null clears it.",
+    }),
+    description: text.optional().meta({
+      deprecated: true,
+      description:
+        "Deprecated: a product's description, when the project argument is a product key; use update_product instead.",
+    }),
   })
   .openapi("ProjectUpdate");
+
+export const projectItemsSchema = z
+  .strictObject({
+    items: z
+      .array(z.string().min(1).max(100))
+      .min(1)
+      .max(100)
+      .meta({
+        description:
+          "Item keys like TRL-12, at most 100; items of several products may go together.",
+        example: ["TRL-12", "KRU-3"],
+      }),
+  })
+  .openapi("ProjectItems");
+
+const itemFields = {
+  title,
+  description: text.optional(),
+  estimate: estimate.optional(),
+  priority: priority.optional(),
+  labels: labelNames.optional(),
+  links: links.optional(),
+  externalRef: externalRef.optional(),
+};
+const assigneeRef = botRef.meta({
+  description:
+    "Who works on it: a bot's name (any case) or id, or a person's id.",
+});
+
+export const todoCreateSchema = z
+  .strictObject({
+    product: productRef.optional().meta({
+      description:
+        "The product's key (like TRL); left out, the one product you own. list_products lists them.",
+    }),
+    ...itemFields,
+    assignee: assigneeRef.optional().meta({
+      description:
+        "Who does it: a bot's name (any case) or id, or a person's id; left out, the product's owner, or you when it has none. A todo always has one.",
+    }),
+  })
+  .openapi("TodoCreate");
+
+export const issueFileSchema = z
+  .strictObject({
+    product: productRef.meta({
+      description:
+        "The key (like TRL) of the product the issue is for; any product this key reaches. list_products lists them.",
+    }),
+    ...itemFields,
+    assignee: assigneeRef.nullable().optional().meta({
+      description:
+        "Usually left out: the product's bot assigns it when it accepts the issue from triage.",
+    }),
+  })
+  .openapi("IssueFile");
+
+/** POST /items: a todo or an issue by `type`. */
+export const itemCreateSchema = z
+  .strictObject({
+    type: itemTypeSchema.meta({
+      description:
+        "todo: planned work for a product you own, open at once and assigned (to the product's owner by default). issue: a report to another product's bot, filed in triage until that bot accepts it (status open) or cancels it.",
+    }),
+    product: productRef.optional().meta({
+      description:
+        "The product's key (like TRL). Required for an issue; a todo goes to the one product you own when left out.",
+    }),
+    ...itemFields,
+    assignee: assigneeRef.nullable().optional(),
+  })
+  .openapi("ItemCreate");
 
 export const issueCreateSchema = z
   .strictObject({
     projectId: projectRef,
-    title,
-    description: text.optional(),
+    ...itemFields,
     assigneeId: id.nullable().optional(),
-    estimate: estimate.optional(),
-    priority: priority.optional(),
-    labels: labelNames.optional(),
-    links: links.optional(),
-    externalRef: externalRef.optional(),
   })
   .openapi("IssueCreate");
 
+const itemPatchFields = {
+  title: title.optional(),
+  description: text.optional(),
+  status: issueStatusSchema.optional().meta({
+    description:
+      "triage, open, in_progress, done or canceled. A product's bot accepts an issue from triage with open, or drops it with canceled. A todo is never in triage.",
+  }),
+  estimate: estimate
+    .nullable()
+    .optional()
+    .meta({ description: "Hours; null clears." }),
+  priority: priority.optional(),
+  labels: labelNames.optional().meta({
+    description: "Replaces the item's labels; [] removes them all.",
+  }),
+  links: links.optional().meta({
+    description: "Replaces the item's links; [] removes them all.",
+  }),
+  addLabels: labelNames.optional().meta({
+    description:
+      "Labels to add, keeping the item's others, even those another bot added a moment ago. A name matches the product's label ignoring the case of A-Z; a new name creates the label. Not with labels.",
+  }),
+  removeLabels: z.array(labelName).max(50).optional().meta({
+    description:
+      "Labels to remove, by name ignoring the case of A-Z; a name the item lacks is ignored. Not with labels.",
+  }),
+  addLinks: links.optional().meta({
+    description:
+      "Links to add, keeping the item's others. A url already on the item takes the title sent here, or keeps its own when none is sent. Not with links.",
+  }),
+  removeLinks: z.array(z.string().min(1).max(2048)).max(50).optional().meta({
+    description:
+      "Urls of links to remove; a url the item lacks is ignored. Not with links.",
+  }),
+};
+
+export const itemUpdateSchema = z
+  .strictObject({
+    type: itemTypeSchema.optional().meta({
+      description:
+        "todo makes it planned work of its product (an item in triage opens; it gets the product's owner as assignee when it has none); issue makes it a report.",
+    }),
+    ...itemPatchFields,
+    assignee: assigneeRef.nullable().optional().meta({
+      description:
+        "A bot's name (any case) or id, or a person's id; null unassigns an issue (a todo always keeps one).",
+    }),
+  })
+  .openapi("ItemUpdate");
+
 export const issueUpdateSchema = z
   .strictObject({
-    title: title.optional(),
-    description: text.optional(),
-    status: issueStatusSchema.optional(),
+    ...itemPatchFields,
     assigneeId: id
       .nullable()
       .optional()
       .meta({ description: "null unassigns." }),
-    estimate: estimate
-      .nullable()
-      .optional()
-      .meta({ description: "Hours; null clears." }),
-    priority: priority.optional(),
-    labels: labelNames.optional().meta({
-      description: "Replaces the issue's labels; [] removes them all.",
-    }),
-    links: links.optional().meta({
-      description: "Replaces the issue's links; [] removes them all.",
-    }),
-    addLabels: labelNames.optional().meta({
-      description:
-        "Labels to add, keeping the issue's others, even those another bot added a moment ago. A name matches the project's label ignoring the case of A-Z; a new name creates the label. Not with labels.",
-    }),
-    removeLabels: z.array(labelName).max(50).optional().meta({
-      description:
-        "Labels to remove, by name ignoring the case of A-Z; a name the issue lacks is ignored. Not with labels.",
-    }),
-    addLinks: links.optional().meta({
-      description:
-        "Links to add, keeping the issue's others. A url already on the issue takes the title sent here, or keeps its own when none is sent. Not with links.",
-    }),
-    removeLinks: z.array(z.string().min(1).max(2048)).max(50).optional().meta({
-      description:
-        "Urls of links to remove; a url the issue lacks is ignored. Not with links.",
-    }),
   })
   .openapi("IssueUpdate");
 
@@ -495,7 +876,7 @@ const sourceTimestamp = z.iso
   .meta({ example: "2026-01-02T03:04:05.000Z" });
 const sourceRef = z.string().min(1).max(200).meta({
   description:
-    "The row's id in the system it came from: Linear's id, a UUID, not an identifier like JUS-187, which Linear changes when an issue moves team. A re-run matches rows by it: the project across trail, an issue within its project, a comment within its issue, a status update within its project.",
+    "The row's id in the system it came from: Linear's id, a UUID, not an identifier like JUS-187, which Linear changes when an issue moves team. A re-run matches rows by it: the product across trail, an issue within its product, a comment within its issue, a status update within its product.",
   example: "2b5f6e1c-7d0a-4c3e-9f1b-8a6d4e2c1f07",
 });
 const sourceAuthorInput = z
@@ -546,7 +927,7 @@ const importIssueSchema = z
     sourceKey: z.string().optional().meta({
       pattern: "^[A-Za-z0-9]{2,10}-[1-9]\\d*$",
       description:
-        "The issue's key in the system it came from (Linear's identifier, like JUS-187; a letter-or-digit prefix, a dash and a number). It is stored uppercased, and the issue is found by it wherever an id or key is taken, after them: an id or key that looks the same wins; a re-run sets it to the value sent. When its prefix is the project's key, a new issue keeps that number, so JUS-187 in Linear is JUS-187 in trail; if another issue already holds the number, the new one gets the project's next number and is listed in the result's renumbered, and is reached by the key listed there, since its sourceKey finds the issue holding that key. An imported issue's number never changes on a re-run. Unique across trail. Without it, an externalRef shaped like JUS-187 keeps its number instead.",
+        "The issue's key in the system it came from (Linear's identifier, like JUS-187; a letter-or-digit prefix, a dash and a number). It is stored uppercased, and the issue is found by it wherever an id or key is taken, after them: an id or key that looks the same wins; a re-run sets it to the value sent. When its prefix is the product's key, a new issue keeps that number, so JUS-187 in Linear is JUS-187 in trail; if another issue already holds the number, the new one gets the product's next number and is listed in the result's renumbered, and is reached by the key listed there, since its sourceKey finds the issue holding that key. An imported issue's number never changes on a re-run. Unique across trail. Without it, an externalRef shaped like JUS-187 keeps its number instead.",
       example: "JUS-187",
     }),
     title: z.string().meta({ description: "1 to 300 characters." }),
@@ -607,9 +988,9 @@ const importStatusUpdateSchema = z
 export const importSchema = z
   .strictObject({
     externalRef: sourceRef,
-    key: projectKey.meta({
+    key: productKey.meta({
       description:
-        "The project's key, like TRL: 2 to 10 letters A-Z or digits. Fixed once imported; a re-run sends the same key.",
+        "The product's key, like TRL: 2 to 10 letters A-Z or digits. Fixed once imported; a re-run sends the same key.",
       example: "TRL",
     }),
     name,
@@ -617,7 +998,7 @@ export const importSchema = z
     createdAt: sourceTimestamp.optional(),
     labels: z.array(labelName).max(1000).optional().meta({
       description:
-        "Label names to create in the project beside those its issues name.",
+        "Label names to create in the product beside those its issues name.",
     }),
     issues: z.array(importIssueSchema).optional(),
     statusUpdates: z.array(importStatusUpdateSchema).optional(),
@@ -637,7 +1018,10 @@ const importCountsSchema = z
 
 export const importResultSchema = z
   .object({
-    project: projectSchema,
+    product: productSchema,
+    project: productSchema.meta({
+      description: "Deprecated alias of product.",
+    }),
     renumbered: z
       .array(
         z.object({
@@ -648,7 +1032,7 @@ export const importResultSchema = z
       )
       .meta({
         description:
-          "Issues created without the number their sourceKey asked for, because another issue in the project held it. Each is reached by its key here: its sourceKey is the key of the issue that held the number, so it finds that issue.",
+          "Items created without the number their sourceKey asked for, because another item in the product held it. Each is reached by its key here: its sourceKey is the key of the issue that held the number, so it finds that issue.",
       }),
     created: importCountsSchema,
     updated: importCountsSchema,
@@ -668,20 +1052,37 @@ export const issueListQuerySchema = pageQuerySchema.extend({
   assigneeId: id.optional(),
 });
 
+export const itemListQuerySchema = pageQuerySchema.extend({
+  product: productRef.optional(),
+  project: projectSlug.optional().meta({
+    description:
+      "A project's slug, like launch-q4: only its items, of the products this key reaches.",
+  }),
+  type: itemTypeSchema.optional(),
+  status: issueStatusSchema.optional(),
+  assignee: assigneeRef.optional(),
+});
+
 export const activityListQuerySchema = pageQuerySchema.extend({
   cursor: z.string().optional().meta({
     description:
-      "Pages newest first: pass the nextCursor of the previous page read without `after`. Bound to the projectId and actorId it was issued under.",
+      "Pages newest first: pass the nextCursor of the previous page read without `after`. Bound to the filters (product or projectId, project, actorId) it was issued under.",
   }),
   after: z.string().optional().meta({
     description:
-      "Resumes oldest first after this cursor; empty starts from the first event. The page's nextCursor is never null: pass it as `after` to poll for newer events. Bound to the projectId and actorId it was issued under.",
+      "Resumes oldest first after this cursor; empty starts from the first event. The page's nextCursor is never null: pass it as `after` to poll for newer events. Bound to the filters (product or projectId, project, actorId) it was issued under.",
+  }),
+  product: productRef.optional(),
+  project: projectSlug.optional().meta({
+    description:
+      "A project's slug: its own events (created, updated, status updates) and its items joining and leaving.",
   }),
   projectId: projectRef.optional(),
   actorId: id.optional(),
 });
 
 export type ApiError = z.infer<typeof errorSchema>;
+export type ProductView = z.infer<typeof productSchema>;
 export type ProjectView = z.infer<typeof projectSchema>;
 export type IssueView = z.infer<typeof issueSchema>;
 export type CommentView = z.infer<typeof commentSchema>;
@@ -698,6 +1099,18 @@ export type PageView<T> = { items: T[]; nextCursor: string | null };
 
 // The human API under /api/web, which the SPA reads. Every row is shaped for display:
 // actors come with their name and kind, projects and issues by key.
+
+/**
+ * The statuses the SPA draws. An item in triage is served as open until the web
+ * API and SPA take triage (slice 3 of products and projects); see `webStatus`.
+ */
+export const webIssueStatuses = [
+  "open",
+  "in_progress",
+  "done",
+  "canceled",
+] as const;
+const webIssueStatusSchema = z.enum(webIssueStatuses).openapi("WebIssueStatus");
 
 const webActorSchema = z.object({
   id,
@@ -774,7 +1187,7 @@ export const webProjectListSchema = z.object({
 export const webIssueRowSchema = z.object({
   key: z.string(),
   title: z.string(),
-  status: issueStatusSchema,
+  status: webIssueStatusSchema,
   priority: z.int(),
   labels: z.array(z.string()),
   assignee: webActorSchema.nullable(),
@@ -817,8 +1230,8 @@ export const entrySchema = z
     z.object({
       ...onIssue,
       kind: z.literal("status_changed"),
-      from: issueStatusSchema,
-      to: issueStatusSchema,
+      from: webIssueStatusSchema,
+      to: webIssueStatusSchema,
     }),
     z.object({
       ...onIssue,
@@ -883,7 +1296,7 @@ export const webIssueSchema = z.object({
   project: webProjectRefSchema,
   title: z.string(),
   description: z.string(),
-  status: issueStatusSchema,
+  status: webIssueStatusSchema,
   priority: z.int(),
   estimate: z.number().nullable(),
   labels: z.array(z.string()),
@@ -917,7 +1330,7 @@ export const searchSchema = z.object({
       key: z.string(),
       sourceKey: z.string().nullable(),
       title: z.string(),
-      status: issueStatusSchema,
+      status: webIssueStatusSchema,
       project: webProjectRefSchema,
     }),
   ),
@@ -978,7 +1391,7 @@ export const webCommentCreateSchema = z.strictObject({
 });
 
 export const webIssueListQuerySchema = pageQuerySchema.extend({
-  status: issueStatusSchema.optional(),
+  status: webIssueStatusSchema.optional(),
 });
 
 const feedFilterQuery = {

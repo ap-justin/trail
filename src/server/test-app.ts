@@ -257,7 +257,7 @@ export function setupTestApp({
 
   /**
    * Sends `json` as the body and the bot's key unless `key` overrides it (null
-   * sends none), and `cookie` as the Cookie header. A non-GET carries the app's
+   * sends none), `cookie` as the Cookie header, and any further `headers`. A non-GET carries the app's
    * own Origin, as a browser on the SPA sends it, unless `origin` overrides it
    * (null sends none).
    */
@@ -269,14 +269,17 @@ export function setupTestApp({
       key = bot.key,
       cookie,
       origin = TEST_ORIGIN,
+      headers: extra = {},
     }: {
       json?: unknown;
       key?: string | null;
       cookie?: string;
       origin?: string | null;
+      /** sent as well, like an Idempotency-Key */
+      headers?: Record<string, string>;
     } = {},
   ) {
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = { ...extra };
     if (key !== null) headers.authorization = `Bearer ${key}`;
     if (cookie !== undefined) headers.cookie = cookie;
     if (origin !== null && method !== "GET") headers.origin = origin;

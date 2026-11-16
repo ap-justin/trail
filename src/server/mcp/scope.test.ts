@@ -39,8 +39,7 @@ let issueA = "";
 beforeAll(async () => {
   ivy = await connect(scoped.key);
   wide = await connect(bot.key);
-  issueA = (await call(wide, "create_issue", { projectId: a.key, title: "a" }))
-    .key;
+  issueA = (await call(wide, "file_issue", { product: a.key, title: "a" })).key;
 });
 
 /** The tool's JSON result; fails the test if the tool answered an error. */
@@ -55,44 +54,44 @@ async function call(client: Client, name: string, args: Body = {}) {
 const raw = (client: Client, name: string, args: Body = {}) =>
   client.callTool({ name, arguments: args });
 
-/** A project with an issue, a comment, a label and a status update, by the unscoped bot. */
+/** A product with an item, a comment, a label and a status update, by the unscoped bot. */
 async function hiddenProject(key = projectKey()) {
-  const project = await call(wide, "create_project", { key, name: "B" });
-  const issue = await call(wide, "create_issue", {
-    projectId: key,
-    title: "b",
-  });
-  await call(wide, "add_comment", { issueId: issue.key, body: "b" });
-  await call(wide, "create_label", { projectId: key, name: "bug" });
+  const project = await call(wide, "create_product", { key, name: "B" });
+  const issue = await call(wide, "add_todo", { product: key, title: "b" });
+  await call(wide, "add_comment", { item: issue.key, body: "b" });
+  await call(wide, "create_label", { product: key, name: "bug" });
   await call(wide, "post_status_update", {
-    projectId: key,
+    product: key,
     body: "ok",
     health: "on_track",
   });
   return { project, issue };
 }
 
-// Every tool that takes a project or issue reference, with its arguments for project K.
+// Every tool that takes a product or item reference, with its arguments for product K.
 const keyed: [string, (k: string) => Body][] = [
-  ["get_project", (k) => ({ projectId: k })],
-  ["update_project", (k) => ({ projectId: k, name: "renamed" })],
-  ["list_labels", (k) => ({ projectId: k })],
-  ["create_label", (k) => ({ projectId: k, name: "new" })],
-  ["list_status_updates", (k) => ({ projectId: k })],
-  [
-    "post_status_update",
-    (k) => ({ projectId: k, body: "x", health: "at_risk" }),
-  ],
-  ["list_issues", (k) => ({ projectId: k })],
+  ["get_product", (k) => ({ product: k })],
+  ["update_product", (k) => ({ product: k, name: "renamed" })],
+  ["get_project", (k) => ({ project: k })],
+  ["update_project", (k) => ({ project: k, name: "renamed" })],
+  ["list_labels", (k) => ({ product: k })],
+  ["create_label", (k) => ({ product: k, name: "new" })],
+  ["list_status_updates", (k) => ({ product: k })],
+  ["post_status_update", (k) => ({ product: k, body: "x", health: "at_risk" })],
+  ["list_items", (k) => ({ product: k })],
+  ["add_todo", (k) => ({ product: k, title: "t" })],
+  ["file_issue", (k) => ({ product: k, title: "t" })],
+  ["create_project", (k) => ({ name: "p", products: [k] })],
+  ["get_item", (k) => ({ item: `${k}-1` })],
+  ["update_item", (k) => ({ item: `${k}-1`, title: "t2" })],
+  ["list_comments", (k) => ({ item: `${k}-1` })],
+  ["add_comment", (k) => ({ item: `${k}-1`, body: "c" })],
+  ["list_activity", (k) => ({ product: k })],
   ["create_issue", (k) => ({ projectId: k, title: "t" })],
-  ["get_issue", (k) => ({ issueId: `${k}-1` })],
-  ["update_issue", (k) => ({ issueId: `${k}-1`, title: "t2" })],
-  ["list_comments", (k) => ({ issueId: `${k}-1` })],
-  ["add_comment", (k) => ({ issueId: `${k}-1`, body: "c" })],
-  ["list_activity", (k) => ({ projectId: k })],
+  ["list_issues", (k) => ({ projectId: k })],
 ];
 
-test("a project outside the key's projects answers exactly as one that doesn't exist, on every keyed tool", async () => {
+test("a product outside the key's products answers exactly as one that doesn't exist, on every keyed tool", async () => {
   const k = projectKey();
   const snapshot = () =>
     Promise.all(
@@ -109,7 +108,7 @@ test("a project outside the key's projects answers exactly as one that doesn't e
   for (const { tool, result } of missing) {
     expect(result.isError, tool).toBe(true);
     const [first] = result.content as { text: string }[];
-    expect(first?.text, tool).toMatch(/^not_found: no (project|issue) /);
+    expect(first?.text, tool).toMatch(/^not_found: no (product|project|item) /);
   }
 });
 
@@ -122,9 +121,9 @@ test("a refused tool call carries the same text as the REST refusal", async () =
   for (const [tool, args, method, path, json] of [
     [
       "post_status_update",
-      { projectId: a.key, body: "ok", health: "on_track" },
+      { product: a.key, body: "ok", health: "on_track" },
       "POST",
-      `/api/v1/projects/${a.key}/status-updates`,
+      `/api/v1/products/${a.key}/status-updates`,
       { body: "ok", health: "on_track" },
     ],
     ["list_bots", {}, "GET", "/api/v1/bots", undefined],
@@ -139,12 +138,12 @@ test("a refused tool call carries the same text as the REST refusal", async () =
   }
 });
 
-test("list tools show a scoped key only its projects, their issues and their activity", async () => {
+test("list tools show a scoped key only its products, their items and their activity", async () => {
   const b = await hiddenProject();
   expect(
-    (await call(ivy, "list_projects")).items.map((p: Body) => p.key),
+    (await call(ivy, "list_products")).items.map((p: Body) => p.key),
   ).toEqual([a.key]);
-  const everyIssue = await call(wide, "list_issues", { limit: 200 });
+  const everyIssue = await call(wide, "list_items", { limit: 200 });
   expect(everyIssue.nextCursor).toBeNull();
   const inA = everyIssue.items
     .filter((i: Body) => i.projectId === a.id)
@@ -153,7 +152,7 @@ test("list tools show a scoped key only its projects, their issues and their act
   expect(everyIssue.items.map((i: Body) => i.key)).toContain(b.issue.key);
   expect(inA).toContain(issueA);
   expect(
-    (await call(ivy, "list_issues", { limit: 200 })).items.map(
+    (await call(ivy, "list_items", { limit: 200 })).items.map(
       (i: Body) => i.key,
     ),
   ).toEqual(inA);
@@ -176,46 +175,53 @@ test("list tools show a scoped key only its projects, their issues and their act
   );
 });
 
-test("a key scoped to A writes issues and comments in A", async () => {
-  const filed = await call(ivy, "create_issue", {
-    projectId: a.key,
+test("a key scoped to A files issues and comments in A", async () => {
+  const filed = await call(ivy, "file_issue", {
+    product: a.key,
     title: "by ivy",
   });
-  expect(filed).toMatchObject({ title: "by ivy", projectId: a.id });
-  const updated = await call(ivy, "update_issue", {
-    issueId: filed.key,
+  expect(filed).toMatchObject({ title: "by ivy", product: a.key });
+  const updated = await call(ivy, "update_item", {
+    item: filed.key,
     status: "in_progress",
   });
   expect(updated.status).toBe("in_progress");
-  await call(ivy, "add_comment", { issueId: filed.key, body: "on it" });
-  const comments = await call(wide, "list_comments", { issueId: filed.key });
+  await call(ivy, "add_comment", { item: filed.key, body: "on it" });
+  const comments = await call(wide, "list_comments", { item: filed.key });
   expect(comments.items.map((c: Body) => c.body)).toEqual(["on it"]);
 });
 
-/** Each tool a key's actions gate, with the action it needs and its arguments in project A. */
+/** Each tool a key's actions gate, with the action it needs and its arguments in product A. */
 const gated = (): [string, string, () => Body][] => [
-  ["get_project", "read", () => ({ projectId: a.key })],
+  ["get_product", "read", () => ({ product: a.key })],
+  ["list_products", "read", () => ({})],
   ["list_projects", "read", () => ({})],
-  ["get_issue", "read", () => ({ issueId: issueA })],
-  ["list_issues", "read", () => ({})],
-  ["list_comments", "read", () => ({ issueId: issueA })],
-  ["list_labels", "read", () => ({ projectId: a.key })],
-  ["list_status_updates", "read", () => ({ projectId: a.key })],
+  ["get_item", "read", () => ({ item: issueA })],
+  ["list_items", "read", () => ({})],
+  ["list_comments", "read", () => ({ item: issueA })],
+  ["list_labels", "read", () => ({ product: a.key })],
+  ["list_status_updates", "read", () => ({ product: a.key })],
   ["list_activity", "read", () => ({})],
-  ["create_issue", "issues", () => ({ projectId: a.key, title: "t" })],
-  ["update_issue", "issues", () => ({ issueId: issueA, title: "t" })],
-  ["add_comment", "comments", () => ({ issueId: issueA, body: "c" })],
+  ["add_todo", "issues", () => ({ product: a.key, title: "t" })],
+  ["file_issue", "issues", () => ({ product: a.key, title: "t" })],
+  ["update_item", "issues", () => ({ item: issueA, title: "t" })],
+  [
+    "create_project",
+    "issues",
+    () => ({ name: `p ${projectKey()}`, products: [a.key] }),
+  ],
+  ["add_comment", "comments", () => ({ item: issueA, body: "c" })],
   [
     "post_status_update",
     "status_updates",
-    () => ({ projectId: a.key, body: "ok", health: "on_track" }),
+    () => ({ product: a.key, body: "ok", health: "on_track" }),
   ],
-  ["create_project", "admin", () => ({ key: projectKey(), name: "n" })],
-  ["update_project", "admin", () => ({ projectId: a.key, description: "d" })],
+  ["create_product", "admin", () => ({ key: projectKey(), name: "n" })],
+  ["update_product", "admin", () => ({ product: a.key, description: "d" })],
   [
     "create_label",
     "admin",
-    () => ({ projectId: a.key, name: `l ${projectKey()}` }),
+    () => ({ product: a.key, name: `l ${projectKey()}` }),
   ],
   [
     "import_project",
@@ -249,14 +255,16 @@ test.each(["read", "issues", "comments", "status_updates", "admin"])(
       }
     }
     expect((await call(only, "whoami")).scope).toEqual({
+      products: null,
       projects: null,
       actions: [action],
     });
   },
 );
 
-test("whoami reports a scoped key's projects and actions", async () => {
+test("whoami reports a scoped key's products and actions", async () => {
   expect((await call(ivy, "whoami")).scope).toEqual({
+    products: [a.key],
     projects: [a.key],
     actions: ["read", "issues", "comments"],
   });
@@ -293,8 +301,8 @@ test("import_project refuses a source key a hidden issue holds naming nothing of
     "import_project",
     withIssue(`ext-${inside}`, inside, "vis-602", "LIN-602"),
   );
-  const hiddenId = (await call(wide, "get_issue", { issueId: "LIN-601" })).id;
-  const visibleId = (await call(wide, "get_issue", { issueId: "LIN-602" })).id;
+  const hiddenId = (await call(wide, "get_item", { item: "LIN-601" })).id;
+  const visibleId = (await call(wide, "get_item", { item: "LIN-602" })).id;
 
   const importer = await connect(
     createBot(db, "mcp scoped source-key importer", {

@@ -164,10 +164,10 @@ test("key create --projects --actions mints a key with that scope, project keys 
   const key = createdKey(stdout);
   expect(withDb((db) => resolveKey(db, key))).toEqual(bot);
   expect(scopeOf(key)).toEqual({
-    projects: ["ATL", "BGP"],
+    products: ["ATL", "BGP"],
     actions: ["read", "issues", "comments"],
   });
-  expect(scopeOf(first)).toEqual({ projects: null, actions: null });
+  expect(scopeOf(first)).toEqual({ products: null, actions: null });
   expect(stdout).toMatch(
     /^actor {2}\S+\nkey {4}\S+\nscope {2}projects ATL,BGP; actions read,issues,comments\n$/,
   );
@@ -187,7 +187,7 @@ test("bot create --projects --key-only prints the key alone on stdout, its scope
   expect(withDb((db) => resolveKey(db, stdout.trim()))).toMatchObject({
     displayName: "bg-ivy",
   });
-  expect(scopeOf(stdout)).toEqual({ projects: ["BGP"], actions: null });
+  expect(scopeOf(stdout)).toEqual({ products: ["BGP"], actions: null });
   expect(stderr).toMatch(
     /^actor {2}\S+\nscope {2}projects BGP; all actions\n/m,
   );
@@ -197,7 +197,7 @@ test("bot create --actions alone limits only the actions", () => {
   const { code, stdout } = run("bot", "create", "reader", "--actions", "read");
   expect(code).toBe(0);
   expect(scopeOf(createdKey(stdout))).toEqual({
-    projects: null,
+    products: null,
     actions: ["read"],
   });
   expect(stdout).toMatch(/^scope {2}all projects; actions read$/m);

@@ -84,8 +84,16 @@ export function page<T extends { createdAt: Date; id: string }>(
   };
 }
 
-/** The filters a feed cursor was issued under; null is "not filtered". */
-export type FeedFilters = { projectId: string | null; actorId: string | null };
+/**
+ * The filters a feed cursor was issued under; null is "not filtered".
+ * `projectId` is a product's id (the name it had before projects); `groupId` a
+ * project's, and a cursor issued without it reads as null.
+ */
+export type FeedFilters = {
+  projectId: string | null;
+  actorId: string | null;
+  groupId?: string | null;
+};
 /** The query parameter a feed cursor goes back on: `cursor` pages newest first, `after` oldest first. */
 export type FeedParam = "cursor" | "after";
 export type FeedPosition = FeedFilters & { seq: number; param: FeedParam };
@@ -95,12 +103,13 @@ export function encodeFeedCursor(position: FeedPosition): string {
     seq: position.seq,
     projectId: position.projectId,
     actorId: position.actorId,
+    ...(position.groupId != null && { groupId: position.groupId }),
     param: position.param,
   });
 }
 
 const describeFilters = (f: FeedFilters) =>
-  `projectId=${f.projectId ?? "(none)"}, actorId=${f.actorId ?? "(none)"}`;
+  `projectId=${f.projectId ?? "(none)"}, actorId=${f.actorId ?? "(none)"}${f.groupId == null ? "" : `, project=${f.groupId}`}`;
 
 const feedOrder = { cursor: "newest-first", after: "oldest-first" } as const;
 
@@ -122,6 +131,7 @@ export function decodeFeedCursor(
     (parsed.seq as number) < 0 ||
     !nullableString(parsed.projectId) ||
     !nullableString(parsed.actorId) ||
+    !(parsed.groupId === undefined || typeof parsed.groupId === "string") ||
     (parsed.param !== "cursor" && parsed.param !== "after")
   ) {
     throw new ValidationError(
@@ -131,7 +141,8 @@ export function decodeFeedCursor(
   const issued = parsed as FeedPosition;
   if (
     issued.projectId !== filters.projectId ||
-    issued.actorId !== filters.actorId
+    issued.actorId !== filters.actorId ||
+    (issued.groupId ?? null) !== (filters.groupId ?? null)
   ) {
     throw new ValidationError(
       `cursor was issued for ${describeFilters(issued)} but this request has ${describeFilters(filters)}: repeat the cursor's filters, or drop the cursor to start over`,

@@ -160,14 +160,14 @@ interface Command<T> {
 }
 
 const projectsCell = (scope: KeyScopeView) =>
-  scope.projects?.join(",") ?? "all projects";
+  scope.products?.join(",") ?? "all projects";
 const actionsCell = (scope: KeyScopeView) =>
   scope.actions?.join(",") ?? "all actions";
 
 /** `scope  projects BGP; all actions`, or nothing for an unscoped key. */
 function scopeLine(scope: KeyScopeView): string {
-  if (scope.projects === null && scope.actions === null) return "";
-  const projects = scope.projects
+  if (scope.products === null && scope.actions === null) return "";
+  const projects = scope.products
     ? `projects ${projectsCell(scope)}`
     : projectsCell(scope);
   const actions = scope.actions

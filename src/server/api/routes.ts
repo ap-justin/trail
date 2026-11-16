@@ -76,7 +76,7 @@ export const notFoundError = {
 
 /**
  * The 403 of an operation a key's actions gate: spread into every operation but
- * whoami. `scope` adds the refusal of a key limited to projects, for the
+ * whoami. `scope` adds the refusal of a key limited to products, for the
  * operations that make one. (The service's bot-only 403 can't reach /api/v1,
  * whose every caller is a bot.)
  */
@@ -86,7 +86,7 @@ export const forbiddenError = (
 ) => ({
   403: jsonContent(
     errorSchema,
-    `The key lacks the ${action} action (code forbidden_action)${scope ? ", or reaches only some projects (code forbidden_scope)" : ""}`,
+    `The key lacks the ${action} action (code forbidden_action)${scope ? ", or reaches only some products (code forbidden_scope)" : ""}`,
   ),
 });
 
@@ -121,6 +121,18 @@ export const jsonBody = <T extends z.ZodType>(schema: T) => ({
   required: true,
 });
 
+export const itemParam = z.object({
+  key: z
+    .string()
+    .min(1)
+    .openapi({
+      param: { name: "key", in: "path" },
+      description:
+        "The item's key (like TRL-12), its id, or its source key (like JUS-187, kept from an import). Looked up in that order, so a key beats a source key that looks the same.",
+      example: "TRL-12",
+    }),
+});
+
 export const issueParam = z.object({
   id: z
     .string()
@@ -128,18 +140,45 @@ export const issueParam = z.object({
     .openapi({
       param: { name: "id", in: "path" },
       description:
-        "The issue's id, its key (like TRL-12) or its source key (like JUS-187, kept from an import). Looked up in that order, so a key beats a source key that looks the same.",
+        "The item's id, its key (like TRL-12) or its source key (like JUS-187, kept from an import).",
       example: "TRL-12",
     }),
 });
 
-export const projectParam = z.object({
-  id: z
+export const productParam = z.object({
+  key: z
     .string()
     .min(1)
     .openapi({
-      param: { name: "id", in: "path" },
-      description: "The project's id or its key, like TRL.",
+      param: { name: "key", in: "path" },
+      description: "The product's key (like TRL, any case) or id.",
       example: "TRL",
     }),
+});
+
+export const projectParam = z.object({
+  ref: z
+    .string()
+    .min(1)
+    .openapi({
+      param: { name: "ref", in: "path" },
+      description:
+        "The project's slug, like launch-q4, matched exactly. Deprecated: a product's key (like TRL) that matches no slug names the product, as this path did before projects; use /products/{key} for that.",
+      example: "launch-q4",
+    }),
+});
+
+export const projectSlugParam = z.object({
+  slug: z
+    .string()
+    .min(1)
+    .openapi({
+      param: { name: "slug", in: "path" },
+      description: "The project's slug, like launch-q4, matched exactly.",
+      example: "launch-q4",
+    }),
+});
+
+export const projectItemParam = projectSlugParam.extend({
+  key: itemParam.shape.key,
 });

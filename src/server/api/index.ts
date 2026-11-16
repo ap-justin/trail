@@ -8,11 +8,11 @@ import { createRouter } from "./env.js";
 import { handleError } from "./errors.js";
 import { importRoutes } from "./import.js";
 import { issueRoutes } from "./issues.js";
-import { labelRoutes } from "./labels.js";
+import { itemRoutes } from "./items.js";
 import { photoRoutes } from "./photos.js";
+import { productRoutes } from "./products.js";
 import { projectRoutes } from "./projects.js";
 import { jsonBodiesOnly, limitBody, MAX_BODY_BYTES } from "./routes.js";
-import { statusUpdateRoutes } from "./status-updates.js";
 import { titleRoutes } from "./title.js";
 import { webhookRoutes } from "./webhooks.js";
 
@@ -41,11 +41,11 @@ export function createApi({ db, service }: { db: Db; service: Service }) {
   api.route("/", importRoutes(service));
   api.route("/", photoRoutes(service));
   api.use(limitBody(MAX_BODY_BYTES));
+  api.route("/", productRoutes(service));
   api.route("/", projectRoutes(service));
+  api.route("/", itemRoutes(service));
   api.route("/", issueRoutes(service));
   api.route("/", commentRoutes(service));
-  api.route("/", labelRoutes(service));
-  api.route("/", statusUpdateRoutes(service));
   api.route("/", activityRoutes(service));
   api.route("/", actorRoutes(service));
   api.route("/", titleRoutes(service));

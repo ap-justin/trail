@@ -98,7 +98,7 @@ describe("a key's scope", () => {
   test("a key minted without a scope reaches every project with every action", () => {
     const { key } = createBot(db, "unscoped");
     expect(authenticateKey(db, key)?.scope).toEqual({
-      projects: null,
+      products: null,
       actions: null,
     });
   });
@@ -110,7 +110,7 @@ describe("a key's scope", () => {
     expect(authenticateKey(db, key)).toEqual({
       ...actor,
       scope: {
-        projects: [
+        products: [
           { id: bgp.id, key: "BGP" },
           { id: ops.id, key: "OPS" },
         ],
@@ -123,11 +123,11 @@ describe("a key's scope", () => {
     const { actor, key: wide } = createBot(db, "two keys");
     const { key: narrow } = createKey(db, actor.id, { actions: ["issues"] });
     expect(authenticateKey(db, narrow)?.scope).toEqual({
-      projects: null,
+      products: null,
       actions: ["issues"],
     });
     expect(authenticateKey(db, wide)?.scope).toEqual({
-      projects: null,
+      products: null,
       actions: null,
     });
   });
@@ -137,7 +137,7 @@ describe("a key's scope", () => {
       scope: { projects: ["BGP", "bgp", "Bgp"], actions: ["read", "read"] },
     });
     expect(authenticateKey(db, key)?.scope).toEqual({
-      projects: [{ id: bgp.id, key: "BGP" }],
+      products: [{ id: bgp.id, key: "BGP" }],
       actions: ["read"],
     });
   });
@@ -195,9 +195,9 @@ describe("a key's scope", () => {
     });
     const listed = listKeys(db).filter((k) => k.actorId === actor.id);
     expect(listed.map((k) => k.scope)).toEqual([
-      { projects: ["BGP", "OPS"], actions: ["admin"] },
+      { products: ["BGP", "OPS"], actions: ["admin"] },
     ]);
     const unscoped = listKeys(db).find((k) => k.actorId === owner.id);
-    expect(unscoped?.scope).toEqual({ projects: null, actions: null });
+    expect(unscoped?.scope).toEqual({ products: null, actions: null });
   });
 });

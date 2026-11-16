@@ -5,6 +5,7 @@ import type {
   WebProjectRefView,
 } from "../../shared/schemas.js";
 import type { Db } from "../db/client.js";
+import type { IssueStatus } from "../db/schema.js";
 import {
   activityEvent,
   comment,
@@ -14,14 +15,13 @@ import {
 } from "../db/schema.js";
 import type { ActivityEvent } from "../events/bus.js";
 import { importedEventPayload, type Link } from "../service/index.js";
-import type { SettableStatus } from "../service/validate.js";
-import { actorsById } from "./visible.js";
+import { actorsById, webStatus } from "./visible.js";
 
 type Change<T> = { from: T; to: T };
 
 /** The part of an `issue.updated` payload (field → from/to) the feed shows. */
 type IssueChanges = {
-  status?: Change<SettableStatus>;
+  status?: Change<IssueStatus>;
   priority?: Change<number>;
   labels?: Change<string[]>;
   links?: Change<Link[]>;
@@ -76,7 +76,13 @@ function changeEntries(
     EntryView,
     "id" | "createdAt" | "actor" | "project" | "issue"
   >[] = [];
-  if (changes.status) parts.push({ kind: "status_changed", ...changes.status });
+  if (changes.status) {
+    parts.push({
+      kind: "status_changed",
+      from: webStatus(changes.status.from),
+      to: webStatus(changes.status.to),
+    });
+  }
   if (changes.priority) {
     parts.push({ kind: "priority_changed", ...changes.priority });
   }

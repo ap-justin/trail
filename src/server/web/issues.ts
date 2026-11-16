@@ -14,15 +14,20 @@ import {
 import { jsonBody, jsonContent } from "../api/routes.js";
 import type { Db } from "../db/client.js";
 import { issue, issueLabel, issueLink, label, product } from "../db/schema.js";
+import { NotFoundError } from "../service/errors.js";
 import type { ActingActor, Service } from "../service/index.js";
 import { page } from "../service/paging.js";
 import { photoUrlOf } from "../service/photos.js";
-import { servedStatus } from "../service/validate.js";
-import { amongVisible, noIssue } from "../service/visible.js";
+import { amongVisible } from "../service/visible.js";
 import { timelineOf } from "./entries.js";
 import { createWebRouter, type Member } from "./env.js";
 import { keyParam } from "./projects.js";
-import { actorsById, visibleIds, visibleProject } from "./visible.js";
+import {
+  actorsById,
+  visibleIds,
+  visibleProject,
+  webStatus,
+} from "./visible.js";
 
 type IssueRow = typeof issue.$inferSelect;
 
@@ -103,7 +108,7 @@ export function visibleIssue(db: Db, member: Member, ref: string) {
       .innerJoin(product, visible)
       .where(eq(issue.sourceKey, ref.trim().toUpperCase()))
       .get();
-  if (!found) throw noIssue(ref);
+  if (!found) throw new NotFoundError(`no issue ${ref}`);
   return {
     row: found.issue,
     key: `${found.projectKey}-${found.issue.number}`,
@@ -130,7 +135,7 @@ export function issueView(
     project: projectRef,
     title: row.title,
     description: row.description,
-    status: servedStatus(row.status),
+    status: webStatus(row.status),
     priority: row.priority,
     estimate: row.estimate,
     labels: labelsOf(db, [row.id])(row.id),
@@ -176,7 +181,7 @@ function toRows(
   return rows.map((r) => ({
     key: `${projectKey}-${r.number}`,
     title: r.title,
-    status: servedStatus(r.status),
+    status: webStatus(r.status),
     priority: r.priority,
     labels: labels(r.id),
     assignee: r.assigneeId === null ? null : actorOf(r.assigneeId),
@@ -211,8 +216,8 @@ export function issueRoutes(db: Db, service: Service) {
       const member = c.var.member;
       const { projectKey, title, description } = c.req.valid("json");
       const target = visibleProject(member, projectKey);
-      const created = service.createIssue(actingAs(member), {
-        projectId: target.id,
+      const created = service.fileIssue(actingAs(member), {
+        product: target.id,
         title,
         description,
       });

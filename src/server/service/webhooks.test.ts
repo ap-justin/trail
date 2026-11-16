@@ -166,43 +166,84 @@ test("a create replayed under its idempotency key queues no second delivery", as
   expect(statuses()).toEqual(["pending"]);
 });
 
-test("a label, a status update and a project change each describe their project", async () => {
+test("a label, a status update and a product change each describe their product", async () => {
   const PUBLIC = "https://trail.example";
   const key = await newProject();
   const since = published.length;
-  await api("POST", `/projects/${key}/labels`, { name: "flaky" });
-  await api("POST", `/projects/${key}/status-updates`, {
+  await api("POST", `/products/${key}/labels`, { name: "flaky" });
+  await api("POST", `/products/${key}/status-updates`, {
     body: "shipping friday",
     health: "on_track",
   });
-  await api("PATCH", `/projects/${key}`, { name: "Renamed" });
-  const subjects = published
+  await api("PATCH", `/products/${key}`, { name: "Renamed" });
+  const sent = published
     .slice(since)
-    .map((event) => buildEnvelope(db, event, PUBLIC).data as Body)
-    .map(({ subject, url }) => ({
-      type: subject.type,
-      key: subject.key,
-      title: subject.title,
-      url,
-    }));
-  const url = `${PUBLIC}/projects/${key}`;
+    .map((event) => buildEnvelope(db, event, PUBLIC).data as Body);
+  const subjects = sent.map(({ subject, url }) => ({
+    type: subject.type,
+    key: subject.key,
+    title: subject.title,
+    url,
+  }));
+  const url = `${PUBLIC}/products/${key}`;
   expect(subjects).toEqual([
     { type: "label", key, title: "flaky", url },
     { type: "status_update", key, title: "Status update: on_track", url },
-    { type: "project", key, title: "Renamed", url },
+    { type: "product", key, title: "Renamed", url },
   ]);
+  for (const data of sent) {
+    expect(data.product).toEqual({ key, name: expect.any(String) });
+    // project stays as the deprecated alias of product for one release
+    expect(data.project).toEqual(data.product);
+    expect(data.projectSlug).toBeNull();
+  }
 });
 
-test("a product event is sent as trail.project.*, though it is stored as product.*", async () => {
+test("an item event carries its product and its type; a project's own event its slug and no product", async () => {
+  const key = await newProject();
+  const since = published.length;
+  const item = (await (
+    await request("POST", "/api/v1/items", {
+      json: { type: "todo", product: key, title: "typed" },
+    })
+  ).json()) as Body;
+  await api("POST", "/projects", {
+    name: "payloads",
+    slug: "payloads",
+    products: [key],
+  });
+  const [created, project] = published
+    .slice(since)
+    .map((event) => buildEnvelope(db, event, "https://trail.example"));
+  expect(created?.type).toBe("trail.issue.created");
+  expect(created?.data).toMatchObject({
+    product: { key },
+    project: { key },
+    projectSlug: null,
+    subject: { type: "issue", key: item.key, title: "typed", itemType: "todo" },
+    url: `https://trail.example/issues/${item.key}`,
+    payload: { type: "todo", product: key },
+  });
+  expect(project?.type).toBe("trail.project.created");
+  expect(project?.data).toMatchObject({
+    product: null,
+    project: null,
+    projectSlug: "payloads",
+    subject: { type: "project", key: "payloads", title: "payloads" },
+    url: "https://trail.example/projects/payloads",
+  });
+});
+
+test("a product event is sent as trail.product.*, as it is stored", async () => {
   const key = await newProject();
   await subscribe([key], "https://bot.example.com/product-events");
   const since = published.length;
-  await api("PATCH", `/projects/${key}`, { name: "Renamed again" });
+  await api("PATCH", `/products/${key}`, { name: "Renamed again" });
   const [event] = published.slice(since);
   if (!event) throw new Error("the PATCH published no event");
   expect(event.action).toBe("product.updated");
   expect(buildEnvelope(db, event, undefined).type).toBe(
-    "trail.project.updated",
+    "trail.product.updated",
   );
   expect(
     db
@@ -210,7 +251,7 @@ test("a product event is sent as trail.project.*, though it is stored as product
       .from(webhookDelivery)
       .where(eq(webhookDelivery.eventId, event.id))
       .all(),
-  ).toEqual([{ type: "trail.project.updated" }]);
+  ).toEqual([{ type: "trail.product.updated" }]);
 });
 
 test("a webhook on two projects gets their events in the order they happened, around another bot's writes", async () => {

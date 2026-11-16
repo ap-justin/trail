@@ -1,5 +1,6 @@
 import {
   type IssueStatus,
+  issueStatuses,
   type ProjectHealth,
   projectHealths,
 } from "../db/schema.js";
@@ -8,7 +9,76 @@ import { ValidationError } from "./errors.js";
 export type Link = { url: string; title: string };
 export type LinkInput = { url: string; title?: string };
 
-const projectKeyPattern = /^[A-Z0-9]{2,10}$/;
+const productKeyPattern = /^[A-Z0-9]{2,10}$/;
+
+// the project table's slug CHECK, in the shape the agent surface states it
+const slugPattern = /^[a-z0-9][a-z0-9-]{1,38}$/;
+export const SLUG_MAX = 39;
+
+/** A project slug as sent: trimmed and lowercased, then 2 to 39 of a-z, 0-9 and hyphens, not starting with one. */
+export function validSlug(raw: string): string {
+  const slug = raw.trim().toLowerCase();
+  if (!slugPattern.test(slug)) {
+    throw new ValidationError(
+      `slug must be 2 to ${SLUG_MAX} lowercase letters, digits or hyphens, starting with a letter or digit, like launch-q4; got "${raw}". Leave slug out to derive one from the name`,
+    );
+  }
+  return slug;
+}
+
+/** The slug a project's name gives: lowercased, each run of other characters one hyphen; "project" when nothing is left. */
+export function slugOfName(name: string): string {
+  const base = name
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, SLUG_MAX)
+    .replace(/-+$/, "");
+  return base.length >= 2 ? base : "project";
+}
+
+const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+
+/** A calendar day as YYYY-MM-DD, a real one (2026-02-30 is refused); null clears. */
+export function validTargetDate(
+  raw: string | null | undefined,
+): string | null | undefined {
+  if (raw == null) return raw;
+  const day = raw.trim();
+  const parsed = new Date(`${day}T00:00:00Z`);
+  if (
+    !datePattern.test(day) ||
+    Number.isNaN(parsed.getTime()) ||
+    parsed.toISOString().slice(0, 10) !== day
+  ) {
+    throw new ValidationError(
+      `targetDate must be a calendar day as YYYY-MM-DD, like 2026-12-01; got "${raw}". Send null to clear it`,
+    );
+  }
+  return day;
+}
+
+// the product table's repo_url CHECK: https://github.com/<owner>/<name>, nothing after
+const repoUrlPattern =
+  /^https:\/\/github\.com\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
+
+/** A GitHub repository URL, a trailing slash or .git dropped; null clears. */
+export function validRepoUrl(
+  raw: string | null | undefined,
+): string | null | undefined {
+  if (raw == null) return raw;
+  const url = raw
+    .trim()
+    .replace(/\/+$/, "")
+    .replace(/\.git$/, "");
+  if (url.length > 200 || !repoUrlPattern.test(url)) {
+    throw new ValidationError(
+      `repoUrl must be a GitHub repository as https://github.com/<owner>/<name>, like https://github.com/acme/trail; got "${raw}". Send null to clear it`,
+    );
+  }
+  return url;
+}
 
 /** Per-issue set sizes outside an import; the schema caps a full replace, `withinIssueCap` the merged add form. */
 export const ISSUE_LABELS_MAX = 50;
@@ -72,28 +142,10 @@ export function validBotTitle(raw: string): string {
   return title;
 }
 
-/** The statuses a caller may set or filter by: nothing files into triage yet. */
-export const settableStatuses = [
-  "open",
-  "in_progress",
-  "done",
-  "canceled",
-] as const satisfies readonly IssueStatus[];
-
-export type SettableStatus = (typeof settableStatuses)[number];
-
-/** A stored status as the API serves it. Throws on triage, which nothing writes yet. */
-export function servedStatus(status: IssueStatus): SettableStatus {
-  if (status === "triage") {
-    throw new Error("an item in triage can't be served before the triage flow");
-  }
-  return status;
-}
-
 export function validStatus(status: string): IssueStatus {
-  if (!(settableStatuses as readonly string[]).includes(status)) {
+  if (!(issueStatuses as readonly string[]).includes(status)) {
     throw new ValidationError(
-      `status must be one of ${settableStatuses.join(", ")}`,
+      `status must be one of ${issueStatuses.join(", ")}`,
     );
   }
   return status as IssueStatus;
@@ -108,9 +160,9 @@ export function validHealth(health: string): ProjectHealth {
   return health as ProjectHealth;
 }
 
-export function validProjectKey(raw: string): string {
+export function validProductKey(raw: string): string {
   const key = raw.trim().toUpperCase();
-  if (!projectKeyPattern.test(key)) {
+  if (!productKeyPattern.test(key)) {
     throw new ValidationError(
       `key must be 2 to 10 letters A-Z or digits, like TRL; got "${raw}"`,
     );

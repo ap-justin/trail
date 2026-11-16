@@ -4,10 +4,9 @@ import { searchQuerySchema, searchSchema } from "../../shared/schemas.js";
 import { jsonContent } from "../api/routes.js";
 import type { Db } from "../db/client.js";
 import { issue, product } from "../db/schema.js";
-import { servedStatus } from "../service/validate.js";
 import { amongVisible } from "../service/visible.js";
 import { createWebRouter } from "./env.js";
-import { visibleIds } from "./visible.js";
+import { visibleIds, webStatus } from "./visible.js";
 
 const SEARCH_LIMIT = 20;
 
@@ -72,7 +71,7 @@ export function searchRoutes(db: Db) {
       {
         issues: issues.map(({ projectKey, projectName, status, ...rest }) => ({
           ...rest,
-          status: servedStatus(status),
+          status: webStatus(status),
           project: { key: projectKey, name: projectName },
         })),
         projects,

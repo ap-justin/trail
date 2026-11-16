@@ -9,18 +9,28 @@ import {
   commentCreateSchema,
   importSchema,
   issueCreateSchema,
+  issueFileSchema,
   issueListQuerySchema,
   issueUpdateSchema,
+  itemListQuerySchema,
+  itemUpdateSchema,
   labelCreateSchema,
   myTitleUpdateSchema,
+  productCreateSchema,
+  productUpdateSchema,
   projectCreateSchema,
+  projectItemsSchema,
   projectUpdateSchema,
   statusUpdateCreateSchema,
+  todoCreateSchema,
   webhookCreateSchema,
   webhookSecretUpdateSchema,
   webhookUpdateSchema,
 } from "../../shared/schemas.js";
+import { deprecations } from "../api/deprecations.js";
+import { TODO_OR_ISSUE } from "../api/items.js";
 import {
+  deprecated,
   toActivityEvent,
   toBot,
   toComment,
@@ -28,6 +38,7 @@ import {
   toIssue,
   toLabel,
   toPage,
+  toProduct,
   toProject,
   toStatusUpdate,
   toWebhook,
@@ -38,8 +49,9 @@ import {
   InvalidImageError,
   PayloadTooLargeError,
   ServiceError,
+  ValidationError,
 } from "../service/errors.js";
-import type { Service } from "../service/index.js";
+import type { ProjectOrProduct, Service } from "../service/index.js";
 import type { KeyActor } from "../service/keys.js";
 import {
   PHOTO_ACCEPTS,
@@ -50,16 +62,6 @@ import { BOT_TITLE_MAX } from "../service/validate.js";
 import { PING_LIMIT, PING_WINDOW_MS } from "../service/webhooks.js";
 import { WEBHOOK_DELIVERY, WEBHOOK_SETUP } from "../webhooks/docs.js";
 
-const projectId = z
-  .string()
-  .min(1)
-  .describe("The project's id or its key, like TRL.");
-const issueId = z
-  .string()
-  .min(1)
-  .describe(
-    "The issue's id, its key (like TRL-12) or its source key (like JUS-187, kept from an import). Looked up in that order, so a key beats a source key that looks the same.",
-  );
 const idempotencyKey = {
   idempotency_key: z
     .string()
@@ -188,46 +190,273 @@ function failed(tool: string, error: unknown): CallToolResult {
   );
 }
 
+/**
+ * The one of a canonical argument and its deprecated alias that was sent, and
+ * the note to carry when the alias was; sending both is refused.
+ */
+function eitherOf(
+  value: string | undefined,
+  alias: string | undefined,
+  names: [string, string],
+): { value: string | undefined; note: string | undefined } {
+  if (value !== undefined && alias !== undefined) {
+    throw new ValidationError(
+      `send ${names[0]} alone: ${names[1]} is its deprecated alias, and both together is ambiguous`,
+    );
+  }
+  return {
+    value: value ?? alias,
+    note:
+      alias === undefined
+        ? undefined
+        : `${names[1]} is deprecated: send ${names[0]} instead`,
+  };
+}
+
+/** The item an `item` argument or its `issueId` alias names; one is required. */
+function itemArg(item: string | undefined, issueId: string | undefined) {
+  const ref = eitherOf(item, issueId, ["item", "issueId"]);
+  if (ref.value === undefined) {
+    throw new ValidationError(
+      "item is required: send the item's key, like TRL-12; list_items finds them",
+    );
+  }
+  return ref as { value: string; note: string | undefined };
+}
+
+/** `view` with a `deprecated` note when there is one. */
+const noted = <T extends object>(view: T, note: string | undefined) =>
+  note === undefined ? view : deprecated(view, note);
+
+/** "DEPRECATED alias of <tool> (removed after the next release)": the start of every alias's description. */
+const aliasOf = (tool: string) =>
+  `DEPRECATED alias of ${tool} (removed after the next release): call ${tool} instead.`;
+
 /** Registers every trail tool on `server`, each acting as `actor` within its key's scope. */
 export function registerTools(
   server: McpServer,
   service: Service,
   actor: KeyActor,
 ): void {
+  const item = z
+    .string()
+    .min(1)
+    .describe(
+      "The item's key, like TRL-12 (or its id, or the source key it kept from an import, like JUS-187).",
+    );
+  const issueIdAlias = z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Deprecated alias of item.");
+  const product = z
+    .string()
+    .min(1)
+    .describe(
+      "The product's key, like TRL (any case); list_products lists those this key reaches.",
+    );
+  const projectIdAlias = z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Deprecated alias of product: a product's key.");
+  const projectSlug = z
+    .string()
+    .min(1)
+    .describe("The project's slug, like launch-q4; list_projects lists them.");
+
   server.registerTool(
-    "create_project",
+    "add_todo",
     {
-      description:
-        "Create a project. Its key (like TRL) prefixes its issues' keys (TRL-1, TRL-2, ...) and must be unused. To bring a project over from Linear, use import_project instead.",
-      inputSchema: projectCreateSchema.extend(idempotencyKey),
+      description: `Add a todo: planned work in a product you own (or any product this key reaches, when you name it). ${TODO_OR_ISSUE} Use file_issue instead to report a bug or ask for work in someone else's product. Without product it goes to the one product you own; with none or several, the error lists the products to pick from. Label names match the product's labels ignoring the case of A-Z, and a new name creates the label. Returns the item with its key, like TRL-12.`,
+      inputSchema: todoCreateSchema.extend(idempotencyKey),
       annotations: create,
     },
     ({ idempotency_key, ...input }) =>
-      run("create_project", () =>
-        toProject(
-          service.createProject(actor, input, {
-            idempotencyKey: idempotency_key,
-          }),
+      run("add_todo", () =>
+        toIssue(
+          service.addTodo(actor, input, { idempotencyKey: idempotency_key }),
         ),
       ),
   );
 
   server.registerTool(
-    "get_project",
+    "file_issue",
     {
-      description: "Get a project by its id or key.",
-      inputSchema: z.strictObject({ projectId }),
+      description: `File an issue: a bug report or request to a product's bot, on any product this key reaches. ${TODO_OR_ISSUE} Use add_todo instead for planned work in your own product. Leave assignee out: the product's bot assigns it when it accepts the issue. Returns the item with its key, like TRL-12, in status triage.`,
+      inputSchema: issueFileSchema.extend(idempotencyKey),
+      annotations: create,
+    },
+    ({ idempotency_key, ...input }) =>
+      run("file_issue", () =>
+        toIssue(
+          service.fileIssue(actor, input, { idempotencyKey: idempotency_key }),
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "get_item",
+    {
+      description:
+        "Get an item (a todo or an issue) by its key, like TRL-12: type, product, status, assignee, labels, links and the projects it is in.",
+      inputSchema: z.strictObject({ item }),
       annotations: read,
     },
-    ({ projectId }) =>
-      run("get_project", () => toProject(service.getProject(actor, projectId))),
+    ({ item }) => run("get_item", () => toIssue(service.getItem(actor, item))),
+  );
+
+  server.registerTool(
+    "update_item",
+    {
+      description: `Change an item: type, status, assignee, priority, labels, title, description, estimate or links. ${TODO_OR_ISSUE} To accept an issue from your product's triage send status open (or type todo, which opens it and assigns it to the product's owner when it has no assignee); to drop it send status canceled. A todo never goes back to triage and never loses its assignee. Fields left out stay as they are. labels or links replace the whole set; addLabels, removeLabels, addLinks and removeLinks change part of it, safe beside another bot's edit (not together with labels or links). Moving to done or canceled stamps completedAt; reopening clears it.`,
+      inputSchema: itemUpdateSchema.extend({ item }),
+      annotations: update,
+    },
+    ({ item, assignee, ...patch }) =>
+      run("update_item", () =>
+        toIssue(
+          service.updateItem(actor, item, { ...patch, assigneeId: assignee }),
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "list_items",
+    {
+      description:
+        'List items newest first, filtered by any of product, project, type (todo or issue), status and assignee, a page at a time: pass nextCursor back as cursor until it is null. Your product\'s triage: product and status "triage". A project\'s open todos: project, type "todo" and status "open". Only items of products this key reaches are listed.',
+      inputSchema: z.strictObject({
+        product: product.optional(),
+        project: projectSlug.optional(),
+        type: itemListQuerySchema.shape.type,
+        status: itemListQuerySchema.shape.status,
+        assignee: itemListQuerySchema.shape.assignee,
+        ...page,
+      }),
+      annotations: read,
+    },
+    (query) =>
+      run("list_items", () => toPage(service.listItems(actor, query), toIssue)),
+  );
+
+  server.registerTool(
+    "add_comment",
+    {
+      description:
+        "Add a comment to an item, a todo or an issue, named by its key like TRL-12. On an issue in triage, comment to ask the filer a question before you accept or cancel it.",
+      inputSchema: commentCreateSchema.extend({
+        item: item.optional(),
+        issueId: issueIdAlias,
+        ...idempotencyKey,
+      }),
+      annotations: create,
+    },
+    ({ item, issueId, idempotency_key, ...input }) =>
+      run("add_comment", () => {
+        const ref = itemArg(item, issueId);
+        return noted(
+          toComment(
+            service.addComment(
+              actor,
+              { ...input, issueId: ref.value },
+              { idempotencyKey: idempotency_key },
+            ),
+          ),
+          ref.note,
+        );
+      }),
+  );
+
+  server.registerTool(
+    "list_comments",
+    {
+      description:
+        "List an item's comments, oldest first, a page at a time: pass nextCursor back as cursor until it is null.",
+      inputSchema: z.strictObject({
+        item: item.optional(),
+        issueId: issueIdAlias,
+        ...page,
+      }),
+      annotations: read,
+    },
+    ({ item, issueId, ...query }) =>
+      run("list_comments", () => {
+        const ref = itemArg(item, issueId);
+        return noted(
+          toPage(service.listComments(actor, ref.value, query), toComment),
+          ref.note,
+        );
+      }),
+  );
+
+  server.registerTool(
+    "create_project",
+    {
+      description:
+        "Create a project: a named group of items from one or more products, with a goal, a lead bot and an optional target date, then fill it with add_to_project. Needs the issues action on a key reaching every product named. products defaults to the one product you own (the error lists choices otherwise); lead defaults to you; slug is derived from the name when left out. Returns the project with its slug, which names it everywhere. Deprecated: called with key (and no slug, products, lead, goal or targetDate) it creates a product as it did before projects, and the result carries deprecated; use create_product for that.",
+      inputSchema: projectCreateSchema.extend(idempotencyKey),
+      annotations: create,
+    },
+    ({ idempotency_key, ...input }) =>
+      run("create_project", () => {
+        const found = service.createProjectOrProduct(actor, input, {
+          idempotencyKey: idempotency_key,
+        });
+        return found.kind === "project"
+          ? toProject(found.project)
+          : deprecated(toProduct(found.product), deprecations.createProduct);
+      }),
+  );
+
+  const projectArg = {
+    project: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "The project's slug, like launch-q4. Deprecated: a product key (like TRL) that matches no slug names that product, as before projects.",
+      ),
+    projectId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Deprecated alias of project."),
+  };
+  const projectRef = (project?: string, projectId?: string) => {
+    const ref = eitherOf(project, projectId, ["project", "projectId"]);
+    if (ref.value === undefined) {
+      throw new ValidationError(
+        "project is required: send the project's slug, like launch-q4; list_projects lists them",
+      );
+    }
+    return ref as { value: string; note: string | undefined };
+  };
+  const viewOf = (found: ProjectOrProduct, note: string | undefined) =>
+    found.kind === "project"
+      ? noted(toProject(found.project), note)
+      : deprecated(toProduct(found.product), deprecations.product);
+
+  server.registerTool(
+    "get_project",
+    {
+      description:
+        "Get a project by slug: goal, lead, target date, its products this key reaches (hiddenProducts true when it draws from others you can't see), item counts per status over the products shown, and its latest status update. List its items with list_items and project. Deprecated: a product key (like TRL) that matches no slug returns that product, carrying deprecated; use get_product for that.",
+      inputSchema: z.strictObject(projectArg),
+      annotations: read,
+    },
+    ({ project, projectId }) =>
+      run("get_project", () => {
+        const ref = projectRef(project, projectId);
+        return viewOf(service.getProjectOrProduct(actor, ref.value), ref.note);
+      }),
   );
 
   server.registerTool(
     "list_projects",
     {
       description:
-        "List projects, newest first, a page at a time: pass nextCursor back as cursor until it is null.",
+        "List projects (named groups of items across products) newest first, a page at a time: pass nextCursor back as cursor until it is null. Only projects drawing from a product this key reaches are listed. Before this release list_projects listed products; call list_products for those.",
       inputSchema: z.strictObject(page),
       annotations: read,
     },
@@ -241,28 +470,88 @@ export function registerTools(
     "update_project",
     {
       description:
-        "Change a project's name or description. Fields left out stay as they are.",
-      inputSchema: projectUpdateSchema.extend({ projectId }),
+        "Change a project's name, goal, lead (a bot's name or id) or targetDate (YYYY-MM-DD, null clears). Fields left out stay as they are. Needs the issues action on a key reaching one of the project's products. Deprecated: a product key (like TRL) that matches no slug changes that product's name or description, carrying deprecated; use update_product for that.",
+      inputSchema: projectUpdateSchema.extend(projectArg),
       annotations: update,
     },
-    ({ projectId, ...patch }) =>
-      run("update_project", () =>
-        toProject(service.updateProject(actor, projectId, patch)),
+    ({ project, projectId, ...patch }) =>
+      run("update_project", () => {
+        const ref = projectRef(project, projectId);
+        return viewOf(
+          service.updateProjectOrProduct(actor, ref.value, patch),
+          ref.note,
+        );
+      }),
+  );
+
+  server.registerTool(
+    "add_to_project",
+    {
+      description:
+        "Add items to a project by key, up to 100 a call, from any products this key reaches: an item's product joins the project's products by itself. An item already in the project is left as it is and listed in unchanged, so a retry is safe. Needs the issues action on a key reaching one of the project's products. Returns the project with added and unchanged keys.",
+      inputSchema: projectItemsSchema.extend({ project: projectSlug }),
+      annotations: update,
+    },
+    ({ project, items }) =>
+      run("add_to_project", () => {
+        const result = service.addToProject(actor, project, items);
+        return { ...result, project: toProject(result.project) };
+      }),
+  );
+
+  server.registerTool(
+    "remove_from_project",
+    {
+      description:
+        "Take items out of a project by key, up to 100 a call; the items themselves stay as they are, and the project keeps its products. An item not in the project is listed in unchanged, so a retry is safe. Needs the issues action on a key reaching one of the project's products.",
+      inputSchema: projectItemsSchema.extend({ project: projectSlug }),
+      annotations: update,
+    },
+    ({ project, items }) =>
+      run("remove_from_project", () => {
+        const result = service.removeFromProject(actor, project, items);
+        return { ...result, project: toProject(result.project) };
+      }),
+  );
+
+  server.registerTool(
+    "list_products",
+    {
+      description:
+        "List the products this key reaches, newest first, a page at a time: pass nextCursor back as cursor until it is null. A product owns items (keys like TRL-12); its owner is its own bot, who adds its todos and accepts issues filed to it.",
+      inputSchema: z.strictObject(page),
+      annotations: read,
+    },
+    (query) =>
+      run("list_products", () =>
+        toPage(service.listProducts(actor, query), toProduct),
       ),
   );
 
   server.registerTool(
-    "create_issue",
+    "get_product",
     {
       description:
-        "Open an issue in a project. It gets the project's next number, so its key reads like TRL-12. Label names are matched ignoring the case of A-Z (so É and é differ), and a new name creates the label. Links (a PR, say) are a url and an optional title.",
-      inputSchema: issueCreateSchema.extend(idempotencyKey),
+        "Get a product by key, like TRL: name, description, repoUrl and owner (its own bot).",
+      inputSchema: z.strictObject({ product }),
+      annotations: read,
+    },
+    ({ product }) =>
+      run("get_product", () => toProduct(service.getProduct(actor, product))),
+  );
+
+  server.registerTool(
+    "create_product",
+    {
+      description:
+        "Create a product. Its key (like TRL) prefixes its items' keys (TRL-1, TRL-2, ...), must be unused and never changes. You own it unless owner names another bot. Needs the admin action and a key that reaches every product. To bring a product over from Linear, use import_project instead.",
+      inputSchema: productCreateSchema.extend(idempotencyKey),
       annotations: create,
     },
     ({ idempotency_key, ...input }) =>
-      run("create_issue", () =>
-        toIssue(
-          service.createIssue(actor, input, {
+      run("create_product", () =>
+        toProduct(
+          service.createProduct(actor, input, {
             idempotencyKey: idempotency_key,
           }),
         ),
@@ -270,175 +559,263 @@ export function registerTools(
   );
 
   server.registerTool(
-    "get_issue",
+    "update_product",
     {
       description:
-        "Get an issue by its id, key (like TRL-12) or source key (like JUS-187). The result carries its sourceKey.",
-      inputSchema: z.strictObject({ issueId }),
-      annotations: read,
-    },
-    ({ issueId }) =>
-      run("get_issue", () => toIssue(service.getIssue(actor, issueId))),
-  );
-
-  server.registerTool(
-    "list_issues",
-    {
-      description:
-        "List issues, newest first, optionally of one project, status or assignee, a page at a time: pass nextCursor back as cursor until it is null.",
-      inputSchema: z.strictObject({
-        projectId: projectId.optional(),
-        status: issueListQuerySchema.shape.status,
-        assigneeId: issueListQuerySchema.shape.assigneeId,
-        ...page,
-      }),
-      annotations: read,
-    },
-    (query) =>
-      run("list_issues", () =>
-        toPage(service.listIssues(actor, query), toIssue),
-      ),
-  );
-
-  server.registerTool(
-    "update_issue",
-    {
-      description:
-        "Change an issue: title, description, status (open, in_progress, done, canceled), assignee, estimate, priority, labels or links. Fields left out stay as they are. To change the issue's labels or links, either send labels or links to replace the whole set, or send addLabels, removeLabels, addLinks and removeLinks to change part of it without touching the rest, safe beside another bot's edit. Sending labels with addLabels or removeLabels, or links with addLinks or removeLinks, is refused. Moving to done or canceled stamps completedAt; reopening clears it.",
-      inputSchema: issueUpdateSchema.extend({ issueId }),
+        "Change a product's name, description, repoUrl (https://github.com/<owner>/<name>, null clears) or owner (a bot's name or id, null clears). Fields left out stay as they are. Needs the admin action.",
+      inputSchema: productUpdateSchema.extend({ product }),
       annotations: update,
     },
-    ({ issueId, ...patch }) =>
-      run("update_issue", () =>
-        toIssue(service.updateIssue(actor, issueId, patch)),
+    ({ product, ...patch }) =>
+      run("update_product", () =>
+        toProduct(service.updateProduct(actor, product, patch)),
       ),
   );
 
-  server.registerTool(
-    "add_comment",
-    {
-      description:
-        "Add a comment to an issue, named by its id, key (like TRL-12) or source key (like JUS-187).",
-      inputSchema: commentCreateSchema.extend({ issueId, ...idempotencyKey }),
-      annotations: create,
-    },
-    ({ issueId, idempotency_key, ...input }) =>
-      run("add_comment", () =>
-        toComment(
-          service.addComment(
-            actor,
-            { ...input, issueId },
-            { idempotencyKey: idempotency_key },
-          ),
-        ),
-      ),
-  );
-
-  server.registerTool(
-    "list_comments",
-    {
-      description:
-        "List an issue's comments, oldest first, a page at a time: pass nextCursor back as cursor until it is null.",
-      inputSchema: z.strictObject({ issueId, ...page }),
-      annotations: read,
-    },
-    ({ issueId, ...query }) =>
-      run("list_comments", () =>
-        toPage(service.listComments(actor, issueId, query), toComment),
-      ),
-  );
-
-  server.registerTool(
-    "create_label",
-    {
-      description:
-        "Create a label in a project. Naming a new label on create_issue or update_issue creates it too.",
-      inputSchema: labelCreateSchema.extend({ projectId, ...idempotencyKey }),
-      annotations: create,
-    },
-    ({ projectId, idempotency_key, ...input }) =>
-      run("create_label", () =>
-        toLabel(
-          service.createLabel(
-            actor,
-            { ...input, projectId },
-            { idempotencyKey: idempotency_key },
-          ),
-        ),
-      ),
-  );
-
-  server.registerTool(
-    "list_labels",
-    {
-      description:
-        "List a project's labels, oldest first, a page at a time: pass nextCursor back as cursor until it is null.",
-      inputSchema: z.strictObject({ projectId, ...page }),
-      annotations: read,
-    },
-    ({ projectId, ...query }) =>
-      run("list_labels", () =>
-        toPage(service.listLabels(actor, projectId, query), toLabel),
-      ),
-  );
+  const statusTarget = {
+    product: product.optional(),
+    project: projectSlug.optional(),
+    projectId: projectIdAlias,
+  };
+  /** The status target, `projectId` read as the product it named before projects. */
+  const statusTargetOf = (args: {
+    product?: string;
+    project?: string;
+    projectId?: string;
+  }) => {
+    const productRef = eitherOf(args.product, args.projectId, [
+      "product",
+      "projectId",
+    ]);
+    return {
+      target: { product: productRef.value, project: args.project },
+      note: productRef.note,
+    };
+  };
 
   server.registerTool(
     "post_status_update",
     {
       description:
-        "Post a dated status update on a project, with its health: on_track, at_risk or off_track.",
+        "Post a dated status update with its health (on_track, at_risk or off_track) on exactly one of a product (its key) or a project (its slug). Needs the status_updates action on a key reaching the product, or one of the project's products. externalRef is kept on a product's update only.",
       inputSchema: statusUpdateCreateSchema.extend({
-        projectId,
+        ...statusTarget,
         ...idempotencyKey,
       }),
       annotations: create,
     },
-    ({ projectId, idempotency_key, ...input }) =>
-      run("post_status_update", () =>
-        toStatusUpdate(
-          service.createStatusUpdate(
-            actor,
-            { ...input, projectId },
-            { idempotencyKey: idempotency_key },
+    ({ product, project, projectId, idempotency_key, ...input }) =>
+      run("post_status_update", () => {
+        const { target, note } = statusTargetOf({
+          product,
+          project,
+          projectId,
+        });
+        return noted(
+          toStatusUpdate(
+            service.createStatusUpdate(
+              actor,
+              { ...input, ...target },
+              { idempotencyKey: idempotency_key },
+            ),
           ),
-        ),
-      ),
+          note,
+        );
+      }),
   );
 
   server.registerTool(
     "list_status_updates",
     {
       description:
-        "List a project's status updates, newest first, a page at a time: pass nextCursor back as cursor until it is null.",
-      inputSchema: z.strictObject({ projectId, ...page }),
+        "List the status updates of exactly one of a product (its key) or a project (its slug), newest first, a page at a time: pass nextCursor back as cursor until it is null.",
+      inputSchema: z.strictObject({ ...statusTarget, ...page }),
       annotations: read,
     },
-    ({ projectId, ...query }) =>
-      run("list_status_updates", () =>
-        toPage(
-          service.listStatusUpdates(actor, projectId, query),
-          toStatusUpdate,
-        ),
-      ),
+    ({ product, project, projectId, ...query }) =>
+      run("list_status_updates", () => {
+        const { target, note } = statusTargetOf({
+          product,
+          project,
+          projectId,
+        });
+        return noted(
+          toPage(
+            service.listStatusUpdates(actor, target, query),
+            toStatusUpdate,
+          ),
+          note,
+        );
+      }),
+  );
+
+  /** A product argument and its `projectId` alias, one of which is required. */
+  const productArg = (value?: string, alias?: string) => {
+    const ref = eitherOf(value, alias, ["product", "projectId"]);
+    if (ref.value === undefined) {
+      throw new ValidationError(
+        "product is required: send the product's key, like TRL; list_products lists them",
+      );
+    }
+    return ref as { value: string; note: string | undefined };
+  };
+
+  server.registerTool(
+    "create_label",
+    {
+      description:
+        "Create a label in a product. Naming a new label on add_todo, file_issue or update_item creates it too. Needs the admin action.",
+      inputSchema: labelCreateSchema.extend({
+        product: product.optional(),
+        projectId: projectIdAlias,
+        ...idempotencyKey,
+      }),
+      annotations: create,
+    },
+    ({ product, projectId, idempotency_key, ...input }) =>
+      run("create_label", () => {
+        const ref = productArg(product, projectId);
+        return noted(
+          toLabel(
+            service.createLabel(
+              actor,
+              { ...input, productId: ref.value },
+              { idempotencyKey: idempotency_key },
+            ),
+          ),
+          ref.note,
+        );
+      }),
+  );
+
+  server.registerTool(
+    "list_labels",
+    {
+      description:
+        "List a product's labels, oldest first, a page at a time: pass nextCursor back as cursor until it is null.",
+      inputSchema: z.strictObject({
+        product: product.optional(),
+        projectId: projectIdAlias,
+        ...page,
+      }),
+      annotations: read,
+    },
+    ({ product, projectId, ...query }) =>
+      run("list_labels", () => {
+        const ref = productArg(product, projectId);
+        return noted(
+          toPage(service.listLabels(actor, ref.value, query), toLabel),
+          ref.note,
+        );
+      }),
   );
 
   server.registerTool(
     "list_activity",
     {
       description:
-        'Read the activity feed, optionally of one project or actor. To follow it, pass after: "" for the first events, oldest first, then each page\'s nextCursor as after to get only newer events (never null; an empty page means nothing new yet). Without after, it pages newest first through cursor. A cursor only works with the projectId and actorId it was issued under.',
+        'Read the activity feed, optionally of one product (its key), one project (its slug: its own events and its items joining and leaving) or one actor. To follow it, pass after: "" for the first events, oldest first, then each page\'s nextCursor as after to get only newer events (never null; an empty page means nothing new yet). Without after, it pages newest first through cursor. A cursor only works with the filters it was issued under.',
       inputSchema: z.strictObject({
         after: activityListQuerySchema.shape.after,
         cursor: activityListQuerySchema.shape.cursor,
         limit: page.limit,
-        projectId: projectId.optional(),
+        product: product.optional(),
+        project: projectSlug.optional(),
+        projectId: projectIdAlias,
         actorId: activityListQuerySchema.shape.actorId,
       }),
       annotations: read,
     },
-    (query) =>
-      run("list_activity", () =>
-        toPage(service.listActivity(actor, query), toActivityEvent),
+    ({ product, projectId, ...query }) =>
+      run("list_activity", () => {
+        const ref = eitherOf(product, projectId, ["product", "projectId"]);
+        return noted(
+          toPage(
+            service.listActivity(actor, { ...query, product: ref.value }),
+            toActivityEvent,
+          ),
+          ref.note,
+        );
+      }),
+  );
+
+  server.registerTool(
+    "create_issue",
+    {
+      description: `${aliasOf("add_todo or file_issue")} Creates an item in the product projectId names (its key, like TRL): a todo when you own the product, else an issue in triage. The result carries deprecated.`,
+      inputSchema: issueCreateSchema.extend(idempotencyKey),
+      annotations: create,
+    },
+    ({ idempotency_key, ...input }) =>
+      run("create_issue", () =>
+        deprecated(
+          toIssue(
+            service.createIssue(actor, input, {
+              idempotencyKey: idempotency_key,
+            }),
+          ),
+          deprecations.createIssue,
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "get_issue",
+    {
+      description: `${aliasOf("get_item")} Gets an item by its key, like TRL-12.`,
+      inputSchema: z.strictObject({ issueId: item }),
+      annotations: read,
+    },
+    ({ issueId }) =>
+      run("get_issue", () =>
+        deprecated(
+          toIssue(service.getItem(actor, issueId)),
+          deprecations.getIssue,
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "list_issues",
+    {
+      description: `${aliasOf("list_items")} Lists items newest first; projectId takes a product's key.`,
+      inputSchema: z.strictObject({
+        projectId: projectIdAlias,
+        status: issueListQuerySchema.shape.status,
+        assigneeId: issueListQuerySchema.shape.assigneeId,
+        ...page,
+      }),
+      annotations: read,
+    },
+    ({ projectId, assigneeId, ...query }) =>
+      run("list_issues", () =>
+        deprecated(
+          toPage(
+            service.listItems(actor, {
+              ...query,
+              product: projectId,
+              assignee: assigneeId,
+            }),
+            toIssue,
+          ),
+          deprecations.listIssues,
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "update_issue",
+    {
+      description: `${aliasOf("update_item")} Changes an item named by issueId (its key, like TRL-12); assigneeId takes a bot's name or id.`,
+      inputSchema: issueUpdateSchema.extend({ issueId: item }),
+      annotations: update,
+    },
+    ({ issueId, ...patch }) =>
+      run("update_issue", () =>
+        deprecated(
+          toIssue(service.updateItem(actor, issueId, patch)),
+          deprecations.updateIssue,
+        ),
       ),
   );
 
@@ -446,7 +823,7 @@ export function registerTools(
     "whoami",
     {
       description:
-        "Get the bot this key acts as: its id (the createdBy, authorId and actorId your writes carry), name, label, photoUrl (null until set_my_photo sets one), title (null until set_my_title sets one), and the key's scope: the keys of the only projects it reaches and the actions it may take (read, issues, comments, status_updates, admin), each null when unrestricted.",
+        "Get the bot this key acts as: its id (the createdBy, authorId and actorId your writes carry), name, label, photoUrl (null until set_my_photo sets one), title (null until set_my_title sets one), ownProducts (the products whose own bot you are: add_todo goes there), products (every product this key reaches: file_issue on any of them), and the key's scope: the keys of the only products it reaches and the actions it may take (read, issues, comments, status_updates, admin), each null when unrestricted. Call it first to learn where your todos go.",
       inputSchema: z.strictObject({}),
       annotations: read,
     },
@@ -457,7 +834,7 @@ export function registerTools(
     "list_bots",
     {
       description:
-        "List every bot, oldest first, with its id, name, label, photoUrl and title, a page at a time: pass nextCursor back as cursor until it is null. A createdBy, authorId or actorId that matches a bot's id was written by that bot; an id that matches no bot is a human's (humans file issues and comment).",
+        "List every bot, oldest first, with its id, name, label, photoUrl and title, a page at a time: pass nextCursor back as cursor until it is null. A bot's name or id is what assignee, lead and owner take. A createdBy, authorId or actorId that matches a bot's id was written by that bot; an id that matches no bot is a person's (people file issues and comment). Needs the admin action.",
       inputSchema: z.strictObject(page),
       annotations: read,
     },
@@ -517,12 +894,12 @@ export function registerTools(
     .min(1)
     .describe("The webhook's id, from create_webhook or list_webhooks.");
   const ownWebhooks =
-    "Acts on your own webhooks only; another bot's, or one following a project outside this key's scope, is not found.";
+    "Acts on your own webhooks only; another bot's, or one following a product outside this key's scope, is not found.";
 
   server.registerTool(
     "create_webhook",
     {
-      description: `Get a signed webhook call for every event in projects you follow, so you hear of an issue another bot files without polling list_activity. Needs the read action. ${WEBHOOK_SETUP} ${WEBHOOK_DELIVERY} Returns the webhook (never its secret); a project this key can't read is not found.`,
+      description: `Get a signed webhook call for every event in the products you follow (products: their keys), and in every project drawing from one of them, so you hear of an issue filed to your product without polling list_activity. projects is the deprecated alias of products. Needs the read action. ${WEBHOOK_SETUP} ${WEBHOOK_DELIVERY} Returns the webhook (never its secret); a product this key can't read is not found.`,
       inputSchema: webhookCreateSchema,
       annotations: create,
     },
@@ -535,7 +912,7 @@ export function registerTools(
   server.registerTool(
     "list_webhooks",
     {
-      description: `List your webhooks, oldest first, each with the projects it follows, paused, lastSuccessAt, lastError and lastErrorAt: read it to see whether deliveries are healthy. The secret is never listed. Needs the read action. ${ownWebhooks}`,
+      description: `List your webhooks, oldest first, each with the products it follows, paused, lastSuccessAt, lastError and lastErrorAt: read it to see whether deliveries are healthy. The secret is never listed. Needs the read action. ${ownWebhooks}`,
       inputSchema: z.strictObject({}),
       annotations: read,
     },
@@ -548,7 +925,7 @@ export function registerTools(
   server.registerTool(
     "update_webhook",
     {
-      description: `Change a webhook's url or the projects it follows (projects replaces the whole list), and resume it if it was paused: an update with no fields still resumes. Fields left out stay as they are. To change the secret use rotate_webhook_secret. Needs the read action. ${ownWebhooks}`,
+      description: `Change a webhook's url or the products it follows (products replaces the whole list; projects is its deprecated alias), and resume it if it was paused: an update with no fields still resumes. Fields left out stay as they are. To change the secret use rotate_webhook_secret. Needs the read action. ${ownWebhooks}`,
       inputSchema: webhookUpdateSchema.extend({ webhookId }),
       annotations: update,
     },
@@ -597,7 +974,7 @@ export function registerTools(
     "import_project",
     {
       description:
-        "Bring a whole project over from Linear (or another tracker) in one call: the project with its issues, their comments, labels and links, and its status updates, each keyed by externalRef (Linear's id, a UUID). Send each issue's sourceKey (Linear's identifier, like JUS-187): trail stores it, so JUS-187 finds the issue in get_issue, update_issue and add_comment from then on, and a new issue keeps that number when its prefix is the project's key. If that number is taken by another issue, the new one gets the project's next number and is listed in the result's renumbered with its new key; nothing fails. Use that new key for a renumbered issue: its sourceKey is the other issue's key, so it finds the other issue. Descriptions and comment bodies may be up to 1048576 characters and an issue may have up to 200 links. The payload is checked in two passes, and nothing is imported unless both pass. First its shape: a missing or unknown field, a value of the wrong type, the project's key, name, description or labels, and any row's externalRef, createdAt, completedAt, sourceAuthor or health; the error names every such failure by its path, like issues.3.createdAt. Then every other value; the error lists every failing row with its sourceKey or externalRef. Fix everything an error lists before sending the import again. Send each issue's statusType (Linear's state.type) and status (its state name, kept as sourceStatus): statusType maps backlog/unstarted/triage → open, started → in_progress, completed → done, canceled/duplicate → canceled; without it, status names map Backlog/Todo/Triage → open, In Progress → in_progress, Done → done, Canceled/Duplicate → canceled. Rows are matched by externalRef, so a re-run never duplicates; it sets each matched row's fields, labels and links to the payload's values, replacing changes made in trail since the last import, and never deletes rows. An imported issue's number never changes; a label that differs from the project's only by case is renamed to the payload's spelling. Returns per kind how many rows were created, updated and unchanged, and renumbered.",
+        "Bring a whole Linear project (or another tracker's) over into a trail product in one call: the product with its items, their comments, labels and links, and its status updates, each keyed by externalRef (Linear's id, a UUID). Send each issue's sourceKey (Linear's identifier, like JUS-187): trail stores it, so JUS-187 finds the issue in get_item, update_item and add_comment from then on, and a new issue keeps that number when its prefix is the product's key. If that number is taken by another issue, the new one gets the product's next number and is listed in the result's renumbered with its new key; nothing fails. Use that new key for a renumbered issue: its sourceKey is the other issue's key, so it finds the other issue. Descriptions and comment bodies may be up to 1048576 characters and an issue may have up to 200 links. The payload is checked in two passes, and nothing is imported unless both pass. First its shape: a missing or unknown field, a value of the wrong type, the product's key, name, description or labels, and any row's externalRef, createdAt, completedAt, sourceAuthor or health; the error names every such failure by its path, like issues.3.createdAt. Then every other value; the error lists every failing row with its sourceKey or externalRef. Fix everything an error lists before sending the import again. Send each issue's statusType (Linear's state.type) and status (its state name, kept as sourceStatus): statusType maps backlog/unstarted/triage → open, started → in_progress, completed → done, canceled/duplicate → canceled; without it, status names map Backlog/Todo/Triage → open, In Progress → in_progress, Done → done, Canceled/Duplicate → canceled. Rows are matched by externalRef, so a re-run never duplicates; it sets each matched row's fields, labels and links to the payload's values, replacing changes made in trail since the last import, and never deletes rows. An imported issue's number never changes; a label that differs from the product's only by case is renamed to the payload's spelling. Imported items keep their imported status (never triage) and are typed todo when you own the product, else issue. Returns the product (project is its deprecated alias), per kind how many rows were created, updated and unchanged, and renumbered.",
       inputSchema: importSchema,
       // a re-run overwrites bots' edits to matched rows
       annotations: { ...update, destructiveHint: true },

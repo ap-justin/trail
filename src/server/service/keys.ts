@@ -18,7 +18,7 @@ export type Actor = typeof actor.$inferSelect;
 /** What a key may reach; null on either side is unrestricted. */
 export type KeyScope = {
   /** by id and key, A to Z by key */
-  projects: { id: string; key: string }[] | null;
+  products: { id: string; key: string }[] | null;
   /** in `apiKeyActions` order */
   actions: ApiKeyAction[] | null;
 };
@@ -26,9 +26,9 @@ export type KeyScope = {
 /** A bot as one of its keys authenticates it: the bot, and that key's scope. */
 export type KeyActor = Actor & { scope: KeyScope };
 
-/** A key's scope as a person or bot reads it: projects by key. */
+/** A key's scope as a person or bot reads it: products by key. */
 export type KeyScopeView = {
-  projects: string[] | null;
+  products: string[] | null;
   actions: ApiKeyAction[] | null;
 };
 
@@ -36,7 +36,7 @@ export type KeyScopeView = {
 export type KeyScopeInput = { projects?: string[]; actions?: string[] };
 
 export const scopeView = (scope: KeyScope): KeyScopeView => ({
-  projects: scope.projects?.map((p) => p.key) ?? null,
+  products: scope.products?.map((p) => p.key) ?? null,
   actions: scope.actions,
 });
 
@@ -374,7 +374,7 @@ export function listKeys(db: Db): KeyListing[] {
   );
   return rows.map(({ id, actions, ...listing }) => ({
     ...listing,
-    scope: scopeView({ projects: lists.get(id) ?? null, actions }),
+    scope: scopeView({ products: lists.get(id) ?? null, actions }),
   }));
 }
 
@@ -449,7 +449,7 @@ export function authenticateKey(db: Db, token: string): KeyActor | null {
   return {
     ...row.actor,
     scope: {
-      projects: allowlists(db, [row.id]).get(row.id) ?? null,
+      products: allowlists(db, [row.id]).get(row.id) ?? null,
       actions: row.actions,
     },
   };

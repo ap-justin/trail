@@ -22,27 +22,43 @@ test("GET /api/v1/openapi.json serves the spec without a key", async () => {
     [
       "GET /activity",
       "GET /bots",
+      "GET /items",
+      "GET /items/{key}",
+      "GET /items/{key}/comments",
       "GET /issues",
       "GET /issues/{id}",
       "GET /issues/{id}/comments",
+      "GET /products",
+      "GET /products/{key}",
+      "GET /products/{key}/labels",
+      "GET /products/{key}/status-updates",
       "GET /projects",
-      "GET /projects/{id}",
-      "GET /projects/{id}/labels",
-      "GET /projects/{id}/status-updates",
+      "GET /projects/{ref}",
+      "GET /projects/{ref}/labels",
+      "GET /projects/{ref}/status-updates",
       "GET /whoami",
       "GET /photos/{actorId}/{hash}",
       "DELETE /me/photo",
       "PUT /me/photo",
       "DELETE /me/title",
       "PUT /me/title",
+      "PATCH /items/{key}",
       "PATCH /issues/{id}",
-      "PATCH /projects/{id}",
+      "PATCH /products/{key}",
+      "PATCH /projects/{ref}",
       "POST /import",
+      "POST /items",
+      "POST /items/{key}/comments",
       "POST /issues",
       "POST /issues/{id}/comments",
+      "POST /products",
+      "POST /products/{key}/labels",
+      "POST /products/{key}/status-updates",
       "POST /projects",
-      "POST /projects/{id}/labels",
-      "POST /projects/{id}/status-updates",
+      "POST /projects/{ref}/labels",
+      "POST /projects/{ref}/status-updates",
+      "POST /projects/{slug}/items",
+      "DELETE /projects/{slug}/items/{key}",
       "GET /webhooks",
       "POST /webhooks",
       "GET /webhooks/{id}",
@@ -77,36 +93,47 @@ test("the spec lists the error statuses each operation can return", async () => 
   const withNotFound = (codes: string[]) => [...codes, "404"].sort();
   const withForbidden = (codes: string[]) => [...codes, "403"].sort();
   const withConflict = (codes: string[]) => [...codes, "409"].sort();
+  const created = withConflict(withForbidden(withNotFound(write("201"))));
   expect(statuses).toEqual({
     "GET /activity": withForbidden(withNotFound(list)),
     "GET /bots": withForbidden(list),
+    "GET /items": withForbidden(withNotFound(list)),
+    "GET /items/{key}": withForbidden(withNotFound(list)),
+    "GET /items/{key}/comments": withForbidden(withNotFound(list)),
     "GET /issues": withForbidden(withNotFound(list)),
     "GET /issues/{id}": withForbidden(withNotFound(list)),
     "GET /issues/{id}/comments": withForbidden(withNotFound(list)),
+    "GET /products": withForbidden(list),
+    "GET /products/{key}": withForbidden(withNotFound(list)),
+    "GET /products/{key}/labels": withForbidden(withNotFound(list)),
+    "GET /products/{key}/status-updates": withForbidden(withNotFound(list)),
     "GET /projects": withForbidden(list),
-    "GET /projects/{id}": withForbidden(withNotFound(list)),
-    "GET /projects/{id}/labels": withForbidden(withNotFound(list)),
-    "GET /projects/{id}/status-updates": withForbidden(withNotFound(list)),
+    "GET /projects/{ref}": withForbidden(withNotFound(list)),
+    "GET /projects/{ref}/labels": withForbidden(withNotFound(list)),
+    "GET /projects/{ref}/status-updates": withForbidden(withNotFound(list)),
     "GET /whoami": ["200", "401"],
     "GET /photos/{actorId}/{hash}": ["200", "401", "404"],
     "DELETE /me/photo": ["200", "401"],
     "PUT /me/photo": ["200", "401", "413", "422"],
     "DELETE /me/title": ["200", "401"],
     "PUT /me/title": write("200"),
+    "PATCH /items/{key}": withForbidden(withNotFound(write("200"))),
     "PATCH /issues/{id}": withForbidden(withNotFound(write("200"))),
-    "PATCH /projects/{id}": withForbidden(withNotFound(write("200"))),
+    "PATCH /products/{key}": withForbidden(withNotFound(write("200"))),
+    "PATCH /projects/{ref}": withForbidden(withNotFound(write("200"))),
     "POST /import": withConflict(withForbidden(write("200"))),
-    "POST /issues": withConflict(withForbidden(withNotFound(write("201")))),
-    "POST /issues/{id}/comments": withConflict(
-      withForbidden(withNotFound(write("201"))),
-    ),
-    "POST /projects": withConflict(withForbidden(write("201"))),
-    "POST /projects/{id}/labels": withConflict(
-      withForbidden(withNotFound(write("201"))),
-    ),
-    "POST /projects/{id}/status-updates": withConflict(
-      withForbidden(withNotFound(write("201"))),
-    ),
+    "POST /items": created,
+    "POST /items/{key}/comments": created,
+    "POST /issues": created,
+    "POST /issues/{id}/comments": created,
+    "POST /products": withConflict(withForbidden(write("201"))),
+    "POST /products/{key}/labels": created,
+    "POST /products/{key}/status-updates": created,
+    "POST /projects": created,
+    "POST /projects/{ref}/labels": created,
+    "POST /projects/{ref}/status-updates": created,
+    "POST /projects/{slug}/items": withForbidden(withNotFound(write("200"))),
+    "DELETE /projects/{slug}/items/{key}": withForbidden(withNotFound(list)),
     "GET /webhooks": withForbidden(list),
     "POST /webhooks": withConflict(withForbidden(withNotFound(write("201")))),
     "GET /webhooks/{id}": withForbidden(withNotFound(list)),
@@ -165,13 +192,57 @@ test("every create documents the Idempotency-Key header, and no other operation 
   );
   expect(withHeader.sort()).toEqual(
     [
+      "POST /items",
+      "POST /items/{key}/comments",
       "POST /issues",
       "POST /issues/{id}/comments",
+      "POST /products",
+      "POST /products/{key}/labels",
+      "POST /products/{key}/status-updates",
       "POST /projects",
-      "POST /projects/{id}/labels",
-      "POST /projects/{id}/status-updates",
+      "POST /projects/{ref}/labels",
+      "POST /projects/{ref}/status-updates",
     ].sort(),
   );
+});
+
+test("the legacy issue and label routes are marked deprecated, and their replacements are not", async () => {
+  const res = await request("GET", "/api/v1/openapi.json", { key: null });
+  const spec = (await res.json()) as {
+    paths: Record<string, Record<string, { deprecated?: boolean }>>;
+    components: {
+      schemas: Record<
+        string,
+        { properties?: Record<string, { deprecated?: boolean }> }
+      >;
+    };
+  };
+  const deprecated = Object.entries(spec.paths)
+    .flatMap(([path, methods]) =>
+      Object.entries(methods)
+        .filter(([, op]) => op.deprecated === true)
+        .map(([method]) => `${method.toUpperCase()} ${path}`),
+    )
+    .sort();
+  expect(deprecated).toEqual(
+    [
+      "GET /issues",
+      "GET /issues/{id}",
+      "GET /issues/{id}/comments",
+      "PATCH /issues/{id}",
+      "POST /issues",
+      "POST /issues/{id}/comments",
+      "GET /projects/{ref}/labels",
+      "POST /projects/{ref}/labels",
+    ].sort(),
+  );
+  // POST /projects stays: only its key field, which creates a product, is deprecated
+  expect(spec.components.schemas.ProjectCreate?.properties?.key).toMatchObject({
+    deprecated: true,
+  });
+  expect(
+    spec.components.schemas.ProjectCreate?.properties?.slug?.deprecated,
+  ).toBeUndefined();
 });
 
 test.each([

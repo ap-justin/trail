@@ -133,7 +133,7 @@ test("another bot's webhook, a hidden project and an internal URL are refused", 
     secret: SECRET,
     projects: [b.key],
   });
-  expect(hidden.text).toMatch(/^not_found: no project/);
+  expect(hidden.text).toMatch(/^not_found: no product/);
   const internal = await raw(scoped, "create_webhook", {
     url: "https://10.0.0.1/hook",
     secret: SECRET,
@@ -321,4 +321,40 @@ test("a key narrower than a webhook can't list, change, test or delete it", asyn
   expect(
     (await call(wide, "list_webhooks")).items.map((w: Body) => w.id),
   ).toContain(made.id);
+});
+
+test("create_webhook and update_webhook take products, report products and its alias projects, and refuse both together", async () => {
+  const client = await connect(bot.key);
+  const made = await call(client, "create_webhook", {
+    url: "https://bot.example.com/products",
+    secret: SECRET,
+    products: [a.key],
+  });
+  expect(made).toMatchObject({ products: [a.key], projects: [a.key] });
+  const moved = await call(client, "update_webhook", {
+    webhookId: made.id,
+    products: [b.key],
+  });
+  expect(moved).toMatchObject({ products: [b.key], projects: [b.key] });
+  expect(
+    (
+      await raw(client, "update_webhook", {
+        webhookId: made.id,
+        products: [a.key],
+        projects: [b.key],
+      })
+    ).text,
+  ).toBe(
+    "validation_failed: send products alone: projects is its deprecated alias, and both together is ambiguous",
+  );
+  expect(
+    (
+      await raw(client, "create_webhook", {
+        url: "https://bot.example.com/none",
+        secret: SECRET,
+      })
+    ).text,
+  ).toBe(
+    "validation_failed: products is required: send the keys (like TRL) of the products whose events you want",
+  );
 });

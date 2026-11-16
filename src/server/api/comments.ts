@@ -1,4 +1,4 @@
-import { createRoute } from "@hono/zod-openapi";
+import { createRoute, z } from "@hono/zod-openapi";
 import {
   commentCreateSchema,
   commentSchema,
@@ -6,6 +6,7 @@ import {
   pageSchema,
 } from "../../shared/schemas.js";
 import type { Service } from "../service/index.js";
+import { deprecations } from "./deprecations.js";
 import { createRouter } from "./env.js";
 import {
   conflictError,
@@ -18,14 +19,22 @@ import {
   readErrors,
   writeErrors,
 } from "./routes.js";
-import { toComment, toPage } from "./serialize.js";
+import { deprecated, toComment, toPage } from "./serialize.js";
 
-const tags = ["comments"];
+// The comment routes under /issues: kept for one release, each answer carrying `deprecated`.
+const tags = ["issues (deprecated)"];
+const legacyCommentSchema = commentSchema
+  .extend({ deprecated: z.string() })
+  .openapi("LegacyComment");
+const legacyCommentPageSchema = pageSchema(commentSchema).extend({
+  deprecated: z.string(),
+});
 
 const addComment = createRoute({
   method: "post",
   path: "/issues/{id}/comments",
-  summary: "Comment on an issue",
+  summary: "Deprecated: comment on an item (use POST /items/{key}/comments)",
+  deprecated: true,
   tags,
   request: {
     params: issueParam,
@@ -33,7 +42,7 @@ const addComment = createRoute({
     body: jsonBody(commentCreateSchema),
   },
   responses: {
-    201: jsonContent(commentSchema, "The created comment"),
+    201: jsonContent(legacyCommentSchema, "The created comment"),
     ...forbiddenError("comments"),
     ...writeErrors,
     ...notFoundError,
@@ -44,11 +53,13 @@ const addComment = createRoute({
 const listComments = createRoute({
   method: "get",
   path: "/issues/{id}/comments",
-  summary: "List an issue's comments, oldest first",
+  summary:
+    "Deprecated: list an item's comments (use GET /items/{key}/comments)",
+  deprecated: true,
   tags,
   request: { params: issueParam, query: pageQuerySchema },
   responses: {
-    200: jsonContent(pageSchema(commentSchema), "A page of comments"),
+    200: jsonContent(legacyCommentPageSchema, "A page of comments"),
     ...forbiddenError("read"),
     ...readErrors,
     ...notFoundError,
@@ -59,25 +70,31 @@ export function commentRoutes(service: Service) {
   return createRouter()
     .openapi(addComment, (c) =>
       c.json(
-        toComment(
-          service.addComment(
-            c.var.actor,
-            { ...c.req.valid("json"), issueId: c.req.valid("param").id },
-            { idempotencyKey: c.req.valid("header")["idempotency-key"] },
+        deprecated(
+          toComment(
+            service.addComment(
+              c.var.actor,
+              { ...c.req.valid("json"), issueId: c.req.valid("param").id },
+              { idempotencyKey: c.req.valid("header")["idempotency-key"] },
+            ),
           ),
+          deprecations.comments,
         ),
         201,
       ),
     )
     .openapi(listComments, (c) =>
       c.json(
-        toPage(
-          service.listComments(
-            c.var.actor,
-            c.req.valid("param").id,
-            c.req.valid("query"),
+        deprecated(
+          toPage(
+            service.listComments(
+              c.var.actor,
+              c.req.valid("param").id,
+              c.req.valid("query"),
+            ),
+            toComment,
           ),
-          toComment,
+          deprecations.comments,
         ),
         200,
       ),
