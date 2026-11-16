@@ -541,10 +541,7 @@ describe("filters", () => {
       "OPB OpenBot",
     ]);
     await user.click(screen.getByRole("option", { name: "OPB OpenBot" }));
-    expect(props.onProductFilterChange).toHaveBeenCalledWith(
-      "OPB",
-      expect.anything(),
-    );
+    expect(props.onProductFilterChange).toHaveBeenCalledWith("OPB");
   });
 
   test("the project menu lists only the projects given and chooses by slug", async () => {

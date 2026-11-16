@@ -1,9 +1,4 @@
-import {
-  BotIcon,
-  FolderIcon,
-  type LucideIcon,
-  PackageIcon,
-} from "lucide-react";
+import { BotIcon, FolderIcon } from "lucide-react";
 import {
   type ReactNode,
   type Ref,
@@ -13,6 +8,7 @@ import {
 } from "react";
 import { ActorAvatar, ActorName, BotTitle } from "@/components/actor";
 import { RowLink } from "@/components/app-link";
+import { FilterSelect, ProductSelect } from "@/components/filter-select";
 import { MarkdownText } from "@/components/markdown-text";
 import {
   FeedEmpty,
@@ -30,14 +26,6 @@ import {
 import { KeyText, LabelChip } from "@/components/text";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import type {
   EntryView,
   FeedView as FeedPage,
@@ -237,67 +225,6 @@ function groupByDay(rows: Row[]) {
   return days;
 }
 
-function FilterSelect<T extends string>({
-  label,
-  allLabel,
-  icon: Icon,
-  options,
-  value,
-  onChange,
-}: {
-  label: string;
-  allLabel: string;
-  icon: LucideIcon;
-  /** `before` and `after` flank the label in the menu only; the trigger shows the label alone. */
-  options: { value: T; label: string; before?: ReactNode; after?: ReactNode }[];
-  value: T | null;
-  onChange: (value: T | null) => void;
-}) {
-  const items: {
-    value: T | null;
-    label: string;
-    before?: ReactNode;
-    after?: ReactNode;
-  }[] = [{ value: null, label: allLabel }, ...options];
-  return (
-    <Select items={items} value={value} onValueChange={onChange}>
-      <SelectTrigger
-        size="sm"
-        aria-label={label}
-        // ! because the trigger's own data-[size=sm]:h-7 outranks a plain max-lg: height
-        className="shrink-0 text-xs font-medium max-lg:h-10!"
-      >
-        <Icon aria-hidden="true" className="size-3.5" />
-        <SelectValue />
-      </SelectTrigger>
-      {/* as wide as its widest item, title pills included, inside the viewport */}
-      <SelectContent
-        alignItemWithTrigger={false}
-        align="start"
-        className="w-auto min-w-(--anchor-width) max-w-(--available-width)"
-      >
-        <SelectGroup>
-          {items.map((item) => (
-            <SelectItem
-              key={item.value ?? ""}
-              value={item.value}
-              label={item.label}
-              // the item's text part is shrink-0 in components/ui: let it give way, so a
-              // long name truncates instead of running out of a viewport-wide menu
-              className="*:first:min-w-0 *:first:shrink!"
-            >
-              {item.before}
-              {item.before && " "}
-              <span className="min-w-0 truncate">{item.label}</span>
-              {item.after}
-            </SelectItem>
-          ))}
-        </SelectGroup>
-      </SelectContent>
-    </Select>
-  );
-}
-
 function FeedFilters({
   filters,
   actorFilter,
@@ -323,15 +250,8 @@ function FeedFilters({
         value={actorFilter}
         onChange={onActorFilterChange}
       />
-      <FilterSelect
-        label="Filter by product"
-        allLabel="All products"
-        icon={PackageIcon}
-        options={filters.products.map((p) => ({
-          value: p.key,
-          label: p.name,
-          before: <KeyText className="text-foreground">{p.key}</KeyText>,
-        }))}
+      <ProductSelect
+        products={filters.products}
         value={productFilter}
         onChange={onProductFilterChange}
       />

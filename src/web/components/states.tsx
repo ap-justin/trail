@@ -4,12 +4,10 @@ import {
   type LucideIcon,
   PackageIcon,
   PlusIcon,
-  SearchIcon,
   TriangleAlertIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { AppLink } from "@/components/app-link";
-import { type IssueStatus, statusLabel } from "@/components/status";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Empty,
@@ -211,33 +209,6 @@ export function IssueListEmpty({
   );
 }
 
-/** The project has issues, just none with the status the filter picked. */
-export function StatusFilterEmpty({
-  status,
-  onShowAll,
-}: {
-  status: IssueStatus;
-  onShowAll: () => void;
-}) {
-  return (
-    <EmptyState
-      icon={SearchIcon}
-      title={`No issues are ${statusLabel(status).toLowerCase()}`}
-      description="Try another status."
-      action={
-        <Button
-          variant="outline"
-          size="sm"
-          className={panelAction}
-          onClick={onShowAll}
-        >
-          Show all
-        </Button>
-      }
-    />
-  );
-}
-
 export function IssueListError({ onRetry }: { onRetry: () => void }) {
   return (
     <ErrorState
@@ -265,6 +236,16 @@ export function ProductsEmpty({
           ? "Products that bots create show up here."
           : `Ask ${ownerName} to give you access to a product.`
       }
+    />
+  );
+}
+
+export function ProductsError({ onRetry }: { onRetry: () => void }) {
+  return (
+    <ErrorState
+      title="Couldn't load products"
+      description="Check your connection, then try again."
+      onRetry={onRetry}
     />
   );
 }

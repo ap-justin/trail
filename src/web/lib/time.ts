@@ -61,3 +61,9 @@ export function dayKey(iso: string): string {
   const date = new Date(iso);
   return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
 }
+
+/** A calendar date with no time (a project's target, `2026-12-04`) as `Dec 4`, by `formatDay`'s rule. */
+export function formatDate(ymd: string, now: Date): string {
+  const [year = 0, month = 1, day = 1] = ymd.split("-").map(Number);
+  return formatDay(new Date(year, month - 1, day), now);
+}

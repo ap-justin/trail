@@ -2,12 +2,13 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { AppPage, useChrome } from "@/app/chrome";
 import { NotFoundPage } from "@/app/not-found-page";
+import type { StatusFilter } from "@/components/item-list";
 import {
-  ProjectHeading,
-  ProjectHealth,
-  ProjectView,
-} from "@/components/project";
-import type { IssueStatus } from "@/components/status";
+  ProductHeading,
+  ProductHealth,
+  ProductView,
+} from "@/components/product";
+import type { ItemType } from "@/components/status";
 import { api, isNotFound } from "@/lib/api";
 import { loadableOf } from "@/lib/loadable";
 import { keys } from "@/lib/queries";
@@ -18,24 +19,28 @@ const statuses = {
   done: true,
   canceled: true,
   // triage is no tab of its own: the Open tab's ?status=open matches it
-} satisfies Record<Exclude<IssueStatus, "triage">, true>;
+} satisfies Record<StatusFilter, true>;
 
-const isStatus = (value: unknown): value is IssueStatus =>
+const isStatus = (value: unknown): value is StatusFilter =>
   typeof value === "string" && Object.hasOwn(statuses, value);
 
+const isType = (value: unknown): value is ItemType =>
+  value === "issue" || value === "todo";
+
 export const Route = createFileRoute("/_app/projects/$key")({
-  // the status filter; anything else in ?status= is All
+  // the status and type filters; anything else in ?status= or ?type= is All
   validateSearch: (
     search: Record<string, unknown>,
-  ): { status?: IssueStatus } => ({
+  ): { status?: StatusFilter; type?: ItemType } => ({
     status: isStatus(search.status) ? search.status : undefined,
+    type: isType(search.type) ? search.type : undefined,
   }),
   component: ProjectPage,
 });
 
 function ProjectPage() {
   const { key } = Route.useParams();
-  const { status = null } = Route.useSearch();
+  const { status = null, type = null } = Route.useSearch();
   const navigate = Route.useNavigate();
   const { session, openNewIssue } = useChrome();
   const project = useQuery({
@@ -60,21 +65,27 @@ function ProjectPage() {
     <AppPage
       section="products"
       productKey={key}
-      heading={<ProjectHeading project={ref} />}
+      heading={<ProductHeading product={ref} />}
       headingAccessory={
-        project.data && <ProjectHealth project={project.data} />
+        project.data && <ProductHealth product={project.data} />
       }
     >
-      <ProjectView
-        project={ref}
-        issues={loadableOf(issues)}
+      <ProductView
+        product={ref}
+        detail={project.data ?? null}
+        items={loadableOf(issues)}
         statusUpdates={loadableOf(updates)}
-        status={status}
-        onStatusChange={(next) =>
-          void navigate({ search: next ? { status: next } : {} })
+        filters={{ status, type }}
+        onFiltersChange={(next) =>
+          void navigate({
+            search: {
+              ...(next.status && { status: next.status }),
+              ...(next.type && { type: next.type }),
+            },
+          })
         }
         onNewIssue={() => openNewIssue(key)}
-        onRetryIssues={() => void issues.refetch()}
+        onRetryItems={() => void issues.refetch()}
         onRetryStatusUpdates={() => void updates.refetch()}
       />
     </AppPage>

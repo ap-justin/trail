@@ -5,7 +5,12 @@ import type {
   WebItemListView,
   WebItemRowView,
   WebItemView,
+  WebProductDetailView,
   WebProductView,
+  WebProjectDetailView,
+  WebProjectItemsView,
+  WebProjectView,
+  WebStatusCountsView,
   WebStatusUpdateView,
 } from "@/lib/api-types";
 
@@ -110,7 +115,8 @@ export function statusUpdate(
   };
 }
 
-export function project(
+/** TRL as a row on the products list. */
+export function product(
   overrides: Partial<WebProductView> = {},
 ): WebProductView {
   return {
@@ -429,4 +435,124 @@ export function projectEntry(
   return kind === "project_created"
     ? { ...base, kind }
     : { ...base, kind, changed: ["goal", "targetDate"] };
+}
+
+/** A bot with a title, the lead of the Human UI launch project. */
+export const ada: WebActorView = {
+  id: "a-ada",
+  name: "Ada",
+  kind: "bot",
+  photoUrl: null,
+  title: "Better Giving Engineer",
+};
+export const openBot = { key: "OPB", name: "OpenBot" };
+export const docsSite = { key: "DOC", name: "Docs site" };
+
+/** TRL-22, a todo Tara owns. */
+export function todoRow(
+  overrides: Partial<WebItemRowView> = {},
+): WebItemRowView {
+  return issueRow({
+    key: "TRL-22",
+    type: "todo",
+    title: "Split Projects into Products and Projects in the nav",
+    priority: 3,
+    labels: ["ui"],
+    updatedAt: "2026-11-11T11:52:00.000Z",
+    ...overrides,
+  });
+}
+
+const tally = (items: WebItemRowView[]): WebStatusCountsView => {
+  const of = (status: WebItemRowView["status"]) =>
+    items.filter((i) => i.status === status).length;
+  return {
+    all: items.length,
+    open: of("open") + of("triage"),
+    in_progress: of("in_progress"),
+    done: of("done"),
+    canceled: of("canceled"),
+  };
+};
+
+/** Counts per type and status tab, as the server tallies them, for exactly these rows. */
+export function countsOf(items: WebItemRowView[]) {
+  return {
+    all: tally(items),
+    issue: tally(items.filter((i) => i.type === "issue")),
+    todo: tally(items.filter((i) => i.type === "todo")),
+  };
+}
+
+/** A product's item list whose counts are these rows' own. */
+export function itemList(items: WebItemRowView[]): WebItemListView {
+  return { items, nextCursor: null, counts: countsOf(items) };
+}
+
+/** The Human UI launch project as a row on the projects list. */
+export function projectRow(
+  overrides: Partial<WebProjectView> = {},
+): WebProjectView {
+  return {
+    ...humanUi,
+    goal: "People read the team's work in trail without asking a bot",
+    health: "at_risk",
+    latestStatusUpdate: statusUpdate({
+      id: "su-h",
+      body: "Feed and product pages are drawn. Docs site pages wait on the new logo.",
+      health: "at_risk",
+      author: ada,
+    }),
+    lead: ada,
+    targetDate: "2026-12-04",
+    products: [docsSite, openBot, trail],
+    openCount: 14,
+    updatedAt: "2026-11-11T09:12:00.000Z",
+    ...overrides,
+  };
+}
+
+export function projectDetail(
+  overrides: Partial<WebProjectDetailView> = {},
+): WebProjectDetailView {
+  return { ...projectRow(), hiddenProducts: false, ...overrides };
+}
+
+/** Team access: one product, Kai leads, on track. */
+export const teamAccessRow = (): WebProjectView =>
+  projectRow({
+    ...teamAccess,
+    goal: "Invite people to the products they should see",
+    health: "on_track",
+    latestStatusUpdate: statusUpdate({ id: "su-t", author: kai }),
+    lead: kai,
+    targetDate: "2026-11-30",
+    products: [trail],
+    openCount: 5,
+  });
+
+/** TRL on its own page: a repo, an owner and two projects. */
+export function productDetail(
+  overrides: Partial<WebProductDetailView> = {},
+): WebProductDetailView {
+  return {
+    ...product({
+      repoUrl: "https://github.com/ap-justin/trail",
+      projectCount: 2,
+    }),
+    owner: kai,
+    projects: [projectRow(), teamAccessRow()],
+    ...overrides,
+  };
+}
+
+/** A project's items in groups, each group's count its own rows'. */
+export function projectItems(
+  groups: { product: { key: string; name: string }; items: WebItemRowView[] }[],
+): WebProjectItemsView {
+  return {
+    groups: groups.map((g) => ({ ...g, count: g.items.length })),
+    nextCursor: null,
+    counts: countsOf(groups.flatMap((g) => g.items)),
+  };
 }

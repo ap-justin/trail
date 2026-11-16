@@ -4,8 +4,8 @@ import { describe, expect, test, vi } from "vitest";
 import { BotTitle } from "@/components/actor";
 import { FeedView, type FeedViewProps } from "@/components/feed";
 import { IssueView } from "@/components/issue";
-import { ProjectView } from "@/components/project";
-import { ProjectsView } from "@/components/projects";
+import { ProductView } from "@/components/product";
+import { ProductsView } from "@/components/products";
 import type { WebActorView } from "@/lib/api-types";
 import {
   commentEntry,
@@ -14,7 +14,7 @@ import {
   issueRow,
   kai,
   maya,
-  project,
+  product,
   statusUpdate,
   tara,
   trail,
@@ -249,13 +249,13 @@ describe("issue", () => {
   });
 });
 
-describe("projects", () => {
+describe("products", () => {
   test("the latest update's author line carries the title, in the table and on the card", () => {
     render(
-      <ProjectsView
+      <ProductsView
         status="ready"
-        projects={[
-          project({ latestStatusUpdate: statusUpdate({ author: taraTitled }) }),
+        products={[
+          product({ latestStatusUpdate: statusUpdate({ author: taraTitled }) }),
         ]}
         ownerName="Justin Salas"
         isOwner={false}
@@ -272,12 +272,13 @@ describe("projects", () => {
   });
 });
 
-describe("project", () => {
-  function renderProject() {
+describe("product", () => {
+  function renderProduct() {
     render(
-      <ProjectView
-        project={trail}
-        issues={{
+      <ProductView
+        product={trail}
+        detail={null}
+        items={{
           status: "ready",
           data: issueList([issueRow({ assignee: taraTitled })]),
         }}
@@ -291,9 +292,9 @@ describe("project", () => {
             nextCursor: null,
           },
         }}
-        status={null}
-        onStatusChange={vi.fn()}
-        onRetryIssues={vi.fn()}
+        filters={{ type: null, status: null }}
+        onFiltersChange={vi.fn()}
+        onRetryItems={vi.fn()}
         onRetryStatusUpdates={vi.fn()}
         onNewIssue={vi.fn()}
         now={now}
@@ -302,7 +303,7 @@ describe("project", () => {
   }
 
   test("a status update reads avatar, name, Bot badge, then the title pill before the date on its own row; the issue list's assignee never carries it", () => {
-    renderProject();
+    renderProduct();
     // the issue table (1440), its rows (375) and both updates are all in the DOM
     const pills = screen.getAllByTitle("Release manager");
     expect(pills).toHaveLength(1);

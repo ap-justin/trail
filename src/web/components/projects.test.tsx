@@ -1,7 +1,8 @@
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 import { ProjectsView, type ProjectsViewProps } from "@/components/projects";
-import { project, statusUpdate } from "@/test/fixtures";
+import { projectRow, teamAccessRow } from "@/test/fixtures";
 
 const now = new Date("2026-11-11T09:53:00.000Z");
 
@@ -9,9 +10,7 @@ function renderProjects(overrides: Partial<ProjectsViewProps> = {}) {
   render(
     <ProjectsView
       status="ready"
-      projects={[project()]}
-      ownerName="Justin Salas"
-      isOwner={false}
+      projects={[projectRow()]}
       onRetry={vi.fn()}
       now={now}
       {...overrides}
@@ -19,103 +18,96 @@ function renderProjects(overrides: Partial<ProjectsViewProps> = {}) {
   );
 }
 
-// the table (1440) and the cards (375) are both in the DOM; CSS shows one
 const table = () => screen.getByRole("table");
-const card = () => {
-  const item = screen.getByRole("listitem");
-  return within(item);
+const rowFor = (slug: string) => {
+  const row = table().querySelector(`[data-project-slug="${slug}"]`);
+  if (!(row instanceof HTMLElement)) throw new Error(`no ${slug} row`);
+  return row;
 };
+const cardFor = (slug: string) => {
+  const card = screen
+    .getAllByRole("listitem")
+    .find((li) => li.dataset.projectSlug === slug);
+  if (!card) throw new Error(`no ${slug} card`);
+  return card;
+};
+const cellsOf = (row: HTMLElement) => within(row).getAllByRole("cell");
 
 describe("projects", () => {
-  test("a project with a status update shows its health and the update's author", () => {
+  test("the columns read Project, Health, Products, Lead, Target, Latest status update, Open, Updated", () => {
     renderProjects();
-    expect(within(table()).getByText("On track")).toBeInTheDocument();
-    expect(within(table()).getByText("Tara")).toBeInTheDocument();
-    expect(within(table()).getByText("Bot")).toBeInTheDocument();
-    expect(within(table()).getByText("41m ago")).toBeInTheDocument();
+    expect(
+      within(table())
+        .getAllByRole("columnheader")
+        .map((th) => th.textContent),
+    ).toEqual([
+      "Project",
+      "Health",
+      "Products",
+      "Lead",
+      "Target",
+      "Latest status update",
+      "Open",
+      "Updated",
+    ]);
   });
 
-  test('"No status update yet" shows no health pill', () => {
+  test("a row reads name and goal, health, product keys, the lead with the Bot badge, target, update, open count and age", () => {
+    renderProjects();
+    const cells = cellsOf(rowFor("human-ui"));
+    expect(
+      within(cells[0] as HTMLElement).getByRole("link", {
+        name: "Human UI launch",
+      }),
+    ).toHaveAttribute("href", "/projects/human-ui");
+    expect(cells[0]).toHaveTextContent(
+      "People read the team's work in trail without asking a bot",
+    );
+    expect(cells[1]).toHaveTextContent(/^At risk$/);
+    expect(cells[2]).toHaveTextContent(/^DOC OPB TRL\s*$/);
+    expect(cells[3]).toHaveTextContent(/Ada.*Bot/);
+    expect(cells[4]).toHaveTextContent(/^Dec 4$/);
+    expect(cells[5]).toHaveTextContent(/Feed and product pages are drawn/);
+    expect(cells[6]).toHaveTextContent(/^14$/);
+    expect(cells[7]).toHaveTextContent(/^41m$/);
+  });
+
+  test('no target reads "None" in the table and drops Target from the card', () => {
+    renderProjects({ projects: [projectRow({ targetDate: null })] });
+    expect(cellsOf(rowFor("human-ui"))[4]).toHaveTextContent(/^None$/);
+    expect(cardFor("human-ui")).not.toHaveTextContent("Target");
+    expect(cardFor("human-ui")).toHaveTextContent("· 14 open");
+  });
+
+  test("a card ends on the keys, the target and the open count", () => {
+    renderProjects({ projects: [teamAccessRow()] });
+    expect(cardFor("team-access")).toHaveTextContent(
+      /TRL\s*· Target Nov 30· 5 open$/,
+    );
+  });
+
+  test("health shows only beside a status update", () => {
     renderProjects({
-      projects: [project({ latestStatusUpdate: null, health: null })],
+      projects: [projectRow({ latestStatusUpdate: null, health: "at_risk" })],
     });
+    expect(screen.queryByText("At risk")).not.toBeInTheDocument();
     expect(screen.getAllByText("No status update yet")).toHaveLength(2);
-    for (const word of ["On track", "At risk", "Off track"]) {
-      expect(screen.queryByText(word)).not.toBeInTheDocument();
-    }
   });
 
-  test("Open shows the open issues and todos together", () => {
-    renderProjects({
-      projects: [project({ openIssues: 7, openTodos: 2 })],
-    });
-    const row = within(table()).getAllByRole("row")[1];
-    if (!row) throw new Error("no project row");
-    const cells = within(row).getAllByRole("cell");
-    expect(cells[3]).toHaveTextContent(/^9$/);
-    expect(card().getByText("9 open")).toBeInTheDocument();
-  });
-
-  test("a card reads name, the update, its author and age, then the counts", () => {
-    renderProjects();
-    const item = screen.getByRole("listitem");
-    const order = [
-      within(item).getByRole("link", { name: "TRL trail" }),
-      within(item).getByText(/^SSE feed shipped/),
-      within(item).getByText("Tara"),
-      within(item).getByText("41m ago"),
-      within(item).getByText("9 open"),
-    ];
-    for (const [before, after] of order
-      .slice(0, -1)
-      .map((el, i) => [el, order[i + 1]])) {
-      if (!before || !after) throw new Error("missing card part");
-      expect(
-        before.compareDocumentPosition(after) &
-          Node.DOCUMENT_POSITION_FOLLOWING,
-      ).toBeTruthy();
-    }
-  });
-
-  test("each project links to its page", () => {
-    renderProjects();
-    for (const link of screen.getAllByRole("link", { name: "TRL trail" })) {
-      expect(link).toHaveAttribute("href", "/products/TRL");
-    }
-  });
-
-  test("a status update shows its words, not its Markdown, in the table and the card", () => {
-    renderProjects({
-      projects: [
-        project({
-          latestStatusUpdate: statusUpdate({
-            body: "**Shipped** the `invite` flow\n\n- next: SSE",
-          }),
-        }),
-      ],
-    });
-    for (const scope of [within(table()), card()]) {
-      const text = scope.getByText(/Shipped/).closest("p");
-      expect(text).toHaveTextContent("Shipped the invite flow next: SSE");
-      expect(text).not.toHaveTextContent("**");
-      expect(text).not.toHaveTextContent("`");
-    }
-  });
-
-  test("a person with no products is told to ask the owner by name", () => {
+  test("an empty list says so", () => {
     renderProjects({ projects: [] });
     expect(
-      screen.getByRole("heading", { name: "No products yet" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText("Ask Justin Salas to give you access to a product."),
+      screen.getByRole("heading", { name: "No projects yet" }),
     ).toBeInTheDocument();
   });
 
-  test("a failed load offers Try again", async () => {
+  test("a failed load says so and offers Try again", async () => {
     const onRetry = vi.fn();
     renderProjects({ status: "error", onRetry });
-    screen.getByRole("button", { name: "Try again" }).click();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Couldn't load projects",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(onRetry).toHaveBeenCalledOnce();
   });
 });

@@ -4,7 +4,7 @@ import { HttpResponse, http } from "msw";
 import { describe, expect, test } from "vitest";
 import type { EntryView, WebItemView } from "@/lib/api-types";
 import { renderApp, signedInAs } from "@/test/app";
-import { issue, issueList, maya, project, trail } from "@/test/fixtures";
+import { issue, issueList, maya, product, trail } from "@/test/fixtures";
 import { server } from "@/test/server";
 
 function serveIssue() {
@@ -49,7 +49,7 @@ describe("filing an issue", () => {
     signedInAs("member");
     server.use(
       http.get("/api/web/products/DOC", () =>
-        HttpResponse.json(project({ key: "DOC", name: "Docs site" })),
+        HttpResponse.json(product({ key: "DOC", name: "Docs site" })),
       ),
       http.get("/api/web/products/DOC/items", () =>
         HttpResponse.json(issueList([])),

@@ -11,7 +11,7 @@ import {
   issueRow,
   kai,
   maya,
-  project,
+  productDetail,
   statusUpdate,
   tara,
 } from "@/test/fixtures";
@@ -114,7 +114,9 @@ describe("a bot's title changing live", () => {
   test("on a project page: the status update's author, not the issue list's assignee", async () => {
     signedInAs("member");
     server.use(
-      http.get("/api/web/products/TRL", () => HttpResponse.json(project())),
+      http.get("/api/web/products/TRL", () =>
+        HttpResponse.json(productDetail()),
+      ),
       http.get("/api/web/products/TRL/items", () =>
         HttpResponse.json(issueList([issueRow({ assignee: tara })])),
       ),

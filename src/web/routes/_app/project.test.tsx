@@ -6,20 +6,23 @@ import { notFound, renderApp, signedInAs } from "@/test/app";
 import {
   issueList,
   issueRow,
-  project,
+  productDetail,
   statusUpdate,
   trail,
 } from "@/test/fixtures";
 import { server } from "@/test/server";
 
-/** Answers TRL's reads, recording the status each issue-list request asked for. */
+/** Answers TRL's reads, recording the status each item-list request asked for. */
 function serveProject() {
   const statuses: (string | null)[] = [];
   server.use(
-    http.get("/api/web/products/TRL", () => HttpResponse.json(project())),
+    http.get("/api/web/products/TRL", () => HttpResponse.json(productDetail())),
     http.get("/api/web/products/TRL/items", ({ request }) => {
-      statuses.push(new URL(request.url).searchParams.get("status"));
-      return HttpResponse.json(issueList([issueRow()]));
+      const status = new URL(request.url).searchParams.get("status");
+      statuses.push(status);
+      // a row under the filter asked for, as the server would answer
+      const row = issueRow(status === "in_progress" ? { status } : {});
+      return HttpResponse.json(issueList([row]));
     }),
     http.get("/api/web/products/TRL/status-updates", () =>
       HttpResponse.json({ items: [statusUpdate()], nextCursor: null }),

@@ -1,76 +1,71 @@
-import { Fragment, useId, useState } from "react";
+import { PackageIcon } from "lucide-react";
+import { useId, useState } from "react";
 import { ActorAvatar, ActorBadge, BotTitle } from "@/components/actor";
-import { AppLink, RowLink } from "@/components/app-link";
-import { Markdown } from "@/components/markdown";
+import { AppLink } from "@/components/app-link";
+import { ProductSelect } from "@/components/filter-select";
+import {
+  FilterEmpty,
+  ItemFilterBar,
+  type ItemFilters,
+  type ItemGroup,
+  ItemRows,
+  ItemTable,
+  matchesFilters,
+  statusFilterOf,
+  statusTabValue,
+} from "@/components/item-list";
 import {
   EmptyState,
   ErrorState,
-  IssueListEmpty,
   IssueListError,
   ListSkeleton,
-  StatusFilterEmpty,
 } from "@/components/states";
 import {
-  HealthPill,
-  type IssueStatus,
-  PriorityLabel,
-  StatusIcon,
-  StatusLabel,
-  statusLabel,
-} from "@/components/status";
-import { KeyText, LabelChip } from "@/components/text";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+  AsideHeading,
+  StatusUpdateList,
+  TargetDate,
+  UpdateHealth,
+} from "@/components/status-updates";
+import { KeyText } from "@/components/text";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type {
-  WebItemListView,
-  WebItemRowView,
-  WebProductRefView,
-  WebProductView,
+  WebProjectDetailView,
+  WebProjectItemsView,
+  WebProjectView,
   WebStatusUpdatePageView,
-  WebStatusUpdateView,
 } from "@/lib/api-types";
 import type { Loadable } from "@/lib/loadable";
 import { paths } from "@/lib/paths";
-import { formatAbsolute, formatRelative } from "@/lib/time";
 import { useMinuteClock } from "@/lib/use-minute-clock";
 import { cn } from "@/lib/utils";
 
+/** The type toggle and status tab, plus one product's key or null for all. */
+export type ProjectItemFilters = ItemFilters & { product: string | null };
+
+export const NO_PROJECT_FILTERS: ProjectItemFilters = {
+  type: null,
+  status: null,
+  product: null,
+};
+
 export type ProjectViewProps = {
-  project: WebProductRefView;
-  /** The list under the current status filter; `counts` are per status whatever the filter. */
-  issues: Loadable<WebItemListView>;
+  project: Loadable<WebProjectDetailView>;
+  /** The groups under `filters`; `counts` follow the product filter alone. */
+  items: Loadable<WebProjectItemsView>;
   /** Newest first. */
   statusUpdates: Loadable<WebStatusUpdatePageView>;
-  /** The status filter; null is All. The URL (`?status=`) is the route's. */
-  status: IssueStatus | null;
-  onStatusChange: (status: IssueStatus | null) => void;
-  onNewIssue: () => void;
-  onRetryIssues: () => void;
+  filters: ProjectItemFilters;
+  onFiltersChange: (filters: ProjectItemFilters) => void;
+  onRetryProject: () => void;
+  onRetryItems: () => void;
   onRetryStatusUpdates: () => void;
   /** The clock relative times are read against; ticks each minute when omitted. */
   now?: Date;
 };
 
-const filterStatuses: Exclude<IssueStatus, "triage">[] = [
-  "open",
-  "in_progress",
-  "done",
-  "canceled",
-];
-const ALL = "all";
-
-type Counts = WebItemListView["counts"]["all"];
-
-/** The shell heading on a project page: `Projects / TRL trail` at 1440, `TRL trail` below. */
-export function ProjectHeading({ project }: { project: WebProductRefView }) {
+/** The shell heading on a project page: `Projects / Human UI launch` at 1440, the name below. */
+export function ProjectHeading({ project }: { project: { name: string } }) {
   return (
     <span className="flex min-w-0 items-center gap-2">
       <span className="flex items-center gap-2 font-normal text-muted-foreground max-lg:hidden">
@@ -79,426 +74,298 @@ export function ProjectHeading({ project }: { project: WebProductRefView }) {
         </AppLink>
         <span aria-hidden="true">/</span>
       </span>
-      <KeyText className="text-sm text-foreground">{project.key}</KeyText>{" "}
-      <span className="truncate">{project.name}</span>
+      <span className="lg:truncate">{project.name}</span>
     </span>
   );
 }
 
-/** The heading's accessory: the latest status update's health, or nothing without one. */
-export function ProjectHealth({ project }: { project: WebProductView }) {
-  if (!project.latestStatusUpdate || !project.health) return null;
-  return <HealthPill health={project.health} className="max-lg:ml-auto" />;
-}
-
-/** All, then each status, with its count once the list has loaded. */
-function filterOptions(counts: Counts | null) {
-  return [
-    { value: ALL, label: "All", count: counts?.all },
-    ...filterStatuses.map((status) => ({
-      value: status,
-      label: statusLabel(status),
-      count: counts?.[status],
-    })),
-  ];
-}
-
-function StatusTabs({ counts }: { counts: Counts | null }) {
-  const options = filterOptions(counts);
+/** The heading's accessory: health beside the name's first line, only with a status update. */
+export function ProjectHealth({ project }: { project: WebProjectView }) {
   return (
-    <TabsList
-      variant="line"
-      aria-label="Filter by status"
-      className="h-8 w-full justify-start gap-3 rounded-none border-b p-0 max-lg:hidden"
-    >
-      {options.map((option) => (
-        <TabsTrigger
-          key={option.value}
-          value={option.value}
-          className="h-8 flex-none px-1 font-normal text-muted-foreground data-active:text-foreground"
-        >
-          {option.label}{" "}
-          {option.count !== undefined && (
-            <span className="text-2xs text-muted-foreground">
-              {option.count}
-            </span>
-          )}
-        </TabsTrigger>
-      ))}
-    </TabsList>
+    <UpdateHealth
+      of={project}
+      className="max-lg:mt-0.5 max-lg:ml-auto max-lg:self-start"
+    />
   );
 }
 
-function StatusChips({
-  value,
-  counts,
-  onChange,
-}: {
-  value: string;
-  counts: Counts | null;
-  onChange: (value: string) => void;
-}) {
-  const options = filterOptions(counts);
-  // the row scrolls sideways; its right padding fades out, so a chip cut at the edge reads as more
-  return (
-    <ToggleGroup
-      aria-label="Filter by status"
-      value={[value]}
-      onValueChange={(next) => {
-        // pressing the current chip again empties the group; keep the filter instead
-        if (next[0]) onChange(next[0]);
-      }}
-      className="w-full scrollbar-none overflow-x-auto px-4 py-2.5 mask-r-from-[calc(100%-var(--spacing)*4)] lg:hidden"
-    >
-      {options.map((option) => (
-        <ToggleGroupItem
-          key={option.value}
-          value={option.value}
-          variant="outline"
-          className="h-10 rounded-4xl border-border px-3 font-normal text-muted-foreground aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background"
-        >
-          {option.label}{" "}
-          {option.count !== undefined && (
-            <span className="text-2xs">{option.count}</span>
-          )}
-        </ToggleGroupItem>
-      ))}
-    </ToggleGroup>
-  );
-}
-
-function RowTime({ iso, now }: { iso: string; now: Date }) {
-  return (
-    <time dateTime={iso} title={formatAbsolute(iso)}>
-      {formatRelative(iso, now)}
-    </time>
-  );
-}
-
-function Assignee({ issue }: { issue: WebItemRowView }) {
-  if (!issue.assignee) {
-    return <span className="text-muted-foreground">Unassigned</span>;
-  }
-  return (
-    <span className="flex min-w-0 items-center gap-1">
-      <ActorAvatar actor={issue.assignee} size="xs" />
-      <span className="truncate">{issue.assignee.name}</span>
-      <ActorBadge kind={issue.assignee.kind} />
-    </span>
-  );
-}
-
-function Labels({ labels }: { labels: string[] }) {
-  return (
-    <span className="flex min-w-0 flex-wrap items-center gap-1">
-      {labels.map((label) => (
-        // the space keeps the names apart when read as text; flex drops it visually
-        <Fragment key={label}>
-          <LabelChip name={label} />{" "}
-        </Fragment>
-      ))}
-    </span>
-  );
-}
-
-const head = "h-7.5 px-0 text-2xs text-muted-foreground";
-
-function IssueTable({ issues, now }: { issues: WebItemRowView[]; now: Date }) {
-  return (
-    <Table className="table-fixed max-lg:hidden">
-      <TableHeader>
-        <TableRow className="hover:bg-transparent">
-          <TableHead className={cn(head, "w-7 pl-2")}>
-            <span className="sr-only">Status</span>
-          </TableHead>
-          <TableHead className={cn(head, "w-18")}>Key</TableHead>
-          <TableHead className={head}>Title</TableHead>
-          <TableHead className={cn(head, "w-20")}>Priority</TableHead>
-          <TableHead className={cn(head, "w-34")}>Labels</TableHead>
-          <TableHead className={cn(head, "w-36")}>Assignee</TableHead>
-          <TableHead className={cn(head, "w-16 pr-2 text-right")}>
-            Updated
-          </TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {issues.map((issue) => {
-          const canceled = issue.status === "canceled";
-          return (
-            <TableRow
-              key={issue.key}
-              data-issue-key={issue.key}
-              className="relative"
-            >
-              <TableCell className="py-2 pr-0 pl-2">
-                <StatusIcon status={issue.status} label />
-              </TableCell>
-              <TableCell className="px-0 py-2">
-                <KeyText>{issue.key}</KeyText>
-              </TableCell>
-              <TableCell className="truncate px-0 py-2 pr-3">
-                <RowLink
-                  href={paths.issue(issue.key)}
-                  label={`${issue.key} ${issue.title}`}
-                  className={cn(canceled && "text-muted-foreground")}
-                >
-                  {issue.title}
-                </RowLink>
-              </TableCell>
-              <TableCell className="px-0 py-2">
-                <PriorityLabel priority={issue.priority} />
-              </TableCell>
-              <TableCell className="px-0 py-2 whitespace-normal">
-                <Labels labels={issue.labels} />
-              </TableCell>
-              <TableCell className="px-0 py-2">
-                <Assignee issue={issue} />
-              </TableCell>
-              <TableCell className="py-2 pr-2 pl-0 text-right text-muted-foreground">
-                <RowTime iso={issue.updatedAt} now={now} />
-              </TableCell>
-            </TableRow>
-          );
-        })}
-      </TableBody>
-    </Table>
-  );
-}
+const HIDDEN_PRODUCTS = "Items from products you can't see are not shown.";
 
 /**
- * Below 1024px: key and title over status, priority glyph, labels, assignee and age. The
- * whole row is the link, named by key and title and described by the meta line.
+ * Lead, Target, Health and Products as a ledger. `aside` (1024px and up): a 72px label
+ * column, the lead's title pill under the name, each product's key and name. `inline`
+ * (below): a 56px column, the pill in line, keys alone, and no Health, which rides the
+ * heading there.
  */
-function IssueRows({ issues, now }: { issues: WebItemRowView[]; now: Date }) {
-  const metaId = useId();
+function ProjectDetails({
+  project,
+  layout,
+  now,
+}: {
+  project: WebProjectDetailView;
+  layout: "aside" | "inline";
+  now: Date;
+}) {
+  const aside = layout === "aside";
+  const label = "text-muted-foreground";
   return (
-    <ul className="lg:hidden">
-      {issues.map((issue) => (
-        <li key={issue.key} data-issue-key={issue.key} className="border-b">
-          <AppLink
-            href={paths.issue(issue.key)}
-            aria-label={`${issue.key} ${issue.title}`}
-            aria-describedby={`${metaId}-${issue.key}`}
-            className="flex min-h-16 flex-col gap-1 px-4 py-2.5 outline-none focus-visible:ring-3 focus-visible:ring-ring/25 focus-visible:ring-inset"
-          >
-            <span className="flex min-w-0 items-center gap-2">
-              <KeyText>{issue.key}</KeyText>
-              <span
-                className={cn(
-                  "truncate",
-                  issue.status === "canceled" && "text-muted-foreground",
-                )}
-              >
-                {issue.title}
-              </span>
-            </span>
-            <span
-              id={`${metaId}-${issue.key}`}
-              className="flex items-center gap-2 text-xs text-muted-foreground"
-            >
-              <StatusLabel status={issue.status} />{" "}
-              <PriorityLabel
-                priority={issue.priority}
-                iconOnly
-                className="text-foreground"
-              />{" "}
-              <Labels labels={issue.labels} />{" "}
-              <span className="ml-auto flex items-center gap-2">
-                {issue.assignee && (
-                  <>
-                    <ActorAvatar actor={issue.assignee} size="xs" />
-                    <span className="sr-only">
-                      Assigned to {issue.assignee.name},{" "}
-                      {issue.assignee.kind === "bot" ? "Bot" : "Human"}
-                    </span>{" "}
-                  </>
-                )}
-                <RowTime iso={issue.updatedAt} now={now} />
-              </span>
-            </span>
-          </AppLink>
-        </li>
-      ))}
-    </ul>
+    <dl
+      className={cn(
+        "grid items-start gap-x-2",
+        aside
+          ? "grid-cols-[--spacing(18)_1fr] gap-y-2.5 pt-2.5"
+          : "grid-cols-[--spacing(14)_1fr] gap-y-2",
+      )}
+    >
+      <dt className={label}>Lead</dt>
+      <dd className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+        <ActorAvatar actor={project.lead} size="xs" />
+        <span className="min-w-0 truncate">{project.lead.name}</span>{" "}
+        <span className={cn(aside && "order-last w-full pl-6.5")}>
+          <BotTitle actor={project.lead} />
+        </span>{" "}
+        <ActorBadge kind={project.lead.kind} />
+      </dd>
+      {project.targetDate && (
+        <>
+          <dt className={label}>Target</dt>
+          <dd>
+            <TargetDate date={project.targetDate} now={now} />
+          </dd>
+        </>
+      )}
+      {aside && project.latestStatusUpdate && project.health && (
+        <>
+          <dt className={label}>Health</dt>
+          <dd>
+            <UpdateHealth of={project} />
+          </dd>
+        </>
+      )}
+      <dt className={label}>Products</dt>
+      <dd className={cn("flex", aside ? "flex-col gap-1.5" : "gap-2")}>
+        {project.products.map((product) => (
+          <span key={product.key} className="flex items-center gap-2">
+            <KeyText className="text-foreground">{product.key}</KeyText>
+            {aside && <> {product.name}</>}
+          </span>
+        ))}
+      </dd>
+    </dl>
   );
 }
 
-function IssueListBody({
-  project,
-  issues,
-  status,
-  onStatusChange,
-  onNewIssue,
-  onRetryIssues,
+/** The groups' rows under the filters; a group left with none is not drawn. */
+function visibleGroups(
+  items: WebProjectItemsView,
+  filters: ProjectItemFilters,
+): ItemGroup[] {
+  return items.groups
+    .filter((g) => !filters.product || g.product.key === filters.product)
+    .map((g) => ({
+      ...g,
+      items: g.items.filter((item) => matchesFilters(item, filters)),
+    }))
+    .filter((g) => g.items.length > 0);
+}
+
+function ItemsBody({
+  items,
+  filters,
+  onFiltersChange,
+  onRetryItems,
   now,
-}: Omit<ProjectViewProps, "now" | "statusUpdates" | "onRetryStatusUpdates"> & {
+}: {
+  items: Loadable<WebProjectItemsView>;
+  filters: ProjectItemFilters;
+  onFiltersChange: (filters: ProjectItemFilters) => void;
+  onRetryItems: () => void;
   now: Date;
 }) {
-  if (issues.status === "loading")
+  if (items.status === "loading")
     return <ListSkeleton className="px-4 lg:px-2" />;
-  if (issues.status === "error")
-    return <IssueListError onRetry={onRetryIssues} />;
-  const {
-    items,
-    counts: { all: counts },
-  } = issues.data;
-  if (counts.all === 0) {
-    return <IssueListEmpty projectKey={project.key} onNewIssue={onNewIssue} />;
-  }
-  if (items.length === 0 && status) {
+  if (items.status === "error")
+    return <IssueListError onRetry={onRetryItems} />;
+  const groups = visibleGroups(items.data, filters);
+  if (groups.length === 0) {
     return (
-      <StatusFilterEmpty
-        status={status}
-        onShowAll={() => onStatusChange(null)}
+      <FilterEmpty
+        filters={filters}
+        onShowAll={() => onFiltersChange(NO_PROJECT_FILTERS)}
       />
     );
   }
   return (
     <>
-      <IssueTable issues={items} now={now} />
-      <IssueRows issues={items} now={now} />
+      <ItemTable groups={groups} labels={false} now={now} />
+      <ItemRows groups={groups} now={now} />
     </>
   );
 }
 
-function StatusUpdateItem({ update }: { update: WebStatusUpdateView }) {
+function NoItems() {
   return (
-    <li className="flex flex-col gap-1 border-b py-3 last:border-b-0 max-lg:px-4 max-lg:py-3.5 max-lg:last:border-b">
-      {/* not ActorName: here the title rides the date's row, under the name */}
-      <div className="flex min-w-0 items-center gap-2">
-        <ActorAvatar actor={update.author} size="xs" />
-        <span className="min-w-0 truncate font-medium">
-          {update.author.name}
-        </span>
-        <ActorBadge kind={update.author.kind} />
-        <HealthPill health={update.health} className="ml-auto" />
-      </div>
-      <div className="-mt-0.5 flex min-w-0 items-center gap-2 pl-6.5 text-xs text-muted-foreground">
-        <BotTitle actor={update.author} />
-        <time dateTime={update.createdAt} className="shrink-0">
-          {formatAbsolute(update.createdAt)}
-        </time>
-      </div>
-      <Markdown>{update.body}</Markdown>
-    </li>
+    <EmptyState
+      icon={PackageIcon}
+      title="No items in this project yet"
+      description="Bots add issues and todos to a project. They show up here, grouped by product."
+    />
   );
 }
 
-function StatusUpdates({
-  updates,
-  onRetry,
-}: {
-  updates: Loadable<WebStatusUpdatePageView>;
-  onRetry: () => void;
-}) {
-  if (updates.status === "loading") return <ListSkeleton />;
-  if (updates.status === "error") {
-    return (
-      <ErrorState
-        title="Couldn't load status updates"
-        description="Check your connection, then try again."
-        onRetry={onRetry}
-      />
-    );
-  }
-  if (updates.data.items.length === 0) {
-    return (
-      <EmptyState
-        title="No status update yet"
-        description="Bots post how the project is going here."
-      />
-    );
-  }
-  return (
-    <ul>
-      {updates.data.items.map((update) => (
-        <StatusUpdateItem key={update.id} update={update} />
-      ))}
-    </ul>
-  );
-}
+type Pane = "items" | "updates";
 
-type Pane = "issues" | "updates";
-
-/**
- * A project's issues, filtered one status at a time, beside its status updates. At
- * 1024px and up the updates are a 300px rail; below, Issues and Status updates switch.
- */
-export function ProjectView(props: ProjectViewProps) {
-  const now = useMinuteClock(props.now);
-  const [pane, setPane] = useState<Pane>("issues");
+function ProjectBody(
+  props: Omit<ProjectViewProps, "project" | "onRetryProject"> & {
+    project: WebProjectDetailView;
+    now: Date;
+  },
+) {
+  const { project, items, filters, onFiltersChange, now } = props;
+  const [pane, setPane] = useState<Pane>("items");
+  const detailsHeading = useId();
   const updatesHeading = useId();
-  const counts =
-    props.issues.status === "ready" ? props.issues.data.counts.all : null;
-  const filterValue = props.status ?? ALL;
-  const changeFilter = (value: string) => {
-    const next = filterStatuses.find((status) => status === value) ?? null;
-    if (next !== props.status) props.onStatusChange(next);
-  };
+  // no items at all leaves nothing to filter; none under a product filter is a filter result
+  const empty =
+    items.status === "ready" &&
+    items.data.counts.all.all === 0 &&
+    filters.product === null;
+  const counts = items.status === "ready" ? items.data.counts : null;
+  const hiddenUnless = (which: Pane) => pane !== which && "max-lg:hidden";
 
   return (
     <div className="flex flex-col lg:flex-row lg:gap-8 lg:px-6 lg:py-4">
-      <ToggleGroup
-        aria-label="Show"
-        value={[pane]}
-        onValueChange={(next) => {
-          if (next[0] === "issues" || next[0] === "updates") setPane(next[0]);
-        }}
-        spacing={5}
-        className="mx-4 mt-2 w-auto rounded-none border-b lg:hidden"
-      >
-        {(
-          [
-            ["issues", "Issues"],
-            ["updates", "Status updates"],
-          ] as const
-        ).map(([value, label]) => (
-          <ToggleGroupItem
-            key={value}
-            value={value}
-            className="-mb-px h-10 min-w-10 rounded-none border-b-2 border-transparent px-0 font-normal text-muted-foreground hover:bg-transparent aria-pressed:border-foreground aria-pressed:bg-transparent aria-pressed:text-foreground"
-          >
-            {label}
-          </ToggleGroupItem>
-        ))}
-      </ToggleGroup>
-      <Tabs
-        value={filterValue}
-        onValueChange={(value) => changeFilter(String(value))}
-        className={cn(
-          "min-w-0 flex-1 gap-1",
-          pane !== "issues" && "max-lg:hidden",
-        )}
-      >
-        <StatusTabs counts={counts} />
-        <StatusChips
-          value={filterValue}
-          counts={counts}
-          onChange={changeFilter}
-        />
-        {/* one panel, keyed to whichever tab is current, so the list is that tab's panel */}
-        <TabsContent value={filterValue}>
-          <IssueListBody {...props} now={now} />
-        </TabsContent>
-      </Tabs>
-      <section
-        aria-labelledby={updatesHeading}
-        className={cn(
-          "lg:w-75 lg:shrink-0",
-          pane !== "updates" && "max-lg:hidden",
-        )}
-      >
-        <h2
-          id={updatesHeading}
-          className="flex h-8 items-center border-b font-medium max-lg:sr-only"
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div
+          className={cn(
+            "flex flex-col gap-3 px-4 pt-1.5 pb-3.5 lg:gap-2 lg:px-2 lg:pt-0",
+            empty && "lg:border-b",
+          )}
         >
-          Status updates
-        </h2>
-        <StatusUpdates
-          updates={props.statusUpdates}
-          onRetry={props.onRetryStatusUpdates}
-        />
-      </section>
+          <div>
+            <p className="text-2xs font-medium text-muted-foreground max-lg:sr-only">
+              Goal
+            </p>
+            <p className="max-w-155">{project.goal}</p>
+          </div>
+          <div className="lg:hidden">
+            <ProjectDetails project={project} layout="inline" now={now} />
+          </div>
+          {project.hiddenProducts && (
+            <p className="text-xs text-muted-foreground">{HIDDEN_PRODUCTS}</p>
+          )}
+        </div>
+        <ToggleGroup
+          aria-label="Show"
+          value={[pane]}
+          onValueChange={(next) => {
+            if (next[0] === "items" || next[0] === "updates") setPane(next[0]);
+          }}
+          spacing={4}
+          className="w-full rounded-none border-b px-4 lg:hidden"
+        >
+          {(
+            [
+              ["items", "Items"],
+              ["updates", "Status updates"],
+            ] as const
+          ).map(([value, label]) => (
+            <ToggleGroupItem
+              key={value}
+              value={value}
+              className="-mb-px h-10 min-w-10 rounded-none border-b-2 border-transparent px-0.5 font-normal text-muted-foreground hover:bg-transparent aria-pressed:border-foreground aria-pressed:bg-transparent aria-pressed:text-foreground"
+            >
+              {label}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+        {empty ? (
+          <div className={cn(hiddenUnless("items"))}>
+            <NoItems />
+          </div>
+        ) : (
+          <Tabs
+            value={statusTabValue(filters)}
+            onValueChange={(value) => {
+              const status = statusFilterOf(String(value));
+              if (status !== filters.status)
+                onFiltersChange({ ...filters, status });
+            }}
+            className={cn("gap-1", hiddenUnless("items"))}
+          >
+            <ItemFilterBar
+              filters={filters}
+              counts={counts}
+              onFiltersChange={(next) =>
+                onFiltersChange({ ...filters, ...next })
+              }
+              select={
+                <ProductSelect
+                  products={project.products}
+                  value={filters.product}
+                  onChange={(product) =>
+                    onFiltersChange({ ...filters, product })
+                  }
+                />
+              }
+            />
+            {/* one panel, keyed to whichever tab is current, so the list is that tab's panel */}
+            <TabsContent value={statusTabValue(filters)}>
+              <ItemsBody
+                items={items}
+                filters={filters}
+                onFiltersChange={onFiltersChange}
+                onRetryItems={props.onRetryItems}
+                now={now}
+              />
+            </TabsContent>
+          </Tabs>
+        )}
+      </div>
+      <aside className="flex flex-col gap-5 lg:w-70 lg:shrink-0">
+        <section aria-labelledby={detailsHeading} className="max-lg:hidden">
+          <AsideHeading id={detailsHeading}>Details</AsideHeading>
+          <ProjectDetails project={project} layout="aside" now={now} />
+        </section>
+        <section
+          aria-labelledby={updatesHeading}
+          className={cn(hiddenUnless("updates"))}
+        >
+          <AsideHeading id={updatesHeading} className="max-lg:sr-only">
+            Status updates
+          </AsideHeading>
+          <StatusUpdateList
+            updates={props.statusUpdates}
+            onRetry={props.onRetryStatusUpdates}
+          />
+        </section>
+      </aside>
     </div>
   );
+}
+
+/**
+ * A project: its goal, then its items grouped by product and filtered by product, type
+ * and status, beside Details and status updates. Only the viewer's products ever show;
+ * when the project has others, one line says items are missing, never which.
+ */
+export function ProjectView({
+  project,
+  onRetryProject,
+  now: fixedNow,
+  ...props
+}: ProjectViewProps) {
+  const now = useMinuteClock(fixedNow);
+  if (project.status === "loading")
+    return <ListSkeleton className="px-4 lg:px-6" />;
+  if (project.status === "error") {
+    return (
+      <ErrorState
+        title="Couldn't load this project"
+        description="Check your connection, then try again."
+        onRetry={onRetryProject}
+      />
+    );
+  }
+  return <ProjectBody {...props} project={project.data} now={now} />;
 }
