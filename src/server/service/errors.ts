@@ -36,6 +36,12 @@ export class ConflictError extends ServiceError {
   override readonly name = "ConflictError";
 }
 
+/** A reply to a message whose sender asked for none. */
+export class NoReplyWantedError extends ServiceError {
+  readonly code = "no_reply_wanted";
+  override readonly name = "NoReplyWantedError";
+}
+
 /** An idempotency key already stored for a different request by the same actor. */
 export class IdempotencyKeyReusedError extends ServiceError {
   readonly code = "idempotency_key_reused";

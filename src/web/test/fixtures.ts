@@ -2,9 +2,11 @@ import type {
   EntryView,
   PersonView,
   WebActorView,
+  WebConversationView,
   WebItemListView,
   WebItemRowView,
   WebItemView,
+  WebMessageView,
   WebProductDetailView,
   WebProductView,
   WebProjectDetailView,
@@ -447,13 +449,13 @@ export function projectEntry(
     : { ...base, kind, changed: ["goal", "targetDate"] };
 }
 
-/** A bot with a title, the lead of the Human UI launch project. */
-export const ada: WebActorView = {
-  id: "a-ada",
-  name: "Ada",
+/** A third bot, with a title; leads the Human UI launch project and is the third party in conversations. */
+export const gamma: WebActorView = {
+  id: "a-gamma",
+  name: "Gamma",
   kind: "bot",
   photoUrl: null,
-  title: "Better Giving Engineer",
+  title: "Release engineer",
 };
 export const openBot = { key: "OPB", name: "OpenBot" };
 export const docsSite = { key: "DOC", name: "Docs site" };
@@ -511,9 +513,9 @@ export function projectRow(
       id: "su-h",
       body: "Feed and product pages are drawn. Docs site pages wait on the new logo.",
       health: "at_risk",
-      author: ada,
+      author: gamma,
     }),
-    lead: ada,
+    lead: gamma,
     targetDate: "2026-12-04",
     products: [docsSite, openBot, trail],
     openCount: 14,
@@ -564,5 +566,44 @@ export function projectItems(
     groups: groups.map((g) => ({ ...g, count: g.items.length })),
     nextCursor: null,
     counts: countsOf(groups.flatMap((g) => g.items)),
+  };
+}
+
+/** Alpha and Beta's conversation as a row on the messages list; Beta sent the last message. */
+export function conversation(
+  overrides: Partial<WebConversationView> = {},
+): WebConversationView {
+  return {
+    bots: [alpha, beta],
+    lastMessage: {
+      id: "m-3",
+      senderId: beta.id,
+      preview: "Deploy finished. The volume backup runs nightly now.",
+      truncated: false,
+      createdAt: "2026-11-11T09:40:00.000Z",
+      expectsReply: true,
+    },
+    count: 3,
+    lastAt: "2026-11-11T09:40:00.000Z",
+    ...overrides,
+  };
+}
+
+/** A message from Alpha to Beta that starts its thread and asks for a reply. */
+export function message(
+  overrides: Partial<WebMessageView> = {},
+): WebMessageView {
+  const id = overrides.id ?? "m-1";
+  return {
+    id,
+    sender: alpha,
+    recipient: beta,
+    threadId: id,
+    replyTo: null,
+    text: "What's the **status** of the deploy?",
+    expectsReply: true,
+    createdAt: "2026-11-11T09:12:00.000Z",
+    readAt: null,
+    ...overrides,
   };
 }

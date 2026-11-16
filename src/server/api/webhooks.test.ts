@@ -187,7 +187,7 @@ test("a bot sees, changes, tests and deletes only its own webhooks", async () =>
 });
 
 test("a key limited to one project can't subscribe to another: a 404, as for a missing project", async () => {
-  const scoped = createBot(db, "bg-ivy", {
+  const scoped = createBot(db, "alpha-scoped", {
     scope: { projects: [a.key], actions: ["read", "issues"] },
   });
   const hidden = await create({ projects: [b.key] }, scoped.key);
@@ -198,9 +198,9 @@ test("a key limited to one project can't subscribe to another: a 404, as for a m
   expect(hidden.body.error.message.replace(b.key, "X")).toBe(
     missing.body.error.message.replace("NOPE9", "X"),
   );
-  const ok = await create({ url: "https://bot.example.com/ivy" }, scoped.key);
+  const ok = await create({ url: "https://bot.example.com/alpha" }, scoped.key);
   expect(ok.status).toBe(201);
-  // another bot's wider webhook is invisible to ivy
+  // another bot's wider webhook is invisible to alpha-scoped
   const wide = await create({
     url: "https://bot.example.com/wide",
     projects: [a.key, b.key],
@@ -235,9 +235,35 @@ test("a key without the read action is refused", async () => {
   );
   expect(res.status).toBe(403);
   expect(res.body.error.code).toBe("forbidden_action");
-  expect((await call("GET", "/webhooks", { key: writer.key })).status).toBe(
-    403,
+});
+
+test("a key without the read action manages its bot's inbox webhooks, and lists only those", async () => {
+  const bot = createBot(db, "inbox only");
+  const writer = createKey(db, bot.actor.id, { actions: ["issues"] }).key;
+  const inbox = await call("POST", "/webhooks", {
+    json: {
+      kind: "inbox",
+      url: "https://bot.example.com/inbox-writer",
+      secret: SECRET,
+    },
+    key: writer,
+  });
+  expect(inbox.status).toBe(201);
+  const activity = await create(
+    { url: "https://bot.example.com/activity-full" },
+    bot.key,
   );
+  const listed = await call("GET", "/webhooks", { key: writer });
+  expect(listed.status).toBe(200);
+  expect(listed.body.items.map((w: Body) => w.id)).toEqual([inbox.body.id]);
+  expect(
+    (await call("GET", `/webhooks/${activity.body.id}`, { key: writer })).body
+      .error.code,
+  ).toBe("forbidden_action");
+  expect(
+    (await call("DELETE", `/webhooks/${inbox.body.id}`, { key: writer }))
+      .status,
+  ).toBe(200);
 });
 
 test.each([
@@ -374,7 +400,7 @@ test("a key narrower than a webhook can't change, rotate or ping it", async () =
 });
 
 test("a scoped key adding a project it can't see on update gets the same 404 as on create", async () => {
-  const scoped = createBot(db, "bg-june", {
+  const scoped = createBot(db, "beta-scoped", {
     scope: { projects: [a.key], actions: ["read"] },
   });
   const id = (await create({ url: "https://bot.example.com/june" }, scoped.key))
@@ -729,6 +755,37 @@ test("at the limit, a key that can't manage every webhook gets a message with no
   expect(full.body.error.message).toContain("20 webhooks");
 });
 
+test("at the limit, an inbox webhook is refused with advice an inbox webhook can take", async () => {
+  const full = createBot(db, "full inbox");
+  for (let i = 0; i < 20; i++) {
+    const made = await create(
+      { url: `https://bot.example.com/full/${i}` },
+      full.key,
+    );
+    expect(made.status).toBe(201);
+  }
+  const inbox = (key: string) =>
+    call("POST", "/webhooks", {
+      json: {
+        kind: "inbox",
+        url: "https://bot.example.com/full/inbox",
+        secret: SECRET,
+      },
+      key,
+    });
+  const over = await inbox(full.key);
+  expect(over.status).toBe(409);
+  expect(over.body.error.message).toBe(
+    "this bot already has 20 webhooks, the most allowed: delete one you no longer use to make room for the inbox webhook",
+  );
+  // a key without read can't see or delete the activity webhooks it would have to remove
+  const noRead = createKey(db, full.actor.id, { actions: ["issues"] }).key;
+  const hidden = await inbox(noRead);
+  expect(hidden.status).toBe(409);
+  expect(hidden.body.error.message).toContain("can't manage all of them");
+  expect(hidden.body.error.message).not.toMatch(/already has \d+/);
+});
+
 test("a key limited to the webhook's projects is told which webhook already has the URL", async () => {
   const bigBot = createBot(db, "scoped-twin-bot");
   const narrow = createKey(db, bigBot.actor.id, { projects: [a.key] }).key;
@@ -751,6 +808,53 @@ test("a key limited to the webhook's projects is told which webhook already has 
   });
   expect(moved.status).toBe(409);
   expect(moved.body.error.message).toContain(twin.body.id);
+});
+
+test("a key without read whose URL collides with an activity webhook isn't sent to update_webhook", async () => {
+  const bot = createBot(db, "unread-twin-bot");
+  const url = "https://bot.example.com/unread-twin";
+  const activity = await create({ url, projects: [a.key] }, bot.key);
+  expect(activity.status).toBe(201);
+  const noRead = createKey(db, bot.actor.id, { actions: ["issues"] }).key;
+  const inbox = (key: string, at = url) =>
+    call("POST", "/webhooks", {
+      json: { kind: "inbox", url: at, secret: SECRET },
+      key,
+    });
+  const refused = await inbox(noRead);
+  expect(refused.status).toBe(409);
+  expect(refused.text).not.toContain(activity.body.id);
+  expect(refused.body.error.message).not.toContain("update_webhook");
+  expect(refused.body.error.message).toContain("this key can't manage");
+  expect(refused.body.error.message).toContain(
+    "a key that can read every product that webhook follows",
+  );
+
+  const own = await inbox(noRead, "https://bot.example.com/unread-twin-2");
+  expect(own.status).toBe(201);
+  const moved = await call("PATCH", `/webhooks/${own.body.id}`, {
+    json: { url },
+    key: noRead,
+  });
+  expect(moved.status).toBe(409);
+  expect(moved.text).not.toContain(activity.body.id);
+  expect(moved.body.error.message).toContain("this key can't manage");
+
+  // an inbox twin is messaging, open to every key: the id is named even without read
+  const inboxUrl = "https://bot.example.com/unread-inbox-twin";
+  const inboxTwin = await inbox(bot.key, inboxUrl);
+  expect(inboxTwin.status).toBe(201);
+  const named = await inbox(noRead, inboxUrl);
+  expect(named.status).toBe(409);
+  expect(named.body.error.message).toContain(inboxTwin.body.id);
+  expect(named.body.error.message).not.toContain("can't manage");
+
+  // a key with read still gets the id and the advice
+  const seen = await inbox(bot.key);
+  expect(seen.status).toBe(409);
+  expect(seen.body.error.message).toContain(
+    `webhook ${activity.body.id} already sends to this URL: change it with update_webhook`,
+  );
 });
 
 test("projects, the deprecated alias of products, carries a deprecated note on create and update; products carries none", async () => {

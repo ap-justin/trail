@@ -17,6 +17,11 @@ export type ActorUpdate = {
 
 export type ActorSubscriber = (update: ActorUpdate) => void;
 
+/** A message committed: its id and recipient. Live-only; it wakes the inbox webhooks' sender. */
+export type MessageNotice = { id: string; recipientId: string };
+
+export type MessageSubscriber = (notice: MessageNotice) => void;
+
 export interface EventBus {
   /** Calls every subscriber in turn; one that throws is logged and skipped. */
   publish(event: ActivityEvent): void;
@@ -26,6 +31,10 @@ export interface EventBus {
   publishActor(update: ActorUpdate): void;
   /** Returns the unsubscribe function; `subscribe`'s subscribers never see actor updates. */
   subscribeActors(fn: ActorSubscriber): () => void;
+  /** Calls every message subscriber in turn; one that throws is logged and skipped. */
+  publishMessage(notice: MessageNotice): void;
+  /** Returns the unsubscribe function; messages never reach `subscribe`'s subscribers. */
+  subscribeMessages(fn: MessageSubscriber): () => void;
 }
 
 function callEach<T>(
@@ -45,6 +54,7 @@ function callEach<T>(
 export function createEventBus(): EventBus {
   const subscribers = new Set<Subscriber>();
   const actorSubscribers = new Set<ActorSubscriber>();
+  const messageSubscribers = new Set<MessageSubscriber>();
   return {
     publish(event) {
       callEach(subscribers, event, `${event.action} ${event.id}`);
@@ -59,6 +69,13 @@ export function createEventBus(): EventBus {
     subscribeActors(fn) {
       actorSubscribers.add(fn);
       return () => actorSubscribers.delete(fn);
+    },
+    publishMessage(notice) {
+      callEach(messageSubscribers, notice, `message ${notice.id}`);
+    },
+    subscribeMessages(fn) {
+      messageSubscribers.add(fn);
+      return () => messageSubscribers.delete(fn);
     },
   };
 }

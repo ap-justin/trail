@@ -109,7 +109,7 @@ describe("goal and details", () => {
     const terms = dl.getAllByRole("term").map((dt) => dt.textContent);
     expect(terms).toEqual(["Lead", "Target", "Health", "Products"]);
     const [lead, target, health, products] = dl.getAllByRole("definition");
-    expect(lead).toHaveTextContent(/Ada.*Better Giving Engineer.*Bot/);
+    expect(lead).toHaveTextContent(/Gamma.*Release engineer.*Bot/);
     expect(target).toHaveTextContent(/^Dec 4$/);
     expect(health).toHaveTextContent(/^At risk$/);
     expect(products).toHaveTextContent(/DOC Docs site\s*TRL trail/);

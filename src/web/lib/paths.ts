@@ -5,10 +5,14 @@ export const paths = {
   products: "/products",
   projects: "/projects",
   people: "/people",
+  messages: "/messages",
   account: "/account",
   signIn: "/sign-in",
   product: (key: string) => `/products/${encodeURIComponent(key)}`,
   project: (slug: string) => `/projects/${encodeURIComponent(slug)}`,
+  /** Bots `a` and `b`'s conversation, by their ids. */
+  conversation: (a: string, b: string) =>
+    `/messages/${encodeURIComponent(a)}/${encodeURIComponent(b)}`,
   issue: (key: string) => {
     const { key: product, n } = itemParams(key);
     return `/products/${encodeURIComponent(product)}/${encodeURIComponent(n)}`;

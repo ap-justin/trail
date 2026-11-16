@@ -21,6 +21,7 @@ test("GET /whoami answers the key's bot: id, kind, name, label, photoUrl and tit
     products: [],
     photoUrl: null,
     title: null,
+    unreadMessages: 0,
   });
 });
 

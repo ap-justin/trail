@@ -17,9 +17,11 @@ import { Route as AppAccountRouteImport } from './routes/_app/account'
 import { Route as AppPeopleRouteImport } from './routes/_app/people'
 import { Route as SignInConfirmRouteImport } from './routes/sign-in_.confirm'
 import { Route as AppIssuesKeyRouteImport } from './routes/_app/issues/$key'
+import { Route as AppMessagesIndexRouteImport } from './routes/_app/messages/index'
 import { Route as AppProductsIndexRouteImport } from './routes/_app/products/index'
 import { Route as AppProjectsIndexRouteImport } from './routes/_app/projects/index'
 import { Route as AppProjectsSlugRouteImport } from './routes/_app/projects/$slug'
+import { Route as AppMessagesABRouteImport } from './routes/_app/messages/$a.$b'
 import { Route as AppProductsKeyIndexRouteImport } from './routes/_app/products/$key/index'
 import { Route as AppProductsKeyNRouteImport } from './routes/_app/products/$key/$n'
 
@@ -62,6 +64,11 @@ const AppIssuesKeyRoute = AppIssuesKeyRouteImport.update({
   path: '/issues/$key',
   getParentRoute: () => AppRoute,
 } as any)
+const AppMessagesIndexRoute = AppMessagesIndexRouteImport.update({
+  id: '/messages/',
+  path: '/messages/',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppProductsIndexRoute = AppProductsIndexRouteImport.update({
   id: '/products/',
   path: '/products/',
@@ -75,6 +82,11 @@ const AppProjectsIndexRoute = AppProjectsIndexRouteImport.update({
 const AppProjectsSlugRoute = AppProjectsSlugRouteImport.update({
   id: '/projects/$slug',
   path: '/projects/$slug',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppMessagesABRoute = AppMessagesABRouteImport.update({
+  id: '/messages/$a/$b',
+  path: '/messages/$a/$b',
   getParentRoute: () => AppRoute,
 } as any)
 const AppProductsKeyIndexRoute = AppProductsKeyIndexRouteImport.update({
@@ -97,8 +109,10 @@ export interface FileRoutesByFullPath {
   '/sign-in/confirm': typeof SignInConfirmRoute
   '/issues/$key': typeof AppIssuesKeyRoute
   '/projects/$slug': typeof AppProjectsSlugRoute
+  '/messages/': typeof AppMessagesIndexRoute
   '/products/': typeof AppProductsIndexRoute
   '/projects/': typeof AppProjectsIndexRoute
+  '/messages/$a/$b': typeof AppMessagesABRoute
   '/products/$key/$n': typeof AppProductsKeyNRoute
   '/products/$key/': typeof AppProductsKeyIndexRoute
 }
@@ -111,8 +125,10 @@ export interface FileRoutesByTo {
   '/': typeof AppIndexRoute
   '/issues/$key': typeof AppIssuesKeyRoute
   '/projects/$slug': typeof AppProjectsSlugRoute
+  '/messages': typeof AppMessagesIndexRoute
   '/products': typeof AppProductsIndexRoute
   '/projects': typeof AppProjectsIndexRoute
+  '/messages/$a/$b': typeof AppMessagesABRoute
   '/products/$key/$n': typeof AppProductsKeyNRoute
   '/products/$key': typeof AppProductsKeyIndexRoute
 }
@@ -127,8 +143,10 @@ export interface FileRoutesById {
   '/_app/': typeof AppIndexRoute
   '/_app/issues/$key': typeof AppIssuesKeyRoute
   '/_app/projects/$slug': typeof AppProjectsSlugRoute
+  '/_app/messages/': typeof AppMessagesIndexRoute
   '/_app/products/': typeof AppProductsIndexRoute
   '/_app/projects/': typeof AppProjectsIndexRoute
+  '/_app/messages/$a/$b': typeof AppMessagesABRoute
   '/_app/products/$key/$n': typeof AppProductsKeyNRoute
   '/_app/products/$key/': typeof AppProductsKeyIndexRoute
 }
@@ -143,8 +161,10 @@ export interface FileRouteTypes {
     | '/sign-in/confirm'
     | '/issues/$key'
     | '/projects/$slug'
+    | '/messages/'
     | '/products/'
     | '/projects/'
+    | '/messages/$a/$b'
     | '/products/$key/$n'
     | '/products/$key/'
   fileRoutesByTo: FileRoutesByTo
@@ -157,8 +177,10 @@ export interface FileRouteTypes {
     | '/'
     | '/issues/$key'
     | '/projects/$slug'
+    | '/messages'
     | '/products'
     | '/projects'
+    | '/messages/$a/$b'
     | '/products/$key/$n'
     | '/products/$key'
   id:
@@ -172,8 +194,10 @@ export interface FileRouteTypes {
     | '/_app/'
     | '/_app/issues/$key'
     | '/_app/projects/$slug'
+    | '/_app/messages/'
     | '/_app/products/'
     | '/_app/projects/'
+    | '/_app/messages/$a/$b'
     | '/_app/products/$key/$n'
     | '/_app/products/$key/'
   fileRoutesById: FileRoutesById
@@ -242,6 +266,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppIssuesKeyRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/messages/': {
+      id: '/_app/messages/'
+      path: '/messages'
+      fullPath: '/messages/'
+      preLoaderRoute: typeof AppMessagesIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/products/': {
       id: '/_app/products/'
       path: '/products'
@@ -261,6 +292,13 @@ declare module '@tanstack/react-router' {
       path: '/projects/$slug'
       fullPath: '/projects/$slug'
       preLoaderRoute: typeof AppProjectsSlugRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/messages/$a/$b': {
+      id: '/_app/messages/$a/$b'
+      path: '/messages/$a/$b'
+      fullPath: '/messages/$a/$b'
+      preLoaderRoute: typeof AppMessagesABRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/products/$key/': {
@@ -287,8 +325,10 @@ interface AppRouteChildren {
   AppIndexRoute: typeof AppIndexRoute
   AppIssuesKeyRoute: typeof AppIssuesKeyRoute
   AppProjectsSlugRoute: typeof AppProjectsSlugRoute
+  AppMessagesIndexRoute: typeof AppMessagesIndexRoute
   AppProductsIndexRoute: typeof AppProductsIndexRoute
   AppProjectsIndexRoute: typeof AppProjectsIndexRoute
+  AppMessagesABRoute: typeof AppMessagesABRoute
   AppProductsKeyNRoute: typeof AppProductsKeyNRoute
   AppProductsKeyIndexRoute: typeof AppProductsKeyIndexRoute
 }
@@ -300,8 +340,10 @@ const AppRouteChildren: AppRouteChildren = {
   AppIndexRoute: AppIndexRoute,
   AppIssuesKeyRoute: AppIssuesKeyRoute,
   AppProjectsSlugRoute: AppProjectsSlugRoute,
+  AppMessagesIndexRoute: AppMessagesIndexRoute,
   AppProductsIndexRoute: AppProductsIndexRoute,
   AppProjectsIndexRoute: AppProjectsIndexRoute,
+  AppMessagesABRoute: AppMessagesABRoute,
   AppProductsKeyNRoute: AppProductsKeyNRoute,
   AppProductsKeyIndexRoute: AppProductsKeyIndexRoute,
 }

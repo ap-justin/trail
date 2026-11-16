@@ -414,3 +414,45 @@ test("an argument sent under its old name is refused naming the argument it beca
     'Unrecognized key "assigneeId": it is assignee now, so send assignee instead',
   );
 });
+
+test("create_issue and list_issues take project or product as aliases of projectId, refusing two spellings with different values", async () => {
+  const client = await connect(bot.key);
+  await call(client, "create_product", { key: "LGZ", name: "legacy aliases" });
+  const viaProject = await call(client, "create_issue", {
+    project: "LGZ",
+    title: "via project",
+  });
+  const viaProduct = await call(client, "create_issue", {
+    product: "lgz",
+    title: "via product",
+  });
+  expect([viaProject.key, viaProduct.key]).toEqual(["LGZ-1", "LGZ-2"]);
+  for (const name of ["projectId", "project", "product"]) {
+    const listed = await call(client, "list_issues", { [name]: "LGZ" });
+    expect(listed.items.map((i: Body) => i.key).sort(), name).toEqual([
+      "LGZ-1",
+      "LGZ-2",
+    ]);
+  }
+  const same = await call(client, "create_issue", {
+    projectId: "LGZ",
+    product: "LGZ",
+    title: "both",
+  });
+  expect(same.key).toBe("LGZ-3");
+  expect(
+    (await call(client, "list_issues", { project: "LGZ", product: "LGZ" }))
+      .items,
+  ).toHaveLength(3);
+  for (const [tool, args] of [
+    ["create_issue", { projectId: "LGZ", product: "OTHER", title: "both" }],
+    ["list_issues", { project: "LGZ", product: "OTHER" }],
+  ] as const) {
+    expect(await callError(client, tool, args), tool).toBe(
+      "validation_failed: send one of projectId, project or product: they name the same product, and two different values are ambiguous",
+    );
+  }
+  expect(await callError(client, "create_issue", { title: "nowhere" })).toBe(
+    "validation_failed: projectId is required: send the product's key, like TRL (project or product are its aliases); list_products lists them",
+  );
+});

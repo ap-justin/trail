@@ -426,8 +426,8 @@ test("a project's own events reach webhooks following any of its products; an it
         products: [who.product.key],
       })
     ).id as string;
-  const ivyHook = await follow(zeta, "https://zeta.example.com/hook");
-  const kaiHook = await follow(beta, "https://beta.example.com/hook");
+  const zetaHook = await follow(zeta, "https://zeta.example.com/hook");
+  const betaHook = await follow(beta, "https://beta.example.com/hook");
   const slug = freshSlug();
   await call(zeta.client, "create_project", {
     name: "hooked",
@@ -445,15 +445,16 @@ test("a project's own events reach webhooks following any of its products; an it
       .select({ type: webhookDelivery.type })
       .from(webhookDelivery)
       .where(eq(webhookDelivery.subscriptionId, subscriptionId))
-      .orderBy(webhookDelivery.seq)
+      .orderBy(webhookDelivery.seq, webhookDelivery.type)
       .all()
       .map((d) => d.type);
-  expect(typesFor(ivyHook)).toEqual([
+  expect(typesFor(zetaHook)).toEqual([
     "trail.project.created",
     "trail.issue.created",
+    "trail.item.created",
     "trail.project.item_added",
   ]);
-  expect(typesFor(kaiHook)).toEqual(["trail.project.created"]);
+  expect(typesFor(betaHook)).toEqual(["trail.project.created"]);
 });
 
 test("a retried create_project with the same idempotency_key returns the first project", async () => {

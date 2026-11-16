@@ -11,6 +11,7 @@ import {
   projectStatusUpdate,
 } from "../db/schema.js";
 import type { ActivityEvent } from "../events/bus.js";
+import { findMessage, MESSAGE_RECEIVED } from "../service/messages.js";
 
 /** How much of an event's payload a webhook carries, in characters of its JSON. */
 export const PAYLOAD_MAX_CHARS = 2000;
@@ -31,7 +32,7 @@ export function cutPayload(payload: Record<string, unknown>): unknown {
 type Subject = {
   type: string;
   id: string;
-  /** an item's key (BGP-12) for an item or a comment on one; a project's slug for a project; the product's key otherwise */
+  /** an item's key (ATL-12) for an item or a comment on one; a project's slug for a project; the product's key otherwise */
   key: string | null;
   title: string | null;
   /** issue or todo, on an item or a comment on one */
@@ -192,6 +193,36 @@ export function buildEnvelope(
         url: `${publicUrl.replace(/\/+$/, "")}${path}`,
       }),
       payload: cutPayload(event.payload),
+    },
+  };
+}
+
+/**
+ * The trail.message.received body for an inbox webhook: the whole message,
+ * text never cut, so it is built apart from `cutPayload`. Undefined when the
+ * message is gone.
+ */
+export function buildMessageEnvelope(
+  db: Db,
+  messageId: string,
+): Envelope | undefined {
+  const found = findMessage(db, messageId);
+  if (!found) return undefined;
+  const createdAt = found.createdAt.toISOString();
+  return {
+    type: MESSAGE_RECEIVED,
+    occurredAt: createdAt,
+    data: {
+      message: {
+        id: found.id,
+        from: found.from,
+        to: found.to,
+        threadId: found.threadId,
+        replyTo: found.replyToId,
+        expectsReply: found.expectsReply,
+        text: found.text,
+        createdAt,
+      },
     },
   };
 }

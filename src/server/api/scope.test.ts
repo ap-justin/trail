@@ -9,7 +9,7 @@ const { db, bot, request, addProject } = setupTestApp();
 type Body = Record<string, any>;
 
 const a = addProject("A");
-const scoped = createBot(db, "bg-ivy", {
+const scoped = createBot(db, "alpha-scoped", {
   scope: { projects: [a.key], actions: ["read", "issues", "comments"] },
 });
 let issueA = "";
@@ -398,7 +398,7 @@ test("an action the key lacks is a 403 naming it, the key's actions and whom to 
 test("a key scoped to A with read, issues and comments writes issues and comments in A", async () => {
   const filed = await request("POST", "/api/v1/issues", {
     key: scoped.key,
-    json: { projectId: a.key, title: "by ivy", labels: ["ivy"] },
+    json: { projectId: a.key, title: "by alpha", labels: ["alpha"] },
   });
   expect(filed.status).toBe(201);
   const { key } = (await filed.json()) as Body;
@@ -548,7 +548,7 @@ test("whoami reports the calling key's scope, null where it is unrestricted", as
   expect(await scopedMe.json()).toEqual({
     id: scoped.actor.id,
     kind: "bot",
-    name: "bg-ivy",
+    name: "alpha-scoped",
     label: null,
     scope: {
       products: [a.key],
@@ -557,6 +557,7 @@ test("whoami reports the calling key's scope, null where it is unrestricted", as
     },
     ownProducts: [],
     products: [{ key: a.key, name: "A" }],
+    unreadMessages: 0,
     photoUrl: null,
     title: null,
   });
@@ -635,13 +636,17 @@ test("the spec documents each gated operation's 403 with the action it needs", a
     "POST /projects/{ref}/status-updates": needs("status_updates"),
     "POST /projects/{slug}/items": needs("issues"),
     "DELETE /projects/{slug}/items/{key}": needs("issues"),
-    "GET /webhooks": needs("read"),
+    "GET /webhooks": null,
     "POST /webhooks": needs("read"),
     "GET /webhooks/{id}": needs("read"),
     "PATCH /webhooks/{id}": needs("read"),
     "DELETE /webhooks/{id}": needs("read"),
     "PUT /webhooks/{id}/secret": needs("read"),
     "POST /webhooks/{id}/ping": needs("read"),
+    "POST /messages": null,
+    "GET /messages": null,
+    "GET /messages/{id}/thread": null,
+    "POST /messages/read": null,
   });
 });
 

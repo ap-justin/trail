@@ -1003,7 +1003,7 @@ test("a key's allowlist names an existing key and project, each pair once", () =
 test("deleting a key drops its allowlist; a project on an allowlist cannot be deleted", () => {
   const scopedTo = db
     .insert(product)
-    .values({ key: "BGP", name: "better giving", createdBy: bot.id })
+    .values({ key: "BTA", name: "beta product", createdBy: bot.id })
     .returning()
     .get();
   const key = db

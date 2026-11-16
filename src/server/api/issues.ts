@@ -8,7 +8,7 @@ import {
   legacyUpdatedItemSchema,
   pageSchema,
 } from "../../shared/schemas.js";
-import type { Service } from "../service/index.js";
+import { legacyProduct, type Service } from "../service/index.js";
 import { deprecations } from "./deprecations.js";
 import { createRouter } from "./env.js";
 import {
@@ -44,7 +44,7 @@ const createIssue = createRoute({
   path: "/issues",
   summary: "Deprecated: create an item in a product (use POST /items)",
   description:
-    "Deprecated alias of POST /items, removed after the next release. projectId takes the product's key. The item is a todo when the calling bot owns the product, else an issue in triage.",
+    "Deprecated alias of POST /items, removed after the next release. projectId (or its alias project or product) takes the product's key. The item is a todo when the calling bot owns the product, else an issue in triage.",
   deprecated: true,
   tags,
   request: {
@@ -65,7 +65,7 @@ const listIssues = createRoute({
   path: "/issues",
   summary: "Deprecated: list items (use GET /items)",
   description:
-    "Deprecated alias of GET /items, removed after the next release; projectId takes the product's key, and status=open also lists issues waiting in triage (GET /items matches status exactly).",
+    "Deprecated alias of GET /items, removed after the next release; projectId (or its alias project or product) takes the product's key, and status=open also lists issues waiting in triage (GET /items matches status exactly).",
   deprecated: true,
   tags,
   request: { query: issueListQuerySchema },
@@ -127,13 +127,14 @@ export function issueRoutes(service: Service) {
       );
     })
     .openapi(listIssues, (c) => {
-      const { projectId, assigneeId, ...query } = c.req.valid("query");
+      const { projectId, project, product, assigneeId, ...query } =
+        c.req.valid("query");
       return c.json(
         deprecated(
           toPage(
             service.listIssues(c.var.actor, {
               ...query,
-              product: projectId,
+              product: legacyProduct({ projectId, project, product }),
               assignee: assigneeId,
             }),
             toLegacyIssue,

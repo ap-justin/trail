@@ -29,16 +29,16 @@ async function connect(key: string) {
 }
 
 const a = addProject("A");
-const scoped = createBot(db, "bg-ivy", {
+const scoped = createBot(db, "alpha-scoped", {
   scope: { projects: [a.key], actions: ["read", "issues", "comments"] },
 });
-let ivy: Client;
+let scopedClient: Client;
 let wide: Client;
 let issueA = "";
 let projectSlugA = "";
 
 beforeAll(async () => {
-  ivy = await connect(scoped.key);
+  scopedClient = await connect(scoped.key);
   wide = await connect(bot.key);
   issueA = (await call(wide, "file_issue", { product: a.key, title: "a" })).key;
 });
@@ -105,7 +105,7 @@ test("a product outside the key's products answers exactly as one that doesn't e
     Promise.all(
       keyed.map(async ([tool, args]) => ({
         tool,
-        result: await raw(ivy, tool, args(k)),
+        result: await raw(scopedClient, tool, args(k)),
       })),
     );
   const missing = await snapshot();
@@ -132,7 +132,7 @@ test("a project whose products are all out of the key's reach answers exactly as
     ["remove_from_project", (s) => ({ project: s, items: [item.key] })],
   ];
   const as = async (s: string) =>
-    Promise.all(tools.map(([tool, args]) => raw(ivy, tool, args(s))));
+    Promise.all(tools.map(([tool, args]) => raw(scopedClient, tool, args(s))));
   const missing = await as("hidden-proj-x");
   await call(wide, "create_project", {
     name: "hidden proj",
@@ -155,7 +155,10 @@ test("a project whose products are all out of the key's reach answers exactly as
 });
 
 test("tools/list offers a scoped key every tool", async () => {
-  const [mine, all] = await Promise.all([ivy.listTools(), wide.listTools()]);
+  const [mine, all] = await Promise.all([
+    scopedClient.listTools(),
+    wide.listTools(),
+  ]);
   expect(mine.tools.map((t) => t.name)).toEqual(all.tools.map((t) => t.name));
 });
 
@@ -173,7 +176,7 @@ test("a refused tool call carries the same text as the REST refusal", async () =
     const res = await request(method, path, { key: scoped.key, json });
     const { error } = (await res.json()) as Body;
     expect(res.status).toBe(403);
-    expect(await raw(ivy, tool, args)).toEqual({
+    expect(await raw(scopedClient, tool, args)).toEqual({
       content: [{ type: "text", text: `${error.code}: ${error.message}` }],
       isError: true,
     });
@@ -183,7 +186,7 @@ test("a refused tool call carries the same text as the REST refusal", async () =
 test("list tools show a scoped key only its products, their items and their activity", async () => {
   const b = await hiddenProject();
   expect(
-    (await call(ivy, "list_products")).items.map((p: Body) => p.key),
+    (await call(scopedClient, "list_products")).items.map((p: Body) => p.key),
   ).toEqual([a.key]);
   const everyIssue = await call(wide, "list_items", { limit: 200 });
   expect(everyIssue.nextCursor).toBeNull();
@@ -194,7 +197,7 @@ test("list tools show a scoped key only its products, their items and their acti
   expect(everyIssue.items.map((i: Body) => i.key)).toContain(b.issue.key);
   expect(inA).toContain(issueA);
   expect(
-    (await call(ivy, "list_items", { limit: 200 })).items.map(
+    (await call(scopedClient, "list_items", { limit: 200 })).items.map(
       (i: Body) => i.key,
     ),
   ).toEqual(inA);
@@ -204,7 +207,7 @@ test("list tools show a scoped key only its products, their items and their acti
   const followed: Body[] = [];
   let after = "";
   for (;;) {
-    const page = await call(ivy, "list_activity", { after, limit: 1 });
+    const page = await call(scopedClient, "list_activity", { after, limit: 1 });
     if (page.items.length === 0) break;
     followed.push(...page.items);
     after = page.nextCursor;
@@ -218,17 +221,17 @@ test("list tools show a scoped key only its products, their items and their acti
 });
 
 test("a key scoped to A files issues and comments in A", async () => {
-  const filed = await call(ivy, "file_issue", {
+  const filed = await call(scopedClient, "file_issue", {
     product: a.key,
-    title: "by ivy",
+    title: "by alpha",
   });
-  expect(filed).toMatchObject({ title: "by ivy", product: a.key });
-  const updated = await call(ivy, "update_item", {
+  expect(filed).toMatchObject({ title: "by alpha", product: a.key });
+  const updated = await call(scopedClient, "update_item", {
     item: filed.key,
     status: "in_progress",
   });
   expect(updated.status).toBe("in_progress");
-  await call(ivy, "add_comment", { item: filed.key, body: "on it" });
+  await call(scopedClient, "add_comment", { item: filed.key, body: "on it" });
   const comments = await call(wide, "list_comments", { item: filed.key });
   expect(comments.items.map((c: Body) => c.body)).toEqual(["on it"]);
 });
@@ -335,7 +338,7 @@ test.each(["read", "issues", "comments", "status_updates", "admin"])(
 );
 
 test("whoami reports a scoped key's products and actions", async () => {
-  expect((await call(ivy, "whoami")).scope).toEqual({
+  expect((await call(scopedClient, "whoami")).scope).toEqual({
     products: [a.key],
     projects: [a.key],
     actions: ["read", "issues", "comments"],

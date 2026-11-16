@@ -9,6 +9,7 @@ import { handleError } from "./errors.js";
 import { importRoutes } from "./import.js";
 import { issueRoutes } from "./issues.js";
 import { itemRoutes } from "./items.js";
+import { messageRoutes } from "./messages.js";
 import { photoRoutes } from "./photos.js";
 import { productRoutes } from "./products.js";
 import { projectRoutes } from "./projects.js";
@@ -50,5 +51,6 @@ export function createApi({ db, service }: { db: Db; service: Service }) {
   api.route("/", actorRoutes(service));
   api.route("/", titleRoutes(service));
   api.route("/", webhookRoutes(service));
+  api.route("/", messageRoutes(service));
   return api;
 }

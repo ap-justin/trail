@@ -92,7 +92,7 @@ describe("a key's scope", () => {
       .values({ key, name: key, createdBy: owner.id })
       .returning()
       .get();
-  const bgp = addProject("BGP");
+  const bta = addProject("BTA");
   const ops = addProject("OPS");
 
   test("a key minted without a scope reaches every project with every action", () => {
@@ -104,14 +104,14 @@ describe("a key's scope", () => {
   });
 
   test("createBot stores the projects by id and the actions, both read back on the key", () => {
-    const { actor, key } = createBot(db, "bg-zeta", {
-      scope: { projects: ["bgp", "OPS"], actions: ["comments", "read"] },
+    const { actor, key } = createBot(db, "gamma-scoped", {
+      scope: { projects: ["bta", "OPS"], actions: ["comments", "read"] },
     });
     expect(authenticateKey(db, key)).toEqual({
       ...actor,
       scope: {
         products: [
-          { id: bgp.id, key: "BGP" },
+          { id: bta.id, key: "BTA" },
           { id: ops.id, key: "OPS" },
         ],
         actions: ["read", "comments"],
@@ -134,10 +134,10 @@ describe("a key's scope", () => {
 
   test("repeated project keys and actions are stored once", () => {
     const { key } = createBot(db, "repeats", {
-      scope: { projects: ["BGP", "bgp", "Bgp"], actions: ["read", "read"] },
+      scope: { projects: ["BTA", "bta", "Bta"], actions: ["read", "read"] },
     });
     expect(authenticateKey(db, key)?.scope).toEqual({
-      products: [{ id: bgp.id, key: "BGP" }],
+      products: [{ id: bta.id, key: "BTA" }],
       actions: ["read"],
     });
   });
@@ -145,11 +145,11 @@ describe("a key's scope", () => {
   test("an unknown project key is refused by name, and no bot is created", () => {
     expect(() =>
       createBot(db, "refused bot", {
-        scope: { projects: ["BGP", "NOPE", "zz"] },
+        scope: { projects: ["BTA", "NOPE", "zz"] },
       }),
     ).toThrow(
       new ValidationError(
-        "no product NOPE, ZZ: scope the key to products that exist, which are BGP, OPS",
+        "no product NOPE, ZZ: scope the key to products that exist, which are BTA, OPS",
       ),
     );
     // listKeys joins api_key, so an orphaned bot row is only visible on actor
@@ -191,11 +191,11 @@ describe("a key's scope", () => {
 
   test("listKeys shows each key's scope by project key", () => {
     const { actor } = createBot(db, "listed scope", {
-      scope: { projects: ["OPS", "BGP"], actions: ["admin"] },
+      scope: { projects: ["OPS", "BTA"], actions: ["admin"] },
     });
     const listed = listKeys(db).filter((k) => k.actorId === actor.id);
     expect(listed.map((k) => k.scope)).toEqual([
-      { products: ["BGP", "OPS"], actions: ["admin"] },
+      { products: ["BTA", "OPS"], actions: ["admin"] },
     ]);
     const unscoped = listKeys(db).find((k) => k.actorId === owner.id);
     expect(unscoped?.scope).toEqual({ products: null, actions: null });

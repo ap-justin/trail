@@ -5,6 +5,7 @@ import {
   FolderIcon,
   LogOutIcon,
   type LucideIcon,
+  MessagesSquareIcon,
   PackageIcon,
   PlusIcon,
   SearchIcon,
@@ -55,6 +56,7 @@ export type ShellSection =
   | "products"
   | "projects"
   | "people"
+  | "messages"
   | "account";
 
 export type AppShellProps = {
@@ -142,6 +144,12 @@ function navItems(isOwner: boolean, withAccount: boolean): NavItem[] {
             label: "People",
             href: paths.people,
             icon: UsersIcon,
+          } as const,
+          {
+            section: "messages",
+            label: "Messages",
+            href: paths.messages,
+            icon: MessagesSquareIcon,
           } as const,
         ]
       : []),

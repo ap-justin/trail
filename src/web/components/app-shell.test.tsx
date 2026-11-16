@@ -442,19 +442,21 @@ const names = (nav: HTMLElement) =>
     .map((link) => link.textContent);
 
 describe("main nav", () => {
-  test("the sidebar reads Feed, Products, Projects, People; the tab bar adds Account", () => {
+  test("the sidebar reads Feed, Products, Projects, People, Messages; the tab bar adds Account", () => {
     renderShell(owner);
     expect(names(sidebarNav())).toEqual([
       "Feed",
       "Products",
       "Projects",
       "People",
+      "Messages",
     ]);
     expect(names(tabNav())).toEqual([
       "Feed",
       "Products",
       "Projects",
       "People",
+      "Messages",
       "Account",
     ]);
     for (const nav of mainNavs()) {
@@ -477,6 +479,7 @@ describe("main nav", () => {
       "lucide-package",
       "lucide-folder",
       "lucide-users",
+      "lucide-messages-square",
       "lucide-user",
     ].entries()) {
       expect(glyphs[index]).toContain(icon);

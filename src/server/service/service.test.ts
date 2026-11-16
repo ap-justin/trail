@@ -857,6 +857,7 @@ test("whoami is the calling actor's row, label included", () => {
   expect(service.whoami(labelled)).toEqual({
     ...labelled,
     photoUrl: null,
+    unreadMessages: 0,
     ownProducts: [],
     products: service
       .listProducts(labelled, { limit: 200 })

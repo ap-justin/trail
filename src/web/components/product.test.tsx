@@ -386,7 +386,7 @@ describe("aside", () => {
       "/projects/human-ui",
     );
     expect(human).toHaveTextContent(
-      /Human UI launch.*At risk.*Ada.*Target Dec 4/,
+      /Human UI launch.*At risk.*Gamma.*Target Dec 4/,
     );
     expect(team).toHaveTextContent(
       /Team access.*On track.*Alpha.*Target Nov 30/,

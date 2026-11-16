@@ -9,6 +9,7 @@ import { eventRoutes, type LiveStreams } from "./events.js";
 import { feedRoutes } from "./feed.js";
 import { itemRoutes } from "./items.js";
 import { meRoutes } from "./me.js";
+import { messageRoutes } from "./messages.js";
 import { peopleRoutes } from "./people.js";
 import { productRoutes } from "./products.js";
 import { projectRoutes } from "./projects.js";
@@ -45,6 +46,7 @@ export function createWeb({
   web.route("/", feedRoutes(db));
   web.route("/", searchRoutes(db));
   web.route("/", peopleRoutes(db));
+  web.route("/", messageRoutes(db, service));
   web.route("/", eventRoutes(db, bus, auth, streams));
   return web;
 }

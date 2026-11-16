@@ -7,11 +7,13 @@ import { createAppRouter } from "@/router";
 import { allProducts, alpha, maya, trail } from "@/test/fixtures";
 import { server } from "@/test/server";
 
-/** The whole app at `path`, on a fresh cache that never retries. */
-export function renderApp(path: string) {
-  const queryClient = createQueryClient({
+/** The whole app at `path`, on a fresh cache that never retries unless the test brings its own. */
+export function renderApp(
+  path: string,
+  queryClient = createQueryClient({
     defaultOptions: { queries: { retry: false } },
-  });
+  }),
+) {
   const router = createAppRouter({
     history: createMemoryHistory({ initialEntries: [path] }),
     queryClient,

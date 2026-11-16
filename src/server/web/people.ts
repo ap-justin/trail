@@ -1,6 +1,5 @@
 import { createRoute, z } from "@hono/zod-openapi";
 import { and, asc, eq, inArray, or, type SQL } from "drizzle-orm";
-import { createMiddleware } from "hono/factory";
 import {
   errorSchema,
   INVITEE_HINT,
@@ -11,7 +10,6 @@ import {
   personSchema,
   personUpdateSchema,
 } from "../../shared/schemas.js";
-import { handleNotFound } from "../api/errors.js";
 import { jsonBody, jsonContent } from "../api/routes.js";
 import { endSessionsOfInvite } from "../auth/identity.js";
 import type { Db } from "../db/client.js";
@@ -29,7 +27,7 @@ import {
 } from "../service/errors.js";
 import { photoUrl, photoUrlOf } from "../service/photos.js";
 import type { Tx } from "../service/tx.js";
-import { createWebRouter, type WebEnv } from "./env.js";
+import { createWebRouter, ownerOnly } from "./env.js";
 
 // a person's {username}: the GitHub username, or the email address of an email invite
 const usernameParam = z.object({ username: z.string().min(1) });
@@ -81,12 +79,6 @@ const removePerson = createRoute({
     204: { description: "Removed; the person's actor and writes stay" },
     404: jsonContent(errorSchema, "No invite for that username or email"),
   },
-});
-
-// the same 404 as a route that doesn't exist: a member never learns /people is there
-const ownerOnly = createMiddleware<WebEnv>(async (c, next) => {
-  if (c.var.member.kind !== "owner") return handleNotFound(c);
-  await next();
 });
 
 type Invitee = { username: string } | { email: string };

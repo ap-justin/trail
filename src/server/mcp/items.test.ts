@@ -265,7 +265,7 @@ test("create_label on another bot's product is refused with the next step and cr
   expect(
     await callError(outsider, "create_label", { product: key, name: "ui" }),
   ).toBe(
-    `forbidden: ${key} is owned by alpha create label, so only alpha create label creates its labels: ask alpha create label to create it, or file or update the item without it, and a label ${key} lacks comes back in skippedLabels`,
+    `forbidden: ${key} is owned by alpha create label, so only alpha create label creates its labels: ask alpha create label to create the label "ui", or file or update the item without it, and a label ${key} lacks comes back in skippedLabels`,
   );
   expect(
     (await call(owner.client, "list_labels", { product: key })).items,

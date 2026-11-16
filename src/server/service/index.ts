@@ -35,6 +35,7 @@ import {
   projectItem,
   projectProduct,
   projectStatusUpdate,
+  type WebhookSubscriptionKind,
   webhookSubscription,
 } from "../db/schema.js";
 import type { ActivityEvent, EventBus } from "../events/bus.js";
@@ -67,6 +68,7 @@ import {
   zeroCounts,
 } from "./import.js";
 import { type Actor, andList, type KeyScope } from "./keys.js";
+import { createMessaging } from "./messages.js";
 import {
   decodeFeedCursor,
   encodeFeedCursor,
@@ -133,6 +135,13 @@ export type {
 } from "./import.js";
 export { importedEventPayload } from "./import.js";
 export type { Actor } from "./keys.js";
+export type {
+  BotRef,
+  Conversation,
+  MarkReadResult,
+  Message,
+  SentMessage,
+} from "./messages.js";
 export type { Page, PageQuery } from "./paging.js";
 export type { Link, LinkInput } from "./validate.js";
 
@@ -237,9 +246,30 @@ export type ItemInput = {
   links?: LinkInput[];
   externalRef?: string | null;
 };
-/** The legacy create: `projectId` takes the product's id or key. */
-export type IssueInput = {
-  projectId: string;
+/** How the legacy create and list name a product: `projectId`, or `project` or `product`, its aliases. */
+export type LegacyProductRef = {
+  projectId?: string;
+  project?: string;
+  product?: string;
+};
+
+/** The product's id or key a legacy call named, under whichever spellings it used; two spellings with different values are refused. */
+export function legacyProduct(ref: LegacyProductRef): string | undefined {
+  const sent = new Set(
+    [ref.projectId, ref.project, ref.product].filter(
+      (value) => value !== undefined,
+    ),
+  );
+  if (sent.size > 1) {
+    throw new ValidationError(
+      "send one of projectId, project or product: they name the same product, and two different values are ambiguous",
+    );
+  }
+  return [...sent][0];
+}
+
+/** The legacy create: `projectId` (or an alias) takes the product's id or key. */
+export type IssueInput = LegacyProductRef & {
   title: string;
   description?: string;
   assigneeId?: string | null;
@@ -349,6 +379,7 @@ export type ActivityEntry = ActivityEvent & {
 export type Whoami = ActorWithPhoto & {
   ownProducts: Product[];
   products: Product[];
+  unreadMessages: number;
 };
 
 /** The products a webhook follows: `products`, or `projects`, its deprecated alias. */
@@ -483,6 +514,7 @@ export function createService({
   webhooks: WebhookSettings;
 }) {
   const pings = createPingLimiter(() => webhooks.now());
+  const messaging = createMessaging({ db, bus, now: () => webhooks.now() });
 
   /** Actors with their photo's hash; the bytes stay in actor_photo. */
   const selectWithPhotoHash = () =>
@@ -569,6 +601,12 @@ export function createService({
     return hook.products.every((key) => scoped.some((p) => p.key === key));
   }
 
+  /** True when the key can read, update and delete the webhook: an activity one needs the read action too. */
+  function canManage(actor: ActingActor, hook: Webhook): boolean {
+    const reads = actor.scope?.actions?.includes("read") ?? true;
+    return withinScope(actor, hook) && (reads || hook.kind === "inbox");
+  }
+
   /** The 409 for a URL the bot already uses: names the webhook only when this key can manage it. */
   function twinConflict(
     actor: ActingActor,
@@ -576,17 +614,31 @@ export function createService({
     from: Db | Tx,
     advice: string,
   ) {
+    const unmanaged = new ConflictError(
+      "this bot already has a webhook to that URL that this key can't manage: use a different URL, or ask for a key that can read every product that webhook follows",
+    );
     try {
-      ownWebhook(actor, twinId, from);
+      if (!canManage(actor, ownWebhook(actor, twinId, from).view)) {
+        return unmanaged;
+      }
     } catch (error) {
       if (!(error instanceof NotFoundError)) throw error;
-      return new ConflictError(
-        "this bot already has a webhook to that URL that this key can't manage: use a different URL, or ask for a key that reaches that webhook's products",
-      );
+      return unmanaged;
     }
     return new ConflictError(
       `webhook ${twinId} already sends to this URL: ${advice}`,
     );
+  }
+
+  /**
+   * `requireAction` for a call on webhook `id`: the read action, except on an
+   * inbox webhook, which is messaging and open to every key. One the caller
+   * can't see is a 404 first. Returns `ownWebhook`'s result.
+   */
+  function requireWebhookAction(actor: ActingActor, id: string, doing: string) {
+    const own = ownWebhook(actor, id);
+    if (!canManage(actor, own.view)) requireAction(actor, "read", doing);
+    return own;
   }
 
   /** The calling bot's webhook, or a 404: another bot's and one the key's scope doesn't cover read as missing. */
@@ -2245,13 +2297,19 @@ export function createService({
       input: IssueInput,
       options: WriteOptions = {},
     ): WrittenItem {
+      const { projectId, project, product, assigneeId, ...rest } = input;
+      const ref = legacyProduct({ projectId, project, product });
+      if (ref === undefined) {
+        throw new ValidationError(
+          "projectId is required: send the product's key, like TRL (project or product are its aliases); list_products lists them",
+        );
+      }
       requireAction(actor, "issues", "create an issue", () =>
-        resolveProduct(db, input.projectId, actor),
+        resolveProduct(db, ref, actor),
       );
-      const { projectId, assigneeId, ...rest } = input;
       return createItem(
         actor,
-        { ...rest, product: projectId, assignee: assigneeId ?? undefined },
+        { ...rest, product: ref, assignee: assigneeId ?? undefined },
         options,
         {
           asked: undefined,
@@ -2673,7 +2731,7 @@ export function createService({
               actor,
               target.id,
               (owner, key) =>
-                `${key} is owned by ${owner}, so only ${owner} creates its labels: ask ${owner} to create it, or file or update the item without it, and a label ${key} lacks comes back in skippedLabels`,
+                `${key} is owned by ${owner}, so only ${owner} creates its labels: ask ${owner} to create the label "${name}", or file or update the item without it, and a label ${key} lacks comes back in skippedLabels`,
             );
             const twin = findLabel(tx, target.id, name);
             if (twin) {
@@ -3389,6 +3447,7 @@ export function createService({
         ),
         ownProducts: ownProductsOf(db, actor),
         products: reachableProducts(db, actor),
+        unreadMessages: messaging.unreadMessages(actor),
       };
     },
 
@@ -3561,18 +3620,33 @@ export function createService({
 
     async createWebhook(
       actor: ActingActor,
-      input: { url: string; secret: string } & FollowedProducts,
+      input: {
+        url: string;
+        secret: string;
+        kind?: WebhookSubscriptionKind;
+      } & FollowedProducts,
     ): Promise<Webhook> {
-      requireBot(actor, "subscribe to a product");
-      requireAction(actor, "read", "create a webhook");
+      const kind = input.kind ?? "activity";
+      requireBot(
+        actor,
+        kind === "inbox" ? "subscribe to an inbox" : "subscribe to a product",
+      );
+      // an inbox webhook is messaging, which no key's actions limit
+      if (kind === "activity") requireAction(actor, "read", "create a webhook");
       validSecret(input.secret);
       const followed = followedRefs(input);
-      if (followed === undefined) {
+      if (kind === "inbox" && followed !== undefined) {
         throw new ValidationError(
-          "products is required: send the keys (like TRL) of the products whose events you want",
+          `an inbox webhook follows no products: leave ${followed.field} out, and create a second webhook with kind activity for the products' events`,
         );
       }
-      const productIds = webhookProductIds(actor, followed);
+      if (kind === "activity" && followed === undefined) {
+        throw new ValidationError(
+          "products is required: send the keys (like TRL) of the products whose events you want, or send kind inbox for the messages other bots send you",
+        );
+      }
+      const productIds =
+        followed === undefined ? [] : webhookProductIds(actor, followed);
       const refuseAtLimit = (from: Db | Tx) => {
         const count = countOwn(from, actor.id);
         if (count >= WEBHOOKS_PER_BOT_MAX) {
@@ -3582,13 +3656,15 @@ export function createService({
             .from(webhookSubscription)
             .where(eq(webhookSubscription.actorId, actor.id))
             .all();
-          if (!webhooksOf(from, own).every((w) => withinScope(actor, w))) {
+          if (!webhooksOf(from, own).every((w) => canManage(actor, w))) {
             throw new ConflictError(
-              `this bot has reached its limit of ${WEBHOOKS_PER_BOT_MAX} webhooks, and this key can't manage all of them: a key that reaches every product the bot follows can delete one to make room`,
+              `this bot has reached its limit of ${WEBHOOKS_PER_BOT_MAX} webhooks, and this key can't manage all of them: a key that can read every product the bot follows can delete one to make room`,
             );
           }
           throw new ConflictError(
-            `this bot already has ${count} webhooks, the most allowed: delete one you no longer use, or add the product to one you have with update_webhook`,
+            kind === "inbox"
+              ? `this bot already has ${count} webhooks, the most allowed: delete one you no longer use to make room for the inbox webhook`
+              : `this bot already has ${count} webhooks, the most allowed: delete one you no longer use, or add the product to one you have with update_webhook`,
           );
         }
       };
@@ -3617,6 +3693,7 @@ export function createService({
             );
           }
           const row = insertSubscription(tx, webhooks, {
+            kind,
             actorId: actor.id,
             url: url.href,
             secret: input.secret,
@@ -3630,11 +3707,18 @@ export function createService({
 
     listWebhooks(actor: ActingActor): Page<Webhook> {
       requireBot(actor, "list webhooks");
-      requireAction(actor, "read", "list webhooks");
+      const actions = actor.scope?.actions;
+      // without the read action, a key still manages the inbox webhooks
+      const inboxOnly = actions != null && !actions.includes("read");
       const rows = db
         .select()
         .from(webhookSubscription)
-        .where(eq(webhookSubscription.actorId, actor.id))
+        .where(
+          and(
+            eq(webhookSubscription.actorId, actor.id),
+            inboxOnly ? eq(webhookSubscription.kind, "inbox") : undefined,
+          ),
+        )
         .orderBy(
           asc(webhookSubscription.createdAt),
           asc(webhookSubscription.id),
@@ -3648,10 +3732,7 @@ export function createService({
 
     getWebhook(actor: ActingActor, id: string): Webhook {
       requireBot(actor, "read a webhook");
-      requireAction(actor, "read", "read a webhook", () =>
-        ownWebhook(actor, id),
-      );
-      return ownWebhook(actor, id).view;
+      return requireWebhookAction(actor, id, "read a webhook").view;
     },
 
     /** Changes the URL or the followed products; any update, an empty one too, ends a pause. */
@@ -3661,11 +3742,13 @@ export function createService({
       patch: { url?: string } & FollowedProducts,
     ): Promise<Webhook> {
       requireBot(actor, "update a webhook");
-      requireAction(actor, "read", "update a webhook", () =>
-        ownWebhook(actor, id),
-      );
-      ownWebhook(actor, id);
+      const { kind } = requireWebhookAction(actor, id, "update a webhook").view;
       const followed = followedRefs(patch);
+      if (kind === "inbox" && followed !== undefined) {
+        throw new ValidationError(
+          `webhook ${id} is an inbox webhook, which follows no products: leave ${followed.field} out, or create a webhook with kind activity for products`,
+        );
+      }
       const productIds =
         followed === undefined ? undefined : webhookProductIds(actor, followed);
       const url =
@@ -3721,10 +3804,7 @@ export function createService({
       secret: string,
     ): Webhook {
       requireBot(actor, "rotate a webhook's secret");
-      requireAction(actor, "read", "rotate a webhook's secret", () =>
-        ownWebhook(actor, id),
-      );
-      ownWebhook(actor, id);
+      requireWebhookAction(actor, id, "rotate a webhook's secret");
       validSecret(secret);
       return db.transaction(
         (tx) => {
@@ -3745,10 +3825,7 @@ export function createService({
     /** Deletes the subscription with its queued deliveries. */
     deleteWebhook(actor: ActingActor, id: string): { deleted: true } {
       requireBot(actor, "delete a webhook");
-      requireAction(actor, "read", "delete a webhook", () =>
-        ownWebhook(actor, id),
-      );
-      ownWebhook(actor, id);
+      requireWebhookAction(actor, id, "delete a webhook");
       db.delete(webhookSubscription)
         .where(eq(webhookSubscription.id, id))
         .run();
@@ -3761,10 +3838,11 @@ export function createService({
       id: string,
     ): Promise<WebhookTestResult> {
       requireBot(actor, "test a webhook");
-      requireAction(actor, "read", "test a webhook", () =>
-        ownWebhook(actor, id),
+      const { view, cipher } = requireWebhookAction(
+        actor,
+        id,
+        "test a webhook",
       );
-      const { view, cipher } = ownWebhook(actor, id);
       const wait = pings.take(id);
       if (wait !== null) {
         throw new RateLimitedError(
@@ -3809,6 +3887,8 @@ export function createService({
         ? { delivered: true, status: result.status, error: null }
         : { delivered: false, status: result.status, error: result.error };
     },
+
+    ...messaging,
   };
 }
 

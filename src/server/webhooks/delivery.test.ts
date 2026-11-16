@@ -30,7 +30,11 @@ import {
 // under test stands where the TLS connection would be: it posts the signed
 // request to the receiver and returns its status.
 type Received = { headers: IncomingHttpHeaders; body: string };
+// an item event's trail.item.* twin lands in itemTwins, so the other tests count one delivery per event
 const received: Received[] = [];
+const itemTwins: Received[] = [];
+const isItemTwin = (body: string) =>
+  (JSON.parse(body) as { type?: string }).type?.startsWith("trail.item.");
 const statuses: number[] = [];
 let receiver: Server;
 let port = 0;
@@ -42,7 +46,10 @@ beforeAll(async () => {
       body += chunk;
     });
     req.on("end", () => {
-      received.push({ headers: req.headers, body });
+      (isItemTwin(body) ? itemTwins : received).push({
+        headers: req.headers,
+        body,
+      });
       res.statusCode = statuses.shift() ?? 200;
       res.end();
     });
@@ -121,6 +128,9 @@ async function newProject() {
   await api("POST", "/projects", { key, name: `Project ${key}` });
   return key;
 }
+/** An event of one delivery type, trail.label.created, whose subject title is `name`. */
+const event = (key: string, name: string) =>
+  api("POST", `/products/${key}/labels`, { name });
 async function subscribe(projects: string[], url = HOOK, secret = SECRET) {
   return api("POST", "/webhooks", { url, secret, projects });
 }
@@ -140,6 +150,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const reset = () => {
   db.delete(webhookSubscription).run();
   received.length = 0;
+  itemTwins.length = 0;
   statuses.length = 0;
   sends = 0;
   sentTo.length = 0;
@@ -268,6 +279,49 @@ test("a product event arrives twice for one release, as trail.product.* then the
   }
 });
 
+test("an item event arrives twice for one release, as trail.issue.* then trail.item.*, each its own delivery with the same data", async () => {
+  reset();
+  const key = await newProject();
+  await subscribe([key], "https://bot.example.com/items");
+  const item = await api("POST", "/items", {
+    type: "todo",
+    product: key,
+    title: "twice",
+  });
+  await api("PATCH", `/items/${item.key}`, { status: "in_progress" });
+
+  const w = worker();
+  await until(w, () => received.length + itemTwins.length >= 4);
+  await w.tick();
+  const both = [...received, ...itemTwins];
+  const [created, updated, itemCreated, itemUpdated] = both.map((r) =>
+    JSON.parse(r.body),
+  );
+  expect(
+    [created, updated, itemCreated, itemUpdated].map((m) => m.type),
+  ).toEqual([
+    "trail.issue.created",
+    "trail.issue.updated",
+    "trail.item.created",
+    "trail.item.updated",
+  ]);
+  expect(itemCreated.data).toEqual(created.data);
+  expect(itemUpdated.data).toEqual(updated.data);
+  expect(created.data.subject).toMatchObject({ key: item.key, title: "twice" });
+  expect(updated.data.payload.status).toEqual({
+    from: "open",
+    to: "in_progress",
+  });
+  // each twin goes out right after its own event, before the next event
+  expect(sentTo).toHaveLength(4);
+  expect(
+    new Set(both.map((r) => r.headers["x-openbot-delivery-id"])).size,
+  ).toBe(4);
+  for (const r of both) {
+    expect(r.headers["x-openbot-signature"]).toBe(signatureOf(r));
+  }
+});
+
 test("a failing trail.product.* delivery holds its trail.project.* twin and everything after it", async () => {
   reset();
   const key = await newProject();
@@ -300,8 +354,8 @@ test("nothing arrives for a project the webhook doesn't follow, while its own pr
     [followed],
     "https://bot.example.com/only-followed",
   );
-  await api("POST", "/issues", { projectId: other, title: "elsewhere" });
-  await api("POST", "/issues", { projectId: followed, title: "mine" });
+  await event(other, "elsewhere");
+  await event(followed, "mine");
   const w = worker();
   await w.tick();
   expect(received.map((r) => JSON.parse(r.body).data.project.key)).toEqual([
@@ -317,7 +371,7 @@ test("a 500 then a 200 retries under the same delivery id, and holds later deliv
   await subscribe([key], "https://bot.example.com/retry");
   statuses.push(500, 200);
   const one = await api("POST", "/issues", { projectId: key, title: "one" });
-  await api("POST", "/issues", { projectId: key, title: "two" });
+  await event(key, "two");
 
   const w = worker();
   await w.tick();
@@ -355,7 +409,7 @@ test("a 401, 403 or 404 from a receiver mid-deploy is retried, and the delivery 
   const key = await newProject();
   const hook = await subscribe([key], "https://bot.example.com/redeploying");
   statuses.push(401, 403, 404, 200);
-  await api("POST", "/issues", { projectId: key, title: "during deploy" });
+  await event(key, "during deploy");
   const w = worker({ pauseAfter: 1000 });
   await until(w, () => received.length >= 4);
   expect(
@@ -372,8 +426,8 @@ test("a 410 Gone fails that delivery at once and moves on", async () => {
   const key = await newProject();
   const hook = await subscribe([key], "https://bot.example.com/gone-410");
   statuses.push(410, 200);
-  await api("POST", "/issues", { projectId: key, title: "rejected" });
-  await api("POST", "/issues", { projectId: key, title: "accepted" });
+  await event(key, "rejected");
+  await event(key, "accepted");
   const w = worker();
   await until(w, () => received.length >= 2);
   const mine = rows().filter((r) => r.subscriptionId === hook.id);
@@ -387,14 +441,14 @@ test("an outbox row survives a restart: a fresh worker sends what an earlier run
   reset();
   const key = await newProject();
   const hook = await subscribe([key], "https://bot.example.com/restart");
-  await api("POST", "/issues", { projectId: key, title: "while down" });
+  await event(key, "while down");
   // no worker has run: the row is already in the database
   const queued = rows().filter((r) => r.subscriptionId === hook.id);
   expect(queued).toHaveLength(1);
   expect(queued[0]).toMatchObject({
     status: "pending",
     attempts: 0,
-    type: "trail.issue.created",
+    type: "trail.label.created",
   });
   expect(received).toHaveLength(0);
 
@@ -414,7 +468,7 @@ test("the bus wakes a running worker without waiting for its poll", async () => 
   await subscribe([key], "https://bot.example.com/bus");
   const w = worker({ pollMs: 60_000 });
   w.start();
-  await api("POST", "/issues", { projectId: key, title: "pushed" });
+  await event(key, "pushed");
   for (let i = 0; i < 100 && received.length === 0; i++) await sleep(10);
   await w.stop();
   expect(received).toHaveLength(1);
@@ -425,8 +479,8 @@ test("repeated failures pause the subscription, shown in its listing, and an upd
   const key = await newProject();
   const hook = await subscribe([key], "https://bot.example.com/pause");
   statuses.push(503, 503, 503);
-  await api("POST", "/issues", { projectId: key, title: "stuck" });
-  await api("POST", "/issues", { projectId: key, title: "behind" });
+  await event(key, "stuck");
+  await event(key, "behind");
   const w = worker({ pauseAfter: 3, backoffMs: [5] });
   for (let i = 0; i < 3; i++) {
     await w.tick();
@@ -467,7 +521,7 @@ test("a delivery still failing after the retry window is marked failed", async (
   const key = await newProject();
   const hook = await subscribe([key], "https://bot.example.com/giveup");
   statuses.push(...Array(50).fill(502));
-  await api("POST", "/issues", { projectId: key, title: "doomed" });
+  await event(key, "doomed");
   const w = worker({ giveUpMs: 50_000, backoffMs: [15_000], pauseAfter: 1000 });
   const mine = () => rows().filter((r) => r.subscriptionId === hook.id);
   // attempts at 0s, 15s, 30s and 45s: the fourth would retry at 60s, past the 50s window
@@ -494,7 +548,7 @@ test("a paused webhook's deliveries wait past the retry window and go out on res
     "https://bot.example.com/paused-overnight",
   );
   statuses.push(503);
-  await api("POST", "/issues", { projectId: key, title: "overnight" });
+  await event(key, "overnight");
   const w = worker({ pauseAfter: 1 });
   await w.tick();
   expect((await api("GET", `/webhooks/${hook.id}`)).paused).toBe(true);
@@ -516,7 +570,7 @@ test("DNS that now points inside is refused at delivery, with no request sent", 
   reset();
   const key = await newProject();
   const hook = await subscribe([key], "https://bot.example.com/rebind");
-  await api("POST", "/issues", { projectId: key, title: "rebind" });
+  await event(key, "rebind");
   resolveTo = ["10.0.0.7"];
   const w = worker({ pauseAfter: 1000 });
   await w.tick();
@@ -530,7 +584,7 @@ test("with no public URL configured a delivery carries no link", async () => {
   reset();
   const key = await newProject();
   await subscribe([key], "https://bot.example.com/nolink");
-  await api("POST", "/issues", { projectId: key, title: "unlinked" });
+  await event(key, "unlinked");
   const w = worker({ settings: { ...settings, publicUrl: undefined } });
   await until(w, () => received.length === 1);
   const { data } = JSON.parse(received[0]?.body ?? "");
@@ -558,7 +612,7 @@ test("deleting a webhook drops its queued deliveries", async () => {
   reset();
   const key = await newProject();
   const hook = await subscribe([key], "https://bot.example.com/gone");
-  await api("POST", "/issues", { projectId: key, title: "queued" });
+  await event(key, "queued");
   expect(rows().filter((r) => r.subscriptionId === hook.id)).toHaveLength(1);
   await api("DELETE", `/webhooks/${hook.id}`);
   expect(rows().filter((r) => r.subscriptionId === hook.id)).toHaveLength(0);
@@ -622,7 +676,7 @@ test("stopping the worker cuts a send in flight, and its delivery stays pending"
   reset();
   const key = await newProject();
   const hook = await subscribe([key], "https://bot.example.com/shutdown");
-  await api("POST", "/issues", { projectId: key, title: "in flight" });
+  await event(key, "in flight");
   const slow = await dripReceiver();
   try {
     const w = worker({ settings: { ...settings, transport: slow.transport } });
@@ -659,7 +713,7 @@ test("the shipped backoff waits 10s, 30s, 2m, 10m, 30m, 1h, 2h, then 4h, and not
   const key = await newProject();
   const hook = await subscribe([key], "https://bot.example.com/schedule");
   statuses.push(...Array(9).fill(503));
-  await api("POST", "/issues", { projectId: key, title: "slow receiver" });
+  await event(key, "slow receiver");
   // pause is out of the way: this is the schedule alone
   const w = createWebhookWorker({ db, bus, settings, pauseAfter: 1000 });
   const mine = () => rows().filter((r) => r.subscriptionId === hook.id)[0];
@@ -694,7 +748,7 @@ test("a delivery that keeps failing is given up on once the next try would fall 
   const key = await newProject();
   const hook = await subscribe([key], "https://bot.example.com/day");
   statuses.push(...Array(30).fill(503));
-  await api("POST", "/issues", { projectId: key, title: "never answered" });
+  await event(key, "never answered");
   const w = createWebhookWorker({ db, bus, settings, pauseAfter: 1000 });
   const mine = () => rows().filter((r) => r.subscriptionId === hook.id)[0];
   const created = mine()?.createdAt.getTime() ?? 0;
@@ -717,7 +771,7 @@ test("a delivery 24 hours old is failed, however late the receiver is tried agai
   const key = await newProject();
   const hook = await subscribe([key], "https://bot.example.com/late");
   statuses.push(...Array(5).fill(503));
-  await api("POST", "/issues", { projectId: key, title: "stale" });
+  await event(key, "stale");
   const w = createWebhookWorker({ db, bus, settings, pauseAfter: 1000 });
   const mine = () => rows().filter((r) => r.subscriptionId === hook.id)[0];
   const created = mine()?.createdAt.getTime() ?? 0;
@@ -743,7 +797,7 @@ test("seven failures in a row don't pause, the eighth does", async () => {
   const key = await newProject();
   const hook = await subscribe([key], "https://bot.example.com/eight");
   statuses.push(...Array(8).fill(503));
-  await api("POST", "/issues", { projectId: key, title: "flapping" });
+  await event(key, "flapping");
   const w = shipped();
   for (let i = 1; i <= 7; i++) {
     await w.tick();
@@ -765,7 +819,7 @@ test("a success resets the count, so only failures in a row pause", async () => 
   const w = shipped();
   // three failures, then it answers
   statuses.push(503, 503, 503, 200);
-  await api("POST", "/issues", { projectId: key, title: "first" });
+  await event(key, "first");
   for (let i = 0; i < 4; i++) {
     await w.tick();
     advanceToDue();
@@ -776,7 +830,7 @@ test("a success resets the count, so only failures in a row pause", async () => 
   });
   // seven more would reach eight only if the three before them still counted
   statuses.push(...Array(7).fill(503));
-  await api("POST", "/issues", { projectId: key, title: "second" });
+  await event(key, "second");
   for (let i = 0; i < 7; i++) {
     await w.tick();
     advanceToDue();
@@ -794,7 +848,7 @@ test("a delivery a receiver refuses for good still counts toward the pause", asy
   statuses.push(...Array(8).fill(410));
   const w = shipped();
   for (let i = 1; i <= 8; i++) {
-    await api("POST", "/issues", { projectId: key, title: `refused ${i}` });
+    await event(key, `refused ${i}`);
     await w.tick();
     expect(sub(hook.id)?.consecutiveFailures).toBe(i);
     expect(sub(hook.id)?.pausedAt === null, `after ${i}`).toBe(i < 8);
@@ -818,7 +872,7 @@ test("one event reaches every webhook that follows its project, each signed with
     "https://bot.example.com/two",
     "whsec_second_0123456789abcdef",
   );
-  await api("POST", "/issues", { projectId: key, title: "for both" });
+  await event(key, "for both");
   await worker().tick();
   expect(sentTo.sort()).toEqual(["/one", "/two"]);
   const [x, y] = received;
@@ -852,7 +906,7 @@ test("a webhook that keeps failing doesn't hold back another one on the same pro
   await subscribe([key], "https://bot.example.com/up");
   failPath = "/down";
   for (const title of ["one", "two", "three"]) {
-    await api("POST", "/issues", { projectId: key, title });
+    await event(key, title);
   }
   const w = worker({ pauseAfter: 1000 });
   await until(w, () => received.length === 3);
@@ -872,13 +926,13 @@ test("events created while a webhook is paused queue behind it and go out in ord
   const key = await newProject();
   const hook = await subscribe([key], "https://bot.example.com/paused-queue");
   failPath = "/paused-queue";
-  await api("POST", "/issues", { projectId: key, title: "before" });
+  await event(key, "before");
   const w = worker({ pauseAfter: 1 });
   await w.tick();
   expect(sub(hook.id)?.pausedAt).not.toBeNull();
 
-  await api("POST", "/issues", { projectId: key, title: "during one" });
-  await api("POST", "/issues", { projectId: key, title: "during two" });
+  await event(key, "during one");
+  await event(key, "during two");
   const queued = rows().filter((r) => r.subscriptionId === hook.id);
   expect(queued.map((r) => r.status)).toEqual([
     "pending",
@@ -903,7 +957,7 @@ test("a delivery queued before a rotation is signed with the new secret", async 
   reset();
   const key = await newProject();
   const hook = await subscribe([key], "https://bot.example.com/rotate");
-  await api("POST", "/issues", { projectId: key, title: "queued" });
+  await event(key, "queued");
   const next = "whsec_rotated_0123456789abcdef";
   await api("PUT", `/webhooks/${hook.id}/secret`, { secret: next });
   await worker().tick();
@@ -922,7 +976,7 @@ test("rotating the secret of a paused webhook resumes it, and what waited goes o
   const key = await newProject();
   const hook = await subscribe([key], "https://bot.example.com/rotate-resume");
   failPath = "/rotate-resume";
-  await api("POST", "/issues", { projectId: key, title: "held" });
+  await event(key, "held");
   const w = worker({ pauseAfter: 1 });
   await w.tick();
   expect(sub(hook.id)?.pausedAt).not.toBeNull();
@@ -960,7 +1014,7 @@ test("a delivery whose outcome can't be written is sent again only after a wait,
     `new.subscription_id = '${broken.id}' and new.attempts <> old.attempts`,
   );
   try {
-    await api("POST", "/issues", { projectId: key, title: "one" });
+    await event(key, "one");
     const w = worker();
     await w.tick();
     await w.tick();
@@ -992,7 +1046,7 @@ test("a delivery that crashes before it is sent is recorded as a retryable failu
     `new.subscription_id = '${hook.id}' and new.body is not null`,
   );
   try {
-    await api("POST", "/issues", { projectId: key, title: "one" });
+    await event(key, "one");
     const w = worker({ backoffMs: [MINUTE] });
     await w.tick();
     await w.tick();
@@ -1016,7 +1070,7 @@ test("a pass that fails is logged, never rejected, and stopping still settles", 
   const key = await newProject();
   const hook = await subscribe([key], "https://bot.example.com/unexpirable");
   statuses.push(503);
-  await api("POST", "/issues", { projectId: key, title: "old" });
+  await event(key, "old");
   const w = worker({ giveUpMs: HOUR, pauseAfter: 1000 });
   await w.tick();
   const logged = quiet();
@@ -1073,11 +1127,11 @@ test("a slow receiver doesn't hold up another webhook's deliveries", async () =>
   const fastHook = await subscribe([key], "https://bot.example.com/fast");
   const slow = holding("/slow");
   const w = worker({ settings: { ...settings, transport: slow.transport } });
-  await api("POST", "/issues", { projectId: key, title: "one" });
+  await event(key, "one");
   const first = w.tick();
   await vi.waitFor(() => expect(titles(fastHook)).toEqual(["one"]));
   // the slow receiver still has "one"; the fast one's next event goes out anyway
-  await api("POST", "/issues", { projectId: key, title: "two" });
+  await event(key, "two");
   const second = w.tick();
   await vi.waitFor(() => expect(titles(fastHook)).toEqual(["one", "two"]));
   expect(slow.held).toHaveLength(1);
@@ -1108,7 +1162,7 @@ test("the bus wakes the worker after the write that published, not inside it", a
   const duringPublish: number[] = [];
   const off = bus.subscribe(() => duringPublish.push(lookups));
   try {
-    await api("POST", "/issues", { projectId: key, title: "deferred" });
+    await event(key, "deferred");
     await vi.waitFor(() => expect(received).toHaveLength(1));
     expect(duringPublish).toEqual([0]);
   } finally {
@@ -1126,12 +1180,12 @@ test("an event during a send in flight doesn't send the head twice, and goes out
     pollMs: 60_000,
     settings: { ...settings, transport: slow.transport },
   });
-  await api("POST", "/issues", { projectId: key, title: "first" });
+  await event(key, "first");
   w.start();
   try {
     await vi.waitFor(() => expect(slow.held).toHaveLength(1));
     // the bus wakes it and a pass runs too, both while "first" is in flight
-    await api("POST", "/issues", { projectId: key, title: "second" });
+    await event(key, "second");
     void w.tick();
     await new Promise((done) => setImmediate(done));
     expect(slow.held).toHaveLength(1);
@@ -1151,7 +1205,7 @@ test("a stop between the receiver's answer and the row's update sends that deliv
   reset();
   const key = await newProject();
   const hook = await subscribe([key], "https://bot.example.com/answered");
-  await api("POST", "/issues", { projectId: key, title: "twice" });
+  await event(key, "twice");
   // the receiver gets it and answers 200, but the worker is stopped before it can record that
   const stopping: Transport = async (call) => {
     void first.stop();
@@ -1190,7 +1244,7 @@ test("a stored secret that can't be read sends nothing and says to rotate, until
       ),
     })
     .run();
-  await api("POST", "/issues", { projectId: key, title: "stranded" });
+  await event(key, "stranded");
   const w = worker({ pauseAfter: 1000 });
   await w.tick();
   advance(SECOND);
@@ -1221,7 +1275,7 @@ test("a poll reads one head per unpaused webhook, never a paused webhook's backl
     .where(eq(webhookSubscription.id, paused.id))
     .run();
   for (let i = 0; i < 20; i++) {
-    await api("POST", "/issues", { projectId: key, title: `backlog ${i}` });
+    await event(key, `backlog ${i}`);
   }
   expect(rows().filter((r) => r.status === "pending")).toHaveLength(20);
 
@@ -1244,7 +1298,7 @@ test("the heads are each unpaused webhook's oldest pending delivery, in event or
   const behind = await subscribe([key], "https://bot.example.com/behind");
   const paused = await subscribe([key], "https://bot.example.com/paused");
   for (const title of ["one", "two", "three"]) {
-    await api("POST", "/issues", { projectId: key, title });
+    await event(key, title);
   }
   const queue = (id: string) =>
     rows()
@@ -1274,7 +1328,7 @@ test("a redirect keeps the delivery pending and counts toward the pause", async 
   const key = await newProject();
   const hook = await subscribe([key], "https://bot.example.com/moved");
   statuses.push(302, 302);
-  await api("POST", "/issues", { projectId: key, title: "redirected" });
+  await event(key, "redirected");
   const w = worker({ pauseAfter: 2, backoffMs: [5] });
   await w.tick();
   const row = () => rows().find((r) => r.subscriptionId === hook.id);
@@ -1367,7 +1421,7 @@ test("a delivery attempt never changes the webhook's updatedAt; the bot's own ch
   const created = subscription(hook.id)?.updatedAt.getTime();
   // the column's clock is the wall clock, so let a millisecond pass before any write
   await sleep(5);
-  await api("POST", "/issues", { projectId: key, title: "delivered" });
+  await event(key, "delivered");
   const w = worker();
   await until(w, () => received.length >= 1);
   await w.tick();
@@ -1377,7 +1431,7 @@ test("a delivery attempt never changes the webhook's updatedAt; the bot's own ch
 
   // failures too, up to the pause that they cause
   statuses.push(503, 503, 503, 503, 503, 503, 503, 503, 503, 503);
-  await api("POST", "/issues", { projectId: key, title: "failing" });
+  await event(key, "failing");
   const pausing = worker({ pauseAfter: 2 });
   await until(pausing, () => subscription(hook.id)?.pausedAt != null);
   expect(subscription(hook.id)?.lastError).toBe("HTTP 503");
@@ -1393,7 +1447,7 @@ test("a delivery's body is dropped once it is delivered, and kept while it may b
   reset();
   const key = await newProject();
   await subscribe([key], "https://bot.example.com/bodies");
-  await api("POST", "/issues", { projectId: key, title: "bodies" });
+  await event(key, "bodies");
   statuses.push(503);
   const w = worker({ backoffMs: [SECOND] });
   await w.tick();
@@ -1415,7 +1469,7 @@ test("finished deliveries go after their keep time, in batches, and nothing else
   const key = await newProject();
   await subscribe([key], "https://bot.example.com/retention");
   for (let i = 0; i < 8; i++) {
-    await api("POST", "/issues", { projectId: key, title: `retention ${i}` });
+    await event(key, `retention ${i}`);
   }
   const day = 24 * HOUR;
   const at = (daysAgo: number) => clock - daysAgo * day;
@@ -1503,7 +1557,7 @@ async function deliveredRows(count: number, daysAgo: number) {
   const key = await newProject();
   await subscribe([key], `https://bot.example.com/aged-${key}`);
   for (let i = 0; i < count; i++) {
-    await api("POST", "/issues", { projectId: key, title: `aged ${i}` });
+    await event(key, `aged ${i}`);
   }
   db.update(webhookDelivery)
     .set({

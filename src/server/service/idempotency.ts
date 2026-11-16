@@ -47,7 +47,7 @@ const hashOf = (scope: string, request: unknown) =>
     .digest("hex");
 
 // the service's rows carry these as Date; the stored JSON holds them as ISO strings
-const dateFields = new Set(["createdAt", "updatedAt", "completedAt"]);
+const dateFields = new Set(["createdAt", "updatedAt", "completedAt", "readAt"]);
 const revive = (key: string, value: unknown) =>
   dateFields.has(key) && typeof value === "string" ? new Date(value) : value;
 

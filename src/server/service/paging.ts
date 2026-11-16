@@ -9,10 +9,11 @@ export type PageQuery = { cursor?: string; limit?: number };
 const defaultLimit = 50;
 const maxLimit = 200;
 
-const encode = (value: unknown) =>
+/** A cursor as base64url JSON; `decode` gives undefined for one that isn't. */
+export const encode = (value: unknown) =>
   Buffer.from(JSON.stringify(value)).toString("base64url");
 
-function decode(cursor: string): unknown {
+export function decode(cursor: string): unknown {
   try {
     return JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
   } catch {

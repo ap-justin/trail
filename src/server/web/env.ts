@@ -1,6 +1,6 @@
 import { createMiddleware } from "hono/factory";
 import { createRouter } from "../api/env.js";
-import { errorResponse } from "../api/errors.js";
+import { errorResponse, handleNotFound } from "../api/errors.js";
 import type { TrailAuth } from "../auth/auth.js";
 import type { Viewer } from "../auth/viewer.js";
 
@@ -28,7 +28,7 @@ export const requireMember = createMiddleware<WebEnv>(async (c, next) => {
       c,
       403,
       "not_invited",
-      `${who} is not invited: ask the owner to invite your GitHub username or email address, then sign in again`,
+      `${who} is not invited: ask the person who runs this trail to invite your GitHub username or email address, then sign in again`,
     );
   }
   c.set("member", viewer);
@@ -56,3 +56,9 @@ export const requireOwnOrigin = (auth: TrailAuth) =>
     }
     await next();
   });
+
+/** For anyone but the owner, the same 404 as a route that doesn't exist. */
+export const ownerOnly = createMiddleware<WebEnv>(async (c, next) => {
+  if (c.var.member.kind !== "owner") return handleNotFound(c);
+  await next();
+});

@@ -66,6 +66,10 @@ test("GET /api/v1/openapi.json serves the spec without a key", async () => {
       "DELETE /webhooks/{id}",
       "PUT /webhooks/{id}/secret",
       "POST /webhooks/{id}/ping",
+      "POST /messages",
+      "GET /messages",
+      "GET /messages/{id}/thread",
+      "POST /messages/read",
     ].sort(),
   );
   expect(spec.components.securitySchemes).toEqual({
@@ -134,7 +138,8 @@ test("the spec lists the error statuses each operation can return", async () => 
     "POST /projects/{ref}/status-updates": created,
     "POST /projects/{slug}/items": withForbidden(withNotFound(write("200"))),
     "DELETE /projects/{slug}/items/{key}": withForbidden(withNotFound(list)),
-    "GET /webhooks": withForbidden(list),
+    // without the read action it lists only the inbox webhooks
+    "GET /webhooks": list,
     "POST /webhooks": withConflict(withForbidden(withNotFound(write("201")))),
     "GET /webhooks/{id}": withForbidden(withNotFound(list)),
     "PATCH /webhooks/{id}": withConflict(
@@ -147,6 +152,13 @@ test("the spec lists the error statuses each operation can return", async () => 
       "415",
       "429",
     ].sort(),
+    "POST /messages": [
+      ...withConflict(withNotFound(write("201"))),
+      "429",
+    ].sort(),
+    "GET /messages": list,
+    "GET /messages/{id}/thread": withNotFound(list),
+    "POST /messages/read": write("200"),
   });
 });
 
@@ -202,6 +214,7 @@ test("every create documents the Idempotency-Key header, and no other operation 
       "POST /projects",
       "POST /projects/{ref}/labels",
       "POST /projects/{ref}/status-updates",
+      "POST /messages",
     ].sort(),
   );
 });
@@ -465,4 +478,47 @@ test("the photo route is documented under its own /api server, and the documente
   const served = await request("GET", documented);
   expect(served.status).toBe(200);
   expect(served.headers.get("content-type")).toBe("image/png");
+});
+
+test("POST /messages documents each refusal under the status the server answers it with", async () => {
+  const res = await request("GET", "/api/v1/openapi.json", { key: null });
+  const spec = (await res.json()) as {
+    paths: Record<
+      string,
+      Record<string, { responses: Record<string, { description: string }> }>
+    >;
+  };
+  const responses = spec.paths["/messages"]?.post?.responses;
+  const notFound = responses?.["404"]?.description;
+  expect(notFound).toMatch(/names no bot/);
+  expect(notFound).toMatch(/replyTo is not one of your messages/);
+  const invalid = responses?.["422"]?.description;
+  expect(invalid).toMatch(/a person's id/);
+  expect(invalid).toMatch(/yourself/);
+  expect(invalid).toMatch(/not the replyTo message's other bot/);
+  expect(invalid).toMatch(/neither to nor replyTo/);
+});
+
+test("the deprecated POST /issues says a product field is required in a form generated clients read", async () => {
+  const res = await request("GET", "/api/v1/openapi.json", { key: null });
+  const spec = (await res.json()) as {
+    components: {
+      schemas: Record<
+        string,
+        { description?: string; anyOf?: { required: string[] }[] }
+      >;
+    };
+  };
+  const create = spec.components.schemas.IssueCreate;
+  expect(create?.anyOf).toEqual([
+    { required: ["projectId"] },
+    { required: ["project"] },
+    { required: ["product"] },
+  ]);
+  expect(create?.description).toMatch(/projectId, project or product/);
+
+  const none = await request("POST", "/api/v1/issues", {
+    json: { title: "no product" },
+  });
+  expect(none.status).toBe(422);
 });
