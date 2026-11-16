@@ -15,6 +15,8 @@ import {
   itemListQuerySchema,
   itemUpdateSchema,
   labelCreateSchema,
+  markReadSchema,
+  messageCreateSchema,
   myTitleUpdateSchema,
   productCreateSchema,
   productUpdateSchema,
@@ -36,12 +38,16 @@ import {
   toBot,
   toComment,
   toImportResult,
+  toInboxEntry,
   toIssue,
   toLabel,
   toLegacyIssue,
+  toMarkReadResult,
+  toMessage,
   toPage,
   toProduct,
   toProject,
+  toSentMessage,
   toStatusUpdate,
   toWebhook,
   toWhoami,
@@ -54,8 +60,18 @@ import {
   ServiceError,
   ValidationError,
 } from "../service/errors.js";
-import type { ProjectOrProduct, Service } from "../service/index.js";
+import {
+  legacyProduct,
+  type ProjectOrProduct,
+  type Service,
+} from "../service/index.js";
 import type { KeyActor } from "../service/keys.js";
+import {
+  MARK_READ_MAX,
+  MESSAGE_PREVIEW_CHARS,
+  MESSAGE_WINDOW_MS,
+  MESSAGES_PER_PAIR,
+} from "../service/messages.js";
 import {
   PHOTO_ACCEPTS,
   PHOTO_MAX_BYTES,
@@ -63,7 +79,12 @@ import {
 } from "../service/photos.js";
 import { BOT_TITLE_MAX } from "../service/validate.js";
 import { PING_LIMIT, PING_WINDOW_MS } from "../service/webhooks.js";
-import { WEBHOOK_DELIVERY, WEBHOOK_SETUP } from "../webhooks/docs.js";
+import {
+  WEBHOOK_DELIVERY,
+  WEBHOOK_INBOX,
+  WEBHOOK_SETUP,
+} from "../webhooks/docs.js";
+import { withArgumentHelp } from "./arguments.js";
 
 const idempotencyKey = {
   idempotency_key: z
@@ -248,6 +269,13 @@ export function registerTools(
   service: Service,
   actor: KeyActor,
 ): void {
+  // every tool registers through here, so each refuses an unknown argument with its own help
+  const register: McpServer["registerTool"] = (name, config, callback) =>
+    server.registerTool(
+      name,
+      { ...config, inputSchema: withArgumentHelp(name, config.inputSchema) },
+      callback,
+    );
   const item = z
     .string()
     .min(1)
@@ -298,7 +326,7 @@ export function registerTools(
       ),
     );
 
-  server.registerTool(
+  register(
     "add_todo",
     {
       description: `Add a todo: planned work in a product you own, or in a product with no owner. ${TODO_OR_ISSUE} In a product another bot owns this is refused (forbidden, naming the owner): use file_issue instead to report a bug or ask for work there. Without product it goes to the one product you own; with none or several, the error lists the products to pick from. Label names match the product's labels ignoring the case of A-Z, and a new name creates the label. Returns the item with its key, like TRL-12.`,
@@ -313,7 +341,7 @@ export function registerTools(
       ),
   );
 
-  server.registerTool(
+  register(
     "file_issue",
     {
       description: `File an issue: a bug report or request to a product's bot, on any product this key reaches. ${TODO_OR_ISSUE} Use add_todo instead for planned work in your own product. Leave assignee out: the product's bot assigns it when it accepts the issue (status open with assignee). On a product another bot owns, labels attach only the product's existing labels (list_labels lists them) and create none; the result lists the names it left off in skippedLabels. Returns the item with its key, like TRL-12, in status triage.`,
@@ -329,7 +357,7 @@ export function registerTools(
       }),
   );
 
-  server.registerTool(
+  register(
     "get_item",
     {
       description:
@@ -340,7 +368,7 @@ export function registerTools(
     ({ item }) => run("get_item", () => toIssue(service.getItem(actor, item))),
   );
 
-  server.registerTool(
+  register(
     "update_item",
     {
       description: `Change an item: type, status, assignee, priority, labels, title, description, estimate or links. ${TODO_OR_ISSUE} To accept an issue from your product's triage send status open with assignee, the bot that will work on it (often you), since status open alone leaves it unassigned; or send type todo, which opens it and assigns the product's owner when it has no assignee. To drop it send status canceled. On a product with an owner, only the owner accepts its triage issues, reopens a canceled issue another bot filed, and changes any item's type, and only the owner or the item's filer cancels it, at any status; anyone else is refused (forbidden) and should comment with add_comment to ask the owner. A todo never goes back to triage and never loses its assignee. Fields left out stay as they are. labels or links replace the whole set; addLabels, removeLabels, addLinks and removeLinks change part of it, safe beside another bot's edit (not together with labels or links). On a product another bot owns, labels and addLabels attach only the product's existing labels (list_labels lists them) and create none; the result lists the names it left off in skippedLabels. Moving to done or canceled stamps completedAt; reopening clears it.`,
@@ -357,7 +385,7 @@ export function registerTools(
       }),
   );
 
-  server.registerTool(
+  register(
     "list_items",
     {
       description:
@@ -376,7 +404,7 @@ export function registerTools(
       run("list_items", () => toPage(service.listItems(actor, query), toIssue)),
   );
 
-  server.registerTool(
+  register(
     "add_comment",
     {
       description:
@@ -404,7 +432,7 @@ export function registerTools(
       }),
   );
 
-  server.registerTool(
+  register(
     "list_comments",
     {
       description:
@@ -426,7 +454,7 @@ export function registerTools(
       }),
   );
 
-  server.registerTool(
+  register(
     "create_project",
     {
       description:
@@ -476,7 +504,7 @@ export function registerTools(
       ? noted(toProject(found.project), note)
       : deprecated(toProduct(found.product), deprecations.product);
 
-  server.registerTool(
+  register(
     "get_project",
     {
       description:
@@ -491,7 +519,7 @@ export function registerTools(
       }),
   );
 
-  server.registerTool(
+  register(
     "list_projects",
     {
       description:
@@ -508,7 +536,7 @@ export function registerTools(
       ),
   );
 
-  server.registerTool(
+  register(
     "update_project",
     {
       description:
@@ -526,7 +554,7 @@ export function registerTools(
       }),
   );
 
-  server.registerTool(
+  register(
     "add_to_project",
     {
       description:
@@ -541,7 +569,7 @@ export function registerTools(
       }),
   );
 
-  server.registerTool(
+  register(
     "remove_from_project",
     {
       description:
@@ -556,7 +584,7 @@ export function registerTools(
       }),
   );
 
-  server.registerTool(
+  register(
     "list_products",
     {
       description:
@@ -570,7 +598,7 @@ export function registerTools(
       ),
   );
 
-  server.registerTool(
+  register(
     "get_product",
     {
       description:
@@ -582,7 +610,7 @@ export function registerTools(
       run("get_product", () => toProduct(service.getProduct(actor, product))),
   );
 
-  server.registerTool(
+  register(
     "create_product",
     {
       description:
@@ -600,7 +628,7 @@ export function registerTools(
       ),
   );
 
-  server.registerTool(
+  register(
     "update_product",
     {
       description:
@@ -635,7 +663,7 @@ export function registerTools(
     };
   };
 
-  server.registerTool(
+  register(
     "post_status_update",
     {
       description:
@@ -666,7 +694,7 @@ export function registerTools(
       }),
   );
 
-  server.registerTool(
+  register(
     "list_status_updates",
     {
       description:
@@ -702,7 +730,7 @@ export function registerTools(
     return ref as { value: string; note: string | undefined };
   };
 
-  server.registerTool(
+  register(
     "create_label",
     {
       description: `Create a label in a product. ${LABEL_CREATORS} Needs the admin action.`,
@@ -729,7 +757,7 @@ export function registerTools(
       }),
   );
 
-  server.registerTool(
+  register(
     "list_labels",
     {
       description:
@@ -751,7 +779,7 @@ export function registerTools(
       }),
   );
 
-  server.registerTool(
+  register(
     "list_activity",
     {
       description:
@@ -780,10 +808,10 @@ export function registerTools(
       }),
   );
 
-  server.registerTool(
+  register(
     "create_issue",
     {
-      description: `${aliasOf("add_todo or file_issue")} Creates an item in the product projectId names (its key, like TRL): a todo when you own the product, else an issue in triage. The result carries deprecated.`,
+      description: `${aliasOf("add_todo or file_issue")} Creates an item in the product projectId (or its alias project or product) names (its key, like TRL): a todo when you own the product, else an issue in triage. The result carries deprecated.`,
       inputSchema: issueCreateSchema.extend(idempotencyKey),
       annotations: create,
     },
@@ -799,7 +827,7 @@ export function registerTools(
       }),
   );
 
-  server.registerTool(
+  register(
     "get_issue",
     {
       description: `${aliasOf("get_item")} Gets an item by its key, like TRL-12.`,
@@ -815,25 +843,27 @@ export function registerTools(
       ),
   );
 
-  server.registerTool(
+  register(
     "list_issues",
     {
-      description: `${aliasOf("list_items")} Lists items newest first; projectId takes a product's key, and status open also lists issues waiting in triage (list_items matches status exactly).`,
+      description: `${aliasOf("list_items")} Lists items newest first; projectId (or its alias project or product) takes a product's key, and status open also lists issues waiting in triage (list_items matches status exactly).`,
       inputSchema: z.strictObject({
-        projectId: projectIdAlias,
+        projectId: issueListQuerySchema.shape.projectId,
+        project: issueListQuerySchema.shape.project,
+        product: issueListQuerySchema.shape.product,
         status: issueListQuerySchema.shape.status,
         assigneeId: issueListQuerySchema.shape.assigneeId,
         ...page,
       }),
       annotations: read,
     },
-    ({ projectId, assigneeId, ...query }) =>
+    ({ projectId, project, product, assigneeId, ...query }) =>
       run("list_issues", () =>
         deprecated(
           toPage(
             service.listIssues(actor, {
               ...query,
-              product: projectId,
+              product: legacyProduct({ projectId, project, product }),
               assignee: assigneeId,
             }),
             toLegacyIssue,
@@ -843,7 +873,7 @@ export function registerTools(
       ),
   );
 
-  server.registerTool(
+  register(
     "update_issue",
     {
       description: `${aliasOf("update_item")} Changes an item named by issueId (its key, like TRL-12); assigneeId takes a bot's name or id.`,
@@ -862,18 +892,18 @@ export function registerTools(
       }),
   );
 
-  server.registerTool(
+  register(
     "whoami",
     {
       description:
-        "Get the bot this key acts as: its id (the createdBy, authorId and actorId your writes carry), name, label, photoUrl (null until set_my_photo sets one), title (null until set_my_title sets one), ownProducts (the products whose own bot you are: add_todo goes there), products (every product this key reaches: file_issue on any of them), and the key's scope: the keys of the only products it reaches and the actions it may take (read, issues, comments, status_updates, admin), each null when unrestricted. Call it first to learn where your todos go.",
+        "Get the bot this key acts as: its id (the createdBy, authorId and actorId your writes carry), name, label, photoUrl (null until set_my_photo sets one), title (null until set_my_title sets one), unreadMessages (messages other bots sent you, unread: list_inbox lists them), ownProducts (the products whose own bot you are: add_todo goes there), products (every product this key reaches: file_issue on any of them), and the key's scope: the keys of the only products it reaches and the actions it may take (read, issues, comments, status_updates, admin), each null when unrestricted. Call it first to learn where your todos go.",
       inputSchema: z.strictObject({}),
       annotations: read,
     },
     () => run("whoami", () => toWhoami(service.whoami(actor), actor.scope)),
   );
 
-  server.registerTool(
+  register(
     "list_bots",
     {
       description:
@@ -885,7 +915,7 @@ export function registerTools(
       run("list_bots", () => toPage(service.listBots(actor, query), toBot)),
   );
 
-  server.registerTool(
+  register(
     "set_my_photo",
     {
       description: `Set your own photo, which people see beside your name in trail. Send ${PHOTO_ACCEPTS}, ${photoEncoding} Its type is read from the bytes, and its pixel size from its header: a larger image is refused, not scaled. The whole image goes in this one argument, so send a small avatar: about 128x128px, under about 16 KB. For a larger file, send its raw bytes to PUT /api/v1/me/photo with this same key instead. A new photo replaces the old one and gets a new photoUrl. Every key may call this, whatever its scope.`,
@@ -899,7 +929,7 @@ export function registerTools(
       run("set_my_photo", () => service.setMyPhoto(actor, photoBytes(data))),
   );
 
-  server.registerTool(
+  register(
     "clear_my_photo",
     {
       description:
@@ -910,7 +940,7 @@ export function registerTools(
     () => run("clear_my_photo", () => service.clearMyPhoto(actor)),
   );
 
-  server.registerTool(
+  register(
     "set_my_title",
     {
       description: `Set your own title: a short plain-text role, like "Release manager", that people see beside your name in trail. It is trimmed, then must be 1 to ${BOT_TITLE_MAX} characters. Setting the title you already have changes nothing. Every key may call this, whatever its scope.`,
@@ -921,7 +951,7 @@ export function registerTools(
     ({ title }) => run("set_my_title", () => service.setMyTitle(actor, title)),
   );
 
-  server.registerTool(
+  register(
     "clear_my_title",
     {
       description:
@@ -932,6 +962,81 @@ export function registerTools(
     () => run("clear_my_title", () => service.clearMyTitle(actor)),
   );
 
+  const messageId = z
+    .string()
+    .min(1)
+    .describe(
+      "The id of a message you sent or received, from list_inbox, message_bot or a trail.message.received webhook.",
+    );
+
+  register(
+    "message_bot",
+    {
+      description: `Send a direct message to another bot: a question, a status, a handoff. Only you and that bot can read it; it never appears in items, the feed or activity, and people can't receive messages. to takes the bot's name (any case) or id. To answer a message, pass its id as replyTo (to can then be left out): the reply joins that message's thread. expectsReply defaults to true; send false for an FYI, and the recipient can't reply to it. text is markdown. Returns the message (id, threadId, from, to) and its thread's messageCount. Refused: to naming a person, yourself or an unknown bot (list_bots lists bots); replyTo that isn't one of your messages, or that belongs to your conversation with another bot; a reply to a message sent with expectsReply false (no_reply_wanted: if it really must be said, send a new message without replyTo); text over 64 KiB; more than ${MESSAGES_PER_PAIR} messages to one bot in ${MESSAGE_WINDOW_MS / 60_000} minutes (rate_limited, saying how many seconds to wait). Any key may send, whatever its actions and products.`,
+      inputSchema: messageCreateSchema.extend(idempotencyKey),
+      annotations: create,
+    },
+    ({ idempotency_key, ...input }) =>
+      run("message_bot", () =>
+        toSentMessage(
+          service.sendMessage(actor, input, {
+            idempotencyKey: idempotency_key,
+          }),
+        ),
+      ),
+  );
+
+  register(
+    "list_inbox",
+    {
+      description: `List the messages other bots sent you, newest first: only unread ones unless all is true. Each entry has id, from (name and id), threadId, replyTo, expectsReply, createdAt, readAt, and preview, the first ${MESSAGE_PREVIEW_CHARS} characters of the text (truncated is true when there is more). Read the whole text and the rest of the conversation with get_thread, answer with message_bot and replyTo set to the message's id (unless expectsReply is false), then mark_read. Messages you sent are not listed: get_thread shows them. To be woken when a message arrives instead of polling, create_webhook with kind inbox. Pass nextCursor back as cursor, with the same all, for the next page.`,
+      inputSchema: z.strictObject({
+        all: z
+          .boolean()
+          .optional()
+          .describe("true lists read messages too; default false."),
+        ...page,
+      }),
+      annotations: read,
+    },
+    (query) =>
+      run("list_inbox", () =>
+        toPage(service.listInbox(actor, query), toInboxEntry),
+      ),
+  );
+
+  register(
+    "get_thread",
+    {
+      description:
+        "Read a conversation: every message in the thread of messageId (any message in it, or its threadId), oldest first, each with its whole text, from, to, replyTo, expectsReply, createdAt and readAt (when its recipient marked it read), plus the thread's two bots. A thread is one chain of replies: a message sent without replyTo starts a new one, even to the same bot. Only those two bots can read it: any other id is not found. Reading marks nothing read: call mark_read for that. Pass nextCursor back as cursor for the next page.",
+      inputSchema: z.strictObject({ messageId, ...page }),
+      annotations: read,
+    },
+    ({ messageId, ...query }) =>
+      run("get_thread", () => {
+        const thread = service.getThread(actor, messageId, query);
+        return {
+          threadId: thread.threadId,
+          bots: thread.bots,
+          ...toPage(thread, toMessage),
+        };
+      }),
+  );
+
+  register(
+    "mark_read",
+    {
+      description: `Mark messages sent to you as read, so list_inbox stops listing them (all true still does). Takes 1 to ${MARK_READ_MAX} ids from list_inbox and is safe to repeat. Each id gets its own result: read (marked now), already_read, or not_found (no message with that id was sent to you; one you sent counts as not found). Returns the results and unreadMessages, your unread count after the call.`,
+      inputSchema: markReadSchema,
+      annotations: additive,
+    },
+    ({ messageIds }) =>
+      run("mark_read", () =>
+        toMarkReadResult(service.markRead(actor, messageIds)),
+      ),
+  );
+
   const webhookId = z
     .string()
     .min(1)
@@ -939,10 +1044,10 @@ export function registerTools(
   const ownWebhooks =
     "Acts on your own webhooks only; another bot's, or one following a product outside this key's scope, is not found.";
 
-  server.registerTool(
+  register(
     "create_webhook",
     {
-      description: `Get a signed webhook call for every event in the products you follow (products: their keys), and in every project drawing from one of them, so you hear of an issue filed to your product without polling list_activity. projects is the deprecated alias of products. Needs the read action. ${WEBHOOK_SETUP} ${WEBHOOK_DELIVERY} Returns the webhook (never its secret); a product this key can't read is not found.`,
+      description: `Get signed webhook calls, of one of two kinds. kind inbox (no products): wake on each message another bot sends you, instead of polling list_inbox; it is always your own inbox. kind activity (the default): every event in the products you follow (products: their keys), and in every project drawing from one of them, so you hear of an issue filed to your product without polling list_activity; projects is the deprecated alias of products, and this kind needs the read action. ${WEBHOOK_INBOX} ${WEBHOOK_SETUP} ${WEBHOOK_DELIVERY} Returns the webhook (never its secret); a product this key can't read is not found.`,
       inputSchema: webhookCreateSchema,
       annotations: create,
     },
@@ -957,10 +1062,10 @@ export function registerTools(
       ),
   );
 
-  server.registerTool(
+  register(
     "list_webhooks",
     {
-      description: `List your webhooks, oldest first, each with the products it follows, paused, lastSuccessAt, lastError and lastErrorAt: read it to see whether deliveries are healthy. The secret is never listed. Needs the read action. ${ownWebhooks}`,
+      description: `List your webhooks, oldest first, each with the products it follows, paused, lastSuccessAt, lastError and lastErrorAt: read it to see whether deliveries are healthy. The secret is never listed. A key without the read action lists only your inbox webhooks. ${ownWebhooks}`,
       inputSchema: z.strictObject({}),
       annotations: read,
     },
@@ -970,10 +1075,10 @@ export function registerTools(
       ),
   );
 
-  server.registerTool(
+  register(
     "update_webhook",
     {
-      description: `Change a webhook's url or the products it follows (products replaces the whole list; projects is its deprecated alias), and resume it if it was paused: an update with no fields still resumes. Fields left out stay as they are. To change the secret use rotate_webhook_secret. Needs the read action. ${ownWebhooks}`,
+      description: `Change a webhook's url or the products it follows (products replaces the whole list; projects is its deprecated alias), and resume it if it was paused: an update with no fields still resumes. Fields left out stay as they are. To change the secret use rotate_webhook_secret. Needs the read action, except on an inbox webhook. ${ownWebhooks}`,
       inputSchema: webhookUpdateSchema.extend({ webhookId }),
       annotations: update,
     },
@@ -988,10 +1093,10 @@ export function registerTools(
       ),
   );
 
-  server.registerTool(
+  register(
     "rotate_webhook_secret",
     {
-      description: `Replace a webhook's signing secret, and resume it if it was paused. The old secret stops signing at once, so give your routine the new one first. Read the secret from a key in a script, never from chat; it is never returned. Needs the read action. ${ownWebhooks}`,
+      description: `Replace a webhook's signing secret, and resume it if it was paused. The old secret stops signing at once, so give your routine the new one first. Read the secret from a key in a script, never from chat; it is never returned. Needs the read action, except on an inbox webhook. ${ownWebhooks}`,
       inputSchema: webhookSecretUpdateSchema.extend({ webhookId }),
       annotations: update,
     },
@@ -1001,10 +1106,10 @@ export function registerTools(
       ),
   );
 
-  server.registerTool(
+  register(
     "delete_webhook",
     {
-      description: `Delete a webhook and the deliveries still queued for it. Needs the read action. ${ownWebhooks}`,
+      description: `Delete a webhook and the deliveries still queued for it. Needs the read action, except on an inbox webhook. ${ownWebhooks}`,
       inputSchema: z.strictObject({ webhookId }),
       annotations: update,
     },
@@ -1012,10 +1117,10 @@ export function registerTools(
       run("delete_webhook", () => service.deleteWebhook(actor, webhookId)),
   );
 
-  server.registerTool(
+  register(
     "test_webhook",
     {
-      description: `Send one signed trail.ping to a webhook now and see what its receiver answered: delivered, the HTTP status, and an error when it failed. Run it after create_webhook to check your OpenBot routine accepts the signature, and after a pause before you update the webhook. A webhook takes ${PING_LIMIT} tests per ${PING_WINDOW_MS / 1000} seconds; past that a test is refused as rate_limited with the seconds to wait. Needs the read action. ${ownWebhooks}`,
+      description: `Send one signed trail.ping to a webhook now and see what its receiver answered: delivered, the HTTP status, and an error when it failed. Run it after create_webhook to check your OpenBot routine accepts the signature, and after a pause before you update the webhook. A webhook takes ${PING_LIMIT} tests per ${PING_WINDOW_MS / 1000} seconds; past that a test is refused as rate_limited with the seconds to wait. Needs the read action, except on an inbox webhook. ${ownWebhooks}`,
       inputSchema: z.strictObject({ webhookId }),
       annotations: { ...create, openWorldHint: true },
     },
@@ -1023,7 +1128,7 @@ export function registerTools(
       runAsync("test_webhook", () => service.testWebhook(actor, webhookId)),
   );
 
-  server.registerTool(
+  register(
     "import_project",
     {
       description:

@@ -62,9 +62,9 @@ const subscribe = (projects: string[], url: string) =>
     secret: "whsec_service_0123456789abcdef",
     projects,
   });
-/** Files an issue at the current clock; its delivery's retry window starts then. */
-async function fileIssue(key: string, title: string) {
-  await api("POST", "/issues", { projectId: key, title });
+/** Queues one delivery at the current clock, a label named `name`; its retry window starts then. */
+async function addLabel(key: string, name: string) {
+  await api("POST", `/products/${key}/labels`, { name });
   db.update(webhookDelivery)
     .set({ createdAt: new Date(clock) })
     .where(eq(webhookDelivery.seq, maxSeq()))
@@ -96,11 +96,11 @@ const statuses = () =>
 test("a resume gives back the paused time each delivery waited through, not the whole pause", async () => {
   const key = await newProject();
   const hook = await subscribe([key], "https://bot.example.com/window");
-  await fileIssue(key, "before");
+  await addLabel(key, "before");
   clock += 2 * HOUR;
   pause(hook.id);
   clock += 7 * DAY - HOUR;
-  await fileIssue(key, "during");
+  await addLabel(key, "during");
   clock += HOUR;
   const resumedAt = clock;
   await api("PATCH", `/webhooks/${hook.id}`, {});
@@ -122,7 +122,7 @@ test("a resume gives back the paused time each delivery waited through, not the 
 test("updating or rotating a webhook that isn't paused leaves its retry's backoff alone", async () => {
   const key = await newProject();
   const hook = await subscribe([key], "https://bot.example.com/backoff");
-  await fileIssue(key, "retrying");
+  await addLabel(key, "retrying");
   const w = worker();
   await w.tick();
   expect(sent).toHaveLength(1);
@@ -146,14 +146,14 @@ test("a create replayed under its idempotency key queues no second delivery", as
   const key = await newProject();
   await subscribe([key], "https://bot.example.com/replay");
   const post = () =>
-    app.request("/api/v1/issues", {
+    app.request(`/api/v1/products/${key}/labels`, {
       method: "POST",
       headers: {
         authorization: `Bearer ${bot.key}`,
         "content-type": "application/json",
         "idempotency-key": "replay-once",
       },
-      body: JSON.stringify({ projectId: key, title: "once" }),
+      body: JSON.stringify({ name: "once" }),
     });
   const first = await post();
   const again = await post();
@@ -257,6 +257,37 @@ test("a product event is queued as trail.product.*, as it is stored, and for one
   ]);
 });
 
+test("an item event is queued once per type, as trail.issue.* and for one release as trail.item.* too, on each webhook following it", async () => {
+  const key = await newProject();
+  const hooks = [
+    await subscribe([key], "https://bot.example.com/items-one"),
+    await subscribe([key], "https://bot.example.com/items-two"),
+  ];
+  const since = published.length;
+  await api("POST", "/items", { type: "todo", product: key, title: "queued" });
+  const [event] = published.slice(since);
+  if (!event) throw new Error("the POST published no event");
+  expect(event.action).toBe("issue.created");
+  const queued = db
+    .select({
+      subscriptionId: webhookDelivery.subscriptionId,
+      type: webhookDelivery.type,
+    })
+    .from(webhookDelivery)
+    .where(eq(webhookDelivery.eventId, event.id))
+    .all();
+  for (const hook of hooks) {
+    expect(
+      queued
+        .filter((d) => d.subscriptionId === hook.id)
+        .map((d) => d.type)
+        .sort(),
+      hook.url,
+    ).toEqual(["trail.issue.created", "trail.item.created"]);
+  }
+  expect(queued).toHaveLength(4);
+});
+
 test("a webhook on two projects gets their events in the order they happened, around another bot's writes", async () => {
   answer = 200;
   const p = await newProject();
@@ -280,11 +311,11 @@ test("a webhook on two projects gets their events in the order they happened, ar
     ).status,
   ).toBe(201);
 
-  await api("POST", "/issues", { projectId: q, title: "q1" });
+  await addLabel(q, "q1");
   await asOther("x1", otherProject);
-  await api("POST", "/issues", { projectId: p, title: "p1" });
+  await addLabel(p, "p1");
   await asOther("x2", otherProject);
-  await api("POST", "/issues", { projectId: q, title: "q2" });
+  await addLabel(q, "q2");
 
   const w = worker();
   for (let i = 0; i < 10 && sent.length < 3; i++) await w.tick();
@@ -326,8 +357,8 @@ test("dropping a project from a paused webhook drops its backlog for that projec
   const a = await newProject();
   const b = await newProject();
   const hook = await subscribe([a, b], "https://bot.example.com/narrowed");
-  await fileIssue(a, "kept");
-  await fileIssue(b, "dropped");
+  await addLabel(a, "kept");
+  await addLabel(b, "dropped");
   pause(hook.id);
 
   await api("PATCH", `/webhooks/${hook.id}`, { projects: [a] });
@@ -346,7 +377,7 @@ test("widening a webhook's projects keeps its queued deliveries", async () => {
   const a = await newProject();
   const b = await newProject();
   const hook = await subscribe([a], "https://bot.example.com/widened");
-  await fileIssue(a, "queued");
+  await addLabel(a, "queued");
 
   await api("PATCH", `/webhooks/${hook.id}`, { projects: [a, b] });
   expect(deliveriesByProject()).toEqual([`${a}:pending`]);
@@ -357,7 +388,7 @@ test("dropping a project keeps the deliveries already made to it", async () => {
   const a = await newProject();
   const b = await newProject();
   const hook = await subscribe([a, b], "https://bot.example.com/history");
-  await fileIssue(b, "sent before");
+  await addLabel(b, "sent before");
   await worker().tick();
   expect(deliveriesByProject()).toEqual([`${b}:delivered`]);
 

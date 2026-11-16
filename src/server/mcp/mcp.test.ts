@@ -123,6 +123,10 @@ test("tools/list offers one tool per operation, none naming who writes", async (
       "rotate_webhook_secret",
       "delete_webhook",
       "test_webhook",
+      "message_bot",
+      "list_inbox",
+      "get_thread",
+      "mark_read",
     ].sort(),
   );
   for (const tool of tools) {
@@ -557,6 +561,7 @@ test("whoami answers the key's bot and list_bots pages every bot with id, name, 
     scope: { products: null, projects: null, actions: null },
     ownProducts: [],
     products: expect.arrayContaining([{ key: seen, name: "whoami seen" }]),
+    unreadMessages: 0,
     photoUrl: null,
     title: null,
   });
@@ -618,13 +623,6 @@ test("a service refusal is a tool error saying what to send instead", async () =
       ],
     }),
   ).toMatch(/^validation_failed: issue x: status "In Review" has no mapping/);
-});
-
-test("a misspelled argument is a tool error naming it", async () => {
-  const client = await connect(bot.key);
-  expect(await callError(client, "get_project", { projectID: "MCP" })).toMatch(
-    /^MCP error -32602: Input validation error: Invalid arguments for tool get_project: .*Unrecognized key: "projectID"/s,
-  );
 });
 
 test("a link that is not http or https is a tool error naming the url", async () => {

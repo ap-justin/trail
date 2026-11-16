@@ -39,7 +39,7 @@ const rows = (db: Db, sql: string) => db.$client.prepare(sql).all();
 
 const live = `
   insert into actor (id, kind, display_name, created_at) values
-    ('b1', 'bot', 'Builder', 0), ('b2', 'bot', 'fly-smoke', 0);
+    ('b1', 'bot', 'Builder', 0), ('b2', 'bot', 'smoke-bot', 0);
   insert into project (id, key, name, created_by, created_at, updated_at, issue_seq) values ('p', 'TRL', 'trail', 'b1', 0, 0, 2);
   insert into issue (id, project_id, number, title, created_by, created_at, updated_at) values
     ('i1', 'p', 1, 'first', 'b1', 1, 1), ('i2', 'p', 2, 'second', 'b1', 2, 2);
@@ -89,7 +89,7 @@ test("two bots whose names differ only by case fail the migration naming both, l
   }
   expect(message).toContain("b1 (Builder)");
   expect(message).toContain("b3 (builder)");
-  expect(message).not.toContain("fly-smoke");
+  expect(message).not.toContain("smoke-bot");
   expect(message).toMatch(/rename/i);
 
   const columns = rows(db, "select name from pragma_table_info('issue')");
@@ -99,7 +99,7 @@ test("two bots whose names differ only by case fail the migration naming both, l
   ]);
   expect(rows(db, "select display_name from actor order by id")).toEqual([
     { display_name: "Builder" },
-    { display_name: "fly-smoke" },
+    { display_name: "smoke-bot" },
     { display_name: "builder" },
   ]);
   db.$client.close();

@@ -15,7 +15,11 @@ import {
   PING_WINDOW_MS,
   WEBHOOKS_PER_BOT_MAX,
 } from "../service/webhooks.js";
-import { WEBHOOK_DELIVERY, WEBHOOK_SETUP } from "../webhooks/docs.js";
+import {
+  WEBHOOK_DELIVERY,
+  WEBHOOK_INBOX,
+  WEBHOOK_SETUP,
+} from "../webhooks/docs.js";
 import { deprecations } from "./deprecations.js";
 import { createRouter } from "./env.js";
 import {
@@ -48,8 +52,9 @@ const webhookParam = z.object({
 const createWebhook = createRoute({
   method: "post",
   path: "/webhooks",
-  summary: "Subscribe to products' events with a signed webhook",
-  description: `Needs the read action. products names the products to follow; projects is its deprecated alias, and not both. ${WEBHOOK_SETUP} ${WEBHOOK_DELIVERY}`,
+  summary:
+    "Subscribe to products' events, or to your inbox, with a signed webhook",
+  description: `products names the products to follow, and needs the read action; projects is its deprecated alias, and not both. Or kind inbox, with no products, for the messages other bots send you. ${WEBHOOK_INBOX} ${WEBHOOK_SETUP} ${WEBHOOK_DELIVERY}`,
   tags,
   request: { body: jsonBody(webhookCreateSchema) },
   responses: {
@@ -71,11 +76,10 @@ const listWebhooks = createRoute({
   method: "get",
   path: "/webhooks",
   summary: "List the calling bot's webhooks",
-  description: `Needs the read action. ${own} Each carries paused, lastSuccessAt, lastError and lastErrorAt.`,
+  description: `${own} Each carries paused, lastSuccessAt, lastError and lastErrorAt. A key without the read action lists only the inbox webhooks.`,
   tags,
   responses: {
     200: jsonContent(pageSchema(webhookSchema), "The bot's webhooks"),
-    ...forbiddenError("read"),
     ...readErrors,
   },
 });
@@ -84,7 +88,7 @@ const getWebhook = createRoute({
   method: "get",
   path: "/webhooks/{id}",
   summary: "Get a webhook",
-  description: `Needs the read action. ${own}`,
+  description: `Needs the read action, except on an inbox webhook. ${own}`,
   tags,
   request: { params: webhookParam },
   responses: {
@@ -99,7 +103,7 @@ const updateWebhook = createRoute({
   method: "patch",
   path: "/webhooks/{id}",
   summary: "Change a webhook's URL or products, and resume it",
-  description: `Needs the read action. ${own} Fields left out stay as they are; products (or its deprecated alias projects) replaces the whole list. Any update, one with no fields too, ends a pause. The secret changes through PUT /webhooks/{id}/secret.`,
+  description: `Needs the read action, except on an inbox webhook. ${own} Fields left out stay as they are; products (or its deprecated alias projects) replaces the whole list. Any update, one with no fields too, ends a pause. The secret changes through PUT /webhooks/{id}/secret.`,
   tags,
   request: { params: webhookParam, body: jsonBody(webhookUpdateSchema) },
   responses: {
@@ -118,7 +122,7 @@ const rotateSecret = createRoute({
   method: "put",
   path: "/webhooks/{id}/secret",
   summary: "Replace a webhook's signing secret",
-  description: `Needs the read action. ${own} The old secret stops signing at once; set the new one on your routine first or in the same script. Ends a pause. The secret is never returned. As on create, read it from a key in a script, not from chat.`,
+  description: `Needs the read action, except on an inbox webhook. ${own} The old secret stops signing at once; set the new one on your routine first or in the same script. Ends a pause. The secret is never returned. As on create, read it from a key in a script, not from chat.`,
   tags,
   request: { params: webhookParam, body: jsonBody(webhookSecretUpdateSchema) },
   responses: {
@@ -133,7 +137,7 @@ const deleteWebhook = createRoute({
   method: "delete",
   path: "/webhooks/{id}",
   summary: "Delete a webhook and its queued deliveries",
-  description: `Needs the read action. ${own}`,
+  description: `Needs the read action, except on an inbox webhook. ${own}`,
   tags,
   request: { params: webhookParam },
   responses: {
@@ -148,7 +152,7 @@ const pingWebhook = createRoute({
   method: "post",
   path: "/webhooks/{id}/ping",
   summary: "Send a signed trail.ping to a webhook",
-  description: `Needs the read action. ${own} Sends one signed trail.ping now, outside the queue, and returns what the receiver answered, so you can check your routine before real events flow. A failed ping is a 200 with delivered false and the reason in error. A webhook takes ${PING_LIMIT} pings per ${PING_WINDOW_MS / 1000} seconds; past that the answer is a 429 with a Retry-After header.`,
+  description: `Needs the read action, except on an inbox webhook. ${own} Sends one signed trail.ping now, outside the queue, and returns what the receiver answered, so you can check your routine before real events flow. A failed ping is a 200 with delivered false and the reason in error. A webhook takes ${PING_LIMIT} pings per ${PING_WINDOW_MS / 1000} seconds; past that the answer is a 429 with a Retry-After header.`,
   tags,
   request: { params: webhookParam },
   responses: {

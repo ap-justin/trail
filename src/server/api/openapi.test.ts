@@ -66,6 +66,10 @@ test("GET /api/v1/openapi.json serves the spec without a key", async () => {
       "DELETE /webhooks/{id}",
       "PUT /webhooks/{id}/secret",
       "POST /webhooks/{id}/ping",
+      "POST /messages",
+      "GET /messages",
+      "GET /messages/{id}/thread",
+      "POST /messages/read",
     ].sort(),
   );
   expect(spec.components.securitySchemes).toEqual({
@@ -134,7 +138,8 @@ test("the spec lists the error statuses each operation can return", async () => 
     "POST /projects/{ref}/status-updates": created,
     "POST /projects/{slug}/items": withForbidden(withNotFound(write("200"))),
     "DELETE /projects/{slug}/items/{key}": withForbidden(withNotFound(list)),
-    "GET /webhooks": withForbidden(list),
+    // without the read action it lists only the inbox webhooks
+    "GET /webhooks": list,
     "POST /webhooks": withConflict(withForbidden(withNotFound(write("201")))),
     "GET /webhooks/{id}": withForbidden(withNotFound(list)),
     "PATCH /webhooks/{id}": withConflict(
@@ -147,6 +152,13 @@ test("the spec lists the error statuses each operation can return", async () => 
       "415",
       "429",
     ].sort(),
+    "POST /messages": [
+      ...withConflict(withNotFound(write("201"))),
+      "429",
+    ].sort(),
+    "GET /messages": list,
+    "GET /messages/{id}/thread": withNotFound(list),
+    "POST /messages/read": write("200"),
   });
 });
 
@@ -202,6 +214,7 @@ test("every create documents the Idempotency-Key header, and no other operation 
       "POST /projects",
       "POST /projects/{ref}/labels",
       "POST /projects/{ref}/status-updates",
+      "POST /messages",
     ].sort(),
   );
 });

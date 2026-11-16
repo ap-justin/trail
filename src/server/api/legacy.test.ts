@@ -196,7 +196,7 @@ test("POST /products/{key}/labels and the deprecated /projects/{ref}/labels refu
       error: {
         code: "forbidden",
         message:
-          "LEG is owned by tester, so only tester creates its labels: ask tester to create it, or file or update the item without it, and a label LEG lacks comes back in skippedLabels",
+          'LEG is owned by tester, so only tester creates its labels: ask tester to create the label "outsider-made", or file or update the item without it, and a label LEG lacks comes back in skippedLabels',
       },
     });
   }
@@ -417,4 +417,40 @@ test("GET /issues?status=open includes issues waiting in triage, as open meant b
   expect(await keys("/api/v1/items?product=LGO&status=open")).toEqual([
     todo.key,
   ]);
+});
+
+test("POST and GET /issues take project or product as aliases of projectId, one spelling at a time", async () => {
+  await request("POST", "/api/v1/products", {
+    json: { key: "LGR", name: "legacy rest aliases" },
+  });
+  for (const [field, title] of [
+    ["project", "via project"],
+    ["product", "via product"],
+  ] as const) {
+    const res = await request("POST", "/api/v1/issues", {
+      json: { [field]: "LGR", title },
+    });
+    expect(res.status, field).toBe(201);
+  }
+  for (const field of ["projectId", "project", "product"]) {
+    const page = await json(
+      await request("GET", `/api/v1/issues?${field}=lgr`),
+    );
+    expect(page.items.map((i: Body) => i.title).sort(), field).toEqual([
+      "via product",
+      "via project",
+    ]);
+  }
+  const both = [
+    await request("POST", "/api/v1/issues", {
+      json: { projectId: "LGR", project: "LGR", title: "both" },
+    }),
+    await request("GET", "/api/v1/issues?projectId=LGR&product=LGR"),
+  ];
+  for (const res of both) {
+    expect(res.status).toBe(422);
+    expect((await json(res)).error.message).toBe(
+      "send one of projectId, project or product: they name the same product, and two together is ambiguous",
+    );
+  }
 });

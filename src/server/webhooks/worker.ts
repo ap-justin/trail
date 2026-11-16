@@ -9,7 +9,11 @@ import {
 } from "../db/schema.js";
 import type { ActivityEvent, EventBus } from "../events/bus.js";
 import { isPending, type WebhookSettings } from "../service/webhooks.js";
-import { buildEnvelope } from "./payload.js";
+import {
+  buildEnvelope,
+  buildMessageEnvelope,
+  type Envelope,
+} from "./payload.js";
 import { openSecret } from "./secret.js";
 import { type SendResult, sendWebhook } from "./send.js";
 
@@ -200,16 +204,26 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
       .filter((d) => d.nextAttemptAt.getTime() <= now);
   }
 
-  function bodyOf(delivery: Delivery): string | null {
-    if (delivery.body !== null) return delivery.body;
+  /** The envelope a delivery carries: its message's on an inbox subscription, else its event's. */
+  function envelopeOf(delivery: Delivery): Envelope | undefined {
+    if (delivery.messageId !== null) {
+      return buildMessageEnvelope(db, delivery.messageId);
+    }
+    if (delivery.eventId === null) return undefined;
     const event = db
       .select()
       .from(activityEvent)
       .where(eq(activityEvent.id, delivery.eventId))
       .get();
-    if (!event) return null;
+    return event && buildEnvelope(db, event, settings.publicUrl);
+  }
+
+  function bodyOf(delivery: Delivery): string | null {
+    if (delivery.body !== null) return delivery.body;
+    const envelope = envelopeOf(delivery);
+    if (!envelope) return null;
     const body = JSON.stringify({
-      ...buildEnvelope(db, event, settings.publicUrl),
+      ...envelope,
       // a product event's legacy trail.project.* twin carries its own type
       type: delivery.type,
     });
@@ -299,7 +313,7 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
       result = {
         ok: false,
         status: null,
-        error: "the event is gone",
+        error: "the event or message is gone",
         retryable: false,
       };
     } else {
@@ -432,7 +446,12 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
     start() {
       if (!stopped) return;
       stopped = false;
-      unsubscribe = bus.subscribe((_: ActivityEvent) => wake());
+      const fromEvents = bus.subscribe((_: ActivityEvent) => wake());
+      const fromMessages = bus.subscribeMessages(() => wake());
+      unsubscribe = () => {
+        fromEvents();
+        fromMessages();
+      };
       timer = setInterval(() => void tick(), pollMs);
       timer.unref();
       purgeTimer = setInterval(() => void purge(), purgeMs);

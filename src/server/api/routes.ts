@@ -97,7 +97,7 @@ export const OWNER_ONLY =
 
 /** Who creates a product's labels, as the create-label route and tool describe it. */
 export const LABEL_CREATORS =
-  "Only a product's owner creates its labels: anyone else gets a 403 (forbidden) naming the owner, and should ask the owner or file or update the item without the label, since names the product lacks come back in skippedLabels. On a product with no owner, any bot creates them.";
+  "Only a product's owner creates its labels. Anyone else gets a 403 (forbidden) naming the owner and the label: ask the owner to create it, or file or update the item without it, and names the product lacks come back in skippedLabels. On a product with no owner, any bot creates them.";
 
 /** The 403 the create-label routes add to `forbiddenError`. */
 export const OWNER_CREATES_LABELS =

@@ -747,17 +747,118 @@ export const activityEvent = sqliteTable(
   ],
 );
 
+/**
+ * A message's two bots as an unordered pair, lower id first. CASE, not two-argument
+ * min()/max(): drizzle-kit splits an index expression at its commas.
+ */
+export const messagePair = (t: {
+  senderId: AnySQLiteColumn;
+  recipientId: AnySQLiteColumn;
+}) =>
+  [
+    sql`case when ${c(t.senderId)} < ${c(t.recipientId)} then ${c(t.senderId)} else ${c(t.recipientId)} end`,
+    sql`case when ${c(t.senderId)} < ${c(t.recipientId)} then ${c(t.recipientId)} else ${c(t.senderId)} end`,
+  ] as const;
+
+/**
+ * A direct message from one bot to another. A conversation is a thread: the
+ * chain of replies from one root message, whose own id is its thread_id.
+ * Messages are kept out of activity_event: they never reach the feed or the
+ * activity webhooks.
+ */
+export const message = sqliteTable(
+  "message",
+  {
+    // minted by the caller for a root message, which names it again as its thread_id
+    id: id(),
+    // commit order, from 1, as activity_event.seq: the inbox and thread cursor, and the inbox webhook's queue order
+    seq: integer("seq")
+      .notNull()
+      .$defaultFn(
+        () =>
+          sql`(select coalesce(max(${sql.identifier("seq")}), 0) + 1 from ${sql.identifier("message")})`,
+      ),
+    // both bots; that neither is a person is the service's check, which a CHECK can't read across tables
+    senderId: text("sender_id")
+      .notNull()
+      .references(() => actor.id),
+    recipientId: text("recipient_id")
+      .notNull()
+      .references(() => actor.id),
+    threadId: text("thread_id").notNull(),
+    replyToId: text("reply_to_id"),
+    text: text("text").notNull(),
+    expectsReply: integer("expects_reply", { mode: "boolean" })
+      .notNull()
+      .default(true),
+    createdAt: createdAt(),
+    // set by the recipient
+    readAt: integer("read_at", { mode: "timestamp_ms" }),
+  },
+  (t) => [
+    check("message_seq_check", sql`${c(t.seq)} > 0`),
+    check(
+      "message_participants_check",
+      sql`${c(t.senderId)} <> ${c(t.recipientId)}`,
+    ),
+    check("message_text_check", sql`length(${c(t.text)}) > 0`),
+    check("message_expects_reply_check", sql`${c(t.expectsReply)} in (0, 1)`),
+    // a root message is its own thread; a reply is in another message's
+    check(
+      "message_thread_check",
+      sql`(${c(t.replyToId)} is null) = (${c(t.threadId)} = ${c(t.id)})`,
+    ),
+    // a reply sits in the thread of the message it answers, so with the check above
+    // every thread_id names a root message, and needs no key of its own
+    foreignKey({
+      columns: [t.replyToId, t.threadId],
+      foreignColumns: [t.id, t.threadId],
+      name: "message_reply_to_fk",
+    }),
+    // target of message_reply_to_fk
+    unique("message_id_thread_unique").on(t.id, t.threadId),
+    uniqueIndex("message_seq_unique").on(t.seq),
+    // a bot's inbox, newest first by seq
+    index("message_recipient_seq_idx").on(t.recipientId, t.seq),
+    // its unread inbox and unread count. Not read_at as a third column to cover the count:
+    // the planner then prefers message_recipient_seq_idx for the unread inbox
+    index("message_recipient_unread_seq_idx")
+      .on(t.recipientId, t.seq)
+      .where(sql`${c(t.readAt)} is null`),
+    // a thread, oldest first
+    index("message_thread_seq_idx").on(t.threadId, t.seq),
+    // the per-pair rate limit: one sender's messages to one recipient in a window
+    index("message_sender_recipient_created_idx").on(
+      t.senderId,
+      t.recipientId,
+      t.createdAt,
+    ),
+    // the operator's conversation list: each unordered pair, its count and its newest message.
+    // A query matches it only by spelling the same expressions as messagePair; the bare
+    // columns after seq let the scan skip the table, which the planner won't do on the expressions alone
+    index("message_pair_seq_idx").on(
+      ...messagePair(t),
+      t.seq,
+      t.senderId,
+      t.recipientId,
+    ),
+  ],
+);
+
 export const webhookDeliveryStatuses = [
   "pending",
   "delivered",
   "failed",
 ] as const;
 export type WebhookDeliveryStatus = (typeof webhookDeliveryStatuses)[number];
+export const webhookSubscriptionKinds = ["activity", "inbox"] as const;
+export type WebhookSubscriptionKind = (typeof webhookSubscriptionKinds)[number];
 
 /**
  * A bot's webhook: an https URL that receives signed POSTs for every activity
- * event of its products. It belongs to the bot, not to the key that made it, so
- * a key rotation keeps it.
+ * event of its products, or for an inbox subscription every message sent to the
+ * bot. It belongs to the bot, not to the key that made it, so a key rotation
+ * keeps it.
  */
 export const webhookSubscription = sqliteTable(
   "webhook_subscription",
@@ -767,6 +868,10 @@ export const webhookSubscription = sqliteTable(
       .notNull()
       .references(() => actor.id),
     url: text("url").notNull(),
+    // an inbox subscription follows no products; that it has none is the service's check
+    kind: text("kind", { enum: webhookSubscriptionKinds })
+      .notNull()
+      .default("activity"),
     // the signing secret, AES-256-GCM under a key derived from the server's own secret (webhooks/secret.ts);
     // never the plain secret, and never read back out through the API
     secretCipher: text("secret_cipher").notNull(),
@@ -782,6 +887,10 @@ export const webhookSubscription = sqliteTable(
   },
   (t) => [
     check("webhook_subscription_url_check", sql`length(${c(t.url)}) > 0`),
+    check(
+      "webhook_subscription_kind_check",
+      oneOf(t.kind, webhookSubscriptionKinds),
+    ),
     check(
       "webhook_subscription_failures_check",
       sql`${c(t.consecutiveFailures)} >= 0`,
@@ -813,9 +922,9 @@ export const webhookSubscriptionProduct = sqliteTable(
 );
 
 /**
- * The outbox: one row per event per subscription, written in the transaction
- * that commits the event, so a restart loses nothing. `id` is the delivery id
- * the receiver sees, the same on every retry.
+ * The outbox: one row per event, or per message, per subscription, written in
+ * the transaction that commits the event or message, so a restart loses
+ * nothing. `id` is the delivery id the receiver sees, the same on every retry.
  */
 export const webhookDelivery = sqliteTable(
   "webhook_delivery",
@@ -824,10 +933,11 @@ export const webhookDelivery = sqliteTable(
     subscriptionId: text("subscription_id")
       .notNull()
       .references(() => webhookSubscription.id, { onDelete: "cascade" }),
-    eventId: text("event_id")
-      .notNull()
-      .references(() => activityEvent.id),
-    // the event's seq: a subscription's deliveries go out in this order
+    // an activity subscription's deliveries carry an event, an inbox subscription's a message
+    eventId: text("event_id").references(() => activityEvent.id),
+    messageId: text("message_id").references(() => message.id),
+    // the event's or the message's seq: a subscription's deliveries go out in this order,
+    // and a subscription carries one kind, so the two sequences never share a queue
     seq: integer("seq").notNull(),
     // trail.<action>
     type: text("type").notNull(),
@@ -851,6 +961,14 @@ export const webhookDelivery = sqliteTable(
       oneOf(t.status, webhookDeliveryStatuses),
     ),
     check("webhook_delivery_attempts_check", sql`${c(t.attempts)} >= 0`),
+    check(
+      "webhook_delivery_subject_check",
+      sql`(${c(t.eventId)} is null) <> (${c(t.messageId)} is null)`,
+    ),
+    unique("webhook_delivery_subscription_message_unique").on(
+      t.subscriptionId,
+      t.messageId,
+    ),
     // one delivery per type of an event: a product event goes out under its old type too, for one release
     unique("webhook_delivery_subscription_event_type_unique").on(
       t.subscriptionId,

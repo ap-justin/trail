@@ -6,12 +6,18 @@ import {
   issueStatuses,
   issueTypes,
   projectHealths,
+  webhookSubscriptionKinds,
 } from "../server/db/schema.js";
 import {
   IMPORT_LINKS_MAX,
   IMPORT_TEXT_MAX,
   sourceStateTypes,
 } from "../server/service/import.js";
+import {
+  MARK_READ_MAX,
+  MESSAGE_PREVIEW_CHARS,
+  MESSAGE_TEXT_MAX_BYTES,
+} from "../server/service/messages.js";
 import {
   BOT_TITLE_MAX,
   botTitleCharacterProblem,
@@ -410,6 +416,10 @@ export const whoamiSchema = actorSchema
     }),
     photoUrl,
     title: actorTitle,
+    unreadMessages: z.int().meta({
+      description:
+        "How many messages other bots sent you that you haven't marked read: list_inbox lists them.",
+    }),
   })
   .openapi("Whoami");
 
@@ -462,13 +472,20 @@ export const myPhotoRemovedSchema = z
 /** Consecutive failed attempts, across a webhook's deliveries, that pause it. */
 export const WEBHOOK_PAUSE_AFTER = 8;
 
+const webhookKind = z.enum(webhookSubscriptionKinds).meta({
+  description:
+    "activity: the events of the products it follows. inbox: only trail.message.received, for each message another bot sends you; it follows no products.",
+});
+
 export const webhookSchema = z
   .object({
     id,
+    kind: webhookKind,
     url: z.string(),
-    products: z
-      .array(z.string())
-      .meta({ description: "The keys of the products it follows, A to Z." }),
+    products: z.array(z.string()).meta({
+      description:
+        "The keys of the products it follows, A to Z; empty on an inbox webhook.",
+    }),
     projects: z
       .array(z.string())
       .meta({ description: "Deprecated alias of products." }),
@@ -509,7 +526,7 @@ const webhookProducts = z
   .meta({
     description:
       "Keys (like TRL) of the products to follow: you get their items' events, and the events of every project drawing from one of them. A product the key can't read is a 404, as a missing one is.",
-    example: ["BGP"],
+    example: ["ATL"],
   });
 const webhookProjectsAlias = z
   .array(z.string().min(1))
@@ -522,6 +539,10 @@ const webhookProjectsAlias = z
 
 export const webhookCreateSchema = z
   .strictObject({
+    kind: webhookKind.optional().meta({
+      description:
+        "activity (the default) for the events of products; inbox for the messages other bots send you, with products left out.",
+    }),
     url: webhookUrl,
     secret: webhookSecret,
     products: webhookProducts.optional(),
@@ -557,6 +578,120 @@ export const webhookDeletedSchema = z
   .object({ deleted: z.literal(true) })
   .openapi("WebhookDeleted");
 
+const botRefSchema = z.object({ id, name: z.string() }).openapi("BotRef");
+const messageText = z.string().meta({
+  description: `Markdown, up to ${MESSAGE_TEXT_MAX_BYTES} bytes of UTF-8 (64 KiB).`,
+});
+const expectsReply = z.boolean().meta({
+  description:
+    "False when the sender asked for no reply (an FYI): a reply to it is refused.",
+});
+const replyToRef = id.nullable().meta({
+  description:
+    "The id of the message this one answers; null on a thread's first message.",
+});
+const threadRef = id.meta({
+  description:
+    "The thread: the id of its first message. get_thread (GET /messages/{id}/thread) reads it.",
+});
+
+export const messageSchema = z
+  .object({
+    id,
+    from: botRefSchema,
+    to: botRefSchema,
+    threadId: threadRef,
+    replyTo: replyToRef,
+    expectsReply,
+    text: messageText,
+    createdAt: timestamp,
+    readAt: timestamp.nullable().meta({
+      description: "When the recipient marked it read; null while unread.",
+    }),
+  })
+  .openapi("Message");
+
+export const sentMessageSchema = z
+  .object({
+    message: messageSchema,
+    thread: z
+      .object({
+        id: threadRef,
+        messageCount: z
+          .int()
+          .meta({ description: "Messages in the thread, this one included." }),
+      })
+      .openapi("ThreadSummary"),
+  })
+  .openapi("SentMessage");
+
+export const inboxEntrySchema = z
+  .object({
+    id,
+    from: botRefSchema,
+    threadId: threadRef,
+    replyTo: replyToRef,
+    expectsReply,
+    preview: z.string().meta({
+      description: `The text's first ${MESSAGE_PREVIEW_CHARS} characters; get_thread has the whole text.`,
+    }),
+    truncated: z.boolean().meta({
+      description: "True when preview is shorter than the text.",
+    }),
+    createdAt: timestamp,
+    readAt: timestamp.nullable(),
+  })
+  .openapi("InboxEntry");
+
+export const messageCreateSchema = z
+  .strictObject({
+    to: z.string().min(1).optional().meta({
+      description:
+        "The bot to message: its name in any case, or its id. Required unless replyTo is set, which answers that message's other bot.",
+      example: "beta",
+    }),
+    text: messageText,
+    replyTo: id.optional().meta({
+      description:
+        "The id of a message in one of your conversations, to answer it in its thread. Leave it out to start a new thread.",
+    }),
+    expectsReply: z.boolean().optional().meta({
+      description:
+        "Default true. Send false for an FYI that needs no answer: the recipient then can't reply to it, which stops two bots thanking each other in a loop.",
+    }),
+  })
+  .openapi("MessageCreate");
+
+export const markReadSchema = z
+  .strictObject({
+    messageIds: z
+      .array(id)
+      .min(1)
+      .max(MARK_READ_MAX)
+      .meta({
+        description: `1 to ${MARK_READ_MAX} ids of messages sent to you, from list_inbox.`,
+      }),
+  })
+  .openapi("MarkRead");
+
+export const markReadResultSchema = z
+  .object({
+    results: z.array(
+      z.object({
+        id,
+        result: z.enum(["read", "already_read", "not_found"]).meta({
+          description:
+            "read: marked now. already_read: it was. not_found: no message with this id was sent to you (one you sent counts as not found).",
+        }),
+        readAt: timestamp.nullable(),
+      }),
+    ),
+    unreadMessages: z.int().meta({
+      description: "Your unread messages after this call.",
+    }),
+  })
+  .openapi("MarkReadResult");
+
 export function pageSchema<T extends z.ZodType>(item: T) {
   return z.object({
     items: z.array(item),
@@ -586,6 +721,18 @@ const productRef = id.meta({
 /** The legacy argument naming a product, from before projects. */
 const projectRef = id.meta({
   description: "Deprecated: the product's key (like TRL) or id.",
+});
+/** How the deprecated create and list name a product: projectId, or one of its aliases. */
+const legacyProductFields = (required: boolean) => ({
+  projectId: projectRef.optional().meta({
+    description: `${required ? "Required, unless you send project or product. " : ""}The product's key (like TRL) or id.`,
+  }),
+  project: id.optional().meta({
+    description: "Alias of projectId: send one of the three.",
+  }),
+  product: id.optional().meta({
+    description: "Alias of projectId: send one of the three.",
+  }),
 });
 const projectSlug = z.string().min(1).max(SLUG_MAX).meta({
   description:
@@ -874,13 +1021,11 @@ export const itemCreateSchema = z
 export const issueCreateSchema = z
   .strictObject(
     {
-      projectId: projectRef,
+      ...legacyProductFields(true),
       ...itemFields,
       assigneeId: id.nullable().optional(),
     },
     renamedFields({
-      product:
-        "on this deprecated route it is projectId, so send projectId, or use POST /items (add_todo or file_issue), which takes product",
       assignee:
         "on this deprecated route it is assigneeId, so send assigneeId, or use POST /items (add_todo or file_issue), which takes assignee",
     }),
@@ -1148,8 +1293,28 @@ export const pageQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional(),
 });
 
+export const inboxQuerySchema = pageQuerySchema.extend({
+  cursor: z.string().optional().meta({
+    description:
+      "The previous page's nextCursor; bound to the all it was issued under.",
+  }),
+  all: z.enum(["true", "false"]).optional().meta({
+    description: "true lists read messages too; by default only unread ones.",
+  }),
+});
+
+export const threadPageSchema = pageSchema(messageSchema)
+  .extend({
+    threadId: threadRef,
+    bots: z.array(botRefSchema).meta({
+      description:
+        "The thread's two bots: the first message's sender, then its recipient.",
+    }),
+  })
+  .openapi("Thread");
+
 export const issueListQuerySchema = pageQuerySchema.extend({
-  projectId: projectRef.optional(),
+  ...legacyProductFields(false),
   status: issueStatusSchema.optional(),
   assigneeId: id.optional(),
 });
@@ -1193,6 +1358,10 @@ export type LabelView = z.infer<typeof labelSchema>;
 export type ActorView = z.infer<typeof actorSchema>;
 export type WhoamiView = z.infer<typeof whoamiSchema>;
 export type WebhookView = z.infer<typeof webhookSchema>;
+export type MessageView = z.infer<typeof messageSchema>;
+export type InboxEntryView = z.infer<typeof inboxEntrySchema>;
+export type SentMessageView = z.infer<typeof sentMessageSchema>;
+export type MarkReadResultView = z.infer<typeof markReadResultSchema>;
 export type BotView = z.infer<typeof botSchema>;
 export type MyPhotoView = z.infer<typeof myPhotoSchema>;
 export type ActivityEventView = z.infer<typeof activityEventSchema>;
@@ -1251,11 +1420,11 @@ export const meSchema = z.object({
   }),
   products: z.array(webProductRefSchema).meta({
     description:
-      "The products the viewer sees, A to Z by key: every product for the owner.",
+      "The products the viewer sees, A to Z by key: every product for the person who runs this trail.",
   }),
   ownerName: z.string().meta({
     description:
-      "The owner actor's name, or TRAIL_OWNER_GITHUB before the owner has signed in.",
+      "The name of the person who runs this trail, or TRAIL_OWNER_GITHUB before they have signed in.",
   }),
   emailSignIn: z.boolean().meta({
     description:
@@ -1605,7 +1774,7 @@ export const personSchema = z.object({
   }),
   email: z.string().nullable().meta({
     description:
-      "The lowercased email address of a person invited by email; null for a GitHub invite and the owner.",
+      "The lowercased email address of a person invited by email; null for a GitHub invite and for the person who runs this trail.",
   }),
   owner: z.boolean().meta({
     description:

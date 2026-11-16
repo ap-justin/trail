@@ -212,6 +212,15 @@ test("the tool descriptions walk a bot through hooking up an OpenBot routine", a
   }
 });
 
+test("create_webhook lists both names an item event goes out under this release", async () => {
+  const client = await connect(bot.key);
+  const { tools } = await client.listTools();
+  const create = tools.find((t) => t.name === "create_webhook")?.description;
+  expect(create).toContain(
+    "an item event also goes out a second time, right after the first, as its new type: trail.issue.created as trail.item.created, trail.issue.updated as trail.item.updated",
+  );
+});
+
 test("a signed-in person gets no MCP tools: every webhook call is a 401 and changes nothing", async () => {
   const client = await connect(bot.key);
   const mine = await call(client, "create_webhook", {
@@ -275,7 +284,6 @@ test("a key without the read action is refused every webhook tool", async () => 
       "create_webhook",
       { url: "https://bot.example.com/w", secret: SECRET, projects: [a.key] },
     ],
-    ["list_webhooks", {}],
     ["update_webhook", { webhookId: mine.id, projects: [a.key] }],
     ["rotate_webhook_secret", { webhookId: mine.id, secret: NEXT_SECRET }],
     ["delete_webhook", { webhookId: mine.id }],
@@ -286,6 +294,8 @@ test("a key without the read action is refused every webhook tool", async () => 
     expect(res.isError, tool).toBe(true);
     expect(res.text, tool).toMatch(/^forbidden_action:/);
   }
+  // it lists only the inbox webhooks, which no action gates
+  expect((await call(writer, "list_webhooks")).items).toEqual([]);
 });
 
 test("a key narrower than a webhook can't list, change, test or delete it", async () => {
@@ -355,7 +365,7 @@ test("create_webhook and update_webhook take products, report products and its a
       })
     ).text,
   ).toBe(
-    "validation_failed: products is required: send the keys (like TRL) of the products whose events you want",
+    "validation_failed: products is required: send the keys (like TRL) of the products whose events you want, or send kind inbox for the messages other bots send you",
   );
 });
 

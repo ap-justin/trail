@@ -76,7 +76,7 @@ test("removing the email invite shuts a live session out on its next request", a
     error: {
       code: "not_invited",
       message:
-        "nia@example.com is not invited: ask the owner to invite your GitHub username or email address, then sign in again",
+        "nia@example.com is not invited: ask the person who runs this trail to invite your GitHub username or email address, then sign in again",
     },
   });
   expect(await me(cookie)).toMatchObject({

@@ -187,7 +187,7 @@ test("a bot sees, changes, tests and deletes only its own webhooks", async () =>
 });
 
 test("a key limited to one project can't subscribe to another: a 404, as for a missing project", async () => {
-  const scoped = createBot(db, "bg-ivy", {
+  const scoped = createBot(db, "alpha-scoped", {
     scope: { projects: [a.key], actions: ["read", "issues"] },
   });
   const hidden = await create({ projects: [b.key] }, scoped.key);
@@ -198,9 +198,9 @@ test("a key limited to one project can't subscribe to another: a 404, as for a m
   expect(hidden.body.error.message.replace(b.key, "X")).toBe(
     missing.body.error.message.replace("NOPE9", "X"),
   );
-  const ok = await create({ url: "https://bot.example.com/ivy" }, scoped.key);
+  const ok = await create({ url: "https://bot.example.com/alpha" }, scoped.key);
   expect(ok.status).toBe(201);
-  // another bot's wider webhook is invisible to ivy
+  // another bot's wider webhook is invisible to alpha-scoped
   const wide = await create({
     url: "https://bot.example.com/wide",
     projects: [a.key, b.key],
@@ -235,9 +235,35 @@ test("a key without the read action is refused", async () => {
   );
   expect(res.status).toBe(403);
   expect(res.body.error.code).toBe("forbidden_action");
-  expect((await call("GET", "/webhooks", { key: writer.key })).status).toBe(
-    403,
+});
+
+test("a key without the read action manages its bot's inbox webhooks, and lists only those", async () => {
+  const bot = createBot(db, "inbox only");
+  const writer = createKey(db, bot.actor.id, { actions: ["issues"] }).key;
+  const inbox = await call("POST", "/webhooks", {
+    json: {
+      kind: "inbox",
+      url: "https://bot.example.com/inbox-writer",
+      secret: SECRET,
+    },
+    key: writer,
+  });
+  expect(inbox.status).toBe(201);
+  const activity = await create(
+    { url: "https://bot.example.com/activity-full" },
+    bot.key,
   );
+  const listed = await call("GET", "/webhooks", { key: writer });
+  expect(listed.status).toBe(200);
+  expect(listed.body.items.map((w: Body) => w.id)).toEqual([inbox.body.id]);
+  expect(
+    (await call("GET", `/webhooks/${activity.body.id}`, { key: writer })).body
+      .error.code,
+  ).toBe("forbidden_action");
+  expect(
+    (await call("DELETE", `/webhooks/${inbox.body.id}`, { key: writer }))
+      .status,
+  ).toBe(200);
 });
 
 test.each([
@@ -374,7 +400,7 @@ test("a key narrower than a webhook can't change, rotate or ping it", async () =
 });
 
 test("a scoped key adding a project it can't see on update gets the same 404 as on create", async () => {
-  const scoped = createBot(db, "bg-june", {
+  const scoped = createBot(db, "beta-scoped", {
     scope: { projects: [a.key], actions: ["read"] },
   });
   const id = (await create({ url: "https://bot.example.com/june" }, scoped.key))

@@ -14,6 +14,7 @@ import {
   activityEvent,
   product,
   projectProduct,
+  type WebhookSubscriptionKind,
   webhookDelivery,
   webhookSubscription,
   webhookSubscriptionProduct,
@@ -94,6 +95,7 @@ export function createPingLimiter(now: () => number) {
 
 export type Webhook = {
   id: string;
+  kind: WebhookSubscriptionKind;
   actorId: string;
   url: string;
   /** product keys, A to Z */
@@ -142,6 +144,7 @@ export function webhooksOf(db: Db | Tx, rows: SubscriptionRow[]): Webhook[] {
     .all();
   return rows.map((r) => ({
     id: r.id,
+    kind: r.kind,
     actorId: r.actorId,
     url: r.url,
     products: links.filter((l) => l.subscriptionId === r.id).map((l) => l.key),
@@ -158,20 +161,28 @@ export function webhooksOf(db: Db | Tx, rows: SubscriptionRow[]): Webhook[] {
 export function insertSubscription(
   tx: Tx,
   settings: WebhookSettings,
-  input: { actorId: string; url: string; secret: string; productIds: string[] },
+  input: {
+    kind: WebhookSubscriptionKind;
+    actorId: string;
+    url: string;
+    secret: string;
+    productIds: string[];
+  },
 ): SubscriptionRow {
   const id = newId();
   const row = tx
     .insert(webhookSubscription)
     .values({
       id,
+      kind: input.kind,
       actorId: input.actorId,
       url: input.url,
       secretCipher: sealSecret(settings.key, id, input.secret),
     })
     .returning()
     .get();
-  setProducts(tx, id, input.productIds);
+  // an inbox subscription follows none
+  if (input.productIds.length > 0) setProducts(tx, id, input.productIds);
   return row;
 }
 
@@ -322,15 +333,17 @@ export function enqueueDeliveries(
 }
 
 /**
- * The webhook types an event goes out as: trail.<action>, and for a product
- * event also the trail.project.* it was sent as before products and projects
- * split, kept for one release.
+ * The webhook types an event goes out as: trail.<action>, and for one release
+ * a second type beside it: a product event also as the trail.project.* it was
+ * sent as before products and projects split, an item event also as the
+ * trail.item.* that replaces trail.issue.*.
  */
 export function deliveryTypesOf(action: string): string[] {
   const type = `trail.${action}`;
-  return action.startsWith("product.")
-    ? [type, `trail.project.${action.slice("product.".length)}`]
-    : [type];
+  const [subject, verb] = action.split(".", 2);
+  if (subject === "product") return [type, `trail.project.${verb}`];
+  if (subject === "issue") return [type, `trail.item.${verb}`];
+  return [type];
 }
 
 export const countOwn = (db: Db | Tx, actorId: string): number =>

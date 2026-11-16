@@ -57,7 +57,7 @@ const usage = `Usage:
                                    https://github.com/<owner>/<name>
 
   --label <agent-id>  the bot's id in the system that runs it, unique among bots
-  --products <keys>   scope: limit the key to these products, like BGP,ATL
+  --products <keys>   scope: limit the key to these products, like ATL,BTA
                       (--projects, the old name, still works)
   --actions <actions> scope: limit the key to these of read, issues, comments,
                       status_updates and admin, like read,issues,comments
@@ -192,7 +192,7 @@ const productsCell = (scope: KeyScopeView) =>
 const actionsCell = (scope: KeyScopeView) =>
   scope.actions?.join(",") ?? "all actions";
 
-/** `scope  products BGP; all actions`, or nothing for an unscoped key. */
+/** `scope  products BTA; all actions`, or nothing for an unscoped key. */
 function scopeLine(scope: KeyScopeView): string {
   if (scope.products === null && scope.actions === null) return "";
   const products = scope.products
@@ -239,7 +239,7 @@ function listFlag(
   const items = value.split(",").map((item) => item.trim());
   if (items.some((item) => item === "")) {
     throw new UsageError(
-      `--${flag} takes a comma-separated list with no blank entries, like --${flag}=${flag === "products" ? "BGP,ATL" : "read,issues"}; leave it out for no limit`,
+      `--${flag} takes a comma-separated list with no blank entries, like --${flag}=${flag === "products" ? "ATL,BTA" : "read,issues"}; leave it out for no limit`,
     );
   }
   return items;

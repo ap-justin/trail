@@ -4,11 +4,15 @@ import type {
   BotView,
   CommentView,
   ImportResultView,
+  InboxEntryView,
   IssueView,
   LabelView,
+  MarkReadResultView,
+  MessageView,
   PageView,
   ProductView,
   ProjectView,
+  SentMessageView,
   StatusUpdateView,
   WebhookView,
   WhoamiView,
@@ -21,14 +25,18 @@ import type {
   ImportResult,
   Issue,
   Label,
+  MarkReadResult,
+  Message,
   Page,
   ProductView as Product,
   ProjectView as Project,
+  SentMessage,
   StatusUpdate,
   Webhook,
   Whoami,
 } from "../service/index.js";
 import type { KeyScope } from "../service/keys.js";
+import { MESSAGE_PREVIEW_CHARS } from "../service/messages.js";
 
 // One function per resource, each listing its wire keys, so a new column reaches the wire only on purpose.
 
@@ -198,6 +206,7 @@ export function toWhoami(row: Whoami, scope: KeyScope): WhoamiView {
     products: row.products.map(ref),
     photoUrl: row.photoUrl,
     title: row.title,
+    unreadMessages: row.unreadMessages,
   };
 }
 
@@ -234,6 +243,7 @@ export function toImportResult(result: ImportResult): ImportResultView {
 export function toWebhook(row: Webhook): WebhookView {
   return {
     id: row.id,
+    kind: row.kind,
     url: row.url,
     products: row.products,
     projects: row.products,
@@ -245,5 +255,53 @@ export function toWebhook(row: Webhook): WebhookView {
     lastErrorAt: row.lastErrorAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+export function toMessage(row: Message): MessageView {
+  return {
+    id: row.id,
+    from: { id: row.from.id, name: row.from.name },
+    to: { id: row.to.id, name: row.to.name },
+    threadId: row.threadId,
+    replyTo: row.replyToId,
+    expectsReply: row.expectsReply,
+    text: row.text,
+    createdAt: row.createdAt.toISOString(),
+    readAt: row.readAt?.toISOString() ?? null,
+  };
+}
+
+export function toSentMessage(row: SentMessage): SentMessageView {
+  return {
+    message: toMessage(row.message),
+    thread: { id: row.thread.id, messageCount: row.thread.messageCount },
+  };
+}
+
+export function toInboxEntry(row: Message): InboxEntryView {
+  // by code point, so a preview never ends on half a surrogate pair
+  const chars = [...row.text];
+  return {
+    id: row.id,
+    from: { id: row.from.id, name: row.from.name },
+    threadId: row.threadId,
+    replyTo: row.replyToId,
+    expectsReply: row.expectsReply,
+    preview: chars.slice(0, MESSAGE_PREVIEW_CHARS).join(""),
+    truncated: chars.length > MESSAGE_PREVIEW_CHARS,
+    createdAt: row.createdAt.toISOString(),
+    readAt: row.readAt?.toISOString() ?? null,
+  };
+}
+
+export function toMarkReadResult(row: MarkReadResult): MarkReadResultView {
+  return {
+    results: row.results.map((r) => ({
+      id: r.id,
+      result: r.result,
+      readAt: r.readAt?.toISOString() ?? null,
+    })),
+    unreadMessages: row.unreadMessages,
   };
 }
