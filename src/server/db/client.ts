@@ -10,7 +10,6 @@ import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { readMigrationFiles } from "drizzle-orm/migrator";
-import { resolveProductOwners } from "./product-owners.js";
 import * as schema from "./schema.js";
 
 export function openDatabase(path: string) {
@@ -113,22 +112,17 @@ function refuseBotNamesClashingByCase(sqlite: Db["$client"]): void {
 const productsMigration = 1794806529483;
 
 /**
- * 0015's data step: sets each product's owner from the seed mapping, then makes the items its
- * owner created todos, assigned to the owner when unassigned. A product with no resolved owner
- * keeps every item an issue. Statuses and updated_at stay as they were.
+ * 0015's data step: each product a bot created gets that bot as its owner, then the items its
+ * owner created become todos, assigned to the owner when unassigned. A product a person created
+ * has no owner and keeps every item an issue. Statuses and updated_at stay as they were.
  */
 function typeItemsByOwner(sqlite: Db["$client"]): void {
-  const setOwner = sqlite.prepare(
-    "update product set owner_id = ? where key = ?",
-  );
-  const makeTodos = sqlite.prepare(
-    "update issue set type = 'todo', assignee_id = coalesce(assignee_id, @owner) where created_by = @owner and product_id = (select id from product where key = @product)",
-  );
-  for (const { product, ownerId } of resolveProductOwners(sqlite)) {
-    if (ownerId === null) continue;
-    setOwner.run(ownerId, product);
-    makeTodos.run({ owner: ownerId, product });
-  }
+  sqlite.exec(`
+    update product set owner_id = created_by
+      where (select kind from actor where id = product.created_by) = 'bot';
+    update issue set type = 'todo', assignee_id = coalesce(assignee_id, created_by)
+      where created_by = (select owner_id from product where id = issue.product_id);
+  `);
   // a replayed create returns its stored row as the service returned it, so stored rows take
   // the renamed column and an item its type
   sqlite.exec(`

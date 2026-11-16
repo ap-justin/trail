@@ -5,7 +5,6 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { loadDatabaseConfig } from "./config.js";
 import { type Db, migrate, openDatabase } from "./db/client.js";
-import { resolveProductOwners } from "./db/product-owners.js";
 import { ValidationError } from "./service/errors.js";
 import {
   createBot,
@@ -18,6 +17,7 @@ import {
   setBotTitle,
 } from "./service/keys.js";
 import {
+  listProductOwners,
   type ProductChange,
   setProductOwner,
   setProductRepo,
@@ -47,8 +47,7 @@ const usage = `Usage:
                                    mint another key for an existing bot
   trail key list                   list every key's prefix, bot, times and scope
   trail key revoke <prefix>        revoke a key by its prefix or the full key
-  trail products owners            list how each product's owner bot resolves
-                                   from the seed list: by label, by name or none
+  trail products owners            list each product's current owner bot, or none
   trail products set-owner <key> <bot-id-label-or-name>
                                    make a bot the product's owner, whose items
                                    are todos
@@ -409,13 +408,8 @@ const productsOwners: Command<null> = {
   },
   run(db, _, io) {
     printTable(io, [
-      ["product", "bot", "resolved", "owner"],
-      ...resolveProductOwners(db.$client).map((r) => [
-        r.product,
-        r.bot ?? "-",
-        r.resolvedBy,
-        r.ownerId ?? "-",
-      ]),
+      ["product", "owner"],
+      ...listProductOwners(db).map((r) => [r.key, r.owner ?? "none"]),
     ]);
   },
 };

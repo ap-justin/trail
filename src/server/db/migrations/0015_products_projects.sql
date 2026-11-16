@@ -2,8 +2,8 @@
 -- `product` with its rows and ids, and so do its join tables and every project_id column;
 -- renames come first so SQLite rewrites each referencing foreign key, then the tables whose
 -- named CHECKs or columns change are rebuilt, then the new `project` tables are created.
--- Items are copied as type 'issue'; migrate() in client.ts then resolves product owners and
--- turns each owner's own items into todos, in this same transaction.
+-- Items are copied as type 'issue'; migrate() in client.ts then makes the bot that created
+-- each product its owner and turns that owner's own items into todos, in this same transaction.
 ALTER TABLE `project` RENAME TO `product`;--> statement-breakpoint
 CREATE TABLE `__new_product` (
 	`id` text PRIMARY KEY NOT NULL,

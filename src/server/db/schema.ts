@@ -391,7 +391,7 @@ export const issue = sqliteTable(
     sourceAuthor: text("source_author"),
     // the imported row's workflow-state name in its source system, e.g. "In Review", kept for reference
     sourceStatus: text("source_status"),
-    // the imported row's identifier in its source system, uppercased (JUS-187); a lookup alias for the issue
+    // the imported row's identifier in its source system, uppercased (ABC-187); a lookup alias for the issue
     sourceKey: text("source_key"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

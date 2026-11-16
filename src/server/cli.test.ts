@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
+import { eq } from "drizzle-orm";
 import { afterAll, expect, test } from "vitest";
 import { runCli } from "./cli.js";
 import { migrate, openDatabase } from "./db/client.js";
@@ -289,19 +290,20 @@ test("--products and --projects together are a usage error", () => {
   expect(stderr).toMatch(/^trail: send --products or --projects, not both/);
 });
 
-test("products owners prints how each product's owner resolves, one line per product, writing nothing", () => {
-  const ivy = withDb((db) => createBot(db, "ivy").actor);
+test("products owners prints each product's current owner, one line per product, writing nothing", () => {
+  withDb((db) => {
+    const alpha = createBot(db, "alpha").actor;
+    db.update(product)
+      .set({ ownerId: alpha.id })
+      .where(eq(product.key, "BGP"))
+      .run();
+  });
   const productRows = () => withDb((db) => db.select().from(product).all());
   const before = productRows();
   const { code, stdout, stderr } = run("products", "owners");
   expect(code).toBe(0);
   expect(stderr).toBe("");
-  const lines = stdout.trimEnd().split("\n");
-  expect(lines[0]).toMatch(/^product\s+bot\s+resolved\s+owner$/);
-  expect(lines.slice(1).map((l) => l.split(/\s+/))).toEqual([
-    ["ATL", "-", "none", "-"],
-    ["BGP", "Ivy", "name", ivy.id],
-  ]);
+  expect(stdout).toBe("product  owner\nATL      none\nBGP      alpha\n");
   expect(productRows()).toEqual(before);
 });
 
@@ -336,14 +338,14 @@ test("products set-owner refuses a person and an unknown product or bot with exi
   for (const argv of [
     ["products", "set-owner", "BGP", person.id],
     ["products", "set-owner", "BGP", "nobody-at-all"],
-    ["products", "set-owner", "NOPE", "ivy"],
+    ["products", "set-owner", "NOPE", "alpha"],
   ]) {
     const { code, stdout, stderr } = run(...argv);
     expect(code, argv.join(" ")).toBe(1);
     expect(stdout).toBe("");
     expect(stderr).toMatch(/^trail: /);
   }
-  expect(run("products", "set-owner", "NOPE", "ivy").stderr).toBe(
+  expect(run("products", "set-owner", "NOPE", "alpha").stderr).toBe(
     "trail: no product NOPE: `trail products owners` lists every product's key\n",
   );
 });

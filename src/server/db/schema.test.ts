@@ -342,11 +342,11 @@ test("an issue's external ref is unique within its project only", () => {
     .values({ key: "REF", name: "refs", createdBy: bot.id })
     .returning()
     .get();
-  newIssue({ externalRef: "JUS-1" })();
-  newIssue({ externalRef: "JUS-1", productId: other.id })();
+  newIssue({ externalRef: "ABC-1" })();
+  newIssue({ externalRef: "ABC-1", productId: other.id })();
   newIssue()();
   newIssue()();
-  expect(errorCode(newIssue({ externalRef: "JUS-1" }))).toBe(
+  expect(errorCode(newIssue({ externalRef: "ABC-1" }))).toBe(
     "SQLITE_CONSTRAINT_UNIQUE",
   );
 });
@@ -355,7 +355,7 @@ test("a project's external ref is unique across projects", () => {
   const withRef = (key: string) => () =>
     db
       .insert(product)
-      .values({ key, name: "p", createdBy: bot.id, externalRef: "P-JUS-9" })
+      .values({ key, name: "p", createdBy: bot.id, externalRef: "P-ABC-9" })
       .run();
   withRef("EXA")();
   expect(errorCode(withRef("EXB"))).toBe("SQLITE_CONSTRAINT_UNIQUE");

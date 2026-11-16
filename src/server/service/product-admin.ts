@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import type { Db } from "../db/client.js";
 import { actor, product } from "../db/schema.js";
 import { NotFoundError } from "./errors.js";
@@ -58,6 +58,18 @@ export function setProductOwner(
     },
     { behavior: "immediate" },
   );
+}
+
+/** Every product's key and its owner bot's name, null for none, in key order. */
+export function listProductOwners(
+  db: Db,
+): { key: string; owner: string | null }[] {
+  return db
+    .select({ key: product.key, owner: actor.displayName })
+    .from(product)
+    .leftJoin(actor, eq(actor.id, product.ownerId))
+    .orderBy(asc(product.key))
+    .all();
 }
 
 /** Sets the product's GitHub repository URL, as `update_product`'s repoUrl takes it. */
