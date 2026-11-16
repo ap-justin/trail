@@ -2655,11 +2655,12 @@
           "isUnique": false,
           "where": "\"status\" = 'failed'"
         },
-        "webhook_delivery_subscription_event_unique": {
-          "name": "webhook_delivery_subscription_event_unique",
+        "webhook_delivery_subscription_event_type_unique": {
+          "name": "webhook_delivery_subscription_event_type_unique",
           "columns": [
             "subscription_id",
-            "event_id"
+            "event_id",
+            "type"
           ],
           "isUnique": true
         }

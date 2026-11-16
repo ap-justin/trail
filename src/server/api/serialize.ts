@@ -101,6 +101,15 @@ export function toIssue(row: Issue): IssueView {
   };
 }
 
+/** An item as the routes from before triage serve it: triage, which their status enum lacks, reads as open. */
+export function toLegacyIssue(row: Issue) {
+  const view = toIssue(row);
+  return {
+    ...view,
+    status: view.status === "triage" ? ("open" as const) : view.status,
+  };
+}
+
 /** `view` with the note naming what replaces the deprecated call that produced it. */
 export const deprecated = <T extends object>(view: T, note: string) => ({
   ...view,
@@ -198,13 +207,18 @@ export function toPage<T, V>(page: Page<T>, view: (row: T) => V): PageView<V> {
 }
 
 export function toImportResult(result: ImportResult): ImportResultView {
+  // the service counts products under projects, the name its stored events carry
+  const counts = (n: ImportResult["created"]) => ({
+    ...n,
+    products: n.projects,
+  });
   return {
     product: toProduct(result.product),
     project: toProduct(result.product),
     renumbered: result.renumbered,
-    created: result.created,
-    updated: result.updated,
-    unchanged: result.unchanged,
+    created: counts(result.created),
+    updated: counts(result.updated),
+    unchanged: counts(result.unchanged),
   };
 }
 

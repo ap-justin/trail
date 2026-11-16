@@ -1,4 +1,13 @@
-import { and, asc, eq, inArray, notInArray, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  inArray,
+  isNull,
+  notInArray,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { Db } from "../db/client.js";
 import { newId } from "../db/id.js";
 import {
@@ -172,7 +181,11 @@ export function insertSubscription(
  */
 export const isPending = sql`${webhookDelivery.status} = 'pending'`;
 
-/** The subscription's pending deliveries whose event is in none of `productIds`. */
+/**
+ * The subscription's pending deliveries whose event is in none of
+ * `productIds`: an event of another product, or a project's own event (which
+ * carries no product) when the project draws from none of them.
+ */
 export const unfollowedDeliveries = (
   tx: Tx | Db,
   subscriptionId: string,
@@ -186,16 +199,29 @@ export const unfollowedDeliveries = (
       and(
         eq(webhookDelivery.subscriptionId, subscriptionId),
         isPending,
-        notInArray(activityEvent.productId, productIds),
+        or(
+          notInArray(activityEvent.productId, productIds),
+          and(
+            isNull(activityEvent.productId),
+            notInArray(
+              activityEvent.projectId,
+              tx
+                .select({ id: projectProduct.projectId })
+                .from(projectProduct)
+                .where(inArray(projectProduct.productId, productIds)),
+            ),
+          ),
+        ),
       ),
     );
 
 /**
  * Replaces the products a subscription follows. Its pending deliveries for a
  * product it no longer follows go with them, since the worker never re-checks
- * following; sent and failed ones stay as history (a project's own event,
- * which carries no product, stays queued). A product followed again later gets
- * only the events committed after.
+ * following, and so do those of a project's own events (which carry no
+ * product) when the project draws from no product it still follows; sent and
+ * failed ones stay as history. A product followed again
+ * later gets only the events committed after.
  */
 export function setProducts(
   tx: Tx,
@@ -278,17 +304,33 @@ export function enqueueDeliveries(
     .where(followed)
     .all();
   if (followers.length === 0) return;
+  const types = deliveryTypesOf(event.action);
+  // in this order: the worker sends one event's deliveries in insertion order
   tx.insert(webhookDelivery)
     .values(
-      followers.map((f) => ({
-        subscriptionId: f.id,
-        eventId: event.id,
-        seq: event.seq,
-        type: `trail.${event.action}`,
-        nextAttemptAt: new Date(now),
-      })),
+      followers.flatMap((f) =>
+        types.map((type) => ({
+          subscriptionId: f.id,
+          eventId: event.id,
+          seq: event.seq,
+          type,
+          nextAttemptAt: new Date(now),
+        })),
+      ),
     )
     .run();
+}
+
+/**
+ * The webhook types an event goes out as: trail.<action>, and for a product
+ * event also the trail.project.* it was sent as before products and projects
+ * split, kept for one release.
+ */
+export function deliveryTypesOf(action: string): string[] {
+  const type = `trail.${action}`;
+  return action.startsWith("product.")
+    ? [type, `trail.project.${action.slice("product.".length)}`]
+    : [type];
 }
 
 export const countOwn = (db: Db | Tx, actorId: string): number =>

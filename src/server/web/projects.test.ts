@@ -255,6 +255,26 @@ describe("GET /projects/:slug/items", () => {
     });
   });
 
+  test("a cursor sent with other filters than it was issued under is a 422 saying to start again without it", async () => {
+    const first = await get("/projects/launch/items?limit=1", member);
+    const cursor = first.body.nextCursor;
+    for (const filter of ["status=done", "type=todo", `product=${beta.key}`]) {
+      const res = await get(
+        `/projects/launch/items?limit=1&${filter}&cursor=${cursor}`,
+        member,
+      );
+      expect(res.status, filter).toBe(422);
+      expect(res.body.error.message).toBe(
+        "cursor was issued for other filters: it pages only the list it came from, so leave cursor out to start this list from its first page",
+      );
+    }
+    const kept = await get(
+      `/projects/launch/items?limit=1&cursor=${cursor}`,
+      member,
+    );
+    expect(kept.status).toBe(200);
+  });
+
   test("a project with no items has no groups and zero counts", async () => {
     const { body } = await get("/projects/seen-only/items", member);
     expect(body.groups).toEqual([]);

@@ -1,6 +1,6 @@
 import { beforeAll, expect, test } from "vitest";
 import { createBot } from "../service/keys.js";
-import { projectKey, setupTestApp } from "../test-app.js";
+import { atFakeTimeAsync, projectKey, setupTestApp } from "../test-app.js";
 
 const { db, bot, request } = setupTestApp();
 
@@ -46,17 +46,23 @@ test("POST /projects/{slug}/items adds items from two products and DELETE takes 
   await request("POST", "/api/v1/projects", {
     json: { name: "rest items", slug: "rest-items" },
   });
-  const own = await json(
-    await request("POST", "/api/v1/items", {
-      json: { type: "todo", product: mine.key, title: "own" },
-    }),
-  );
-  const theirs = await json(
-    await request("POST", "/api/v1/items", {
-      json: { type: "todo", product: other.product.key, title: "theirs" },
-      key: other.key,
-    }),
-  );
+  // one stamp apiece: same-millisecond rows would list in random id order
+  const [own, theirs] = (await atFakeTimeAsync([
+    async () =>
+      json(
+        await request("POST", "/api/v1/items", {
+          json: { type: "todo", product: mine.key, title: "own" },
+        }),
+      ),
+    async () =>
+      json(
+        await request("POST", "/api/v1/items", {
+          json: { type: "todo", product: other.product.key, title: "theirs" },
+          key: other.key,
+        }),
+      ),
+  ])) as Body[];
+  if (!own || !theirs) throw new Error("a create answered nothing");
   const added = await request("POST", "/api/v1/projects/rest-items/items", {
     json: { items: [own.key, theirs.key] },
   });
@@ -140,4 +146,21 @@ test("a key that reaches no product of a project gets the 404 an unknown slug ge
       ),
     );
   }
+});
+
+test("a project status update with externalRef is a 422 pointing to the Idempotency-Key header for safe retries", async () => {
+  await request("POST", "/api/v1/projects", {
+    json: { name: "rest refs", slug: "rest-refs" },
+  });
+  const res = await request(
+    "POST",
+    "/api/v1/projects/rest-refs/status-updates",
+    {
+      json: { body: "b", health: "on_track", externalRef: "lin-1" },
+    },
+  );
+  expect(res.status).toBe(422);
+  expect((await json(res)).error.message).toBe(
+    "externalRef is kept on a product's status update only: drop externalRef to post on the project, and send an idempotency key (the Idempotency-Key header over REST, idempotency_key over MCP) to make the post safe to retry",
+  );
 });

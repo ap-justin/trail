@@ -30,7 +30,7 @@ const importProject = createRoute({
   responses: {
     200: jsonContent(
       importResultSchema,
-      "The product (project is its deprecated alias), per kind how many rows were created, updated and left unchanged, and the issues that were renumbered. Imported items keep their status and are typed todo when the calling bot owns the product, else issue.",
+      "The product (project is its deprecated alias), per kind how many rows were created, updated and left unchanged (products counted under products; projects is its deprecated alias), and the issues that were renumbered. A product the import creates is owned by the calling bot. Imported items keep their status and are typed todo when the calling bot owns the product, else issue.",
     ),
     ...forbiddenError("admin", { scope: true }),
     ...writeErrors,

@@ -67,6 +67,41 @@ describe("a create repeated with its Idempotency-Key returns the first response 
       () => `/projects/${project.id}/labels`,
       () => ({ name: "once" }),
     ],
+    [
+      "POST /products",
+      () => "/products",
+      () => ({ key: "IDN", name: "new route" }),
+    ],
+    [
+      "POST /items (todo)",
+      () => "/items",
+      () => ({ type: "todo", product: project.key, title: "once" }),
+    ],
+    [
+      "POST /items (issue)",
+      () => "/items",
+      () => ({ type: "issue", product: project.key, title: "once" }),
+    ],
+    [
+      "POST /items/:key/comments",
+      () => `/items/${issue.key}/comments`,
+      () => ({ body: "once" }),
+    ],
+    [
+      "POST /projects (a project)",
+      () => "/projects",
+      () => ({ name: "once", products: [project.key] }),
+    ],
+    [
+      "POST /products/:key/status-updates",
+      () => `/products/${project.key}/status-updates`,
+      () => ({ body: "once", health: "on_track" }),
+    ],
+    [
+      "POST /products/:key/labels",
+      () => `/products/${project.key}/labels`,
+      () => ({ name: "once on the new route" }),
+    ],
   ])("%s", async (name, path, json) => {
     const key = `retry ${name}`;
     const first = await post(path(), json(), key);
@@ -294,5 +329,93 @@ describe("a key stored before items had products and types", () => {
     expect(((await res.json()) as Body).error.code).toBe(
       "idempotency_key_reused",
     );
+  });
+});
+
+describe("a retry hashes the request as the caller sent it, not values filled in from current data", () => {
+  test("a todo retried after its product changed owner replays", async () => {
+    const product = (await (
+      await request("POST", "/api/v1/products", {
+        json: { key: projectKey(), name: "owner moves" },
+      })
+    ).json()) as Body;
+    const json = { type: "todo", product: product.key, title: "planned" };
+    const first = await post("/items", json, "todo before owner move");
+    expect(first.status).toBe(201);
+    const heir = addBot("idem heir");
+    await request("PATCH", `/api/v1/products/${product.key}`, {
+      json: { owner: heir.actor.id },
+    });
+    const events = eventCount();
+    const again = await post("/items", json, "todo before owner move");
+    expect(again.status).toBe(201);
+    expect(await again.json()).toEqual(await first.json());
+    expect(eventCount()).toBe(events);
+  });
+
+  test("a project with no products named, retried after the caller came to own a second product, replays", async () => {
+    const lead = addBot("idem lead");
+    await request("POST", "/api/v1/products", {
+      json: { key: projectKey(), name: "lead's one" },
+      key: lead.key,
+    });
+    const json = { name: "defaulted products" };
+    const first = await post("/projects", json, "default products", lead.key);
+    expect(first.status).toBe(201);
+    await request("POST", "/api/v1/products", {
+      json: { key: projectKey(), name: "lead's second" },
+      key: lead.key,
+    });
+    const again = await post("/projects", json, "default products", lead.key);
+    expect(again.status).toBe(201);
+    expect(await again.json()).toEqual(await first.json());
+  });
+});
+
+test("a product create stored before products were split from projects replays when retried", async () => {
+  const made = (await (
+    await request("POST", "/api/v1/products", {
+      json: { key: projectKey(), name: "before the split" },
+    })
+  ).json()) as Body;
+  // the request project.create hashed, and the row it stored, before migration 0015
+  db.transaction((tx) =>
+    storeResult(
+      tx,
+      bot.actor.id,
+      {
+        key: "product before split",
+        scope: "project.create",
+        request: {
+          name: "before the split",
+          key: made.key,
+          description: "",
+          externalRef: null,
+        },
+      },
+      {
+        id: made.id,
+        key: made.key,
+        name: made.name,
+        description: "",
+        issueSeq: 0,
+        externalRef: null,
+        createdBy: bot.actor.id,
+        createdAt: made.createdAt,
+        updatedAt: made.updatedAt,
+      },
+    ),
+  );
+  const again = await post(
+    "/projects",
+    { key: made.key, name: "before the split" },
+    "product before split",
+  );
+  expect(again.status).toBe(201);
+  expect(await again.json()).toMatchObject({
+    id: made.id,
+    key: made.key,
+    owner: made.owner,
+    deprecated: expect.any(String),
   });
 });

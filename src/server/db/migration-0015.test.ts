@@ -553,6 +553,46 @@ test("a label still goes only on an item of its own product", () => {
   ).toBe("SQLITE_CONSTRAINT_FOREIGNKEY");
 });
 
+test("a sent delivery stays, and its event can queue once more under each other type", () => {
+  const db = legacyDb();
+  const insert = db.$client.prepare(
+    "insert into webhook_delivery (id, subscription_id, event_id, seq, type, next_attempt_at, created_at) values (?, 'w1', 'e1', 1, ?, 0, 0)",
+  );
+  expect(errorCode(() => insert.run("d2", "trail.product.created"))).toBe(
+    "no error",
+  );
+  expect(errorCode(() => insert.run("d3", "trail.product.created"))).toBe(
+    "SQLITE_CONSTRAINT_UNIQUE",
+  );
+  expect(errorCode(() => insert.run("d4", "trail.project.created"))).toBe(
+    "SQLITE_CONSTRAINT_UNIQUE",
+  );
+});
+
+test("before the migration an event queued once per webhook, whatever its type", () => {
+  const db = open();
+  migrate(db, through(14));
+  db.$client.exec(`
+    insert into actor (id, kind, display_name, label, created_at) values ('b1', 'bot', 'builder', 'agt_1', 0);
+    insert into project (id, key, name, created_by, created_at, updated_at) values ('p1', 'TRL', 'trail', 'b1', 0, 0);
+    insert into activity_event (id, seq, actor_id, subject_type, subject_id, project_id, action, payload, created_at)
+      values ('e1', 1, 'b1', 'project', 'p1', 'p1', 'project.updated', '{}', 0);
+    insert into webhook_subscription (id, actor_id, url, secret_cipher, created_at, updated_at)
+      values ('s1', 'b1', 'https://bot.example.com/hook', 'x', 0, 0);
+    insert into webhook_delivery (id, subscription_id, event_id, seq, type, next_attempt_at, created_at)
+      values ('d1', 's1', 'e1', 1, 'trail.project.updated', 0, 0);
+  `);
+  const insertProductType = () =>
+    db.$client
+      .prepare(
+        "insert into webhook_delivery (id, subscription_id, event_id, seq, type, next_attempt_at, created_at) values ('d2', 's1', 'e1', 1, 'trail.product.updated', 0, 0)",
+      )
+      .run();
+  expect(errorCode(insertProductType)).toBe("SQLITE_CONSTRAINT_UNIQUE");
+  migrate(db);
+  expect(errorCode(insertProductType)).toBe("no error");
+});
+
 test("a fresh database migrates to the product tables, with no projects", () => {
   const db = open();
   migrate(db);

@@ -251,6 +251,79 @@ const gated = (): Gated[] => [
   },
   { route: "POST /import", action: "admin", json: importBody },
   { route: "GET /bots", action: "admin" },
+  { route: "GET /products", action: "read" },
+  { route: `GET /products/${a.key}`, action: "read" },
+  { route: `GET /products/${a.key}/labels`, action: "read" },
+  { route: `GET /products/${a.key}/status-updates`, action: "read" },
+  { route: `GET /items?product=${a.key}`, action: "read" },
+  { route: `GET /items/${issueA}`, action: "read" },
+  { route: `GET /items/${issueA}/comments`, action: "read" },
+  { route: `GET /projects/${projectSlugA}`, action: "read" },
+  { route: `GET /projects/${projectSlugA}/status-updates`, action: "read" },
+  {
+    route: "POST /items",
+    action: "issues",
+    json: () => ({ type: "todo", product: a.key, title: `t${++made}` }),
+  },
+  {
+    route: "POST /items",
+    action: "issues",
+    json: () => ({ type: "issue", product: a.key, title: `t${++made}` }),
+  },
+  {
+    route: `PATCH /items/${issueA}`,
+    action: "issues",
+    json: () => ({ title: `t${++made}` }),
+  },
+  {
+    route: "POST /projects",
+    action: "issues",
+    json: () => ({ name: `p${++made}`, products: [a.key] }),
+  },
+  {
+    route: `PATCH /projects/${projectSlugA}`,
+    action: "issues",
+    json: () => ({ goal: `g${++made}` }),
+  },
+  {
+    route: `POST /projects/${projectSlugA}/items`,
+    action: "issues",
+    json: () => ({ items: [issueA] }),
+  },
+  {
+    route: `DELETE /projects/${projectSlugA}/items/${issueA}`,
+    action: "issues",
+  },
+  {
+    route: `POST /items/${issueA}/comments`,
+    action: "comments",
+    json: () => ({ body: "hi" }),
+  },
+  {
+    route: `POST /products/${a.key}/status-updates`,
+    action: "status_updates",
+    json: () => ({ body: "ok", health: "on_track" }),
+  },
+  {
+    route: `POST /projects/${projectSlugA}/status-updates`,
+    action: "status_updates",
+    json: () => ({ body: "ok", health: "on_track" }),
+  },
+  {
+    route: "POST /products",
+    action: "admin",
+    json: () => ({ key: projectKey(), name: "new" }),
+  },
+  {
+    route: `PATCH /products/${a.key}`,
+    action: "admin",
+    json: () => ({ description: `d${++made}` }),
+  },
+  {
+    route: `POST /products/${a.key}/labels`,
+    action: "admin",
+    json: () => ({ name: `label ${++made}` }),
+  },
 ];
 
 const send = (row: Gated, key: string) => {
@@ -258,9 +331,21 @@ const send = (row: Gated, key: string) => {
   return request(method, `/api/v1${path}`, { key, json: row.json?.() });
 };
 
+let projectSlugA = "";
+
 test.each(["read", "issues", "comments", "status_updates", "admin"])(
   "a key with only %s passes exactly the routes that need it",
   async (action) => {
+    // made here, not in beforeAll: a project event in A's feed would join the activity lists above
+    if (!projectSlugA) {
+      projectSlugA = (
+        await seed("POST", "/api/v1/projects", {
+          name: "gate project",
+          slug: "gate-project",
+          products: [a.key],
+        })
+      ).slug;
+    }
     const only = createBot(db, `only ${action}`, {
       scope: { actions: [action] },
     });
@@ -494,6 +579,8 @@ test("the spec documents each gated operation's 403 with the action it needs", a
     `The key lacks the ${action} action (code forbidden_action)`;
   const orScope = (action: string) =>
     `${needs(action)}, or reaches only some products (code forbidden_scope)`;
+  const orOwner = (action: string) =>
+    `${needs(action)}, or the product has an owner bot and the call is that bot's alone: adding a todo, moving an issue out of triage (its filer may cancel it), or changing an item's type; the message names the owner and what to do instead (code forbidden)`;
   expect(forbidden).toEqual({
     "GET /activity": needs("read"),
     "GET /bots": needs("admin"),
@@ -517,13 +604,13 @@ test("the spec documents each gated operation's 403 with the action it needs", a
     "PUT /me/photo": null,
     "DELETE /me/title": null,
     "PUT /me/title": null,
-    "PATCH /items/{key}": needs("issues"),
-    "PATCH /issues/{id}": needs("issues"),
+    "PATCH /items/{key}": orOwner("issues"),
+    "PATCH /issues/{id}": orOwner("issues"),
     "PATCH /products/{key}": needs("admin"),
     "PATCH /projects/{ref}":
       "The key lacks the issues action, or for a product key the admin action (code forbidden_action)",
     "POST /import": orScope("admin"),
-    "POST /items": needs("issues"),
+    "POST /items": orOwner("issues"),
     "POST /items/{key}/comments": needs("comments"),
     "POST /issues": needs("issues"),
     "POST /issues/{id}/comments": needs("comments"),

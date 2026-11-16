@@ -354,13 +354,21 @@ export type Whoami = ActorWithPhoto & {
 /** The products a webhook follows: `products`, or `projects`, its deprecated alias. */
 export type FollowedProducts = { products?: string[]; projects?: string[] };
 
-function followedRefs(input: FollowedProducts): string[] | undefined {
+function followedRefs(
+  input: FollowedProducts,
+): { refs: string[]; field: "products" | "projects" } | undefined {
   if (input.products !== undefined && input.projects !== undefined) {
     throw new ValidationError(
       "send products alone: projects is its deprecated alias, and both together is ambiguous",
     );
   }
-  return input.products ?? input.projects;
+  if (input.products !== undefined) {
+    return { refs: input.products, field: "products" };
+  }
+  if (input.projects !== undefined) {
+    return { refs: input.projects, field: "projects" };
+  }
+  return undefined;
 }
 
 /** Most items one add_to_project call takes. */
@@ -507,8 +515,15 @@ export function createService({
     if (changed > 0) publishActor(actorId);
   }
 
-  /** Product keys or ids as the product ids a webhook follows; one the key can't see is a 404, as everywhere. */
-  function webhookProductIds(actor: ActingActor, refs: string[]): string[] {
+  /**
+   * Product keys or ids as the product ids a webhook follows; one the key
+   * can't see is a 404, as everywhere, and a project's slug a 422 naming its
+   * products, since `projects` reads as if it took one.
+   */
+  function webhookProductIds(
+    actor: ActingActor,
+    { refs, field }: { refs: string[]; field: "products" | "projects" },
+  ): string[] {
     if (refs.length === 0) {
       throw new ValidationError(
         "products must name at least one product: send the keys (like TRL) of the products whose events you want",
@@ -519,7 +534,20 @@ export function createService({
         `products names ${refs.length} products, over the limit of ${WEBHOOK_PRODUCTS_MAX}: follow fewer, or split them across webhooks`,
       );
     }
-    return [...new Set(refs.map((ref) => resolveProduct(db, ref, actor).id))];
+    const idOf = (ref: string) => {
+      try {
+        return resolveProduct(db, ref, actor).id;
+      } catch (error) {
+        const slugged =
+          error instanceof NotFoundError && findProject(db, ref, actor);
+        if (!slugged) throw error;
+        const keys = projectView(db, slugged, actor).products.map((p) => p.key);
+        throw new ValidationError(
+          `${field} takes product keys${field === "projects" ? ", as products does," : ""} and ${ref} is a project's slug: send products with the keys of the products it draws from (${andList(keys)})`,
+        );
+      }
+    };
+    return [...new Set(refs.map(idOf))];
   }
 
   /** The URL vetted and its address resolved; a refusal is a 422 saying why. */
@@ -692,24 +720,47 @@ export function createService({
     actor: ActingActor,
   ): ProjectRow {
     const found = findProject(tx, slug, actor);
-    if (!found) throw noProject(slug);
-    return found;
+    if (found) return found;
+    let named: Product | undefined;
+    try {
+      named = resolveProduct(tx, slug, actor);
+    } catch (error) {
+      if (!(error instanceof NotFoundError)) throw error;
+    }
+    // items carry their product's key as project, so a bot reading one sends it here
+    if (named) {
+      throw new NotFoundError(
+        `no project ${slug}: that is a product key, send it as product (product: "${named.key}")`,
+      );
+    }
+    throw noProject(slug);
   }
 
-  /** A project by slug, else a product by key or id (the meaning `project` had before projects). */
+  /**
+   * A project by exact slug, or a product by key or id (the meaning `project`
+   * had before projects). A ref naming both, among those the actor reaches, is
+   * refused: an old client meaning the product must not edit the project.
+   */
   function resolveProjectOrProduct(
     tx: Tx | Db,
     ref: string,
     actor: ActingActor,
   ): { project: ProjectRow } | { product: Product } {
     const found = findProject(tx, ref, actor);
-    if (found) return { project: found };
+    let named: Product | undefined;
     try {
-      return { product: resolveProduct(tx, ref, actor) };
+      named = resolveProduct(tx, ref, actor);
     } catch (error) {
       if (!(error instanceof NotFoundError)) throw error;
-      throw noProject(ref);
     }
+    if (found && named) {
+      throw new ValidationError(
+        `${ref} names both project ${found.slug} and product ${named.key}, so it is refused rather than guessed: use get_product or update_product (/products/${named.key}) for the product; list_projects (GET /projects) lists the project, and list_products (GET /products) the products`,
+      );
+    }
+    if (found) return { project: found };
+    if (named) return { product: named };
+    throw noProject(ref);
   }
 
   /**
@@ -951,6 +1002,26 @@ export function createService({
         ? `you own ${keys.length} products, so ${doing} needs ${field}: ${listed}`
         : `you own no product, so ${doing} needs ${field}: ${listed} (list_products describes each)`,
     );
+  }
+
+  /**
+   * Refuses `actor` a write only the product's owner makes, unless the product
+   * has no owner or `actor` is it; `refusal` words the 403 from the owner's name.
+   */
+  function requireOwner(
+    tx: Tx | Db,
+    actor: ActingActor,
+    productId: string,
+    refusal: (owner: string, productKey: string) => string,
+  ): void {
+    const target = tx
+      .select({ key: product.key, ownerId: product.ownerId })
+      .from(product)
+      .where(eq(product.id, productId))
+      .get() as { key: string; ownerId: string | null };
+    if (target.ownerId === null || target.ownerId === actor.id) return;
+    const owner = actorRefs(tx, [target.ownerId]).get(target.ownerId);
+    throw new ForbiddenError(refusal(owner?.name ?? "its owner", target.key));
   }
 
   function productView(tx: Tx | Db, row: Product): ProductView {
@@ -1253,6 +1324,8 @@ export function createService({
           description: input.description ?? "",
           createdAt: input.createdAt,
           createdBy: actor.id,
+          // the importing bot carries on the product's work, so what it brings in are its todos
+          ownerId: actor.id,
         })
         .returning()
         .get();
@@ -1578,15 +1651,27 @@ export function createService({
 
   /**
    * Creates an item: an issue starts in triage, a todo open and always
-   * assigned. `typeOf` decides the type once the product is known; `assignee`
-   * left out assigns a todo to the product's owner, else the caller.
+   * assigned. `input.product` names the product, else `fallback` picks it;
+   * `typeOf` decides the type once the product is known, and `asked` is the
+   * type the caller asked for by the call it made (none for the legacy
+   * create). `assignee` left out assigns a todo to the product's owner, else
+   * the caller. An idempotency key is checked against the input as sent, so
+   * what `fallback`, `typeOf` and the default assignee read from current data
+   * can't turn a retry into a mismatch.
    */
   function createItem(
     actor: ActingActor,
     input: ItemInput,
     options: WriteOptions,
-    target: (tx: Tx) => Product,
-    typeOf: (target: Product) => IssueType,
+    {
+      asked,
+      fallback,
+      typeOf,
+    }: {
+      asked: IssueType | undefined;
+      fallback?: (tx: Tx) => Product;
+      typeOf: (target: Product) => IssueType;
+    },
   ): Issue {
     if (actor.kind === "human" && input.assignee != null) {
       throw new ForbiddenError(
@@ -1601,48 +1686,63 @@ export function createService({
     const externalRef = optionalRef(input.externalRef);
     return currentShape(
       create(actor, options, "issue.create", (tx) => {
-        const product = target(tx);
-        const type = typeOf(product);
-        if (type === "todo" && actor.kind === "human") {
-          throw new ForbiddenError(
-            "a person files issues, not todos: file it as an issue, and the product's bot accepts it from triage",
-          );
-        }
-        let assigneeId: string | null;
-        if (input.assignee == null) {
-          if (type === "todo" && input.assignee === null) {
-            throw new ValidationError(
-              "a todo always has an assignee: leave assignee out to assign it to the product's owner, or name a bot",
-            );
-          }
-          assigneeId = type === "todo" ? (product.ownerId ?? actor.id) : null;
-        } else {
-          assigneeId = resolveAssignee(tx, input.assignee);
-        }
-        const fields = {
-          productId: product.id,
-          type,
+        const named =
+          input.product === undefined
+            ? undefined
+            : resolveProduct(tx, input.product, actor);
+        const assignee =
+          input.assignee == null
+            ? input.assignee
+            : resolveAssignee(tx, input.assignee);
+        const sent = {
           title,
           description: input.description ?? "",
-          assigneeId,
           estimate: estimate ?? null,
           priority: priority ?? 0,
           externalRef,
         };
         return {
-          request: { ...fields, labels: labelNames, links },
-          legacyRequest: {
-            projectId: product.id,
-            title,
-            description: fields.description,
-            assigneeId: input.assignee == null ? null : assigneeId,
-            estimate: fields.estimate,
-            priority: fields.priority,
-            externalRef,
+          request: {
+            type: asked,
+            productId: named?.id,
+            assigneeId: assignee,
+            ...sent,
+            labels: labelNames,
+            links,
+          },
+          // as issue.create hashed it before migration 0015, when every create named its product
+          legacyRequest: named && {
+            projectId: named.id,
+            ...sent,
+            assigneeId: assignee ?? null,
             labels: labelNames,
             links,
           },
           write: () => {
+            const product = named ?? (fallback as (tx: Tx) => Product)(tx);
+            const type = typeOf(product);
+            if (type === "todo" && actor.kind === "human") {
+              throw new ForbiddenError(
+                "a person files issues, not todos: file it as an issue, and the product's bot accepts it from triage",
+              );
+            }
+            if (type === "todo") {
+              requireOwner(
+                tx,
+                actor,
+                product.id,
+                (owner, key) =>
+                  `${key} is owned by ${owner}, so only ${owner} adds its todos: file the work as an issue with file_issue (POST /items with type issue), and ${owner} accepts it from triage`,
+              );
+            }
+            if (type === "todo" && assignee === null) {
+              throw new ValidationError(
+                "a todo always has an assignee: leave assignee out to assign it to the product's owner, or name a bot",
+              );
+            }
+            const assigneeId =
+              assignee ??
+              (type === "todo" ? (product.ownerId ?? actor.id) : null);
             if (externalRef !== null) {
               const twin = tx
                 .select({ id: issue.id, number: issue.number })
@@ -1663,7 +1763,10 @@ export function createService({
             const row = tx
               .insert(issue)
               .values({
-                ...fields,
+                ...sent,
+                productId: product.id,
+                type,
+                assigneeId,
                 status: type === "issue" ? "triage" : "open",
                 number: nextIssueNumber(tx, product.id),
                 createdBy: actor.id,
@@ -1803,12 +1906,23 @@ export function createService({
       };
       // the stored scope keeps the name it had before products and projects split
       const row = create(actor, options, "project.create", (tx) => {
-        const ownerId =
+        const owner =
           input.owner === undefined
-            ? actor.id
+            ? undefined
             : (productFields(tx, { owner: input.owner }).ownerId ?? null);
+        const ownerId = owner === undefined ? actor.id : owner;
         return {
-          request: { ...fields, ownerId },
+          request: { ...fields, ownerId: owner },
+          // as project.create hashed it before migration 0015, which had no repoUrl or owner to send
+          legacyRequest:
+            owner === undefined && fields.repoUrl === null
+              ? {
+                  name: fields.name,
+                  key: fields.key,
+                  description: fields.description,
+                  externalRef: fields.externalRef,
+                }
+              : undefined,
           write: () => {
             const taken = tx
               .select()
@@ -1858,7 +1972,15 @@ export function createService({
           },
         };
       });
-      return productView(db, row);
+      // a replay stored before migration 0015 lacks the owner and repoUrl columns: read them from the row
+      const stored: Partial<Product> & Pick<Product, "id"> = row;
+      return productView(
+        db,
+        "ownerId" in stored
+          ? row
+          : (db.select().from(product).where(eq(product.id, row.id)).get() ??
+              row),
+      );
     },
 
     /** A patch that changes nothing writes nothing and emits no event. */
@@ -1934,7 +2056,8 @@ export function createService({
 
     /**
      * Adds a todo: planned work, open from the start and always assigned. With
-     * no `product`, the caller's own product when it owns exactly one.
+     * no `product`, the caller's own product when it owns exactly one. In a
+     * product with an owner, only the owner may.
      */
     addTodo(
       actor: ActingActor,
@@ -1946,16 +2069,11 @@ export function createService({
           ? undefined
           : resolveProduct(db, input.product, actor),
       );
-      return createItem(
-        actor,
-        input,
-        options,
-        (tx) =>
-          input.product === undefined
-            ? defaultProduct(tx, actor, "add_todo")
-            : resolveProduct(tx, input.product, actor),
-        () => "todo",
-      );
+      return createItem(actor, input, options, {
+        asked: "todo",
+        fallback: (tx) => defaultProduct(tx, actor, "add_todo"),
+        typeOf: () => "todo",
+      });
     },
 
     /** Files an issue on a product the caller reaches; it waits in triage until the product's bot accepts or cancels it. */
@@ -1973,13 +2091,10 @@ export function createService({
       requireAction(actor, "issues", "file an issue", () =>
         resolveProduct(db, ref, actor),
       );
-      return createItem(
-        actor,
-        input,
-        options,
-        (tx) => resolveProduct(tx, ref, actor),
-        () => "issue",
-      );
+      return createItem(actor, input, options, {
+        asked: "issue",
+        typeOf: () => "issue",
+      });
     },
 
     /** The legacy create: a todo when the caller owns the product, else an issue in triage. */
@@ -1996,17 +2111,27 @@ export function createService({
         actor,
         { ...rest, product: projectId, assignee: assigneeId ?? undefined },
         options,
-        (tx) => resolveProduct(tx, projectId, actor),
-        (target) => legacyTypeOf(target, actor.id),
+        {
+          asked: undefined,
+          typeOf: (target) => legacyTypeOf(target, actor.id),
+        },
       );
     },
 
     /**
      * A patch that changes nothing writes nothing and emits no event. Setting
      * type todo on an item in triage opens it; a todo is never in triage and
-     * never unassigned.
+     * never unassigned. On a product with an owner, only the owner moves an
+     * item out of triage or changes its type; its filer may cancel it from
+     * triage. `legacy` words the refusals for update_issue and PATCH
+     * /issues, which have no type field.
      */
-    updateItem(actor: ActingActor, ref: string, patch: IssuePatch): Issue {
+    updateItem(
+      actor: ActingActor,
+      ref: string,
+      patch: IssuePatch,
+      { legacy = false }: { legacy?: boolean } = {},
+    ): Issue {
       requireBot(actor, "update an item");
       requireAction(actor, "issues", "update an item", () =>
         resolveIssueRow(db, ref, actor),
@@ -2078,7 +2203,9 @@ export function createService({
         if (type === "todo" && assigneeId === null) {
           if (patch.assigneeId === null) {
             throw new ValidationError(
-              `${current.key} is a todo, and a todo always has an assignee: assign it to another bot, or send type issue to make it an unassigned issue`,
+              legacy
+                ? `${current.key} is a todo, and a todo always has an assignee by design, so it can't be unassigned: reassign it by sending assigneeId with another bot's name or id (list_bots lists them)`
+                : `${current.key} is a todo, and a todo always has an assignee: assign it to another bot, or send type issue to make it an unassigned issue`,
             );
           }
           const owner = tx
@@ -2091,6 +2218,30 @@ export function createService({
         const nextStatus =
           status ??
           (type === "todo" && row.status === "triage" ? "open" : row.status);
+        if (type !== row.type) {
+          requireOwner(
+            tx,
+            actor,
+            row.productId,
+            (owner, key) =>
+              `only ${owner}, the owner of ${key}, changes an item's type between todo and issue: comment on ${current.key} with add_comment to ask ${owner}`,
+          );
+        }
+        const filerCancels =
+          nextStatus === "canceled" && row.createdBy === actor.id;
+        if (
+          row.status === "triage" &&
+          nextStatus !== "triage" &&
+          !filerCancels
+        ) {
+          requireOwner(
+            tx,
+            actor,
+            row.productId,
+            (owner, key) =>
+              `${current.key} is in the triage of ${key}, which ${owner} owns: only ${owner} accepts or cancels it, and its filer may cancel it. Comment on it with add_comment to ask ${owner}`,
+          );
+        }
         const fields = { ...next, type, status: nextStatus, assigneeId };
         const changes = changesOf<IssueRow>(row, fields);
         // the add and remove forms edit the set read here, under the write lock this transaction holds
@@ -2246,7 +2397,7 @@ export function createService({
       const externalRef = optionalRef(input.externalRef);
       if ("project" in target && externalRef !== null) {
         throw new ValidationError(
-          "externalRef is kept on a product's status update only: drop externalRef to post on the project, and use idempotency_key to make the post safe to retry",
+          "externalRef is kept on a product's status update only: drop externalRef to post on the project, and send an idempotency key (the Idempotency-Key header over REST, idempotency_key over MCP) to make the post safe to retry",
         );
       }
       return create(actor, options, "status_update.create", (tx) => {
@@ -2398,24 +2549,30 @@ export function createService({
         );
       }
       const row = create(actor, options, "project_group.create", (tx) => {
-        const products =
-          input.products === undefined
-            ? [defaultProduct(tx, actor, "create_project", "products")]
-            : input.products.map((ref) => resolveProduct(tx, ref, actor));
-        const productIds = [...new Set(products.map((p) => p.id))].sort();
-        const leadId =
+        const named = input.products?.map(
+          (ref) => resolveProduct(tx, ref, actor).id,
+        );
+        const lead =
           input.lead === undefined
-            ? actor.id
+            ? undefined
             : resolveBot(tx, input.lead, "lead").id;
-        const fields = {
-          name,
-          goal: input.goal ?? "",
-          leadId,
-          targetDate,
-        };
+        const fields = { name, goal: input.goal ?? "", targetDate };
         return {
-          request: { ...fields, slug: slug ?? null, productIds },
+          // as sent: the product a create naming none defaults to can change before a retry
+          request: {
+            ...fields,
+            leadId: lead,
+            slug: slug ?? null,
+            productIds: named && [...new Set(named)].sort(),
+          },
           write: () => {
+            const productIds = [
+              ...new Set(
+                named ?? [
+                  defaultProduct(tx, actor, "create_project", "products").id,
+                ],
+              ),
+            ];
             if (
               slug !== undefined &&
               tx
@@ -2432,6 +2589,7 @@ export function createService({
               .insert(project)
               .values({
                 ...fields,
+                leadId: lead ?? actor.id,
                 slug: slug ?? freeSlug(tx, slugOfName(name)),
                 createdBy: actor.id,
               })
@@ -3218,13 +3376,13 @@ export function createService({
       requireBot(actor, "subscribe to a product");
       requireAction(actor, "read", "create a webhook");
       validSecret(input.secret);
-      const refs = followedRefs(input);
-      if (refs === undefined) {
+      const followed = followedRefs(input);
+      if (followed === undefined) {
         throw new ValidationError(
           "products is required: send the keys (like TRL) of the products whose events you want",
         );
       }
-      const productIds = webhookProductIds(actor, refs);
+      const productIds = webhookProductIds(actor, followed);
       const refuseAtLimit = (from: Db | Tx) => {
         const count = countOwn(from, actor.id);
         if (count >= WEBHOOKS_PER_BOT_MAX) {
@@ -3317,9 +3475,9 @@ export function createService({
         ownWebhook(actor, id),
       );
       ownWebhook(actor, id);
-      const refs = followedRefs(patch);
+      const followed = followedRefs(patch);
       const productIds =
-        refs === undefined ? undefined : webhookProductIds(actor, refs);
+        followed === undefined ? undefined : webhookProductIds(actor, followed);
       const url =
         patch.url === undefined
           ? undefined

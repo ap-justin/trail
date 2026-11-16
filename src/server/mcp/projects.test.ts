@@ -466,3 +466,67 @@ test("a retried create_project with the same idempotency_key returns the first p
     ),
   ).toHaveLength(1);
 });
+
+test("a product key sent as project to list_items, the status update tools or list_activity is refused with a pointer to product", async () => {
+  const owner = await productBot("Pointed");
+  const key = owner.product.key;
+  const told = `not_found: no project ${key}: that is a product key, send it as product (product: "${key}")`;
+  for (const [tool, args] of [
+    ["list_items", { project: key }],
+    ["list_items", { project: key.toLowerCase() }],
+    ["list_status_updates", { project: key }],
+    ["post_status_update", { project: key, body: "b", health: "on_track" }],
+    ["list_activity", { project: key }],
+  ] as const) {
+    const answer = await callError(owner.client, tool, args);
+    expect(answer, `${tool} ${JSON.stringify(args)}`).toBe(
+      told.replace(`project ${key}:`, `project ${args.project}:`),
+    );
+  }
+  expect(
+    await callError(owner.client, "list_items", { project: "no-such-slug" }),
+  ).toBe(
+    "not_found: no project no-such-slug: pass the slug (like launch-q4) of a project this key reaches; list_projects (GET /api/v1/projects) lists them",
+  );
+});
+
+test("a webhook that stops following a product drops the queued events of projects that no longer draw from a product it follows", async () => {
+  onTestFinished(() => {
+    db.delete(webhookSubscription).run();
+  });
+  const ivy = await productBot("Ivy unfollows");
+  const kai = await productBot("Kai unfollowed");
+  const hook = (
+    await call(ivy.client, "create_webhook", {
+      url: "https://ivy.example.com/unfollow",
+      secret: "whsec_projects_0123456789",
+      products: [ivy.product.key, kai.product.key],
+    })
+  ).id as string;
+  const kept = freshSlug();
+  const dropped = freshSlug();
+  await call(ivy.client, "create_project", {
+    name: "kept",
+    slug: kept,
+    products: [ivy.product.key, kai.product.key],
+  });
+  await call(kai.client, "create_project", {
+    name: "dropped",
+    slug: dropped,
+    products: [kai.product.key],
+  });
+  const queued = () =>
+    db
+      .select({ type: webhookDelivery.type })
+      .from(webhookDelivery)
+      .where(eq(webhookDelivery.subscriptionId, hook))
+      .all();
+  expect(queued()).toHaveLength(2);
+
+  await call(ivy.client, "update_webhook", {
+    webhookId: hook,
+    products: [ivy.product.key],
+  });
+  // the project still drawing from Ivy's product keeps its event
+  expect(queued()).toEqual([{ type: "trail.project.created" }]);
+});

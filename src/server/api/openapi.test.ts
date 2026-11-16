@@ -279,6 +279,35 @@ test("project key fields advertise the key rule as a pattern", async () => {
   }
 });
 
+test("a project's slug and targetDate advertise the server's limits, so a client built from the spec sends what the server takes", async () => {
+  const res = await request("GET", "/api/v1/openapi.json", { key: null });
+  const spec = (await res.json()) as {
+    components: {
+      schemas: Record<
+        string,
+        {
+          properties: Record<
+            string,
+            { maxLength?: number; minLength?: number; pattern?: string }
+          >;
+        }
+      >;
+    };
+  };
+  const create = spec.components.schemas.ProjectCreate?.properties;
+  expect(create?.slug).toMatchObject({ minLength: 2, maxLength: 39 });
+  for (const schema of ["ProjectCreate", "ProjectUpdate"]) {
+    expect(
+      spec.components.schemas[schema]?.properties.targetDate?.pattern,
+      schema,
+    ).toBe("^\\d{4}-\\d{2}-\\d{2}$");
+  }
+  const tooLong = await request("POST", "/api/v1/projects", {
+    json: { name: "long slug", slug: "a".repeat(40) },
+  });
+  expect(tooLong.status).toBe(422);
+});
+
 test("the /activity nextCursor says which parameter takes it back in each mode", async () => {
   const res = await request("GET", "/api/v1/openapi.json", { key: null });
   type Page = {

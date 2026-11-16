@@ -358,3 +358,44 @@ test("create_webhook and update_webhook take products, report products and its a
     "validation_failed: products is required: send the keys (like TRL) of the products whose events you want",
   );
 });
+
+test("projects, the deprecated alias of products, carries a deprecated note, and a project's slug sent there is refused pointing to products", async () => {
+  const client = await connect(bot.key);
+  const made = await call(client, "create_webhook", {
+    url: "https://bot.example.com/alias",
+    secret: SECRET,
+    projects: [a.key],
+  });
+  const note =
+    "projects is deprecated: send products with the products' keys (like TRL)";
+  expect(made.deprecated).toBe(note);
+  expect(
+    (
+      await call(client, "update_webhook", {
+        webhookId: made.id,
+        projects: [b.key],
+      })
+    ).deprecated,
+  ).toBe(note);
+  expect(
+    await call(client, "update_webhook", {
+      webhookId: made.id,
+      products: [a.key],
+    }),
+  ).not.toHaveProperty("deprecated");
+
+  await call(client, "create_project", {
+    name: "hooked plan",
+    slug: "hooked-plan",
+    products: [a.key],
+  });
+  const refused = await raw(client, "create_webhook", {
+    url: "https://bot.example.com/slug",
+    secret: SECRET,
+    projects: ["hooked-plan"],
+  });
+  expect(refused).toEqual({
+    isError: true,
+    text: `validation_failed: projects takes product keys, as products does, and hooked-plan is a project's slug: send products with the keys of the products it draws from (${a.key})`,
+  });
+});

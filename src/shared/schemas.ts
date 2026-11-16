@@ -116,7 +116,7 @@ export const issueSchema = z
     number: z.int().meta({ example: 12 }),
     type: itemTypeSchema.meta({
       description:
-        "todo: planned work of the product's own bot, open from the start and always assigned. issue: a report to the product's bot, filed in triage until that bot accepts it (status open) or cancels it.",
+        "todo: planned work of the product's own bot, open from the start and always assigned. issue: a report to the product's bot, filed in triage until that bot accepts it (status open with an assignee) or cancels it.",
     }),
     product: z.string().meta({
       description: "The key of the product the item belongs to.",
@@ -162,7 +162,16 @@ export const issueSchema = z
   .openapi("Item");
 
 export const legacyIssueSchema = issueSchema
-  .extend({ deprecated: deprecatedNote })
+  .extend({
+    status: z
+      .enum(["open", "in_progress", "done", "canceled"])
+      .openapi("LegacyIssueStatus")
+      .meta({
+        description:
+          "The statuses items had before triage: an issue waiting in triage reads as open here; GET /items/{key} shows it as triage.",
+      }),
+    deprecated: deprecatedNote,
+  })
   .openapi("LegacyItem");
 
 export const commentSchema = z
@@ -638,10 +647,17 @@ export const productUpdateSchema = z
 const goal = text.meta({
   description: "What the project is for, in a sentence or a few.",
 });
-const targetDate = z.string().max(10).meta({
-  description: "A calendar day as YYYY-MM-DD.",
-  example: "2026-12-01",
-});
+// the service's rule (service/validate.ts) refuses an impossible day too, like 2026-02-30
+const targetDate = z
+  .string()
+  .regex(
+    /^\d{4}-\d{2}-\d{2}$/,
+    "must be a calendar day as YYYY-MM-DD, like 2026-12-01",
+  )
+  .meta({
+    description: "A calendar day as YYYY-MM-DD.",
+    example: "2026-12-01",
+  });
 const leadRef = botRef.meta({
   description: "The bot leading the project, by name (any case) or id.",
 });
@@ -649,8 +665,8 @@ const projectFields = {
   name,
   slug: z
     .string()
-    .min(1)
-    .max(100)
+    .min(2)
+    .max(SLUG_MAX)
     .optional()
     .meta({
       description: `How agents name the project: 2 to ${SLUG_MAX} lowercase letters, digits and hyphens, like launch-q4, unique. Left out, it is derived from the name (Launch Q4 → launch-q4), with -2, -3 ... added when taken.`,
@@ -737,61 +753,109 @@ const itemFields = {
   links: links.optional(),
   externalRef: externalRef.optional(),
 };
+/**
+ * The options of a strict object some of whose fields were renamed: an unknown
+ * key that is a field's old name says what to send instead.
+ */
+const renamedFields = (advice: Record<string, string>) => ({
+  error: (issue: { code?: string; keys?: string[] }) => {
+    if (issue.code !== "unrecognized_keys" || issue.keys === undefined) {
+      return undefined;
+    }
+    const old = issue.keys.filter((k) => k in advice);
+    if (old.length === 0) return undefined;
+    const unknown = issue.keys.filter((k) => !(k in advice));
+    return [
+      ...old.map((k) => `Unrecognized key "${k}": ${advice[k]}`),
+      ...(unknown.length === 0
+        ? []
+        : [
+            `Unrecognized key${unknown.length > 1 ? "s" : ""}: ${unknown.map((k) => `"${k}"`).join(", ")}`,
+          ]),
+    ].join("; ");
+  },
+});
+const nowNamed = (field: string) =>
+  `it is ${field} now, so send ${field} instead`;
+const onLegacyRoute = (field: string, current: string) =>
+  `on this deprecated route it is ${current}, so send ${current}, or use PATCH /items/{key} (update_item), which takes ${field}`;
+const itemCreateRenames = renamedFields({
+  projectId: nowNamed("product"),
+  assigneeId: nowNamed("assignee"),
+});
+
 const assigneeRef = botRef.meta({
   description:
     "Who works on it: a bot's name (any case) or id, or a person's id.",
 });
 
 export const todoCreateSchema = z
-  .strictObject({
-    product: productRef.optional().meta({
-      description:
-        "The product's key (like TRL); left out, the one product you own. list_products lists them.",
-    }),
-    ...itemFields,
-    assignee: assigneeRef.optional().meta({
-      description:
-        "Who does it: a bot's name (any case) or id, or a person's id; left out, the product's owner, or you when it has none. A todo always has one.",
-    }),
-  })
+  .strictObject(
+    {
+      product: productRef.optional().meta({
+        description:
+          "The product's key (like TRL); left out, the one product you own. list_products lists them.",
+      }),
+      ...itemFields,
+      assignee: assigneeRef.optional().meta({
+        description:
+          "Who does it: a bot's name (any case) or id, or a person's id; left out, the product's owner, or you when it has none. A todo always has one.",
+      }),
+    },
+    itemCreateRenames,
+  )
   .openapi("TodoCreate");
 
 export const issueFileSchema = z
-  .strictObject({
-    product: productRef.meta({
-      description:
-        "The key (like TRL) of the product the issue is for; any product this key reaches. list_products lists them.",
-    }),
-    ...itemFields,
-    assignee: assigneeRef.nullable().optional().meta({
-      description:
-        "Usually left out: the product's bot assigns it when it accepts the issue from triage.",
-    }),
-  })
+  .strictObject(
+    {
+      product: productRef.meta({
+        description:
+          "The key (like TRL) of the product the issue is for; any product this key reaches. list_products lists them.",
+      }),
+      ...itemFields,
+      assignee: assigneeRef.nullable().optional().meta({
+        description:
+          "Usually left out: the product's bot assigns it when it accepts the issue from triage (status open with an assignee).",
+      }),
+    },
+    itemCreateRenames,
+  )
   .openapi("IssueFile");
 
 /** POST /items: a todo or an issue by `type`. */
 export const itemCreateSchema = z
-  .strictObject({
-    type: itemTypeSchema.meta({
-      description:
-        "todo: planned work for a product you own, open at once and assigned (to the product's owner by default). issue: a report to another product's bot, filed in triage until that bot accepts it (status open) or cancels it.",
-    }),
-    product: productRef.optional().meta({
-      description:
-        "The product's key (like TRL). Required for an issue; a todo goes to the one product you own when left out.",
-    }),
-    ...itemFields,
-    assignee: assigneeRef.nullable().optional(),
-  })
+  .strictObject(
+    {
+      type: itemTypeSchema.meta({
+        description:
+          "todo: planned work for a product you own (or one with no owner), open at once and assigned (to the product's owner by default); in another bot's product it is a 403. issue: a report to another product's bot, filed in triage until that bot accepts it (status open with an assignee) or cancels it.",
+      }),
+      product: productRef.optional().meta({
+        description:
+          "The product's key (like TRL). Required for an issue; a todo goes to the one product you own when left out.",
+      }),
+      ...itemFields,
+      assignee: assigneeRef.nullable().optional(),
+    },
+    itemCreateRenames,
+  )
   .openapi("ItemCreate");
 
 export const issueCreateSchema = z
-  .strictObject({
-    projectId: projectRef,
-    ...itemFields,
-    assigneeId: id.nullable().optional(),
-  })
+  .strictObject(
+    {
+      projectId: projectRef,
+      ...itemFields,
+      assigneeId: id.nullable().optional(),
+    },
+    renamedFields({
+      product:
+        "on this deprecated route it is projectId, so send projectId, or use POST /items (add_todo or file_issue), which takes product",
+      assignee:
+        "on this deprecated route it is assigneeId, so send assigneeId, or use POST /items (add_todo or file_issue), which takes assignee",
+    }),
+  )
   .openapi("IssueCreate");
 
 const itemPatchFields = {
@@ -831,27 +895,36 @@ const itemPatchFields = {
 };
 
 export const itemUpdateSchema = z
-  .strictObject({
-    type: itemTypeSchema.optional().meta({
-      description:
-        "todo makes it planned work of its product (an item in triage opens; it gets the product's owner as assignee when it has none); issue makes it a report.",
-    }),
-    ...itemPatchFields,
-    assignee: assigneeRef.nullable().optional().meta({
-      description:
-        "A bot's name (any case) or id, or a person's id; null unassigns an issue (a todo always keeps one).",
-    }),
-  })
+  .strictObject(
+    {
+      type: itemTypeSchema.optional().meta({
+        description:
+          "todo makes it planned work of its product (an item in triage opens; it gets the product's owner as assignee when it has none); issue makes it a report.",
+      }),
+      ...itemPatchFields,
+      assignee: assigneeRef.nullable().optional().meta({
+        description:
+          "A bot's name (any case) or id, or a person's id; null unassigns an issue (a todo always keeps one).",
+      }),
+    },
+    renamedFields({ assigneeId: nowNamed("assignee") }),
+  )
   .openapi("ItemUpdate");
 
 export const issueUpdateSchema = z
-  .strictObject({
-    ...itemPatchFields,
-    assigneeId: id
-      .nullable()
-      .optional()
-      .meta({ description: "null unassigns." }),
-  })
+  .strictObject(
+    {
+      ...itemPatchFields,
+      assigneeId: id
+        .nullable()
+        .optional()
+        .meta({ description: "null unassigns." }),
+    },
+    renamedFields({
+      assignee: onLegacyRoute("assignee", "assigneeId"),
+      type: "this deprecated route has no type: use PATCH /items/{key} (update_item) to change an item's type",
+    }),
+  )
   .openapi("IssueUpdate");
 
 export const commentCreateSchema = z
@@ -1007,7 +1080,8 @@ export const importSchema = z
 
 const importCountsSchema = z
   .object({
-    projects: z.int(),
+    products: z.int(),
+    projects: z.int().meta({ description: "Deprecated alias of products." }),
     issues: z.int(),
     comments: z.int(),
     labels: z.int(),

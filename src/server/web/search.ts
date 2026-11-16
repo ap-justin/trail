@@ -40,6 +40,7 @@ export function searchRoutes(db: Db) {
     const { q } = c.req.valid("query");
     const ids = visibleIds(c.var.member);
     const itemKey = sql`${product.key} || '-' || ${issue.number}`;
+    const exact = q.trim().toUpperCase();
     const items = db
       .select({
         key: sql<string>`${itemKey}`,
@@ -62,7 +63,12 @@ export function searchRoutes(db: Db) {
           ),
         ),
       )
-      .orderBy(desc(issue.createdAt), desc(issue.id))
+      // an item the query names exactly first, so newer items whose keys merely contain it can't crowd it out
+      .orderBy(
+        sql`case when upper(${itemKey}) = ${exact} or ${issue.sourceKey} = ${exact} then 0 else 1 end`,
+        desc(issue.createdAt),
+        desc(issue.id),
+      )
       .limit(SEARCH_LIMIT)
       .all();
     const products = db

@@ -78,3 +78,17 @@ test("matches % and _ literally", async () => {
 test("an empty query is a 422", async () => {
   expect((await search(" ")).status).toBe(422);
 });
+
+test("an item whose key is the query comes first, ahead of the 20 newest items whose keys only contain it", async () => {
+  const many = addProject("Many items");
+  const reader = await addMember("exact-searcher", [many.id]);
+  for (let n = 1; n <= 120; n++) await file(many.id, `item ${n}`);
+  const res = await request(
+    "GET",
+    `/api/web/search?q=${encodeURIComponent(`${many.key.toLowerCase()}-1`)}`,
+    { key: null, cookie: reader },
+  );
+  const { items } = (await res.json()) as Body;
+  expect(items).toHaveLength(20);
+  expect(items[0]).toMatchObject({ key: `${many.key}-1`, title: "item 1" });
+});

@@ -19,6 +19,7 @@ import {
   jsonBody,
   jsonContent,
   notFoundError,
+  OWNER_ONLY,
   readErrors,
   writeErrors,
 } from "./routes.js";
@@ -27,7 +28,7 @@ import { toComment, toIssue, toPage } from "./serialize.js";
 const tags = ["items"];
 
 export const TODO_OR_ISSUE =
-  "A todo is planned work of a product's own bot: open from the start and always assigned (to the product's owner unless you name someone). An issue is a report to a product's bot, from a person or another product's bot: it starts in triage until that bot accepts it (status open) or cancels it.";
+  "A todo is planned work of a product's own bot (its owner), and only that bot adds one: open from the start and always assigned (to the owner unless it names someone). An issue is a report to a product's bot, from a person or any other bot: it starts in triage until that bot accepts it (status open with assignee, the bot that will work on it) or cancels it; its filer may cancel it too. A product with no owner leaves both to any bot that reaches it.";
 
 const createItem = createRoute({
   method: "post",
@@ -41,7 +42,7 @@ const createItem = createRoute({
   },
   responses: {
     201: jsonContent(issueSchema, "The created item"),
-    ...forbiddenError("issues"),
+    ...forbiddenError("issues", { owner: OWNER_ONLY }),
     ...writeErrors,
     ...notFoundError,
     ...conflictError,
@@ -82,12 +83,12 @@ const updateItem = createRoute({
   path: "/items/{key}",
   summary:
     "Change an item's type, status, assignee, title, description, estimate, priority, labels or links",
-  description: `Needs the issues action. ${TODO_OR_ISSUE} Accept an issue from triage with status open, or drop it with canceled. type todo on an item in triage opens it; a todo never goes back to triage and never loses its assignee. Fields left out stay as they are; addLabels, removeLabels, addLinks and removeLinks change part of a set in the same transaction. Moving to done or canceled stamps completedAt; reopening clears it.`,
+  description: `Needs the issues action. ${TODO_OR_ISSUE} Accept an issue from triage with status open and assignee, the bot that will work on it (status open alone leaves it unassigned), or drop it with canceled. type todo on an item in triage opens it and assigns the product's owner when it has no assignee; a todo never goes back to triage and never loses its assignee. Fields left out stay as they are; addLabels, removeLabels, addLinks and removeLinks change part of a set in the same transaction. Moving to done or canceled stamps completedAt; reopening clears it.`,
   tags,
   request: { params: itemParam, body: jsonBody(itemUpdateSchema) },
   responses: {
     200: jsonContent(issueSchema, "The updated item"),
-    ...forbiddenError("issues"),
+    ...forbiddenError("issues", { owner: OWNER_ONLY }),
     ...writeErrors,
     ...notFoundError,
   },

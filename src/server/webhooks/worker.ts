@@ -56,7 +56,8 @@ type Delivery = typeof webhookDelivery.$inferSelect;
 const keepUpdatedAt = sql`${webhookSubscription.updatedAt}`;
 
 /**
- * Each unpaused subscription's oldest pending delivery, due or not, in seq order.
+ * Each unpaused subscription's oldest pending delivery, due or not, in seq order
+ * (one event's deliveries in the order they were queued).
  * Driven from the subscriptions, one index probe each: a paused subscription's
  * backlog only grows, and a query driven from the deliveries reads all of it.
  */
@@ -139,7 +140,7 @@ export function headsQuery(db: Db, subscriptionId?: string) {
       // 'pending' as a literal, so the planner can match the partial index
       eq(
         webhookDelivery.id,
-        sql`(select x.id from webhook_delivery x where x.subscription_id = ${webhookSubscription.id} and x.status = 'pending' order by x.seq limit 1)`,
+        sql`(select x.id from webhook_delivery x where x.subscription_id = ${webhookSubscription.id} and x.status = 'pending' order by x.seq, x.rowid limit 1)`,
       ),
     )
     .where(
@@ -207,7 +208,11 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
       .where(eq(activityEvent.id, delivery.eventId))
       .get();
     if (!event) return null;
-    const body = JSON.stringify(buildEnvelope(db, event, settings.publicUrl));
+    const body = JSON.stringify({
+      ...buildEnvelope(db, event, settings.publicUrl),
+      // a product event's legacy trail.project.* twin carries its own type
+      type: delivery.type,
+    });
     db.update(webhookDelivery)
       .set({ body })
       .where(eq(webhookDelivery.id, delivery.id))

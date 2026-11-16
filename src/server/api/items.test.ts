@@ -114,6 +114,38 @@ test("POST /items files an issue on another bot's product: in triage, unassigned
   });
 });
 
+test("a todo in another bot's product is a 403 naming its owner and saying to file an issue", async () => {
+  const other = addBot("todo outsider");
+  const res = await request("POST", "/api/v1/items", {
+    json: { type: "todo", product: own.key, title: "not mine to plan" },
+    key: other.key,
+  });
+  expect(res.status).toBe(403);
+  expect(((await res.json()) as Body).error).toEqual({
+    code: "forbidden",
+    message: `${own.key} is owned by tester, so only tester adds its todos: file the work as an issue with file_issue (POST /items with type issue), and tester accepts it from triage`,
+  });
+});
+
+test("PATCH /items/:key by a bot that doesn't own the product can't accept, cancel or retype a triage issue, and changes nothing", async () => {
+  const filer = addBot("triage filer");
+  const outsider = addBot("triage outsider");
+  const { key } = await createItem(
+    { type: "issue", product: own.key, title: "owner decides" },
+    filer.key,
+  );
+  for (const json of [{ status: "open" }, { type: "todo" }]) {
+    const res = await request("PATCH", `/api/v1/items/${key}`, {
+      json,
+      key: outsider.key,
+    });
+    expect(res.status, JSON.stringify(json)).toBe(403);
+    expect(((await res.json()) as Body).error.code).toBe("forbidden");
+  }
+  const after = await request("GET", `/api/v1/items/${key}`);
+  expect(await after.json()).toMatchObject({ type: "issue", status: "triage" });
+});
+
 test("an issue on a product the key doesn't reach is the 404 an unknown one is", async () => {
   const elsewhere = await newProduct("elsewhere");
   const scoped = createBot(db, "scoped filer", {
@@ -352,5 +384,45 @@ test("a repeated create with the same Idempotency-Key returns the first item", a
   expect(reused.status).toBe(422);
   expect(((await reused.json()) as Body).error.code).toBe(
     "idempotency_key_reused",
+  );
+});
+
+test("a field sent under its old name is a 422 naming the field it became", async () => {
+  const cases = [
+    [
+      "POST",
+      "/api/v1/items",
+      { type: "todo", projectId: own.key, title: "old field" },
+      'Unrecognized key "projectId": it is product now, so send product instead',
+    ],
+    [
+      "POST",
+      "/api/v1/items",
+      { type: "todo", product: own.key, title: "old", assigneeId: null },
+      'Unrecognized key "assigneeId": it is assignee now, so send assignee instead',
+    ],
+    [
+      "PATCH",
+      `/api/v1/items/${own.key}-1`,
+      { assigneeId: "tester" },
+      'Unrecognized key "assigneeId": it is assignee now, so send assignee instead',
+    ],
+    [
+      "PATCH",
+      `/api/v1/issues/${own.key}-1`,
+      { assignee: "tester" },
+      'Unrecognized key "assignee": on this deprecated route it is assigneeId, so send assigneeId, or use PATCH /items/{key} (update_item), which takes assignee',
+    ],
+  ] as const;
+  for (const [method, path, json, message] of cases) {
+    const res = await request(method, path, { json });
+    expect(res.status, `${method} ${path}`).toBe(422);
+    expect(((await res.json()) as Body).error.message).toBe(message);
+  }
+  const unknown = await request("PATCH", `/api/v1/items/${own.key}-1`, {
+    json: { colour: "red" },
+  });
+  expect(((await unknown.json()) as Body).error.message).toBe(
+    'Unrecognized key: "colour"',
   );
 });

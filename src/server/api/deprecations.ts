@@ -19,4 +19,6 @@ export const deprecations = {
     "list_projects lists projects (groups of items across products) since this release, no longer products: call list_products (GET /products) for those",
   labels: "/projects/{key}/labels is deprecated: use /products/{key}/labels",
   projectId: "projectId is deprecated: send product with the product's key",
+  webhookProjects:
+    "projects is deprecated: send products with the products' keys (like TRL)",
 } as const;

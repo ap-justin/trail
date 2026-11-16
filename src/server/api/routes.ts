@@ -77,18 +77,23 @@ export const notFoundError = {
 /**
  * The 403 of an operation a key's actions gate: spread into every operation but
  * whoami. `scope` adds the refusal of a key limited to products, for the
- * operations that make one. (The service's bot-only 403 can't reach /api/v1,
- * whose every caller is a bot.)
+ * operations that make one; `owner` the refusal of a write only the product's
+ * owner bot makes. (The service's bot-only 403 can't reach /api/v1, whose
+ * every caller is a bot.)
  */
 export const forbiddenError = (
   action: ApiKeyAction,
-  { scope = false }: { scope?: boolean } = {},
+  { scope = false, owner }: { scope?: boolean; owner?: string } = {},
 ) => ({
   403: jsonContent(
     errorSchema,
-    `The key lacks the ${action} action (code forbidden_action)${scope ? ", or reaches only some products (code forbidden_scope)" : ""}`,
+    `The key lacks the ${action} action (code forbidden_action)${scope ? ", or reaches only some products (code forbidden_scope)" : ""}${owner === undefined ? "" : `, or ${owner} (code forbidden)`}`,
   ),
 });
+
+/** The 403 a write only a product's owner makes adds to `forbiddenError`. */
+export const OWNER_ONLY =
+  "the product has an owner bot and the call is that bot's alone: adding a todo, moving an issue out of triage (its filer may cancel it), or changing an item's type; the message names the owner and what to do instead";
 
 /** Spread only into operations whose service call can throw `ConflictError`. */
 export const conflictError = {

@@ -1,5 +1,5 @@
 import { beforeAll, expect, test } from "vitest";
-import { setupTestApp } from "../test-app.js";
+import { atFakeTimeAsync, setupTestApp } from "../test-app.js";
 
 const { bot, addBot, request } = setupTestApp();
 
@@ -33,13 +33,18 @@ test("the /issues routes serve items, each answer carrying deprecated", async ()
   });
   expect(created.status).toBe(201);
   const item = await json(created);
+  // the old status enum has no triage: an issue waiting there reads as open
   expect(item).toMatchObject({
     type: "issue",
-    status: "triage",
+    status: "open",
     product: "LEG",
     deprecated: expect.stringMatching(/use add_todo/),
   });
   const read = await json(await request("GET", `/api/v1/issues/${item.key}`));
+  expect(read.status).toBe("open");
+  expect(
+    (await json(await request("GET", `/api/v1/items/${item.key}`))).status,
+  ).toBe("triage");
   expect(read.deprecated).toMatch(/use get_item \(GET \/items\/\{key\}\)/);
   const patched = await json(
     await request("PATCH", `/api/v1/issues/${item.key}`, {
@@ -53,6 +58,18 @@ test("the /issues routes serve items, each answer carrying deprecated", async ()
   });
   const page = await json(await request("GET", "/api/v1/issues?projectId=LEG"));
   expect(page.items.map((i: Body) => i.key)).toEqual([item.key]);
+  const another = await json(
+    await request("POST", "/api/v1/issues", {
+      json: { projectId: "LEG", title: "still in triage" },
+      key: filer.key,
+    }),
+  );
+  const listed = await json(
+    await request("GET", "/api/v1/issues?projectId=LEG"),
+  );
+  expect(listed.items.find((i: Body) => i.key === another.key)?.status).toBe(
+    "open",
+  );
   expect(page.deprecated).toMatch(/use list_items \(GET \/items\)/);
   const comment = await json(
     await request("POST", `/api/v1/issues/${item.key}/comments`, {
@@ -114,28 +131,50 @@ test("/projects/{KEY} that matches no slug names the product, carrying deprecate
   ).toHaveLength(1);
 });
 
-test("a slug wins over the legacy meaning and its answers carry no deprecated note", async () => {
+test("a ref naming both a project's slug and a product's key is a 422 naming both, on every /projects/{ref} route", async () => {
   const created = await request("POST", "/api/v1/projects", {
     json: { name: "leg", slug: "leg", products: ["LEG"] },
   });
   expect(created.status).toBe(201);
-  const project = await json(created);
-  expect(project).not.toHaveProperty("deprecated");
-  const got = await json(await request("GET", "/api/v1/projects/leg"));
-  expect(got).toEqual(project);
-  const posted = await json(
-    await request("POST", "/api/v1/projects/leg/status-updates", {
-      json: { body: "project update", health: "at_risk" },
-    }),
-  );
-  expect(posted).toMatchObject({ project: "leg", product: null });
-  expect(posted).not.toHaveProperty("deprecated");
+  const refusal =
+    "leg names both project leg and product LEG, so it is refused rather than guessed: use get_product or update_product (/products/LEG) for the product; list_projects (GET /projects) lists the project, and list_products (GET /products) the products";
+  for (const [method, path, body] of [
+    ["GET", "/api/v1/projects/leg", undefined],
+    ["PATCH", "/api/v1/projects/leg", { name: "renamed" }],
+    ["GET", "/api/v1/projects/leg/status-updates", undefined],
+    [
+      "POST",
+      "/api/v1/projects/leg/status-updates",
+      { body: "which one", health: "at_risk" },
+    ],
+  ] as const) {
+    const res = await request(method, path, body ? { json: body } : {});
+    expect(res.status, `${method} ${path}`).toBe(422);
+    expect((await json(res)).error.message).toBe(refusal);
+  }
   // the upper-case key still reaches the product: slugs are lowercase only
   expect(
     await json(await request("GET", "/api/v1/projects/LEG")),
-  ).toMatchObject({
-    key: "LEG",
-  });
+  ).toMatchObject({ key: "LEG", name: "legacy" });
+});
+
+test("a slug no product key matches names the project, its answers carrying no deprecated note", async () => {
+  const project = await json(
+    await request("POST", "/api/v1/projects", {
+      json: { name: "leg plan", slug: "leg-plan", products: ["LEG"] },
+    }),
+  );
+  expect(project).not.toHaveProperty("deprecated");
+  expect(await json(await request("GET", "/api/v1/projects/leg-plan"))).toEqual(
+    project,
+  );
+  const posted = await json(
+    await request("POST", "/api/v1/projects/leg-plan/status-updates", {
+      json: { body: "project update", health: "at_risk" },
+    }),
+  );
+  expect(posted).toMatchObject({ project: "leg-plan", product: null });
+  expect(posted).not.toHaveProperty("deprecated");
 });
 
 test("GET /projects lists projects, never products", async () => {
@@ -151,6 +190,9 @@ test("GET /projects lists projects, never products", async () => {
   expect(page.items.map((p: Body) => p.slug)).toContain("lgl-list");
   expect(page.items.every((p: Body) => typeof p.slug === "string")).toBe(true);
   expect(page.items.some((p: Body) => "key" in p)).toBe(false);
+  expect(page.deprecated).toBe(
+    "list_projects lists projects (groups of items across products) since this release, no longer products: call list_products (GET /products) for those",
+  );
 });
 
 test("GET /issues?status=open includes issues waiting in triage, as open meant before triage; GET /items keeps exact status", async () => {
@@ -164,13 +206,18 @@ test("GET /issues?status=open includes issues waiting in triage, as open meant b
         key,
       }),
     );
-  const filed = await create("filed by another bot", addBot("lgo filer").key);
-  const todo = await create("planned");
-  const started = await create("started");
+  const filer = addBot("lgo filer").key;
+  // one stamp apiece: same-millisecond rows would list in random id order
+  const [filed, todo, started] = (await atFakeTimeAsync([
+    () => create("filed by another bot", filer),
+    () => create("planned"),
+    () => create("started"),
+  ])) as Body[];
+  if (!filed || !todo || !started) throw new Error("a create answered nothing");
   await request("PATCH", `/api/v1/items/${started.key}`, {
     json: { status: "in_progress" },
   });
-  expect([filed.status, todo.status]).toEqual(["triage", "open"]);
+  expect([filed.type, todo.type]).toEqual(["issue", "todo"]);
   const keys = async (path: string) =>
     (await json(await request("GET", path))).items.map((i: Body) => i.key);
 

@@ -234,7 +234,7 @@ test("an item event carries its product and its type; a project's own event its 
   });
 });
 
-test("a product event is sent as trail.product.*, as it is stored", async () => {
+test("a product event is queued as trail.product.*, as it is stored, and for one release as its old trail.project.* too", async () => {
   const key = await newProject();
   await subscribe([key], "https://bot.example.com/product-events");
   const since = published.length;
@@ -251,7 +251,10 @@ test("a product event is sent as trail.product.*, as it is stored", async () => 
       .from(webhookDelivery)
       .where(eq(webhookDelivery.eventId, event.id))
       .all(),
-  ).toEqual([{ type: "trail.product.updated" }]);
+  ).toEqual([
+    { type: "trail.product.updated" },
+    { type: "trail.project.updated" },
+  ]);
 });
 
 test("a webhook on two projects gets their events in the order they happened, around another bot's writes", async () => {

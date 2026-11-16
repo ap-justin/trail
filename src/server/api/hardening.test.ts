@@ -407,6 +407,7 @@ test("a re-import whose label differs only by case renames the label, and the co
   const again = await importProject(key, issues("bug"));
   expect(again.status).toBe(200);
   const zero = {
+    products: 0,
     projects: 0,
     issues: 0,
     comments: 0,

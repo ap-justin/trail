@@ -851,9 +851,11 @@ export const webhookDelivery = sqliteTable(
       oneOf(t.status, webhookDeliveryStatuses),
     ),
     check("webhook_delivery_attempts_check", sql`${c(t.attempts)} >= 0`),
-    unique("webhook_delivery_subscription_event_unique").on(
+    // one delivery per type of an event: a product event goes out under its old type too, for one release
+    unique("webhook_delivery_subscription_event_type_unique").on(
       t.subscriptionId,
       t.eventId,
+      t.type,
     ),
     // the head of a subscription's queue: its oldest pending delivery
     index("webhook_delivery_pending_idx")

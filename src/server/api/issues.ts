@@ -2,7 +2,6 @@ import { createRoute } from "@hono/zod-openapi";
 import {
   issueCreateSchema,
   issueListQuerySchema,
-  issueSchema,
   issueUpdateSchema,
   legacyIssueSchema,
   pageSchema,
@@ -18,15 +17,18 @@ import {
   jsonBody,
   jsonContent,
   notFoundError,
+  OWNER_ONLY,
   readErrors,
   writeErrors,
 } from "./routes.js";
-import { deprecated, toIssue, toPage } from "./serialize.js";
+import { deprecated, toLegacyIssue, toPage } from "./serialize.js";
 
 // The routes items had before todos: kept for one release, each answer carrying `deprecated`.
 const tags = ["issues (deprecated)"];
 
-const legacyPageSchema = pageSchema(issueSchema).extend({
+const legacyPageSchema = pageSchema(
+  legacyIssueSchema.omit({ deprecated: true }),
+).extend({
   deprecated: legacyIssueSchema.shape.deprecated,
 });
 
@@ -94,7 +96,7 @@ const updateIssue = createRoute({
   request: { params: issueParam, body: jsonBody(issueUpdateSchema) },
   responses: {
     200: jsonContent(legacyIssueSchema, "The updated item"),
-    ...forbiddenError("issues"),
+    ...forbiddenError("issues", { owner: OWNER_ONLY }),
     ...writeErrors,
     ...notFoundError,
   },
@@ -105,7 +107,7 @@ export function issueRoutes(service: Service) {
     .openapi(createIssue, (c) =>
       c.json(
         deprecated(
-          toIssue(
+          toLegacyIssue(
             service.createIssue(c.var.actor, c.req.valid("json"), {
               idempotencyKey: c.req.valid("header")["idempotency-key"],
             }),
@@ -125,7 +127,7 @@ export function issueRoutes(service: Service) {
               product: projectId,
               assignee: assigneeId,
             }),
-            toIssue,
+            toLegacyIssue,
           ),
           deprecations.listIssues,
         ),
@@ -135,7 +137,7 @@ export function issueRoutes(service: Service) {
     .openapi(getIssue, (c) =>
       c.json(
         deprecated(
-          toIssue(service.getItem(c.var.actor, c.req.valid("param").id)),
+          toLegacyIssue(service.getItem(c.var.actor, c.req.valid("param").id)),
           deprecations.getIssue,
         ),
         200,
@@ -144,11 +146,12 @@ export function issueRoutes(service: Service) {
     .openapi(updateIssue, (c) =>
       c.json(
         deprecated(
-          toIssue(
+          toLegacyIssue(
             service.updateItem(
               c.var.actor,
               c.req.valid("param").id,
               c.req.valid("json"),
+              { legacy: true },
             ),
           ),
           deprecations.updateIssue,

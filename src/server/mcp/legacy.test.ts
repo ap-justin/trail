@@ -53,10 +53,15 @@ test("create_issue makes a todo for the product's owner and an issue in triage f
       /^create_issue and POST \/issues are deprecated: use add_todo/,
     ),
   });
-  expect(filed).toMatchObject({ type: "issue", status: "triage" });
+  // the old status enum has no triage: an issue waiting there reads as open
+  expect(filed).toMatchObject({ type: "issue", status: "open" });
+  expect(await call(owner, "get_item", { item: filed.key })).toMatchObject({
+    status: "triage",
+  });
 
   expect(await call(owner, "get_issue", { issueId: filed.key })).toMatchObject({
     key: filed.key,
+    status: "open",
     deprecated:
       "get_issue and GET /issues/{id} are deprecated: use get_item (GET /items/{key})",
   });
@@ -117,25 +122,33 @@ test("create_project with key creates a product and says so; with project fields
 test("get_project and update_project take a slug first, else a product key by the old meaning with a deprecated note", async () => {
   const client = await connect(bot.key);
   await call(client, "create_product", { key: "LGU", name: "fallback" });
-  const project = await call(client, "create_project", {
+  await call(client, "create_project", {
     name: "lgu",
     slug: "lgu",
     products: ["LGU"],
   });
-  expect(await call(client, "get_project", { project: "lgu" })).toEqual(
-    project,
+  expect(await callError(client, "get_project", { project: "lgu" })).toBe(
+    "validation_failed: lgu names both project lgu and product LGU, so it is refused rather than guessed: use get_product or update_product (/products/LGU) for the product; list_projects (GET /projects) lists the project, and list_products (GET /products) the products",
   );
+  expect(
+    await callError(client, "update_project", { project: "lgu", name: "x" }),
+  ).toMatch(/^validation_failed: lgu names both project lgu and product LGU/);
   const product = await call(client, "get_project", { project: "LGU" });
   expect(product).toMatchObject({
     key: "LGU",
     deprecated: expect.stringMatching(/use get_product/),
   });
-  expect(await call(client, "get_project", { projectId: "lgu" })).toMatchObject(
-    {
-      slug: "lgu",
-      deprecated: "projectId is deprecated: send project instead",
-    },
-  );
+  await call(client, "create_project", {
+    name: "lgu plan",
+    slug: "lgu-plan",
+    products: ["LGU"],
+  });
+  expect(
+    await call(client, "get_project", { projectId: "lgu-plan" }),
+  ).toMatchObject({
+    slug: "lgu-plan",
+    deprecated: "projectId is deprecated: send project instead",
+  });
   expect(
     await call(client, "update_project", {
       project: "LGU",
@@ -153,11 +166,11 @@ test("get_project and update_project take a slug first, else a product key by th
   );
   expect(
     await callError(client, "update_project", {
-      project: "lgu",
+      project: "lgu-plan",
       description: "d",
     }),
   ).toBe(
-    "validation_failed: lgu is a project, which has a goal, not a description: send goal instead",
+    "validation_failed: lgu-plan is a project, which has a goal, not a description: send goal instead",
   );
 });
 
@@ -200,18 +213,13 @@ test("list_issues with status open includes issues waiting in triage, as open me
   const owner = await connect(bot.key);
   await call(owner, "create_product", { key: "LGS", name: "legacy status" });
   const filer = await connect(createBot(db, "lgs filer").key);
-  const filed = await call(filer, "file_issue", {
-    product: "LGS",
-    title: "filed",
-  });
-  const todo = await call(owner, "add_todo", {
-    product: "LGS",
-    title: "planned",
-  });
-  const started = await call(owner, "add_todo", {
-    product: "LGS",
-    title: "started",
-  });
+  // one stamp apiece: same-millisecond rows would list in random id order
+  const [filed, todo, started] = (await atFakeTimeAsync([
+    () => call(filer, "file_issue", { product: "LGS", title: "filed" }),
+    () => call(owner, "add_todo", { product: "LGS", title: "planned" }),
+    () => call(owner, "add_todo", { product: "LGS", title: "started" }),
+  ])) as Body[];
+  if (!filed || !todo || !started) throw new Error("a create answered nothing");
   await call(owner, "update_item", {
     item: started.key,
     status: "in_progress",
@@ -222,6 +230,12 @@ test("list_issues with status open includes issues waiting in triage, as open me
   expect(
     await keys("list_issues", { projectId: "LGS", status: "open" }),
   ).toEqual([todo.key, filed.key]);
+  const legacy = await call(owner, "list_issues", { projectId: "LGS" });
+  expect(legacy.items.map((i: Body) => i.status)).toEqual([
+    "in_progress",
+    "open",
+    "open",
+  ]);
   expect(
     await keys("list_issues", { projectId: "LGS", status: "in_progress" }),
   ).toEqual([started.key]);
@@ -240,5 +254,43 @@ test("list_projects carries deprecated, pointing a caller after products to list
   expect(page.items.map((p: Body) => p.slug)).toContain(made.slug);
   expect(page.deprecated).toBe(
     "list_projects lists projects (groups of items across products) since this release, no longer products: call list_products (GET /products) for those",
+  );
+});
+
+test("update_issue can't unassign a todo, and says it is refused by design and to reassign instead", async () => {
+  const owner = await connect(bot.key);
+  await call(owner, "create_product", { key: "LGT", name: "legacy todo" });
+  const todo = await call(owner, "add_todo", { product: "LGT", title: "kept" });
+  expect(
+    await callError(owner, "update_issue", {
+      issueId: todo.key,
+      assigneeId: null,
+    }),
+  ).toBe(
+    `validation_failed: ${todo.key} is a todo, and a todo always has an assignee by design, so it can't be unassigned: reassign it by sending assigneeId with another bot's name or id (list_bots lists them)`,
+  );
+  createBot(db, "lgt helper");
+  expect(
+    await call(owner, "update_issue", {
+      issueId: todo.key,
+      assigneeId: "lgt helper",
+    }),
+  ).toMatchObject({ assignee: { name: "lgt helper" } });
+});
+
+test("an argument sent under its old name is refused naming the argument it became", async () => {
+  const client = await connect(bot.key);
+  expect(
+    await callError(client, "add_todo", { projectId: "LGT", title: "old" }),
+  ).toContain(
+    'Unrecognized key "projectId": it is product now, so send product instead',
+  );
+  expect(
+    await callError(client, "update_item", {
+      item: "LGT-1",
+      assigneeId: "tester",
+    }),
+  ).toContain(
+    'Unrecognized key "assigneeId": it is assignee now, so send assignee instead',
   );
 });

@@ -18,7 +18,7 @@ async function productBot(name: string) {
 }
 
 test("the triage flow: another bot files an issue, the product's bot finds it in triage and accepts it", async () => {
-  const tara = await productBot("Tara");
+  const tara = await productBot("Thea");
   const kai = await productBot("Kai");
 
   const filed = await call(kai.client, "file_issue", {
@@ -55,12 +55,12 @@ test("the triage flow: another bot files an issue, the product's bot finds it in
   const accepted = await call(tara.client, "update_item", {
     item: filed.key,
     status: "open",
-    assignee: "tara",
+    assignee: "thea",
   });
   expect(accepted).toMatchObject({
     type: "issue",
     status: "open",
-    assignee: { id: tara.actor.id, name: "Tara", kind: "bot" },
+    assignee: { id: tara.actor.id, name: "Thea", kind: "bot" },
   });
   expect(
     (
@@ -70,6 +70,101 @@ test("the triage flow: another bot files an issue, the product's bot finds it in
       })
     ).items,
   ).toEqual([]);
+});
+
+test("Tara, who owns TRL, accepts a TRL issue from triage and adds a TRL todo, and files an issue on KRU, where add_todo is refused with the next step", async () => {
+  const tara = createBot(db, "Tara");
+  const tc = await connect(tara.key);
+  const trl = await call(tc, "create_product", { key: "TRL", name: "trail" });
+  const kru = createBot(db, "Kru");
+  await call(await connect(kru.key), "create_product", {
+    key: "KRU",
+    name: "kru",
+  });
+
+  const filed = await call(await connect(bot.key), "file_issue", {
+    product: "TRL",
+    title: "the feed skips a row",
+  });
+  expect(
+    await call(tc, "update_item", {
+      item: filed.key,
+      status: "open",
+      assignee: "Tara",
+    }),
+  ).toMatchObject({ status: "open", assignee: { name: "Tara" } });
+  expect(await call(tc, "add_todo", { title: "fix the feed" })).toMatchObject({
+    type: "todo",
+    product: trl.key,
+    assignee: { name: "Tara" },
+  });
+  expect(
+    await call(tc, "file_issue", { product: "KRU", title: "kru crashes" }),
+  ).toMatchObject({ type: "issue", status: "triage", product: "KRU" });
+  expect(
+    await callError(tc, "add_todo", { product: "KRU", title: "fix kru" }),
+  ).toBe(
+    "forbidden: KRU is owned by Kru, so only Kru adds its todos: file the work as an issue with file_issue (POST /items with type issue), and Kru accepts it from triage",
+  );
+});
+
+test("on a product with an owner, only the owner accepts, cancels or retypes its triage issues; the filer may cancel its own", async () => {
+  const owner = await productBot("Opal");
+  const filer = await connect(createBot(db, "Fern").key);
+  const other = await connect(createBot(db, "Olin").key);
+  const key = owner.product.key;
+  const filed = await call(filer, "file_issue", { product: key, title: "x" });
+  for (const patch of [
+    { status: "open", assignee: "Olin" },
+    { status: "in_progress" },
+    { status: "canceled" },
+  ]) {
+    expect(
+      await callError(other, "update_item", { item: filed.key, ...patch }),
+      JSON.stringify(patch),
+    ).toBe(
+      `forbidden: ${filed.key} is in the triage of ${key}, which Opal owns: only Opal accepts or cancels it, and its filer may cancel it. Comment on it with add_comment to ask Opal`,
+    );
+  }
+  expect(
+    await callError(other, "update_item", { item: filed.key, type: "todo" }),
+  ).toBe(
+    `forbidden: only Opal, the owner of ${key}, changes an item's type between todo and issue: comment on ${filed.key} with add_comment to ask Opal`,
+  );
+  expect(
+    await call(other, "update_item", {
+      item: filed.key,
+      priority: 2,
+      addLabels: ["bug"],
+    }),
+  ).toMatchObject({ status: "triage", priority: 2, labels: ["bug"] });
+  expect(
+    await callError(filer, "update_item", { item: filed.key, status: "open" }),
+  ).toMatch(/^forbidden: /);
+  expect(
+    await call(filer, "update_item", { item: filed.key, status: "canceled" }),
+  ).toMatchObject({ status: "canceled" });
+});
+
+test("a product with no owner leaves todos and triage open to any bot that reaches it", async () => {
+  const opener = await productBot("Nobody's");
+  await call(opener.client, "update_product", {
+    product: opener.product.key,
+    owner: null,
+  });
+  const other = await connect(createBot(db, "Anyone").key);
+  const todo = await call(other, "add_todo", {
+    product: opener.product.key,
+    title: "unowned work",
+  });
+  expect(todo).toMatchObject({ type: "todo", assignee: { name: "Anyone" } });
+  const filed = await call(other, "file_issue", {
+    product: opener.product.key,
+    title: "unowned report",
+  });
+  expect(
+    await call(other, "update_item", { item: filed.key, status: "open" }),
+  ).toMatchObject({ status: "open" });
 });
 
 test("accepting an issue from triage with status open and no assignee leaves it open and unassigned", async () => {
@@ -138,20 +233,6 @@ test("add_todo names the products to pick from when the caller owns none or seve
   ).toBe(
     `validation_failed: you own no product, so add_todo needs product: pick one of ${quinn.product.key} (list_products describes each)`,
   );
-});
-
-test("add_todo in a named product defaults the assignee to that product's owner", async () => {
-  const wren = await productBot("Wren");
-  const helper = await connect(createBot(db, "Nora").key);
-  const todo = await call(helper, "add_todo", {
-    product: wren.product.key,
-    title: "planned for Wren",
-  });
-  expect(todo.assignee).toEqual({
-    id: wren.actor.id,
-    name: "Wren",
-    kind: "bot",
-  });
 });
 
 test("file_issue on a product the key doesn't reach is the 404 an unknown product is", async () => {
@@ -314,9 +395,16 @@ test("add_todo, file_issue and update_item each say when to use a todo and when 
     const description = tools.find((t) => t.name === name)?.description;
     expect(description, name).toMatch(/A todo is planned work/);
     expect(description, name).toMatch(
-      /starts in triage until that bot accepts it \(status open\) or cancels it/,
+      /starts in triage until that bot accepts it \(status open with assignee, the bot that will work on it\) or cancels it/,
     );
   }
+});
+
+test("the server's instructions say to accept an issue with status open and an assignee", async () => {
+  const client = await connect(bot.key);
+  expect(client.getInstructions()).toMatch(
+    /accepts it with update_item status open and assignee, the bot that will work on it/,
+  );
 });
 
 test("update_item says to name an assignee when accepting an issue, since status open alone leaves it unassigned", async () => {

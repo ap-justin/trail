@@ -16,6 +16,7 @@ import {
   WEBHOOKS_PER_BOT_MAX,
 } from "../service/webhooks.js";
 import { WEBHOOK_DELIVERY, WEBHOOK_SETUP } from "../webhooks/docs.js";
+import { deprecations } from "./deprecations.js";
 import { createRouter } from "./env.js";
 import {
   forbiddenError,
@@ -25,7 +26,7 @@ import {
   readErrors,
   writeErrors,
 } from "./routes.js";
-import { toPage, toWebhook } from "./serialize.js";
+import { deprecated, toPage, toWebhook } from "./serialize.js";
 
 const tags = ["webhooks"];
 const own =
@@ -52,7 +53,10 @@ const createWebhook = createRoute({
   tags,
   request: { body: jsonBody(webhookCreateSchema) },
   responses: {
-    201: jsonContent(webhookSchema, "The webhook, without its secret"),
+    201: jsonContent(
+      webhookSchema.extend({ deprecated: z.string().optional() }),
+      "The webhook, without its secret; deprecated is set when the body sent projects",
+    ),
     ...forbiddenError("read"),
     ...writeErrors,
     ...notFoundError,
@@ -99,7 +103,10 @@ const updateWebhook = createRoute({
   tags,
   request: { params: webhookParam, body: jsonBody(webhookUpdateSchema) },
   responses: {
-    200: jsonContent(webhookSchema, "The updated webhook"),
+    200: jsonContent(
+      webhookSchema.extend({ deprecated: z.string().optional() }),
+      "The updated webhook; deprecated is set when the body sent projects",
+    ),
     ...forbiddenError("read"),
     ...writeErrors,
     ...notFoundError,
@@ -171,14 +178,16 @@ const pingWebhook = createRoute({
 
 export function webhookRoutes(service: Service) {
   return createRouter()
-    .openapi(createWebhook, async (c) =>
-      c.json(
-        toWebhook(
-          await service.createWebhook(c.var.actor, c.req.valid("json")),
-        ),
+    .openapi(createWebhook, async (c) => {
+      const input = c.req.valid("json");
+      const made = toWebhook(await service.createWebhook(c.var.actor, input));
+      return c.json(
+        input.projects === undefined
+          ? made
+          : deprecated(made, deprecations.webhookProjects),
         201,
-      ),
-    )
+      );
+    })
     .openapi(listWebhooks, (c) =>
       c.json(toPage(service.listWebhooks(c.var.actor), toWebhook), 200),
     )
@@ -188,18 +197,22 @@ export function webhookRoutes(service: Service) {
         200,
       ),
     )
-    .openapi(updateWebhook, async (c) =>
-      c.json(
-        toWebhook(
-          await service.updateWebhook(
-            c.var.actor,
-            c.req.valid("param").id,
-            c.req.valid("json"),
-          ),
+    .openapi(updateWebhook, async (c) => {
+      const patch = c.req.valid("json");
+      const updated = toWebhook(
+        await service.updateWebhook(
+          c.var.actor,
+          c.req.valid("param").id,
+          patch,
         ),
+      );
+      return c.json(
+        patch.projects === undefined
+          ? updated
+          : deprecated(updated, deprecations.webhookProjects),
         200,
-      ),
-    )
+      );
+    })
     .openapi(rotateSecret, (c) =>
       c.json(
         toWebhook(

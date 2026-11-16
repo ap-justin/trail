@@ -31,7 +31,9 @@ const payload = {
 };
 
 const counts = (n: Partial<Record<string, number>>) => ({
-  projects: 0,
+  products: n.products ?? 0,
+  // deprecated alias of products
+  projects: n.products ?? 0,
   issues: 0,
   comments: 0,
   labels: 0,
@@ -49,12 +51,12 @@ test("POST /import upserts the project and answers the per-kind counts", async (
       key: "IMP",
       externalRef: "P-JUS-9",
       createdBy: bot.actor.id,
-      // an import names no owner: its rows are issues, whoever imports them
-      owner: null,
+      // the importing bot owns the product it creates, so its rows are its todos
+      owner: { id: bot.actor.id, name: "tester", kind: "bot" },
     }),
     project: body.product,
     renumbered: [],
-    created: counts({ projects: 1, issues: 1, comments: 1, labels: 1 }),
+    created: counts({ products: 1, issues: 1, comments: 1, labels: 1 }),
     updated: counts({}),
     unchanged: counts({}),
   });
@@ -62,6 +64,8 @@ test("POST /import upserts the project and answers the per-kind counts", async (
     await request("GET", "/api/v1/issues/IMP-1")
   ).json()) as Body;
   expect(issue).toMatchObject({
+    type: "todo",
+    assigneeId: bot.actor.id,
     status: "in_progress",
     createdAt: "2026-01-02T03:04:05.000Z",
     sourceAuthor: "Ada",

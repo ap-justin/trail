@@ -236,6 +236,11 @@ test("a key scoped to A files issues and comments in A", async () => {
 /** Each tool a key's actions gate, with the action it needs and its arguments in product A. */
 const gated = (): [string, string, () => Body][] => [
   ["get_product", "read", () => ({ product: a.key })],
+  ["get_project", "read", () => ({ project: projectSlugA })],
+  ["get_issue", "read", () => ({ issueId: issueA })],
+  ["list_issues", "read", () => ({ projectId: a.key })],
+  ["create_issue", "issues", () => ({ projectId: a.key, title: "t" })],
+  ["update_issue", "issues", () => ({ issueId: issueA, title: "t" })],
   ["list_products", "read", () => ({})],
   ["list_projects", "read", () => ({})],
   ["get_item", "read", () => ({ item: issueA })],

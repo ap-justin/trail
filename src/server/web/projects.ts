@@ -75,7 +75,10 @@ const listItems = createRoute({
       "The project's items of visible products, grouped by product",
     ),
     ...notFound,
-    422: jsonContent(errorSchema, "A cursor this list didn't issue"),
+    422: jsonContent(
+      errorSchema,
+      "A cursor this list didn't issue, or one issued under other filters",
+    ),
   },
 });
 
@@ -89,25 +92,53 @@ const listStatusUpdates = createRoute({
   },
 });
 
-const encodeCursor = (row: { key: string; createdAt: Date; id: string }) =>
+/** The filters a page was read under: its cursor pages only a list read under the same. */
+type ItemsFilters = {
+  product: string | null;
+  type: string | null;
+  status: string | null;
+};
+
+const encodeCursor = (
+  row: { key: string; createdAt: Date; id: string },
+  filters: ItemsFilters,
+) =>
   Buffer.from(
-    JSON.stringify([row.key, row.createdAt.getTime(), row.id]),
+    JSON.stringify([
+      row.key,
+      row.createdAt.getTime(),
+      row.id,
+      filters.product,
+      filters.type,
+      filters.status,
+    ]),
   ).toString("base64url");
 
-function decodeCursor(cursor: string) {
+function decodeCursor(cursor: string, filters: ItemsFilters) {
   let parsed: unknown;
   try {
     parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
   } catch {}
+  const filterOrNull = (v: unknown) => v === null || typeof v === "string";
   if (
     !Array.isArray(parsed) ||
-    parsed.length !== 3 ||
+    parsed.length !== 6 ||
     typeof parsed[0] !== "string" ||
     !Number.isSafeInteger(parsed[1]) ||
-    typeof parsed[2] !== "string"
+    typeof parsed[2] !== "string" ||
+    !parsed.slice(3).every(filterOrNull)
   ) {
     throw new ValidationError(
       "cursor is invalid: pass a nextCursor exactly as the previous page returned it, or leave cursor out for the first page",
+    );
+  }
+  if (
+    parsed[3] !== filters.product ||
+    parsed[4] !== filters.type ||
+    parsed[5] !== filters.status
+  ) {
+    throw new ValidationError(
+      "cursor was issued for other filters: it pages only the list it came from, so leave cursor out to start this list from its first page",
     );
   }
   return {
@@ -118,8 +149,8 @@ function decodeCursor(cursor: string) {
 }
 
 /** Rows after the cursor in (product key A to Z, then newest first) order. */
-function pastCursor(cursor: string): SQL {
-  const after = decodeCursor(cursor);
+function pastCursor(cursor: string, filters: ItemsFilters): SQL {
+  const after = decodeCursor(cursor, filters);
   return or(
     gt(product.key, after.key),
     and(
@@ -215,6 +246,11 @@ export function projectRoutes(db: Db) {
         ),
       );
       const filters = itemFilters({ type, status });
+      const sentFilters: ItemsFilters = {
+        product: productKey?.toUpperCase() ?? null,
+        type: type ?? null,
+        status: status ?? null,
+      };
       const rows = db
         .select({ issue, key: product.key })
         .from(projectItem)
@@ -224,7 +260,7 @@ export function projectRoutes(db: Db) {
           and(
             scope,
             ...filters,
-            cursor === undefined ? undefined : pastCursor(cursor),
+            cursor === undefined ? undefined : pastCursor(cursor, sentFilters),
           ),
         )
         .orderBy(asc(product.key), desc(issue.createdAt), desc(issue.id))
@@ -259,11 +295,14 @@ export function projectRoutes(db: Db) {
           groups,
           nextCursor:
             rows.length > limit && last
-              ? encodeCursor({
-                  key: last.key,
-                  createdAt: last.issue.createdAt,
-                  id: last.issue.id,
-                })
+              ? encodeCursor(
+                  {
+                    key: last.key,
+                    createdAt: last.issue.createdAt,
+                    id: last.issue.id,
+                  },
+                  sentFilters,
+                )
               : null,
           counts: itemCounts(
             db,

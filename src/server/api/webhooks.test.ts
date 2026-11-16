@@ -752,3 +752,19 @@ test("a key limited to the webhook's projects is told which webhook already has 
   expect(moved.status).toBe(409);
   expect(moved.body.error.message).toContain(twin.body.id);
 });
+
+test("projects, the deprecated alias of products, carries a deprecated note on create and update; products carries none", async () => {
+  const note =
+    "projects is deprecated: send products with the products' keys (like TRL)";
+  const created = await create();
+  expect(created.body.deprecated).toBe(note);
+  const viaAlias = await call("PATCH", `/webhooks/${created.body.id}`, {
+    json: { projects: [b.key] },
+  });
+  expect(viaAlias.body.deprecated).toBe(note);
+  const current = await call("PATCH", `/webhooks/${created.body.id}`, {
+    json: { products: [a.key] },
+  });
+  expect(current.status).toBe(200);
+  expect(current.body).not.toHaveProperty("deprecated");
+});

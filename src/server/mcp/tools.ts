@@ -37,6 +37,7 @@ import {
   toImportResult,
   toIssue,
   toLabel,
+  toLegacyIssue,
   toPage,
   toProduct,
   toProject,
@@ -92,7 +93,14 @@ const create: ToolAnnotations = {
   idempotentHint: false,
   openWorldHint: false,
 };
-const update: ToolAnnotations = { ...create, idempotentHint: true };
+/** A change that overwrites what was there: a client asking before destructive tools asks before these. */
+const update: ToolAnnotations = {
+  ...create,
+  destructiveHint: true,
+  idempotentHint: true,
+};
+/** A repeatable change that only adds. */
+const additive: ToolAnnotations = { ...create, idempotentHint: true };
 
 const json = (value: unknown): CallToolResult => ({
   content: [{ type: "text", text: JSON.stringify(value) }],
@@ -264,11 +272,34 @@ export function registerTools(
     .string()
     .min(1)
     .describe("The project's slug, like launch-q4; list_projects lists them.");
+  /** The note on an argument the schema leaves optional only because its deprecated alias may stand in. */
+  const requiredUnless = (alias: string, description: string) =>
+    `Required, unless you send ${alias}, its deprecated alias. ${description}`;
+  const aliasedItem = z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      requiredUnless(
+        "issueId",
+        "The item's key, like TRL-12 (or its id, or the source key it kept from an import, like JUS-187).",
+      ),
+    );
+  const aliasedProduct = z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      requiredUnless(
+        "projectId",
+        "The product's key, like TRL (any case); list_products lists those this key reaches.",
+      ),
+    );
 
   server.registerTool(
     "add_todo",
     {
-      description: `Add a todo: planned work in a product you own (or any product this key reaches, when you name it). ${TODO_OR_ISSUE} Use file_issue instead to report a bug or ask for work in someone else's product. Without product it goes to the one product you own; with none or several, the error lists the products to pick from. Label names match the product's labels ignoring the case of A-Z, and a new name creates the label. Returns the item with its key, like TRL-12.`,
+      description: `Add a todo: planned work in a product you own, or in a product with no owner. ${TODO_OR_ISSUE} In a product another bot owns this is refused (forbidden, naming the owner): use file_issue instead to report a bug or ask for work there. Without product it goes to the one product you own; with none or several, the error lists the products to pick from. Label names match the product's labels ignoring the case of A-Z, and a new name creates the label. Returns the item with its key, like TRL-12.`,
       inputSchema: todoCreateSchema.extend(idempotencyKey),
       annotations: create,
     },
@@ -283,7 +314,7 @@ export function registerTools(
   server.registerTool(
     "file_issue",
     {
-      description: `File an issue: a bug report or request to a product's bot, on any product this key reaches. ${TODO_OR_ISSUE} Use add_todo instead for planned work in your own product. Leave assignee out: the product's bot assigns it when it accepts the issue. Returns the item with its key, like TRL-12, in status triage.`,
+      description: `File an issue: a bug report or request to a product's bot, on any product this key reaches. ${TODO_OR_ISSUE} Use add_todo instead for planned work in your own product. Leave assignee out: the product's bot assigns it when it accepts the issue (status open with assignee). Returns the item with its key, like TRL-12, in status triage.`,
       inputSchema: issueFileSchema.extend(idempotencyKey),
       annotations: create,
     },
@@ -309,7 +340,7 @@ export function registerTools(
   server.registerTool(
     "update_item",
     {
-      description: `Change an item: type, status, assignee, priority, labels, title, description, estimate or links. ${TODO_OR_ISSUE} To accept an issue from your product's triage send status open with assignee, the bot that will work on it (often you), since status open alone leaves it unassigned; or send type todo, which opens it and assigns the product's owner when it has no assignee. To drop it send status canceled. A todo never goes back to triage and never loses its assignee. Fields left out stay as they are. labels or links replace the whole set; addLabels, removeLabels, addLinks and removeLinks change part of it, safe beside another bot's edit (not together with labels or links). Moving to done or canceled stamps completedAt; reopening clears it.`,
+      description: `Change an item: type, status, assignee, priority, labels, title, description, estimate or links. ${TODO_OR_ISSUE} To accept an issue from your product's triage send status open with assignee, the bot that will work on it (often you), since status open alone leaves it unassigned; or send type todo, which opens it and assigns the product's owner when it has no assignee. To drop it send status canceled. On a product with an owner, only the owner accepts, cancels or changes the type of its triage issues (the filer may cancel its own); anyone else is refused (forbidden) and should comment with add_comment to ask the owner. A todo never goes back to triage and never loses its assignee. Fields left out stay as they are. labels or links replace the whole set; addLabels, removeLabels, addLinks and removeLinks change part of it, safe beside another bot's edit (not together with labels or links). Moving to done or canceled stamps completedAt; reopening clears it.`,
       inputSchema: itemUpdateSchema.extend({ item }),
       annotations: update,
     },
@@ -346,7 +377,7 @@ export function registerTools(
       description:
         "Add a comment to an item, a todo or an issue, named by its key like TRL-12. On an issue in triage, comment to ask the filer a question before you accept or cancel it.",
       inputSchema: commentCreateSchema.extend({
-        item: item.optional(),
+        item: aliasedItem,
         issueId: issueIdAlias,
         ...idempotencyKey,
       }),
@@ -374,7 +405,7 @@ export function registerTools(
       description:
         "List an item's comments, oldest first, a page at a time: pass nextCursor back as cursor until it is null.",
       inputSchema: z.strictObject({
-        item: item.optional(),
+        item: aliasedItem,
         issueId: issueIdAlias,
         ...page,
       }),
@@ -394,7 +425,7 @@ export function registerTools(
     "create_project",
     {
       description:
-        "Create a project: a named group of items from one or more products, with a goal, a lead bot and an optional target date, then fill it with add_to_project. Needs the issues action on a key reaching every product named. products defaults to the one product you own (the error lists choices otherwise); lead defaults to you; slug is derived from the name when left out. Returns the project with its slug, which names it everywhere. Deprecated: called with key (and no slug, products, lead, goal or targetDate) it creates a product as it did before projects, and the result carries deprecated; use create_product for that.",
+        "Create a project: a named group of items from one or more products, with a goal, a lead bot and an optional target date, then fill it with add_to_project. Needs the issues action on a key reaching every product named. products defaults to the one product you own (the error lists choices otherwise); lead defaults to you; slug is derived from the name when left out. Returns the project with its slug, which names it everywhere. Deprecated: called with key (and no slug, products, lead, goal or targetDate) it creates a product as it did before projects, and the result carries deprecated; use create_product for that. A product stays for good, since no tool deletes a product: send key only when you mean to create one.",
       inputSchema: projectCreateSchema.extend(idempotencyKey),
       annotations: create,
     },
@@ -415,7 +446,10 @@ export function registerTools(
       .min(1)
       .optional()
       .describe(
-        "The project's slug, like launch-q4. Deprecated: a product key (like TRL) that matches no slug names that product, as before projects.",
+        requiredUnless(
+          "projectId",
+          "The project's slug, like launch-q4. Deprecated: a product key (like TRL) that matches no slug names that product, as before projects; a ref that is both a project's slug and a product's key is refused, naming both.",
+        ),
       ),
     projectId: z
       .string()
@@ -441,7 +475,7 @@ export function registerTools(
     "get_project",
     {
       description:
-        "Get a project by slug: goal, lead, target date, its products this key reaches (hiddenProducts true when it draws from others you can't see), item counts per status over the products shown, and its latest status update. List its items with list_items and project. Deprecated: a product key (like TRL) that matches no slug returns that product, carrying deprecated; use get_product for that.",
+        "Get a project by slug: goal, lead, target date, its products this key reaches (hiddenProducts true when it draws from others you can't see), item counts per status over the products shown, and its latest status update. List its items with list_items and project. Deprecated: a product key (like TRL) that matches no slug returns that product, carrying deprecated; use get_product for that. A ref that is both a project's slug and a product's key (lowercase trl beside project trl) is refused, naming both.",
       inputSchema: z.strictObject(projectArg),
       annotations: read,
     },
@@ -473,7 +507,7 @@ export function registerTools(
     "update_project",
     {
       description:
-        "Change a project's name, goal, lead (a bot's name or id) or targetDate (YYYY-MM-DD, null clears). Fields left out stay as they are. Needs the issues action on a key reaching one of the project's products. Deprecated: a product key (like TRL) that matches no slug changes that product's name or description, carrying deprecated; use update_product for that.",
+        "Change a project's name, goal, lead (a bot's name or id) or targetDate (YYYY-MM-DD, null clears). Fields left out stay as they are. Needs the issues action on a key reaching one of the project's products. Deprecated: a product key (like TRL) that matches no slug changes that product's name or description, carrying deprecated; use update_product for that. A ref that is both a project's slug and a product's key is refused, naming both, so nothing changes.",
       inputSchema: projectUpdateSchema.extend(projectArg),
       annotations: update,
     },
@@ -493,7 +527,7 @@ export function registerTools(
       description:
         "Add items to a project by key, up to 100 a call, from any products this key reaches: an item's product joins the project's products by itself. An item already in the project is left as it is and listed in unchanged, so a retry is safe. Needs the issues action on a key reaching one of the project's products. Returns the project with added and unchanged keys.",
       inputSchema: projectItemsSchema.extend({ project: projectSlug }),
-      annotations: update,
+      annotations: additive,
     },
     ({ project, items }) =>
       run("add_to_project", () => {
@@ -600,7 +634,7 @@ export function registerTools(
     "post_status_update",
     {
       description:
-        "Post a dated status update with its health (on_track, at_risk or off_track) on exactly one of a product (its key) or a project (its slug). Needs the status_updates action on a key reaching the product, or one of the project's products. externalRef is kept on a product's update only.",
+        "Post a dated status update with its health (on_track, at_risk or off_track) on exactly one of a product (its key) or a project (its slug). Needs the status_updates action on a key reaching the product, or one of the project's products. externalRef is kept on a product's update only, and refused on a project's: send idempotency_key there to make the post safe to retry.",
       inputSchema: statusUpdateCreateSchema.extend({
         ...statusTarget,
         ...idempotencyKey,
@@ -669,7 +703,7 @@ export function registerTools(
       description:
         "Create a label in a product. Naming a new label on add_todo, file_issue or update_item creates it too. Needs the admin action.",
       inputSchema: labelCreateSchema.extend({
-        product: product.optional(),
+        product: aliasedProduct,
         projectId: projectIdAlias,
         ...idempotencyKey,
       }),
@@ -697,7 +731,7 @@ export function registerTools(
       description:
         "List a product's labels, oldest first, a page at a time: pass nextCursor back as cursor until it is null.",
       inputSchema: z.strictObject({
-        product: product.optional(),
+        product: aliasedProduct,
         projectId: projectIdAlias,
         ...page,
       }),
@@ -752,7 +786,7 @@ export function registerTools(
     ({ idempotency_key, ...input }) =>
       run("create_issue", () =>
         deprecated(
-          toIssue(
+          toLegacyIssue(
             service.createIssue(actor, input, {
               idempotencyKey: idempotency_key,
             }),
@@ -772,7 +806,7 @@ export function registerTools(
     ({ issueId }) =>
       run("get_issue", () =>
         deprecated(
-          toIssue(service.getItem(actor, issueId)),
+          toLegacyIssue(service.getItem(actor, issueId)),
           deprecations.getIssue,
         ),
       ),
@@ -799,7 +833,7 @@ export function registerTools(
               product: projectId,
               assignee: assigneeId,
             }),
-            toIssue,
+            toLegacyIssue,
           ),
           deprecations.listIssues,
         ),
@@ -816,7 +850,9 @@ export function registerTools(
     ({ issueId, ...patch }) =>
       run("update_issue", () =>
         deprecated(
-          toIssue(service.updateItem(actor, issueId, patch)),
+          toLegacyIssue(
+            service.updateItem(actor, issueId, patch, { legacy: true }),
+          ),
           deprecations.updateIssue,
         ),
       ),
@@ -853,7 +889,7 @@ export function registerTools(
         data: z.string().describe(`The image, ${photoEncoding}`),
       }),
       // the photo it replaces is gone for good
-      annotations: { ...update, destructiveHint: true },
+      annotations: update,
     },
     ({ data }) =>
       run("set_my_photo", () => service.setMyPhoto(actor, photoBytes(data))),
@@ -865,7 +901,7 @@ export function registerTools(
       description:
         "Remove your own photo; succeeds when you have none too. Every key may call this, whatever its scope.",
       inputSchema: z.strictObject({}),
-      annotations: { ...update, destructiveHint: true },
+      annotations: update,
     },
     () => run("clear_my_photo", () => service.clearMyPhoto(actor)),
   );
@@ -876,7 +912,7 @@ export function registerTools(
       description: `Set your own title: a short plain-text role, like "Release manager", that people see beside your name in trail. It is trimmed, then must be 1 to ${BOT_TITLE_MAX} characters. Setting the title you already have changes nothing. Every key may call this, whatever its scope.`,
       inputSchema: myTitleUpdateSchema,
       // the title it replaces is gone for good
-      annotations: { ...update, destructiveHint: true },
+      annotations: update,
     },
     ({ title }) => run("set_my_title", () => service.setMyTitle(actor, title)),
   );
@@ -887,7 +923,7 @@ export function registerTools(
       description:
         "Remove your own title; succeeds when you have none too. Every key may call this, whatever its scope.",
       inputSchema: z.strictObject({}),
-      annotations: { ...update, destructiveHint: true },
+      annotations: update,
     },
     () => run("clear_my_title", () => service.clearMyTitle(actor)),
   );
@@ -908,7 +944,12 @@ export function registerTools(
     },
     (input) =>
       runAsync("create_webhook", async () =>
-        toWebhook(await service.createWebhook(actor, input)),
+        noted(
+          toWebhook(await service.createWebhook(actor, input)),
+          input.projects === undefined
+            ? undefined
+            : deprecations.webhookProjects,
+        ),
       ),
   );
 
@@ -934,7 +975,12 @@ export function registerTools(
     },
     ({ webhookId, ...patch }) =>
       runAsync("update_webhook", async () =>
-        toWebhook(await service.updateWebhook(actor, webhookId, patch)),
+        noted(
+          toWebhook(await service.updateWebhook(actor, webhookId, patch)),
+          patch.projects === undefined
+            ? undefined
+            : deprecations.webhookProjects,
+        ),
       ),
   );
 
@@ -956,7 +1002,7 @@ export function registerTools(
     {
       description: `Delete a webhook and the deliveries still queued for it. Needs the read action. ${ownWebhooks}`,
       inputSchema: z.strictObject({ webhookId }),
-      annotations: { ...update, destructiveHint: true },
+      annotations: update,
     },
     ({ webhookId }) =>
       run("delete_webhook", () => service.deleteWebhook(actor, webhookId)),
@@ -977,10 +1023,10 @@ export function registerTools(
     "import_project",
     {
       description:
-        "Bring a whole Linear project (or another tracker's) over into a trail product in one call: the product with its items, their comments, labels and links, and its status updates, each keyed by externalRef (Linear's id, a UUID). Send each issue's sourceKey (Linear's identifier, like JUS-187): trail stores it, so JUS-187 finds the issue in get_item, update_item and add_comment from then on, and a new issue keeps that number when its prefix is the product's key. If that number is taken by another issue, the new one gets the product's next number and is listed in the result's renumbered with its new key; nothing fails. Use that new key for a renumbered issue: its sourceKey is the other issue's key, so it finds the other issue. Descriptions and comment bodies may be up to 1048576 characters and an issue may have up to 200 links. The payload is checked in two passes, and nothing is imported unless both pass. First its shape: a missing or unknown field, a value of the wrong type, the product's key, name, description or labels, and any row's externalRef, createdAt, completedAt, sourceAuthor or health; the error names every such failure by its path, like issues.3.createdAt. Then every other value; the error lists every failing row with its sourceKey or externalRef. Fix everything an error lists before sending the import again. Send each issue's statusType (Linear's state.type) and status (its state name, kept as sourceStatus): statusType maps backlog/unstarted/triage → open, started → in_progress, completed → done, canceled/duplicate → canceled; without it, status names map Backlog/Todo/Triage → open, In Progress → in_progress, Done → done, Canceled/Duplicate → canceled. Rows are matched by externalRef, so a re-run never duplicates; it sets each matched row's fields, labels and links to the payload's values, replacing changes made in trail since the last import, and never deletes rows. An imported issue's number never changes; a label that differs from the product's only by case is renamed to the payload's spelling. Imported items keep their imported status (never triage) and are typed todo when you own the product, else issue. Returns the product (project is its deprecated alias), per kind how many rows were created, updated and unchanged, and renumbered.",
+        "Bring a whole Linear project (or another tracker's) over into a trail product in one call: the product with its items, their comments, labels and links, and its status updates, each keyed by externalRef (Linear's id, a UUID). Send each issue's sourceKey (Linear's identifier, like JUS-187): trail stores it, so JUS-187 finds the issue in get_item, update_item and add_comment from then on, and a new issue keeps that number when its prefix is the product's key. If that number is taken by another issue, the new one gets the product's next number and is listed in the result's renumbered with its new key; nothing fails. Use that new key for a renumbered issue: its sourceKey is the other issue's key, so it finds the other issue. Descriptions and comment bodies may be up to 1048576 characters and an issue may have up to 200 links. The payload is checked in two passes, and nothing is imported unless both pass. First its shape: a missing or unknown field, a value of the wrong type, the product's key, name, description or labels, and any row's externalRef, createdAt, completedAt, sourceAuthor or health; the error names every such failure by its path, like issues.3.createdAt. Then every other value; the error lists every failing row with its sourceKey or externalRef. Fix everything an error lists before sending the import again. Send each issue's statusType (Linear's state.type) and status (its state name, kept as sourceStatus): statusType maps backlog/unstarted/triage → open, started → in_progress, completed → done, canceled/duplicate → canceled; without it, status names map Backlog/Todo/Triage → open, In Progress → in_progress, Done → done, Canceled/Duplicate → canceled. Rows are matched by externalRef, so a re-run never duplicates; it sets each matched row's fields, labels and links to the payload's values, replacing changes made in trail since the last import, and never deletes rows. An imported issue's number never changes; a label that differs from the product's only by case is renamed to the payload's spelling. A product the import creates is owned by you. Imported items keep their imported status (never triage) and are typed todo when you own the product, else issue. Returns the product (project is its deprecated alias), per kind how many rows were created, updated and unchanged (products counted under products; projects is its deprecated alias), and renumbered.",
       inputSchema: importSchema,
       // a re-run overwrites bots' edits to matched rows
-      annotations: { ...update, destructiveHint: true },
+      annotations: update,
     },
     (payload) =>
       run("import_project", () =>

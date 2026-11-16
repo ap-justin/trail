@@ -467,9 +467,15 @@ test("import_project imports a project and a re-run changes nothing", async () =
     ],
   };
   const first = await call(client, "import_project", payload);
-  expect(first.created).toMatchObject({ projects: 1, issues: 1, comments: 1 });
+  expect(first.created).toMatchObject({
+    products: 1,
+    projects: 1,
+    issues: 1,
+    comments: 1,
+  });
   const second = await call(client, "import_project", payload);
   expect(second.created).toEqual({
+    products: 0,
     projects: 0,
     issues: 0,
     comments: 0,
@@ -708,6 +714,58 @@ test("import_project is annotated destructive and says a re-run replaces trail's
     /replacing changes made in trail since the last import.*never deletes/s,
   );
   expect(tool?.description).toMatch(/sourceKey/);
+});
+
+test("every tool that overwrites or removes is annotated destructive; creates and add_to_project are additive", async () => {
+  const { tools } = await (await connect(bot.key)).listTools();
+  const destructive = (name: string) =>
+    tools.find((t) => t.name === name)?.annotations?.destructiveHint;
+  for (const name of [
+    "update_item",
+    "update_issue",
+    "update_project",
+    "update_product",
+    "update_webhook",
+    "rotate_webhook_secret",
+    "remove_from_project",
+    "delete_webhook",
+  ]) {
+    expect(destructive(name), name).toBe(true);
+  }
+  for (const name of ["add_todo", "file_issue", "add_to_project"]) {
+    expect(destructive(name), name).toBe(false);
+  }
+});
+
+test("an argument that is required but has a deprecated alias says so, since the schema can't mark one of two required", async () => {
+  const { tools } = await (await connect(bot.key)).listTools();
+  const describe = (tool: string, field: string) =>
+    (
+      tools.find((t) => t.name === tool)?.inputSchema.properties?.[field] as
+        | { description?: string }
+        | undefined
+    )?.description;
+  for (const [tool, field, alias] of [
+    ["get_project", "project", "projectId"],
+    ["update_project", "project", "projectId"],
+    ["add_comment", "item", "issueId"],
+    ["list_comments", "item", "issueId"],
+    ["create_label", "product", "projectId"],
+    ["list_labels", "product", "projectId"],
+  ] as const) {
+    expect(describe(tool, field), `${tool} ${field}`).toMatch(
+      new RegExp(
+        `^Required, unless you send ${alias}, its deprecated alias\\.`,
+      ),
+    );
+  }
+});
+
+test("create_project says a product made through its deprecated key can't be deleted by any tool", async () => {
+  const { tools } = await (await connect(bot.key)).listTools();
+  expect(tools.find((t) => t.name === "create_project")?.description).toMatch(
+    /no tool deletes a product/,
+  );
 });
 
 const reviewIssue = {

@@ -142,6 +142,9 @@ ALTER TABLE `webhook_subscription_project` RENAME TO `webhook_subscription_produ
 ALTER TABLE `webhook_subscription_product` RENAME COLUMN `project_id` TO `product_id`;--> statement-breakpoint
 DROP INDEX `webhook_subscription_project_project_idx`;--> statement-breakpoint
 CREATE INDEX `webhook_subscription_product_product_idx` ON `webhook_subscription_product` (`product_id`,`subscription_id`);--> statement-breakpoint
+-- a product event is delivered under both trail.product.* and trail.project.*; rows unique per (subscription, event) stay unique with type added
+DROP INDEX `webhook_delivery_subscription_event_unique`;--> statement-breakpoint
+CREATE UNIQUE INDEX `webhook_delivery_subscription_event_type_unique` ON `webhook_delivery` (`subscription_id`,`event_id`,`type`);--> statement-breakpoint
 CREATE TABLE `project` (
 	`id` text PRIMARY KEY NOT NULL,
 	`slug` text NOT NULL,
