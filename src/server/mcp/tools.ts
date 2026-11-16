@@ -309,7 +309,7 @@ export function registerTools(
   server.registerTool(
     "update_item",
     {
-      description: `Change an item: type, status, assignee, priority, labels, title, description, estimate or links. ${TODO_OR_ISSUE} To accept an issue from your product's triage send status open (or type todo, which opens it and assigns it to the product's owner when it has no assignee); to drop it send status canceled. A todo never goes back to triage and never loses its assignee. Fields left out stay as they are. labels or links replace the whole set; addLabels, removeLabels, addLinks and removeLinks change part of it, safe beside another bot's edit (not together with labels or links). Moving to done or canceled stamps completedAt; reopening clears it.`,
+      description: `Change an item: type, status, assignee, priority, labels, title, description, estimate or links. ${TODO_OR_ISSUE} To accept an issue from your product's triage send status open with assignee, the bot that will work on it (often you), since status open alone leaves it unassigned; or send type todo, which opens it and assigns the product's owner when it has no assignee. To drop it send status canceled. A todo never goes back to triage and never loses its assignee. Fields left out stay as they are. labels or links replace the whole set; addLabels, removeLabels, addLinks and removeLinks change part of it, safe beside another bot's edit (not together with labels or links). Moving to done or canceled stamps completedAt; reopening clears it.`,
       inputSchema: itemUpdateSchema.extend({ item }),
       annotations: update,
     },

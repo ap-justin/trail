@@ -296,3 +296,11 @@ test("add_todo, file_issue and update_item each say when to use a todo and when 
     );
   }
 });
+
+test("update_item says to name an assignee when accepting an issue, since status open alone leaves it unassigned", async () => {
+  const { tools } = await (await connect(bot.key)).listTools();
+  const description = tools.find((t) => t.name === "update_item")?.description;
+  expect(description).toMatch(
+    /To accept an issue from your product's triage send status open with assignee/,
+  );
+});

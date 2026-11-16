@@ -799,7 +799,7 @@ const itemPatchFields = {
   description: text.optional(),
   status: issueStatusSchema.optional().meta({
     description:
-      "triage, open, in_progress, done or canceled. A product's bot accepts an issue from triage with open, or drops it with canceled. A todo is never in triage.",
+      "triage, open, in_progress, done or canceled. A product's bot accepts an issue from triage with open and an assignee (open alone leaves it unassigned), or drops it with canceled. A todo is never in triage.",
   }),
   estimate: estimate
     .nullable()
