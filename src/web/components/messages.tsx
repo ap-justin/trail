@@ -477,7 +477,14 @@ export function ConversationView(props: ConversationViewProps) {
   let title: ReactNode;
   let body: ReactNode;
   if (props.status === "error") {
-    title = untitled;
+    // a failed first load can't name the pair, so the page still says what it is
+    title = bots ? (
+      untitled
+    ) : (
+      <header className={headerBox}>
+        <h1 className={cn(titleType, "font-semibold")}>Conversation</h1>
+      </header>
+    );
     body = (
       <ErrorState
         title="Couldn't load this conversation"

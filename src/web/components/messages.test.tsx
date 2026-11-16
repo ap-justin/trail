@@ -503,12 +503,13 @@ describe("conversation thread", () => {
     expect(screen.queryByRole("listitem")).not.toBeInTheDocument();
   });
 
-  test("a failed load shows only the sr-only Messages h1 and the error, and offers Try again", async () => {
+  test("a failed first load titles the page Conversation over the error, and offers Try again", async () => {
     const user = userEvent.setup();
     const props = renderThread(failed);
-    expect(
-      screen.getByRole("heading", { level: 1, name: "Messages" }),
-    ).toHaveClass("sr-only");
+    const h1 = screen.getByRole("heading", { level: 1 });
+    expect(h1).toHaveTextContent(/^Conversation$/);
+    expect(h1).not.toHaveClass("sr-only");
+    expect(screen.queryByText("Bot")).not.toBeInTheDocument();
     expect(document.querySelector("[data-title-skeleton]")).toBeNull();
     expect(document.querySelector('[data-slot="skeleton"]')).toBeNull();
     expect(screen.getByRole("alert")).toHaveTextContent(
@@ -516,6 +517,13 @@ describe("conversation thread", () => {
     );
     await user.click(screen.getByRole("button", { name: "Try again" }));
     expect(props.onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  test("a failed load with its bots known keeps the sr-only Messages h1", () => {
+    renderThread({ ...failed, bots: [alpha, beta] });
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Messages" }),
+    ).toHaveClass("sr-only");
   });
 
   test("a pair that isn't two bots reads as Page not found", () => {
