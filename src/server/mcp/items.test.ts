@@ -151,6 +151,72 @@ test("on a product with an owner, only the owner accepts, cancels or retypes its
   ).toMatchObject({ status: "canceled" });
 });
 
+test("on a product with an owner, only the owner or the filer cancels an item at any status; anyone else is refused and changes nothing", async () => {
+  const owner = await productBot("alpha cancel");
+  const filer = await connect(createBot(db, "beta cancel").key);
+  const outsider = await connect(createBot(db, "gamma cancel").key);
+  const key = owner.product.key;
+  const refusal = (item: string) =>
+    `forbidden: ${item} is on ${key}, which alpha cancel owns: only alpha cancel or the bot that filed it cancels it. Comment on it with add_comment to ask alpha cancel`;
+  const accepted = async (title: string) => {
+    const filed = await call(filer, "file_issue", { product: key, title });
+    await call(owner.client, "update_item", {
+      item: filed.key,
+      status: "open",
+      assignee: "alpha cancel",
+    });
+    return filed.key as string;
+  };
+
+  const issue = await accepted("a");
+  const todo = (await call(owner.client, "add_todo", { title: "b" }))
+    .key as string;
+  for (const item of [issue, todo]) {
+    expect(
+      await callError(outsider, "update_item", { item, status: "canceled" }),
+      item,
+    ).toBe(refusal(item));
+    expect(await call(owner.client, "get_item", { item }), item).toMatchObject({
+      status: "open",
+    });
+  }
+  expect(
+    await call(filer, "update_item", { item: issue, status: "canceled" }),
+  ).toMatchObject({ status: "canceled" });
+  expect(
+    await call(owner.client, "update_item", { item: todo, status: "canceled" }),
+  ).toMatchObject({ status: "canceled" });
+  const another = await accepted("c");
+  expect(
+    await call(owner.client, "update_item", {
+      item: another,
+      status: "canceled",
+    }),
+  ).toMatchObject({ status: "canceled" });
+});
+
+test("anyone reopens a canceled todo, even one another bot filed as an issue; a canceled issue that bot filed only the owner reopens", async () => {
+  const owner = await productBot("alpha todo reopen");
+  const filer = await connect(createBot(db, "beta todo reopen").key);
+  const outsider = await connect(createBot(db, "gamma todo reopen").key);
+  const key = owner.product.key;
+  const filed = await call(filer, "file_issue", { product: key, title: "a" });
+  await call(owner.client, "update_item", { item: filed.key, type: "todo" });
+  await call(filer, "update_item", { item: filed.key, status: "canceled" });
+  expect(
+    await call(outsider, "update_item", { item: filed.key, status: "open" }),
+  ).toMatchObject({ type: "todo", status: "open" });
+
+  const issue = await call(filer, "file_issue", { product: key, title: "b" });
+  await call(filer, "update_item", { item: issue.key, status: "canceled" });
+  expect(
+    await callError(outsider, "update_item", {
+      item: issue.key,
+      status: "open",
+    }),
+  ).toMatch(/^forbidden: .* only alpha todo reopen reopens it\./);
+});
+
 test("update_item on another bot's product attaches only labels the product has and lists the rest in skippedLabels; the owner creates them", async () => {
   const owner = await productBot("alpha labels");
   const outsider = await connect(createBot(db, "beta labels").key);
@@ -250,6 +316,13 @@ test("a product with no owner leaves todos and triage open to any bot that reach
   expect(
     await call(other, "update_item", { item: filed.key, status: "open" }),
   ).toMatchObject({ status: "open" });
+  const third = await connect(createBot(db, "Anyone else").key);
+  for (const item of [todo.key, filed.key]) {
+    expect(
+      await call(third, "update_item", { item, status: "canceled" }),
+      item,
+    ).toMatchObject({ status: "canceled" });
+  }
 });
 
 test("accepting an issue from triage with status open and no assignee leaves it open and unassigned", async () => {

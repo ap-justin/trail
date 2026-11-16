@@ -121,6 +121,42 @@ test("PATCH /issues/{id} keeps the owner rule: an outsider can't accept, cancel 
   ).toMatchObject({ type: "issue", status: "canceled" });
 });
 
+test("PATCH /issues/{id} cancels an accepted issue or a todo only for the owner or the filer", async () => {
+  const filer = addBot("legacy rest accepted filer");
+  const outsider = addBot("legacy rest accepted outsider");
+  const issue = await json(
+    await request("POST", "/api/v1/issues", {
+      json: { projectId: "LEG", title: "accepted then dropped" },
+      key: filer.key,
+    }),
+  );
+  const accepted = await request("PATCH", `/api/v1/issues/${issue.key}`, {
+    json: { status: "open", assigneeId: "tester" },
+  });
+  expect(accepted.status).toBe(200);
+  const todo = await json(
+    await request("POST", "/api/v1/issues", {
+      json: { projectId: "LEG", title: "owner's own" },
+    }),
+  );
+  expect(todo.type).toBe("todo");
+  for (const { key } of [issue, todo]) {
+    const res = await request("PATCH", `/api/v1/issues/${key}`, {
+      json: { status: "canceled" },
+      key: outsider.key,
+    });
+    expect(res.status, key).toBe(403);
+    expect((await json(res)).error.message, key).toBe(
+      `${key} is on LEG, which tester owns: only tester or the bot that filed it cancels it. Comment on it with add_comment to ask tester`,
+    );
+  }
+  const byFiler = await request("PATCH", `/api/v1/issues/${issue.key}`, {
+    json: { status: "canceled" },
+    key: filer.key,
+  });
+  expect((await json(byFiler)).status).toBe("canceled");
+});
+
 test("PATCH /issues/{id} by a bot outside the product creates no label, and says which it skipped", async () => {
   const outsider = addBot("legacy rest label patcher");
   const filed = await json(
@@ -203,6 +239,25 @@ test("a slug equal to a product's key is a 409, and a name that derives one gets
   });
   expect(derived.status).toBe(201);
   expect((await json(derived)).slug).toBe("leg-2");
+});
+
+test("a name whose slug is a product's key, with the -2 suffix a project's slug, derives the -3 one", async () => {
+  expect(
+    (
+      await request("POST", "/api/v1/products", {
+        json: { key: "SLGX", name: "suffixed" },
+      })
+    ).status,
+  ).toBe(201);
+  const taken = await request("POST", "/api/v1/projects", {
+    json: { name: "taken", slug: "slgx-2", products: ["SLGX"] },
+  });
+  expect(taken.status).toBe(201);
+  const derived = await request("POST", "/api/v1/projects", {
+    json: { name: "SLGX", products: ["SLGX"] },
+  });
+  expect(derived.status).toBe(201);
+  expect((await json(derived)).slug).toBe("slgx-3");
 });
 
 test("a product key equal to a project's slug, in any case, is a 409", async () => {

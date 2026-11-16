@@ -360,6 +360,44 @@ test("update_issue keeps the owner rule: an outsider can't accept, cancel or ret
   ).toMatchObject({ labels: [], skippedLabels: ["outside-made"] });
 });
 
+test("update_issue cancels an accepted issue or a todo only for the owner or the filer", async () => {
+  const owner = await connect(bot.key);
+  await call(owner, "create_product", { key: "LGC", name: "legacy cancel" });
+  const filer = await connect(createBot(db, "legacy cancel filer").key);
+  const outsider = await connect(createBot(db, "legacy cancel outsider").key);
+  const issue = await call(filer, "create_issue", {
+    projectId: "LGC",
+    title: "accepted then dropped",
+  });
+  await call(owner, "update_issue", {
+    issueId: issue.key,
+    status: "open",
+    assigneeId: "tester",
+  });
+  const todo = await call(owner, "create_issue", {
+    projectId: "LGC",
+    title: "owner's own",
+  });
+  expect(todo.type).toBe("todo");
+  for (const { key } of [issue, todo]) {
+    expect(
+      await callError(outsider, "update_issue", {
+        issueId: key,
+        status: "canceled",
+      }),
+      key,
+    ).toBe(
+      `forbidden: ${key} is on LGC, which tester owns: only tester or the bot that filed it cancels it. Comment on it with add_comment to ask tester`,
+    );
+  }
+  expect(
+    await call(filer, "update_issue", {
+      issueId: issue.key,
+      status: "canceled",
+    }),
+  ).toMatchObject({ status: "canceled" });
+});
+
 test("an argument sent under its old name is refused naming the argument it became", async () => {
   const client = await connect(bot.key);
   expect(

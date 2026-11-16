@@ -93,7 +93,7 @@ export const forbiddenError = (
 
 /** The 403 a write only a product's owner makes adds to `forbiddenError`. */
 export const OWNER_ONLY =
-  "the product has an owner bot and the call is that bot's alone: adding a todo, moving an issue out of triage (its filer may cancel it), reopening a canceled issue another bot filed, or changing an item's type; the message names the owner and what to do instead";
+  "the product has an owner bot and the call is that bot's alone: adding a todo, moving an issue out of triage, canceling an item another bot filed, reopening a canceled issue another bot filed, or changing an item's type; the message names the owner and what to do instead";
 
 /** Spread only into operations whose service call can throw `ConflictError`. */
 export const conflictError = {

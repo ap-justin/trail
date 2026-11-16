@@ -2264,8 +2264,8 @@ export function createService({
      * A patch that changes nothing writes nothing and emits no event. Setting
      * type todo on an item in triage opens it; a todo is never in triage and
      * never unassigned. On a product with an owner, only the owner moves an
-     * item out of triage or changes its type; its filer may cancel it from
-     * triage. `legacy` words the refusals for update_issue and PATCH
+     * item out of triage or changes its type, and only the owner or its filer
+     * cancels it. `legacy` words the refusals for update_issue and PATCH
      * /issues, which have no type field.
      */
     updateItem(
@@ -2377,6 +2377,20 @@ export function createService({
             row.productId,
             (owner, key) =>
               `${current.key} is in the triage of ${key}, which ${owner} owns: only ${owner} accepts or cancels it, and its filer may cancel it. Comment on it with add_comment to ask ${owner}`,
+          );
+        }
+        // only the owner reopens a canceled issue (below), so an outsider's cancel would be one its filer couldn't undo
+        if (
+          nextStatus === "canceled" &&
+          row.status !== "canceled" &&
+          row.createdBy !== actor.id
+        ) {
+          requireOwner(
+            tx,
+            actor,
+            row.productId,
+            (owner, key) =>
+              `${current.key} is on ${key}, which ${owner} owns: only ${owner} or the bot that filed it cancels it. Comment on it with add_comment to ask ${owner}`,
           );
         }
         // an issue filed from outside reached canceled through triage or after it, so reopening it decides triage again

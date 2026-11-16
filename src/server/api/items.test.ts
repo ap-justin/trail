@@ -177,6 +177,40 @@ test("PATCH /items/:key lets the filer cancel its own triage issue, and reopenin
   expect(await byOwner.json()).toMatchObject({ status: "triage" });
 });
 
+test("PATCH /items/:key cancels an accepted issue or a todo only for the owner or the filer", async () => {
+  const filer = addBot("rest accepted filer");
+  const outsider = addBot("rest accepted outsider");
+  const issue = await createItem(
+    { type: "issue", product: own.key, title: "accepted then dropped" },
+    filer.key,
+  );
+  const accepted = await request("PATCH", `/api/v1/items/${issue.key}`, {
+    json: { status: "open", assignee: "tester" },
+  });
+  expect(accepted.status).toBe(200);
+  const todo = await createItem({ type: "todo", product: own.key, title: "t" });
+  for (const { key } of [issue, todo]) {
+    const res = await request("PATCH", `/api/v1/items/${key}`, {
+      json: { status: "canceled" },
+      key: outsider.key,
+    });
+    expect(res.status, key).toBe(403);
+    expect(((await res.json()) as Body).error).toEqual({
+      code: "forbidden",
+      message: `${key} is on ${own.key}, which tester owns: only tester or the bot that filed it cancels it. Comment on it with add_comment to ask tester`,
+    });
+  }
+  const byFiler = await request("PATCH", `/api/v1/items/${issue.key}`, {
+    json: { status: "canceled" },
+    key: filer.key,
+  });
+  expect(await byFiler.json()).toMatchObject({ status: "canceled" });
+  const byOwner = await request("PATCH", `/api/v1/items/${todo.key}`, {
+    json: { status: "canceled" },
+  });
+  expect(await byOwner.json()).toMatchObject({ status: "canceled" });
+});
+
 test("an issue on a product the key doesn't reach is the 404 an unknown one is", async () => {
   const elsewhere = await newProduct("elsewhere");
   const scoped = createBot(db, "scoped filer", {

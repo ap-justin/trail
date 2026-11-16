@@ -591,7 +591,7 @@ test("the spec documents each gated operation's 403 with the action it needs", a
   const orScope = (action: string) =>
     `${needs(action)}, or reaches only some products (code forbidden_scope)`;
   const orOwner = (action: string) =>
-    `${needs(action)}, or the product has an owner bot and the call is that bot's alone: adding a todo, moving an issue out of triage (its filer may cancel it), reopening a canceled issue another bot filed, or changing an item's type; the message names the owner and what to do instead (code forbidden)`;
+    `${needs(action)}, or the product has an owner bot and the call is that bot's alone: adding a todo, moving an issue out of triage, canceling an item another bot filed, reopening a canceled issue another bot filed, or changing an item's type; the message names the owner and what to do instead (code forbidden)`;
   expect(forbidden).toEqual({
     "GET /activity": needs("read"),
     "GET /bots": needs("admin"),
