@@ -87,17 +87,19 @@ function arrivals(state: Arrivals, action: ArrivalAction): Arrivals {
 /**
  * The feed under `filter`: the newest page from `/feed`, with entries from the
  * `/events` stream merged on top. The stream reopens when the filter changes.
- * `onProjectGone` runs when the filtered project turns out to be hidden or missing.
+ * `onFilterGone` runs when the filtered product or project turns out to be hidden or missing.
  */
 export function useLiveFeed(
   filter: FeedFilter,
-  { onProjectGone }: { onProjectGone: () => void },
+  { onFilterGone }: { onFilterGone: () => void },
 ) {
-  const { actor, product: project } = filter;
+  const { actor, product, project } = filter;
+  // rebuilt from the parts, so the effects below depend on values, not the caller's object
+  const current = { actor, product, project };
   const queryClient = useQueryClient();
   const feed = useQuery({
-    queryKey: keys.feed({ actor, product: project }),
-    queryFn: () => api.feed({ actor, product: project }),
+    queryKey: keys.feed(current),
+    queryFn: () => api.feed(current),
     // the stream keeps it current; a focus refetch would only repeat it
     refetchOnWindowFocus: false,
     // the filter options stay while another filter's page loads
@@ -116,7 +118,7 @@ export function useLiveFeed(
   // once anything is held, later entries wait behind it so the order holds
   const hold = !atTop || state.pending.length > 0;
 
-  const filterKey = `${actor}\u0000${project}`;
+  const filterKey = `${actor}\u0000${product}\u0000${project}`;
   const [shownFor, setShownFor] = useState(filterKey);
   const filterChanged = shownFor !== filterKey;
   if (filterChanged) {
@@ -163,9 +165,7 @@ export function useLiveFeed(
   });
 
   const refetch = useEffectEvent(() => {
-    void queryClient.invalidateQueries({
-      queryKey: keys.feed({ actor, product: project }),
-    });
+    void queryClient.invalidateQueries({ queryKey: keys.feed(current) });
   });
   const readEverything = useEffectEvent(() => {
     void queryClient.invalidateQueries();
@@ -177,24 +177,25 @@ export function useLiveFeed(
   const recheckSession = useEffectEvent(() => {
     void queryClient.invalidateQueries({ queryKey: keys.me });
   });
-  // the server closes a stream on a 4xx: a 404 is a filtered project this person lost,
+  // the server closes a stream on a 4xx: a 404 is a filtered product or project this person lost,
   // which only /feed can say, since EventSource never exposes the status
   const readAfterClose = useEffectEvent(async () => {
     try {
       await queryClient.fetchQuery({
-        queryKey: keys.feed({ actor, product: project }),
-        queryFn: () => api.feed({ actor, product: project }),
+        queryKey: keys.feed(current),
+        queryFn: () => api.feed(current),
         staleTime: 0,
       });
     } catch (error) {
-      if (project !== null && error instanceof Error && isNotFound(error)) {
-        onProjectGone();
+      const filtered = product !== null || project !== null;
+      if (filtered && error instanceof Error && isNotFound(error)) {
+        onFilterGone();
       }
     }
   });
 
   useEffect(() => {
-    const source = new EventSource(api.eventsUrl({ actor, product: project }));
+    const source = new EventSource(api.eventsUrl({ actor, product, project }));
     let retry: ReturnType<typeof setTimeout> | undefined;
     source.addEventListener("open", () => {
       setConnection("open");
@@ -228,7 +229,7 @@ export function useLiveFeed(
       source.close();
       clearTimeout(retry);
     };
-  }, [actor, project, attempt]);
+  }, [actor, product, project, attempt]);
 
   // the shell's own stream stays closed while this one carries the actor changes
   useEffect(() => holdFeedStream(), []);

@@ -266,8 +266,167 @@ export const people: PersonView[] = [
   },
 ];
 
-export const allProjects = [
+export const allProducts = [
   trail,
   { key: "OPB", name: "OpenBot" },
   { key: "DOC", name: "Docs site" },
 ];
+
+export const humanUi = { slug: "human-ui", name: "Human UI launch" };
+export const teamAccess = { slug: "team-access", name: "Team access" };
+
+/** TRL-15, a todo Kai planned and owns, in the Human UI launch project. */
+export function todo(overrides: Partial<WebItemView> = {}): WebItemView {
+  const on = {
+    product: trail,
+    project: null,
+    item: { key: "TRL-15", title: "Back up the volume", type: "todo" as const },
+  };
+  return issue({
+    key: "TRL-15",
+    type: "todo",
+    projects: [humanUi],
+    title: "Back up the volume with Litestream",
+    description: "Stream the SQLite WAL off the Fly volume.",
+    labels: ["infra"],
+    links: [],
+    assignee: kai,
+    creator: kai,
+    timeline: [
+      {
+        ...on,
+        kind: "item_created",
+        id: "t1",
+        createdAt: "2026-11-11T10:15:00.000Z",
+        actor: kai,
+        sourceAuthor: null,
+      },
+      {
+        ...on,
+        project: humanUi,
+        kind: "added_to_project",
+        id: "t2",
+        createdAt: "2026-11-11T10:16:00.000Z",
+        actor: kai,
+      },
+    ],
+    ...overrides,
+  });
+}
+
+type Item = { key: string; title: string; type: "issue" | "todo" };
+const teamAccessIssue: Item = {
+  key: "TRL-14",
+  title: "Team access: invite people",
+  type: "issue",
+};
+
+export function itemCreatedEntry(
+  id: string,
+  createdAt: string,
+  {
+    actor = kai,
+    item = teamAccessIssue,
+  }: { actor?: WebActorView; item?: Item } = {},
+): EntryView {
+  return {
+    kind: "item_created",
+    id,
+    createdAt,
+    actor,
+    product: trail,
+    project: null,
+    item,
+    sourceAuthor: null,
+  };
+}
+
+export function typeChangedEntry(id: string, createdAt: string): EntryView {
+  return {
+    kind: "type_changed",
+    id,
+    createdAt,
+    actor: kai,
+    product: trail,
+    project: null,
+    item: { ...teamAccessIssue, type: "todo" },
+    from: "issue",
+    to: "todo",
+  };
+}
+
+export function membershipEntry(
+  id: string,
+  createdAt: string,
+  kind: "added_to_project" | "removed_from_project",
+): EntryView {
+  return {
+    kind,
+    id,
+    createdAt,
+    actor: kai,
+    product: trail,
+    project: humanUi,
+    item: teamAccessIssue,
+  };
+}
+
+export function productStatusUpdateEntry(
+  id: string,
+  createdAt: string,
+): EntryView {
+  return {
+    kind: "product_status_update",
+    id,
+    createdAt,
+    actor: kai,
+    product: { key: "OPB", name: "OpenBot" },
+    project: null,
+    item: null,
+    statusUpdate: {
+      id: "su-p",
+      body: "Webhook retries stall after a 502.",
+      health: "at_risk",
+      sourceAuthor: null,
+    },
+  };
+}
+
+export function projectStatusUpdateEntry(
+  id: string,
+  createdAt: string,
+): EntryView {
+  return {
+    kind: "project_status_update",
+    id,
+    createdAt,
+    actor: kai,
+    product: null,
+    project: humanUi,
+    item: null,
+    statusUpdate: {
+      id: "su-j",
+      body: "Feed and product pages are drawn.",
+      health: "at_risk",
+      sourceAuthor: null,
+    },
+  };
+}
+
+export function projectEntry(
+  id: string,
+  createdAt: string,
+  kind: "project_created" | "project_updated",
+): EntryView {
+  const base = {
+    id,
+    createdAt,
+    actor: kai,
+    product: null,
+    project: humanUi,
+    item: null,
+  };
+  return kind === "project_created"
+    ? { ...base, kind }
+    : { ...base, kind, changed: ["goal", "targetDate"] };
+}

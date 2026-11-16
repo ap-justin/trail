@@ -14,17 +14,33 @@ function serveIssue() {
 }
 
 describe("issue page shell", () => {
-  test("links back to its project and marks that project's row as where it sits", async () => {
+  test("links back to its product and marks that product's row as where it sits", async () => {
     signedInAs("member");
     serveIssue();
     renderApp("/issues/TRL-14");
     expect(
       await screen.findByRole("link", { name: "Back to trail" }),
-    ).toHaveAttribute("href", "/projects/TRL");
-    const projects = screen.getByRole("navigation", { name: "Projects" });
+    ).toHaveAttribute("href", "/products/TRL");
+    const products = screen.getByRole("navigation", { name: "Products" });
     expect(
-      within(projects).getByRole("link", { name: "TRL trail" }),
+      within(products).getByRole("link", { name: "TRL trail" }),
     ).toHaveAttribute("aria-current", "location");
+  });
+
+  test("the breadcrumb is a nav, so the title is the page's one h1", async () => {
+    signedInAs("member");
+    serveIssue();
+    renderApp("/issues/TRL-14");
+    expect(
+      await screen.findByRole("heading", {
+        level: 1,
+        name: "Team access: invite people by GitHub username",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    expect(
+      screen.getAllByRole("navigation", { name: "Breadcrumb" }),
+    ).not.toEqual([]);
   });
 });
 

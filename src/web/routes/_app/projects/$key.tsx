@@ -54,12 +54,12 @@ function ProjectPage() {
   if (isNotFound(project.error)) return <NotFoundPage />;
   // named from the session's list until the project itself has loaded
   const ref = project.data ??
-    session.projects.find((p) => p.key === key) ?? { key, name: "" };
+    session.products.find((p) => p.key === key) ?? { key, name: "" };
 
   return (
     <AppPage
-      section="projects"
-      projectKey={key}
+      section="products"
+      productKey={key}
       heading={<ProjectHeading project={ref} />}
       headingAccessory={
         project.data && <ProjectHealth project={project.data} />

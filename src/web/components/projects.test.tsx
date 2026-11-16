@@ -80,7 +80,7 @@ describe("projects", () => {
   test("each project links to its page", () => {
     renderProjects();
     for (const link of screen.getAllByRole("link", { name: "TRL trail" })) {
-      expect(link).toHaveAttribute("href", "/projects/TRL");
+      expect(link).toHaveAttribute("href", "/products/TRL");
     }
   });
 
@@ -102,13 +102,13 @@ describe("projects", () => {
     }
   });
 
-  test("a person with no projects is told to ask the owner by name", () => {
+  test("a person with no products is told to ask the owner by name", () => {
     renderProjects({ projects: [] });
     expect(
-      screen.getByRole("heading", { name: "No projects yet" }),
+      screen.getByRole("heading", { name: "No products yet" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Ask Justin Salas to give you access to a project."),
+      screen.getByText("Ask Justin Salas to give you access to a product."),
     ).toBeInTheDocument();
   });
 

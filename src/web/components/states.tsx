@@ -2,6 +2,7 @@ import {
   ActivityIcon,
   FolderIcon,
   type LucideIcon,
+  PackageIcon,
   PlusIcon,
   SearchIcon,
   TriangleAlertIcon,
@@ -141,13 +142,13 @@ export function FeedEmpty() {
   );
 }
 
-/** A member the owner has not added to any project: nothing can appear until they do. */
-export function FeedNoProjects() {
+/** A member the owner has not added to any product: nothing can appear until they do. */
+export function FeedNoProducts() {
   return (
     <EmptyState
-      icon={FolderIcon}
-      title="No projects yet"
-      description="Ask the owner to add you to a project."
+      icon={PackageIcon}
+      title="No products yet"
+      description="Ask the owner to add you to a product."
     />
   );
 }
@@ -247,8 +248,8 @@ export function IssueListError({ onRetry }: { onRetry: () => void }) {
   );
 }
 
-/** A person given no projects yet is pointed at the owner; the owner sees where projects come from. */
-export function ProjectsEmpty({
+/** A person given no products yet is pointed at the owner; the owner sees where products come from. */
+export function ProductsEmpty({
   ownerName,
   isOwner,
 }: {
@@ -257,12 +258,12 @@ export function ProjectsEmpty({
 }) {
   return (
     <EmptyState
-      icon={FolderIcon}
-      title="No projects yet"
+      icon={PackageIcon}
+      title="No products yet"
       description={
         isOwner
-          ? "Projects that bots create show up here."
-          : `Ask ${ownerName} to give you access to a project.`
+          ? "Products that bots create show up here."
+          : `Ask ${ownerName} to give you access to a product.`
       }
     />
   );

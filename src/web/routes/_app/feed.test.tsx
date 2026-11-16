@@ -265,13 +265,15 @@ describe("after a reconnect", () => {
   });
 });
 
-describe("a project taken away while filtered to it", () => {
-  test("the closed stream reads the feed again, and its 404 clears the project filter", async () => {
+describe("a product taken away while filtered to it", () => {
+  test("the closed stream reads the feed again, and its 404 clears the product filter", async () => {
     const { asked } = await openFeed();
     await userEvent.click(
-      screen.getByRole("combobox", { name: "Filter by project" }),
+      screen.getByRole("combobox", { name: "Filter by product" }),
     );
-    await userEvent.click(await screen.findByRole("option", { name: "trail" }));
+    await userEvent.click(
+      await screen.findByRole("option", { name: "TRL trail" }),
+    );
     await waitFor(() => expect(asked.at(-1)?.get("product")).toBe("TRL"));
     const filtered = FakeEventSource.current;
     expect(filtered.url).toBe("/api/web/events?product=TRL");
@@ -291,8 +293,40 @@ describe("a project taken away while filtered to it", () => {
     );
     await waitFor(() => expect(asked.at(-1)?.has("product")).toBe(false));
     expect(
+      screen.getByRole("combobox", { name: "Filter by product" }),
+    ).toHaveTextContent("All products");
+  });
+});
+
+describe("the project filter", () => {
+  test("a project chosen reads and streams the feed by its slug", async () => {
+    signedInAs("member");
+    const asked: URLSearchParams[] = [];
+    const page = feedPage([statusEntry("e2", minutesAgo(30))]);
+    server.use(
+      http.get("/api/web/feed", ({ request }) => {
+        asked.push(new URL(request.url).searchParams);
+        return HttpResponse.json({
+          ...page,
+          filters: {
+            ...page.filters,
+            projects: [{ slug: "human-ui", name: "Human UI launch" }],
+          },
+        });
+      }),
+    );
+    renderApp("/");
+    await waitFor(() => expect(rowFor("e2")).not.toBeNull());
+    await userEvent.click(
       screen.getByRole("combobox", { name: "Filter by project" }),
-    ).toHaveTextContent("All projects");
+    );
+    await userEvent.click(
+      await screen.findByRole("option", { name: "Human UI launch" }),
+    );
+    await waitFor(() => expect(asked.at(-1)?.get("project")).toBe("human-ui"));
+    expect(FakeEventSource.current.url).toBe(
+      "/api/web/events?project=human-ui",
+    );
   });
 });
 

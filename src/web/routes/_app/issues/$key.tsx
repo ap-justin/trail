@@ -40,11 +40,12 @@ function IssuePage() {
   return (
     <AppPage
       section={null}
-      heading={<IssueBreadcrumb issueKey={key} project={issue.data?.product} />}
-      projectKey={issue.data?.product.key}
+      heading={<IssueBreadcrumb issueKey={key} product={issue.data?.product} />}
+      headingKind="breadcrumb"
+      productKey={issue.data?.product.key}
       back={
         issue.data && {
-          href: paths.project(issue.data.product.key),
+          href: paths.product(issue.data.product.key),
           label: `Back to ${issue.data.product.name}`,
         }
       }

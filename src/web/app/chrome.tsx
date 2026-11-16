@@ -17,7 +17,7 @@ import { useActorStream } from "@/lib/use-actor-stream";
 
 export type Session = {
   viewer: ShellViewer;
-  projects: WebProductRefView[];
+  products: WebProductRefView[];
   ownerName: string;
 };
 
@@ -33,14 +33,14 @@ export function sessionOf(me: MeView): Session | null {
       isOwner: me.state === "owner",
       photoUrl: me.actor.photoUrl,
     },
-    projects: me.products,
+    products: me.products,
     ownerName: me.ownerName,
   };
 }
 
 type Chrome = {
   session: Session;
-  openNewIssue: (projectKey: string | null) => void;
+  openNewIssue: (productKey: string | null) => void;
   signOut: () => void;
 };
 
@@ -64,7 +64,7 @@ export function AppChrome({
   const router = useRouter();
   const navigate = useNavigate();
   useActorStream();
-  const [dialog, setDialog] = useState<{ projectKey: string | null } | null>(
+  const [dialog, setDialog] = useState<{ productKey: string | null } | null>(
     null,
   );
 
@@ -89,7 +89,7 @@ export function AppChrome({
               login: null,
               email: null,
               actor: null,
-              projects: [],
+              products: [],
             }
           : me,
       );
@@ -103,9 +103,9 @@ export function AppChrome({
 
   const chrome: Chrome = {
     session,
-    openNewIssue: (projectKey) => {
+    openNewIssue: (productKey) => {
       create.reset();
-      setDialog({ projectKey });
+      setDialog({ productKey });
     },
     signOut: () => signOut.mutate(),
   };
@@ -118,13 +118,11 @@ export function AppChrome({
         onOpenChange={(open) => {
           if (!open) setDialog(null);
         }}
-        projects={session.projects}
-        defaultProjectKey={dialog?.projectKey ?? null}
+        products={session.products}
+        defaultProductKey={dialog?.productKey ?? null}
         viewer={session.viewer}
         ownerName={session.ownerName}
-        onSubmit={({ projectKey, ...issue }) =>
-          create.run({ product: projectKey, ...issue })
-        }
+        onSubmit={(issue) => create.run(issue)}
         pending={create.pending}
         error={create.error?.message ?? null}
       />
@@ -147,16 +145,18 @@ function useDebounced<T>(value: T, ms: number): T {
 export function AppPage({
   section,
   heading,
+  headingKind,
   headingAccessory,
-  projectKey,
+  productKey,
   back,
   children,
 }: Pick<
   AppShellProps,
   | "section"
   | "heading"
+  | "headingKind"
   | "headingAccessory"
-  | "projectKey"
+  | "productKey"
   | "back"
   | "children"
 >) {
@@ -179,11 +179,12 @@ export function AppPage({
   return (
     <AppShell
       viewer={chrome.session.viewer}
-      projects={chrome.session.projects}
+      products={chrome.session.products}
       section={section}
-      projectKey={projectKey}
+      productKey={productKey}
       back={back}
       heading={heading}
+      headingKind={headingKind}
       headingAccessory={headingAccessory}
       searchValue={typed}
       onSearch={setTyped}
@@ -197,7 +198,7 @@ export function AppPage({
           />
         )
       }
-      onNewIssue={() => chrome.openNewIssue(projectKey ?? null)}
+      onNewIssue={() => chrome.openNewIssue(productKey ?? null)}
       onSignOut={chrome.signOut}
     >
       {children}

@@ -4,7 +4,7 @@ import { HttpResponse, http } from "msw";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { SearchView } from "@/lib/api-types";
 import { renderApp, serveFeed, signedInAs } from "@/test/app";
-import { issueList, project, trail } from "@/test/fixtures";
+import { trail } from "@/test/fixtures";
 import { server } from "@/test/server";
 
 afterEach(() => {
@@ -55,22 +55,13 @@ describe("search", () => {
     signedInAs("member");
     serveFeed();
     serveSearch({ items: [], products: [trail], projects: [] });
-    server.use(
-      http.get("/api/web/products/TRL", () => HttpResponse.json(project())),
-      http.get("/api/web/products/TRL/items", () =>
-        HttpResponse.json(issueList([])),
-      ),
-      http.get("/api/web/products/TRL/status-updates", () =>
-        HttpResponse.json({ items: [], nextCursor: null }),
-      ),
-    );
     const { router } = renderApp("/");
     await screen.findByText("No activity yet");
     await userEvent.type(searchBox(), "tra");
     const results = await screen.findByRole("list", { name: "Search results" });
     await userEvent.click(within(results).getByRole("link"));
     await waitFor(() =>
-      expect(router.state.location.pathname).toBe("/projects/TRL"),
+      expect(router.state.location.pathname).toBe("/products/TRL"),
     );
     expect(searchBox()).toHaveValue("");
     expect(

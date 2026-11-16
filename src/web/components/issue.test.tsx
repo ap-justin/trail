@@ -1,8 +1,12 @@
-import { render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
-import { IssueView, type IssueViewProps } from "@/components/issue";
-import { issue } from "@/test/fixtures";
+import {
+  IssueBreadcrumb,
+  IssueView,
+  type IssueViewProps,
+} from "@/components/issue";
+import { humanUi, issue, maya, teamAccess, todo } from "@/test/fixtures";
 
 function renderIssue(overrides: Partial<IssueViewProps> = {}) {
   const props: IssueViewProps = {
@@ -50,7 +54,7 @@ describe("properties", () => {
     expect(within(props).getByText("auth")).toBeInTheDocument();
     expect(
       within(props).getByRole("link", { name: "TRL trail" }),
-    ).toHaveAttribute("href", "/projects/TRL");
+    ).toHaveAttribute("href", "/products/TRL");
   });
 
   test("a link row shows its title and its URL in mono, and opens safely", () => {
@@ -122,7 +126,7 @@ describe("timeline", () => {
   test("comments are cards and changes are one line with the change in words", () => {
     renderIssue();
     const [created, priority, comment, status] = entries();
-    expect(created).toHaveTextContent("created this issue");
+    expect(created).toHaveTextContent("reported this issue");
     expect(priority).toHaveTextContent("set priority to High");
     expect(comment).toHaveClass("rounded-xl", "border");
     expect(comment).toHaveTextContent("Owner only for invites.");
@@ -228,4 +232,237 @@ describe("states", () => {
     renderIssue({ issue: { status: "loading" } });
     expect(screen.getByRole("status")).toHaveTextContent("Loading");
   });
+});
+
+/** The line under the title. */
+const byline = () => {
+  const line = screen.getByRole("heading", { level: 1 }).nextElementSibling;
+  if (!(line instanceof HTMLElement)) throw new Error("no byline");
+  return line;
+};
+const propertiesRegion = () =>
+  screen.getByRole("region", { name: "Properties" });
+const termsOf = (region: HTMLElement) =>
+  [...region.querySelectorAll("dt")].map((dt) => dt.textContent);
+const propertyValue = (label: string) => {
+  const dt = [...propertiesRegion().querySelectorAll("dt")].find(
+    (term) => term.textContent === label,
+  );
+  const dd = dt?.nextElementSibling;
+  if (!(dd instanceof HTMLElement)) throw new Error(`no ${label} value`);
+  return dd;
+};
+
+describe("item type", () => {
+  test("properties run Type, Status, Priority, Estimate, Assignee, Labels, Product, Projects, Created, Updated", () => {
+    renderIssue();
+    expect(termsOf(propertiesRegion())).toEqual([
+      "Type",
+      "Status",
+      "Priority",
+      "Estimate",
+      "Assignee",
+      "Labels",
+      "Product",
+      "Projects",
+      "Created",
+      "Updated",
+    ]);
+  });
+
+  test("an issue: the Issue badge with the inbox glyph in the byline and Type, reported by its creator", () => {
+    renderIssue();
+    const line = byline();
+    for (const badge of [
+      within(line).getByText("Issue"),
+      within(propertyValue("Type")).getByText("Issue"),
+    ]) {
+      expect(badge).toHaveAttribute("data-item-type", "issue");
+      expect(badge.querySelector("svg")).toHaveClass("lucide-inbox");
+    }
+    expect(line).toHaveTextContent(/Issue\s*TRL-14\s*reported by.*Tara/);
+    expect(within(line).getByText("Bot")).toBeInTheDocument();
+  });
+
+  test("a todo: the Todo badge with the list glyph, planned by its creator", () => {
+    renderIssue({
+      issueKey: "TRL-15",
+      issue: { status: "ready", data: todo() },
+    });
+    const line = byline();
+    const badge = within(line).getByText("Todo");
+    expect(badge).toHaveAttribute("data-item-type", "todo");
+    expect(badge.querySelector("svg")).toHaveClass("lucide-list-todo");
+    expect(within(propertyValue("Type")).getByText("Todo")).toBeInTheDocument();
+    expect(line).toHaveTextContent(/Todo\s*TRL-15\s*planned by.*Kai/);
+  });
+
+  test("a person's issue is reported by a Human", () => {
+    renderIssue({ issue: { status: "ready", data: issue({ creator: maya }) } });
+    const line = byline();
+    expect(line).toHaveTextContent(/reported by.*Maya Chen/);
+    expect(within(line).getByText("Human")).toBeInTheDocument();
+  });
+
+  test("an unassigned issue says Unassigned", () => {
+    renderIssue({
+      issue: { status: "ready", data: issue({ assignee: null }) },
+    });
+    expect(propertyValue("Assignee")).toHaveTextContent("Unassigned");
+  });
+
+  test("a todo never says Unassigned", () => {
+    renderIssue({
+      issueKey: "TRL-15",
+      issue: { status: "ready", data: todo({ assignee: null }) },
+    });
+    expect(screen.queryByText("Unassigned")).not.toBeInTheDocument();
+    cleanup();
+    renderIssue({
+      issueKey: "TRL-15",
+      issue: { status: "ready", data: todo() },
+    });
+    expect(propertyValue("Assignee")).toHaveTextContent("Kai");
+    expect(screen.queryByText("Unassigned")).not.toBeInTheDocument();
+  });
+});
+
+describe("projects property", () => {
+  test("one row per project, each with the folder glyph, linking to the project", () => {
+    renderIssue({
+      issue: {
+        status: "ready",
+        data: issue({ projects: [teamAccess, humanUi] }),
+      },
+    });
+    const rows = within(propertyValue("Projects")).getAllByRole("listitem");
+    expect(rows.map((row) => row.textContent)).toEqual([
+      "Team access",
+      "Human UI launch",
+    ]);
+    for (const row of rows) {
+      expect(row.querySelector("svg")).toHaveClass("lucide-folder");
+    }
+    expect(
+      within(propertyValue("Projects")).getByRole("link", {
+        name: "Human UI launch",
+      }),
+    ).toHaveAttribute("href", "/projects/human-ui");
+  });
+
+  test("an item in no project reads None, muted", () => {
+    renderIssue();
+    const none = within(propertyValue("Projects")).getByText("None");
+    expect(none).toHaveClass("text-muted-foreground");
+    expect(
+      within(propertyValue("Projects")).queryAllByRole("listitem"),
+    ).toEqual([]);
+  });
+
+  test("the product shows its key and name, linking to the product", () => {
+    renderIssue();
+    const link = within(propertyValue("Product")).getByRole("link", {
+      name: "TRL trail",
+    });
+    expect(within(link).getByText("TRL")).toHaveClass("font-mono");
+  });
+});
+
+describe("project and type events", () => {
+  test("a todo's first event reads planned this todo, then added this to project", () => {
+    renderIssue({
+      issueKey: "TRL-15",
+      issue: { status: "ready", data: todo() },
+    });
+    const [created, added] = [
+      ...document.querySelectorAll<HTMLElement>("[data-entry-id]"),
+    ];
+    expect(created).toHaveTextContent("planned this todo");
+    expect(added).toHaveTextContent("added this to project Human UI launch");
+  });
+
+  test("removed from a project, filed by a person, and a type change read in words", () => {
+    const base = issue();
+    const on = {
+      product: base.product,
+      item: { key: "TRL-14", title: "Team access", type: "issue" as const },
+    };
+    renderIssue({
+      issue: {
+        status: "ready",
+        data: issue({
+          timeline: [
+            {
+              ...on,
+              project: null,
+              kind: "item_created",
+              id: "a",
+              createdAt: "2026-11-09T14:02:00.000Z",
+              actor: maya,
+              sourceAuthor: null,
+            },
+            {
+              ...on,
+              project: humanUi,
+              kind: "removed_from_project",
+              id: "b",
+              createdAt: "2026-11-09T14:03:00.000Z",
+              actor: maya,
+            },
+            {
+              ...on,
+              project: null,
+              kind: "type_changed",
+              id: "c",
+              createdAt: "2026-11-09T14:04:00.000Z",
+              actor: maya,
+              from: "issue",
+              to: "todo",
+            },
+          ],
+        }),
+      },
+    });
+    const [filed, removed, typed] = [
+      ...document.querySelectorAll<HTMLElement>("[data-entry-id]"),
+    ];
+    expect(filed).toHaveTextContent("filed this issue");
+    expect(removed).toHaveTextContent(
+      "removed this from project Human UI launch",
+    );
+    expect(typed).toHaveTextContent("changed type from Issue to Todo");
+  });
+});
+
+describe("people's controls", () => {
+  test("a todo takes a comment and offers no other control", () => {
+    renderIssue({
+      issueKey: "TRL-15",
+      issue: { status: "ready", data: todo() },
+    });
+    expect(screen.getAllByRole("textbox")).toEqual([
+      screen.getByRole("textbox", { name: "Comment" }),
+    ]);
+    expect(screen.getAllByRole("button")).toEqual([
+      screen.getByRole("button", { name: "Comment" }),
+    ]);
+  });
+});
+
+test("the breadcrumb reads Products / product name / key", () => {
+  render(
+    <IssueBreadcrumb
+      issueKey="TRL-14"
+      product={{ key: "TRL", name: "trail" }}
+    />,
+  );
+  expect(screen.getByRole("link", { name: "Products" })).toHaveAttribute(
+    "href",
+    "/products",
+  );
+  expect(screen.getByRole("link", { name: "trail" })).toHaveAttribute(
+    "href",
+    "/products/TRL",
+  );
+  expect(screen.getByText("TRL-14")).toBeInTheDocument();
 });

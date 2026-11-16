@@ -1,10 +1,20 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, test, vi } from "vitest";
 import { sessionOf } from "@/app/chrome";
 import { AccountPanel } from "@/components/account-panel";
-import { AppShell, type ShellViewer } from "@/components/app-shell";
+import {
+  AppShell,
+  type ShellSection,
+  type ShellViewer,
+} from "@/components/app-shell";
 import { SearchResults } from "@/components/search-results";
 import { ThemeProvider } from "@/components/theme-provider";
 import type { MeView } from "@/lib/api-types";
@@ -15,7 +25,7 @@ function renderShell(viewer: ShellViewer) {
     <ThemeProvider>
       <AppShell
         viewer={viewer}
-        projects={[{ key: "TRL", name: "trail" }]}
+        products={[{ key: "TRL", name: "trail" }]}
         section="feed"
         heading="Feed"
         onSearch={vi.fn()}
@@ -166,7 +176,7 @@ test("no heading draws no h1, so a page's own heading stands alone", () => {
     <ThemeProvider>
       <AppShell
         viewer={owner}
-        projects={[]}
+        products={[]}
         section={null}
         heading={null}
         onSearch={vi.fn()}
@@ -187,7 +197,7 @@ function SearchingShell({ onSearch }: { onSearch: (q: string) => void }) {
     <ThemeProvider>
       <AppShell
         viewer={owner}
-        projects={[]}
+        products={[]}
         section="feed"
         heading="Feed"
         searchValue={query}
@@ -203,6 +213,7 @@ function SearchingShell({ onSearch }: { onSearch: (q: string) => void }) {
               status="ready"
               results={{
                 products: [],
+                projects: [],
                 items: [
                   {
                     key: "TRL-14",
@@ -378,7 +389,7 @@ describe("search", () => {
       <ThemeProvider>
         <AppShell
           viewer={owner}
-          projects={[]}
+          products={[]}
           section="feed"
           heading="Feed"
           searchValue={value}
@@ -398,15 +409,15 @@ describe("search", () => {
 });
 
 function renderAt(props: {
-  section: "projects" | null;
-  projectKey?: string;
+  section: ShellSection | null;
+  productKey?: string;
   back?: { href: string; label: string };
 }) {
   render(
     <ThemeProvider>
       <AppShell
         viewer={owner}
-        projects={[
+        products={[
           { key: "TRL", name: "trail" },
           { key: "OPB", name: "OpenBot" },
         ]}
@@ -424,48 +435,148 @@ function renderAt(props: {
 
 const sidebarNav = () => mainNavs()[0] as HTMLElement;
 const tabNav = () => mainNavs()[1] as HTMLElement;
-const projectsNav = () => screen.getByRole("navigation", { name: "Projects" });
+const productsNav = () => screen.getByRole("navigation", { name: "Products" });
+const names = (nav: HTMLElement) =>
+  within(nav)
+    .getAllByRole("link")
+    .map((link) => link.textContent);
+
+describe("main nav", () => {
+  test("the sidebar reads Feed, Products, Projects, People; the tab bar adds Account", () => {
+    renderShell(owner);
+    expect(names(sidebarNav())).toEqual([
+      "Feed",
+      "Products",
+      "Projects",
+      "People",
+    ]);
+    expect(names(tabNav())).toEqual([
+      "Feed",
+      "Products",
+      "Projects",
+      "People",
+      "Account",
+    ]);
+    for (const nav of mainNavs()) {
+      expect(
+        within(nav).getByRole("link", { name: "Products" }),
+      ).toHaveAttribute("href", "/products");
+      expect(
+        within(nav).getByRole("link", { name: "Projects" }),
+      ).toHaveAttribute("href", "/projects");
+    }
+  });
+
+  test("each tab carries its own glyph", () => {
+    renderShell(owner);
+    const glyphs = within(tabNav())
+      .getAllByRole("link")
+      .map((link) => link.querySelector("svg")?.getAttribute("class"));
+    for (const [index, icon] of [
+      "lucide-activity",
+      "lucide-package",
+      "lucide-folder",
+      "lucide-users",
+      "lucide-user",
+    ].entries()) {
+      expect(glyphs[index]).toContain(icon);
+    }
+  });
+
+  test("under the Products label, one row per visible product: key in mono, then name", () => {
+    renderShell(owner);
+    const row = within(productsNav()).getByRole("link", { name: "TRL trail" });
+    expect(row).toHaveAttribute("href", "/products/TRL");
+    expect(within(row).getByText("TRL")).toHaveClass("font-mono");
+    expect(
+      within(productsNav()).getByRole("heading", { name: "Products" }),
+    ).toBeInTheDocument();
+  });
+
+  test("a viewer with no product has no Products list", () => {
+    render(
+      <ThemeProvider>
+        <AppShell
+          viewer={owner}
+          products={[]}
+          section="feed"
+          heading="Feed"
+          onSearch={vi.fn()}
+          onNewIssue={vi.fn()}
+          onSignOut={vi.fn()}
+        >
+          <p>page</p>
+        </AppShell>
+      </ThemeProvider>,
+    );
+    expect(
+      screen.queryByRole("navigation", { name: "Products" }),
+    ).not.toBeInTheDocument();
+  });
+});
 
 describe("where the page sits", () => {
-  test("a project page marks its own row, not Projects, in the sidebar", () => {
-    renderAt({ section: "projects", projectKey: "TRL" });
+  test("a product page marks its own row, not Products, in the sidebar", () => {
+    renderAt({ section: "products", productKey: "TRL" });
     expect(
-      within(sidebarNav()).getByRole("link", { name: "Projects" }),
+      within(sidebarNav()).getByRole("link", { name: "Products" }),
     ).not.toHaveAttribute("aria-current");
     expect(
-      within(projectsNav()).getByRole("link", { name: "TRL trail" }),
+      within(productsNav()).getByRole("link", { name: "TRL trail" }),
     ).toHaveAttribute("aria-current", "page");
     expect(
-      within(tabNav()).getByRole("link", { name: "Projects" }),
+      within(tabNav()).getByRole("link", { name: "Products" }),
     ).toHaveAttribute("aria-current", "page");
   });
 
-  test("an issue page marks its project's row and the Projects tab as its location", () => {
-    renderAt({ section: null, projectKey: "TRL" });
+  test("an item page marks its product's row and the Products tab as its location", () => {
+    renderAt({ section: null, productKey: "TRL" });
     expect(
-      within(projectsNav()).getByRole("link", { name: "TRL trail" }),
+      within(productsNav()).getByRole("link", { name: "TRL trail" }),
     ).toHaveAttribute("aria-current", "location");
     expect(
-      within(projectsNav()).getByRole("link", { name: "OPB OpenBot" }),
+      within(productsNav()).getByRole("link", { name: "OPB OpenBot" }),
     ).not.toHaveAttribute("aria-current");
     expect(
-      within(sidebarNav()).getByRole("link", { name: "Projects" }),
+      within(sidebarNav()).getByRole("link", { name: "Products" }),
     ).not.toHaveAttribute("aria-current");
+    expect(
+      within(tabNav()).getByRole("link", { name: "Products" }),
+    ).toHaveAttribute("aria-current", "location");
     expect(
       within(tabNav()).getByRole("link", { name: "Projects" }),
-    ).toHaveAttribute("aria-current", "location");
+    ).not.toHaveAttribute("aria-current");
+  });
+
+  test("the products list marks Products; a projects page marks Projects", () => {
+    renderAt({ section: "products" });
+    for (const nav of mainNavs()) {
+      expect(
+        within(nav).getByRole("link", { name: "Products" }),
+      ).toHaveAttribute("aria-current", "page");
+    }
+    cleanup();
+    renderAt({ section: "projects" });
+    for (const nav of mainNavs()) {
+      expect(
+        within(nav).getByRole("link", { name: "Projects" }),
+      ).toHaveAttribute("aria-current", "page");
+      expect(
+        within(nav).getByRole("link", { name: "Products" }),
+      ).not.toHaveAttribute("aria-current");
+    }
   });
 });
 
 test("back: a chevron link in the top bar, beside the heading", () => {
   renderAt({
     section: null,
-    projectKey: "TRL",
-    back: { href: "/projects/TRL", label: "Back to trail" },
+    productKey: "TRL",
+    back: { href: "/products/TRL", label: "Back to trail" },
   });
   expect(screen.getByRole("link", { name: "Back to trail" })).toHaveAttribute(
     "href",
-    "/projects/TRL",
+    "/products/TRL",
   );
   // one h1 per layout (top bar at 1440, top bar at 375), no separate heading row
   expect(
@@ -479,11 +590,11 @@ test("a breadcrumb heading is a nav, not an h1, so the page's own h1 stands alon
     <ThemeProvider>
       <AppShell
         viewer={owner}
-        projects={[]}
+        products={[]}
         section={null}
         heading="TRL-14"
         headingKind="breadcrumb"
-        back={{ href: "/projects/TRL", label: "Back to trail" }}
+        back={{ href: "/products/TRL", label: "Back to trail" }}
         onSearch={vi.fn()}
         onNewIssue={vi.fn()}
         onSignOut={vi.fn()}
@@ -520,8 +631,8 @@ describe("the logo", () => {
   test("a page with a back link has no logo in the top bar; the sidebar keeps its own", () => {
     renderAt({
       section: null,
-      projectKey: "TRL",
-      back: { href: "/projects/TRL", label: "Back to trail" },
+      productKey: "TRL",
+      back: { href: "/products/TRL", label: "Back to trail" },
     });
     expect(
       screen.getByRole("banner").querySelector("svg[viewBox='0 4 60 52']"),

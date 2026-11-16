@@ -101,10 +101,10 @@ function row(username: string) {
 
 async function startSave(username: string) {
   await userEvent.click(
-    screen.getByRole("button", { name: `Edit projects for @${username}` }),
+    screen.getByRole("button", { name: `Edit products for @${username}` }),
   );
   await userEvent.click(
-    row(username).getByRole("button", { name: "Save projects" }),
+    row(username).getByRole("button", { name: "Save products" }),
   );
 }
 
@@ -157,16 +157,16 @@ describe("managing people", () => {
     ]);
   });
 
-  test("Save projects puts the chosen keys and the row refreshes", async () => {
+  test("Save products puts the chosen keys and the row refreshes", async () => {
     signedInAs("owner");
     const writes = servePeople();
     renderApp("/people");
     await screen.findByText("@kai-dev");
     await userEvent.click(
-      screen.getByRole("button", { name: "Edit projects for @mayachen" }),
+      screen.getByRole("button", { name: "Edit products for @mayachen" }),
     );
     await userEvent.click(
-      screen.getByRole("button", { name: "Save projects" }),
+      screen.getByRole("button", { name: "Save products" }),
     );
     await waitFor(() => expect(writes).toHaveLength(1));
     expect(writes[0]).toMatchObject({
@@ -179,13 +179,13 @@ describe("managing people", () => {
     );
   });
 
-  test("Save projects puts exactly the boxes left checked, after a change", async () => {
+  test("Save products puts exactly the boxes left checked, after a change", async () => {
     signedInAs("owner");
     const writes = servePeople();
     renderApp("/people");
     await screen.findByText("@kai-dev");
     await userEvent.click(
-      screen.getByRole("button", { name: "Edit projects for @mayachen" }),
+      screen.getByRole("button", { name: "Edit products for @mayachen" }),
     );
     // she starts on TRL and DOC: drop TRL, add OPB
     await userEvent.click(
@@ -195,7 +195,7 @@ describe("managing people", () => {
       row("mayachen").getByRole("checkbox", { name: /OPB/ }),
     );
     await userEvent.click(
-      row("mayachen").getByRole("button", { name: "Save projects" }),
+      row("mayachen").getByRole("button", { name: "Save products" }),
     );
     await waitFor(() => expect(writes).toHaveLength(1));
     expect(writes[0]?.body).toEqual({ products: ["DOC", "OPB"] });
@@ -235,7 +235,7 @@ describe("managing people", () => {
     await puts.release("kai-dev");
     expect(
       await row("kai-dev").findByRole("button", {
-        name: "Edit projects for @kai-dev",
+        name: "Edit products for @kai-dev",
       }),
     ).toBeInTheDocument();
     expect(
@@ -245,7 +245,7 @@ describe("managing people", () => {
     await puts.release("mayachen");
     expect(
       await row("mayachen").findByRole("button", {
-        name: "Edit projects for @mayachen",
+        name: "Edit products for @mayachen",
       }),
     ).toBeInTheDocument();
     expect(writes.map((write) => write.path)).toEqual([
@@ -281,7 +281,7 @@ describe("managing people", () => {
       await row("mayachen").findByText("Couldn't save projects"),
     ).toBeInTheDocument();
     expect(
-      row("mayachen").getByRole("button", { name: "Save projects" }),
+      row("mayachen").getByRole("button", { name: "Save products" }),
     ).toBeInTheDocument();
   });
 
@@ -367,10 +367,10 @@ describe("managing people", () => {
     await userEvent.click(screen.getByRole("button", { name: "Invite" }));
     expect(await screen.findByText("@newbie")).toBeInTheDocument();
     await userEvent.click(
-      screen.getByRole("button", { name: "Edit projects for @newbie" }),
+      screen.getByRole("button", { name: "Edit products for @newbie" }),
     );
     await userEvent.click(
-      row("newbie").getByRole("button", { name: "Save projects" }),
+      row("newbie").getByRole("button", { name: "Save products" }),
     );
     await waitFor(() => expect(writes).toHaveLength(2));
     await userEvent.click(

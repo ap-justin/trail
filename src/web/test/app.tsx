@@ -4,7 +4,7 @@ import { HttpResponse, http } from "msw";
 import type { EntryView, FeedView, MeView } from "@/lib/api-types";
 import { createQueryClient } from "@/lib/queries";
 import { createAppRouter } from "@/router";
-import { allProjects, kai, maya, trail } from "@/test/fixtures";
+import { allProducts, kai, maya, trail } from "@/test/fixtures";
 import { server } from "@/test/server";
 
 /** The whole app at `path`, on a fresh cache that never retries. */
@@ -50,7 +50,7 @@ export function meView(state: MeView["state"]): MeView {
         login: "mayachen",
         email: null,
         actor: maya,
-        products: allProjects,
+        products: allProducts,
         ownerName,
         emailSignIn: true,
       };

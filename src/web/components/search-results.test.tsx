@@ -4,6 +4,7 @@ import { SearchResults } from "@/components/search-results";
 
 const results = {
   products: [{ key: "TRL", name: "trail" }],
+  projects: [{ slug: "human-ui", name: "Human UI launch" }],
   items: [
     {
       key: "TRL-14",
@@ -17,7 +18,7 @@ const results = {
 };
 
 describe("SearchResults", () => {
-  test("projects and issues as links, each with its key and title", () => {
+  test("products, projects and items as links: products by key and name, projects by name", () => {
     render(
       <SearchResults
         query="team"
@@ -26,11 +27,15 @@ describe("SearchResults", () => {
         status="ready"
       />,
     );
-    const [project, issue] = within(
+    const [product, project, issue] = within(
       screen.getByRole("list", { name: "Search results" }),
     ).getAllByRole("link");
-    expect(project).toHaveAttribute("href", "/projects/TRL");
-    expect(project).toHaveAccessibleName("TRL trail");
+    expect(product).toHaveAttribute("href", "/products/TRL");
+    expect(product).toHaveAccessibleName("TRL trail");
+    expect(product?.querySelector("svg")).toHaveClass("lucide-package");
+    expect(project).toHaveAttribute("href", "/projects/human-ui");
+    expect(project).toHaveAccessibleName("Human UI launch");
+    expect(project?.querySelector("svg")).toHaveClass("lucide-folder");
     expect(issue).toHaveAttribute("href", "/issues/TRL-14");
     expect(issue).toHaveAccessibleName(
       "TRL-14 Team access: invite people JUS-187",
@@ -42,7 +47,7 @@ describe("SearchResults", () => {
       <SearchResults
         query="team"
         answeredQuery="team"
-        results={{ products: [], items: [] }}
+        results={{ products: [], projects: [], items: [] }}
         status="ready"
       />,
     );
@@ -115,12 +120,12 @@ describe("SearchResults", () => {
 
     rerender(<SearchResults {...props} results={results} status="ready" />);
     expect(screen.getByRole("status")).toBe(region);
-    expect(region).toHaveTextContent("2 results");
+    expect(region).toHaveTextContent("3 results");
 
     rerender(
       <SearchResults
         {...props}
-        results={{ products: [], items: [] }}
+        results={{ products: [], projects: [], items: [] }}
         status="ready"
       />,
     );
@@ -135,7 +140,7 @@ describe("SearchResults", () => {
       <SearchResults
         query="team"
         answeredQuery="team"
-        results={{ products: [], items: results.items }}
+        results={{ products: [], projects: [], items: results.items }}
         status="ready"
       />,
     );

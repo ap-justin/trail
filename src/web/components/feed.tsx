@@ -1,4 +1,9 @@
-import { BotIcon, FolderIcon, type LucideIcon } from "lucide-react";
+import {
+  BotIcon,
+  FolderIcon,
+  type LucideIcon,
+  PackageIcon,
+} from "lucide-react";
 import {
   type ReactNode,
   type Ref,
@@ -12,11 +17,16 @@ import { MarkdownText } from "@/components/markdown-text";
 import {
   FeedEmpty,
   FeedError,
-  FeedNoProjects,
+  FeedNoProducts,
   LoadingRegion,
   SkeletonBlock,
 } from "@/components/states";
-import { HealthPill, PriorityLabel, StatusLabel } from "@/components/status";
+import {
+  HealthPill,
+  PriorityLabel,
+  StatusLabel,
+  TypeBadge,
+} from "@/components/status";
 import { KeyText, LabelChip } from "@/components/text";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -30,8 +40,10 @@ import {
 } from "@/components/ui/select";
 import type {
   EntryView,
-  WebActorView,
+  FeedView as FeedPage,
+  WebItemRefView,
   WebProductRefView,
+  WebProjectRefView,
 } from "@/lib/api-types";
 import { paths } from "@/lib/paths";
 import {
@@ -58,17 +70,20 @@ export type FeedViewProps = {
   onShowPending: () => void;
   /** Whether the top of the list is in view; while it isn't, hold new entries as pending. */
   onAtTopChange: (atTop: boolean) => void;
-  /** Bots that acted in a visible project, and the visible projects. */
-  filters: { actors: WebActorView[]; products: WebProductRefView[] };
+  /** Bots that acted in a visible product, the visible products and the visible projects. */
+  filters: FeedPage["filters"];
   /** A bot's actor id, or null for all bots. */
   actorFilter: string | null;
-  /** A project key, or null for all projects. */
+  /** A product key, or null for all products. */
+  productFilter: string | null;
+  /** A project slug, or null for all projects. */
   projectFilter: string | null;
   onActorFilterChange: (actorId: string | null) => void;
-  onProjectFilterChange: (projectKey: string | null) => void;
+  onProductFilterChange: (productKey: string | null) => void;
+  onProjectFilterChange: (projectSlug: string | null) => void;
   onRetry: () => void;
-  /** The viewer is a member with no project, so an empty feed is about access, not quiet. */
-  noProjects?: boolean;
+  /** The viewer is a member with no product, so an empty feed is about access, not quiet. */
+  noProducts?: boolean;
   /** The clock relative times are read against; ticks each minute when omitted. */
   now?: Date;
 };
@@ -116,8 +131,8 @@ export function FeedView(props: FeedViewProps) {
     props.onShowPending();
   };
 
-  // a member with no project has nothing to filter or wait for yet
-  const nothingToFollow = props.noProjects && props.entries.length === 0;
+  // a member with no product has nothing to filter or wait for yet
+  const nothingToFollow = props.noProducts && props.entries.length === 0;
 
   return (
     // the 880px column sits inside the page padding, so the padding never narrows it;
@@ -165,14 +180,14 @@ function FeedBody({
   freshIds,
   connection,
   onRetry,
-  noProjects,
+  noProducts,
   now,
   firstDayRef,
 }: FeedViewProps & { now: Date; firstDayRef: Ref<HTMLHeadingElement> }) {
   if (status === "loading") return <FeedSkeleton />;
   if (status === "error") return <FeedError onRetry={onRetry} />;
   if (entries.length === 0) {
-    return noProjects ? <FeedNoProjects /> : <FeedEmpty />;
+    return noProducts ? <FeedNoProducts /> : <FeedEmpty />;
   }
   return (
     <div className={cn(connection === "reconnecting" && "opacity-60")}>
@@ -233,22 +248,24 @@ function FilterSelect<T extends string>({
   label: string;
   allLabel: string;
   icon: LucideIcon;
-  /** `after` follows the label in the menu only; the trigger shows the label alone. */
-  options: { value: T; label: string; after?: ReactNode }[];
+  /** `before` and `after` flank the label in the menu only; the trigger shows the label alone. */
+  options: { value: T; label: string; before?: ReactNode; after?: ReactNode }[];
   value: T | null;
   onChange: (value: T | null) => void;
 }) {
-  const items: { value: T | null; label: string; after?: ReactNode }[] = [
-    { value: null, label: allLabel },
-    ...options,
-  ];
+  const items: {
+    value: T | null;
+    label: string;
+    before?: ReactNode;
+    after?: ReactNode;
+  }[] = [{ value: null, label: allLabel }, ...options];
   return (
     <Select items={items} value={value} onValueChange={onChange}>
       <SelectTrigger
         size="sm"
         aria-label={label}
         // ! because the trigger's own data-[size=sm]:h-7 outranks a plain max-lg: height
-        className="text-xs font-medium max-lg:h-10!"
+        className="shrink-0 text-xs font-medium max-lg:h-10!"
       >
         <Icon aria-hidden="true" className="size-3.5" />
         <SelectValue />
@@ -269,6 +286,8 @@ function FilterSelect<T extends string>({
               // long name truncates instead of running out of a viewport-wide menu
               className="*:first:min-w-0 *:first:shrink!"
             >
+              {item.before}
+              {item.before && " "}
               <span className="min-w-0 truncate">{item.label}</span>
               {item.after}
             </SelectItem>
@@ -282,12 +301,15 @@ function FilterSelect<T extends string>({
 function FeedFilters({
   filters,
   actorFilter,
+  productFilter,
   projectFilter,
   onActorFilterChange,
+  onProductFilterChange,
   onProjectFilterChange,
 }: FeedViewProps) {
   return (
-    <div className="flex flex-wrap items-center gap-2 px-4 pt-2.5 lg:px-3 lg:pt-0 lg:pb-1">
+    // one row that scrolls sideways below lg; the bottom padding keeps focus rings inside the clip
+    <div className="flex items-center gap-2 overflow-x-auto px-4 pt-2.5 pb-1 lg:flex-wrap lg:overflow-visible lg:px-3 lg:pt-0">
       <FilterSelect
         label="Filter by bot"
         allLabel="All bots"
@@ -302,10 +324,25 @@ function FeedFilters({
         onChange={onActorFilterChange}
       />
       <FilterSelect
+        label="Filter by product"
+        allLabel="All products"
+        icon={PackageIcon}
+        options={filters.products.map((p) => ({
+          value: p.key,
+          label: p.name,
+          before: <KeyText className="text-foreground">{p.key}</KeyText>,
+        }))}
+        value={productFilter}
+        onChange={onProductFilterChange}
+      />
+      <FilterSelect
         label="Filter by project"
         allLabel="All projects"
         icon={FolderIcon}
-        options={filters.products.map((p) => ({ value: p.key, label: p.name }))}
+        options={filters.projects.map((p) => ({
+          value: p.slug,
+          label: p.name,
+        }))}
         value={projectFilter}
         onChange={onProjectFilterChange}
       />
@@ -339,7 +376,7 @@ type Sentence = {
   /** Before the subject: "changed status of". */
   verb: ReactNode;
   subject: ReactNode;
-  /** The issue title (or link title) the subject names; its own line at 375. */
+  /** The item title (or link title) the subject names; its own line at 375. */
   title?: string;
   /** After the subject: "to In progress". */
   tail?: ReactNode;
@@ -347,17 +384,35 @@ type Sentence = {
   sourceAuthor?: string | null;
 };
 
-function issueSubject(issue: { key: string }, title: string) {
+/** The item's type badge, then its key as the row's link. */
+function itemSubject(item: WebItemRefView) {
   return (
-    <RowLink href={paths.issue(issue.key)} label={`${issue.key} ${title}`}>
-      <KeyText>{issue.key}</KeyText>
+    <>
+      <TypeBadge type={item.type} />
+      <RowLink href={paths.issue(item.key)} label={`${item.key} ${item.title}`}>
+        <KeyText>{item.key}</KeyText>
+      </RowLink>
+    </>
+  );
+}
+
+function productSubject(product: WebProductRefView) {
+  return (
+    <RowLink
+      href={paths.product(product.key)}
+      // spans with no space between would be read as one word: "OPBOpenBot"
+      label={`${product.key} ${product.name}`}
+      className="inline-flex items-center gap-1.5 font-medium"
+    >
+      <KeyText className="text-foreground">{product.key}</KeyText>
+      {product.name}
     </RowLink>
   );
 }
 
-function projectSubject(project: WebProductRefView) {
+function projectSubject(project: WebProjectRefView) {
   return (
-    <RowLink href={paths.project(project.key)} className="font-medium">
+    <RowLink href={paths.project(project.slug)} className="font-medium">
       {project.name}
     </RowLink>
   );
@@ -367,19 +422,31 @@ const muted = (text: string) => (
   <span className="text-muted-foreground">{text}</span>
 );
 
+/** "posted a status update on", short to "status update on" below lg. */
+const statusUpdateVerb = (on: "product" | "project") => (
+  <span className="text-muted-foreground">
+    <span className="max-lg:hidden">posted a </span>status update on {on}
+  </span>
+);
+
+function createdVerb(entry: Extract<EntryView, { kind: "item_created" }>) {
+  if (entry.actor.kind === "human") return "filed";
+  return entry.item.type === "todo" ? "planned" : "reported";
+}
+
 function sentenceFor(entry: EntryView): Sentence | null {
   switch (entry.kind) {
     case "item_created":
       return {
-        verb: muted(entry.actor.kind === "bot" ? "created" : "filed"),
-        subject: issueSubject(entry.item, entry.item.title),
+        verb: muted(createdVerb(entry)),
+        subject: itemSubject(entry.item),
         title: entry.item.title,
         sourceAuthor: entry.sourceAuthor,
       };
     case "status_changed":
       return {
         verb: muted("changed status of"),
-        subject: issueSubject(entry.item, entry.item.title),
+        subject: itemSubject(entry.item),
         title: entry.item.title,
         tail: (
           <>
@@ -388,10 +455,22 @@ function sentenceFor(entry: EntryView): Sentence | null {
           </>
         ),
       };
+    case "type_changed":
+      return {
+        verb: muted("changed type of"),
+        subject: itemSubject(entry.item),
+        title: entry.item.title,
+        tail: (
+          <>
+            {muted("to")}
+            <TypeBadge type={entry.to} />
+          </>
+        ),
+      };
     case "priority_changed":
       return {
         verb: muted("changed priority of"),
-        subject: issueSubject(entry.item, entry.item.title),
+        subject: itemSubject(entry.item),
         title: entry.item.title,
         tail: (
           <>
@@ -403,7 +482,7 @@ function sentenceFor(entry: EntryView): Sentence | null {
     case "labels_changed":
       return {
         verb: muted("changed labels on"),
-        subject: issueSubject(entry.item, entry.item.title),
+        subject: itemSubject(entry.item),
         title: entry.item.title,
         tail: (
           <>
@@ -421,14 +500,14 @@ function sentenceFor(entry: EntryView): Sentence | null {
     case "link_added":
       return {
         verb: muted("added a link to"),
-        subject: issueSubject(entry.item, entry.item.title),
+        subject: itemSubject(entry.item),
         title: entry.link.title,
       };
     case "assignee_changed":
       return entry.to
         ? {
             verb: muted("assigned"),
-            subject: issueSubject(entry.item, entry.item.title),
+            subject: itemSubject(entry.item),
             title: entry.item.title,
             tail: (
               <>
@@ -439,19 +518,19 @@ function sentenceFor(entry: EntryView): Sentence | null {
           }
         : {
             verb: muted("unassigned"),
-            subject: issueSubject(entry.item, entry.item.title),
+            subject: itemSubject(entry.item),
             title: entry.item.title,
           };
     case "estimate_changed":
       return entry.to === null
         ? {
             verb: muted("cleared the estimate of"),
-            subject: issueSubject(entry.item, entry.item.title),
+            subject: itemSubject(entry.item),
             title: entry.item.title,
           }
         : {
             verb: muted("changed estimate of"),
-            subject: issueSubject(entry.item, entry.item.title),
+            subject: itemSubject(entry.item),
             title: entry.item.title,
             tail: (
               <>
@@ -463,19 +542,48 @@ function sentenceFor(entry: EntryView): Sentence | null {
     case "comment":
       return {
         verb: muted("commented on"),
-        subject: issueSubject(entry.item, entry.item.title),
+        subject: itemSubject(entry.item),
         title: entry.item.title,
         quote: entry.comment.body,
         sourceAuthor: entry.comment.sourceAuthor,
       };
+    // the item is the row's link, so the project is named in plain text
+    case "added_to_project":
+      return {
+        verb: muted("added"),
+        subject: itemSubject(entry.item),
+        title: entry.item.title,
+        tail: (
+          <>
+            {muted("to project")}
+            <span className="font-medium">{entry.project.name}</span>
+          </>
+        ),
+      };
+    case "removed_from_project":
+      return {
+        verb: muted("removed"),
+        subject: itemSubject(entry.item),
+        title: entry.item.title,
+        tail: (
+          <>
+            {muted("from project")}
+            <span className="font-medium">{entry.project.name}</span>
+          </>
+        ),
+      };
     case "product_status_update":
       return {
-        verb: (
-          <span className="text-muted-foreground">
-            <span className="max-lg:hidden">posted a </span>status update on
-          </span>
-        ),
-        subject: projectSubject(entry.product),
+        verb: statusUpdateVerb("product"),
+        subject: productSubject(entry.product),
+        tail: <HealthPill health={entry.statusUpdate.health} />,
+        quote: entry.statusUpdate.body,
+        sourceAuthor: entry.statusUpdate.sourceAuthor,
+      };
+    case "project_status_update":
+      return {
+        verb: statusUpdateVerb("project"),
+        subject: projectSubject(entry.project),
         tail: <HealthPill health={entry.statusUpdate.health} />,
         quote: entry.statusUpdate.body,
         sourceAuthor: entry.statusUpdate.sourceAuthor,
@@ -483,10 +591,10 @@ function sentenceFor(entry: EntryView): Sentence | null {
     case "product_created":
       return {
         verb: muted("created"),
-        subject: projectSubject(entry.product),
+        subject: productSubject(entry.product),
       };
     case "product_imported": {
-      // an import that only touched labels, status updates or the project row counts 0 of both
+      // an import that only touched labels, status updates or the product row counts 0 of both
       const counts = [
         entry.imported.issues > 0 && countOf(entry.imported.issues, "issue"),
         entry.imported.comments > 0 &&
@@ -494,7 +602,7 @@ function sentenceFor(entry: EntryView): Sentence | null {
       ].filter(Boolean);
       return {
         verb: muted("imported"),
-        subject: projectSubject(entry.product),
+        subject: productSubject(entry.product),
         tail: counts.length > 0 && (
           <>
             {muted("with")}
@@ -503,14 +611,16 @@ function sentenceFor(entry: EntryView): Sentence | null {
         ),
       };
     }
-    // kinds this feed doesn't draw yet: skipped like a kind it doesn't know
-    case "type_changed":
-    case "added_to_project":
-    case "removed_from_project":
-    case "project_status_update":
     case "project_created":
+      return {
+        verb: muted("created project"),
+        subject: projectSubject(entry.project),
+      };
     case "project_updated":
-      return null;
+      return {
+        verb: muted("updated project"),
+        subject: projectSubject(entry.project),
+      };
     default:
       // typechecks only while every known kind has a case; at runtime, a kind the server added later lands here
       entry satisfies never;
@@ -530,7 +640,7 @@ function RowTime({ iso, now }: { iso: string; now: Date }) {
 }
 
 /**
- * One feed entry. At 1440 the sentence runs on one wrapping line with the project
+ * One feed entry. At 1440 the sentence runs on one wrapping line with the product
  * key and time at the right; below 1024 it stacks: who and when, then the verb, then
  * the title. The line wrappers turn into `display: contents` at 1440 so one DOM
  * serves both.
@@ -586,7 +696,10 @@ function FeedRow({
           </p>
         )}
       </div>
-      <KeyText className="max-lg:hidden">{entry.product?.key}</KeyText>
+      {/* empty on a project's own entries, which belong to no product */}
+      <span data-product-column className="min-w-8 text-right max-lg:hidden">
+        {entry.product && <KeyText>{entry.product.key}</KeyText>}
+      </span>
       <span className="w-14 text-right text-xs whitespace-nowrap text-muted-foreground max-lg:hidden">
         <RowTime iso={entry.createdAt} now={now} />
       </span>

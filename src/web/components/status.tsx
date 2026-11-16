@@ -4,16 +4,51 @@ import {
   CircleDotIcon,
   CircleIcon,
   CircleXIcon,
+  InboxIcon,
+  ListTodoIcon,
   type LucideIcon,
   MinusIcon,
   SignalHighIcon,
   SignalLowIcon,
   SignalMediumIcon,
 } from "lucide-react";
-import type { WebItemRowView, WebProductView } from "@/lib/api-types";
+import type {
+  WebItemRowView,
+  WebItemType,
+  WebProductView,
+} from "@/lib/api-types";
 import { cn } from "@/lib/utils";
 
 export type IssueStatus = WebItemRowView["status"];
+export type { WebItemType as ItemType };
+
+const types: Record<WebItemType, { label: string; icon: LucideIcon }> = {
+  issue: { label: "Issue", icon: InboxIcon },
+  todo: { label: "Todo", icon: ListTodoIcon },
+};
+
+/** Issue or Todo, glyph plus word. Neutral on purpose: indigo is for bots alone. */
+export function TypeBadge({
+  type,
+  className,
+}: {
+  type: WebItemType;
+  className?: string;
+}) {
+  const { icon: Icon, label } = types[type];
+  return (
+    <span
+      data-item-type={type}
+      className={cn(
+        "inline-flex h-4.5 shrink-0 items-center gap-0.75 rounded-sm bg-secondary px-1.5 text-2xs leading-none font-medium whitespace-nowrap text-secondary-foreground",
+        className,
+      )}
+    >
+      <Icon aria-hidden="true" className="size-3.5 shrink-0" />
+      {label}
+    </span>
+  );
+}
 export type ProjectHealth = NonNullable<WebProductView["health"]>;
 
 const statuses: Record<

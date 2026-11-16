@@ -32,7 +32,7 @@ function serveNoProjectsFeed() {
 }
 
 describe("session", () => {
-  test("a member with no project is told so, not that nothing happened", async () => {
+  test("a member with no product is told so, not that nothing happened", async () => {
     server.use(
       http.get("/api/web/me", () =>
         HttpResponse.json({ ...meView("member"), products: [] }),
@@ -40,9 +40,9 @@ describe("session", () => {
     );
     serveNoProjectsFeed();
     renderApp("/");
-    expect(await screen.findByText("No projects yet")).toBeInTheDocument();
+    expect(await screen.findByText("No products yet")).toBeInTheDocument();
     expect(
-      screen.getByText("Ask the owner to add you to a project."),
+      screen.getByText("Ask the owner to add you to a product."),
     ).toBeInTheDocument();
     expect(screen.queryByText("No activity yet")).not.toBeInTheDocument();
     expect(
@@ -50,7 +50,7 @@ describe("session", () => {
     ).not.toBeInTheDocument();
   });
 
-  test("a member with no project has no Live indicator, though the stream is open", async () => {
+  test("a member with no product has no Live indicator, though the stream is open", async () => {
     server.use(
       http.get("/api/web/me", () =>
         HttpResponse.json({ ...meView("member"), products: [] }),
@@ -58,13 +58,13 @@ describe("session", () => {
     );
     serveNoProjectsFeed();
     renderApp("/");
-    expect(await screen.findByText("No projects yet")).toBeInTheDocument();
+    expect(await screen.findByText("No products yet")).toBeInTheDocument();
     await waitFor(() => expect(FakeEventSource.opened).not.toHaveLength(0));
     FakeEventSource.current.open();
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
   });
 
-  test("a member added to a project while the Feed is open sees its history and filters on the next focus", async () => {
+  test("a member added to a product while the Feed is open sees its history and filters on the next focus", async () => {
     server.use(
       http.get("/api/web/me", () =>
         HttpResponse.json({ ...meView("member"), products: [] }),
@@ -72,7 +72,7 @@ describe("session", () => {
     );
     serveNoProjectsFeed();
     renderApp("/");
-    expect(await screen.findByText("No projects yet")).toBeInTheDocument();
+    expect(await screen.findByText("No products yet")).toBeInTheDocument();
 
     // the owner adds them: /me now lists the project, and /feed holds its history
     signedInAs("member");
@@ -87,14 +87,14 @@ describe("session", () => {
     );
     expect(screen.queryByText("No activity yet")).not.toBeInTheDocument();
     await userEvent.click(
-      screen.getByRole("combobox", { name: "Filter by project" }),
+      screen.getByRole("combobox", { name: "Filter by product" }),
     );
     expect(
-      await screen.findByRole("option", { name: "trail" }),
+      await screen.findByRole("option", { name: "TRL trail" }),
     ).toBeInTheDocument();
   });
 
-  test("a member with no project sees Live once the stream brings rows", async () => {
+  test("a member with no product sees Live once the stream brings rows", async () => {
     server.use(
       http.get("/api/web/me", () =>
         HttpResponse.json({ ...meView("member"), products: [] }),
@@ -102,7 +102,7 @@ describe("session", () => {
     );
     serveNoProjectsFeed();
     renderApp("/");
-    expect(await screen.findByText("No projects yet")).toBeInTheDocument();
+    expect(await screen.findByText("No products yet")).toBeInTheDocument();
     await waitFor(() => expect(FakeEventSource.opened).not.toHaveLength(0));
     FakeEventSource.current.open();
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
@@ -115,22 +115,22 @@ describe("session", () => {
     expect((await screen.findAllByText("Live")).length).toBeGreaterThan(0);
   });
 
-  test("a member with projects and an empty feed is told nothing happened yet, with the filters to hand", async () => {
+  test("a member with products and an empty feed is told nothing happened yet, with the filters to hand", async () => {
     await onFeed();
-    expect(screen.queryByText("No projects yet")).not.toBeInTheDocument();
+    expect(screen.queryByText("No products yet")).not.toBeInTheDocument();
     expect(
       screen.getAllByRole("combobox", { name: /^Filter by/ }),
-    ).toHaveLength(2);
+    ).toHaveLength(3);
   });
 
-  test("a member with projects sees Live once the stream opens", async () => {
+  test("a member with products sees Live once the stream opens", async () => {
     await onFeed();
     await waitFor(() => expect(FakeEventSource.opened).not.toHaveLength(0));
     FakeEventSource.current.open();
     expect((await screen.findAllByText("Live")).length).toBeGreaterThan(0);
   });
 
-  test("an owner with no projects is told it is quiet, not that they lack access", async () => {
+  test("an owner with no products is told it is quiet, not that they lack access", async () => {
     server.use(
       http.get("/api/web/me", () =>
         HttpResponse.json({ ...meView("owner"), products: [] }),
@@ -139,7 +139,7 @@ describe("session", () => {
     serveNoProjectsFeed();
     renderApp("/");
     expect(await screen.findByText("No activity yet")).toBeInTheDocument();
-    expect(screen.queryByText("No projects yet")).not.toBeInTheDocument();
+    expect(screen.queryByText("No products yet")).not.toBeInTheDocument();
   });
 
   test("Sign out calls the endpoint and lands on sign-in", async () => {

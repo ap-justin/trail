@@ -13,22 +13,24 @@ function FeedPage() {
   const [filter, setFilter] = useState<FeedFilter>({
     actor: null,
     product: null,
+    project: null,
   });
   const { session } = useChrome();
   const feed = useLiveFeed(filter, {
-    onProjectGone: () => setFilter((f) => ({ ...f, product: null })),
+    onFilterGone: () =>
+      setFilter((f) => ({ ...f, product: null, project: null })),
   });
-  const noProjects = !session.viewer.isOwner && session.projects.length === 0;
+  const noProducts = !session.viewer.isOwner && session.products.length === 0;
   return (
     <AppPage
       section="feed"
       heading="Feed"
       // nothing until the stream first opens: neither Live nor Reconnecting is true yet;
-      // nor while a member with no projects has no rows, which hides the filters too —
-      // the stream checks access per event, so a project granted mid-view starts delivering
+      // nor while a member with no products has no rows, which hides the filters too —
+      // the stream checks access per event, so a product granted mid-view starts delivering
       headingAccessory={
         feed.connection === "open" &&
-        !(noProjects && feed.entries.length === 0) && (
+        !(noProducts && feed.entries.length === 0) && (
           <LiveIndicator connection="open" />
         )
       }
@@ -45,13 +47,17 @@ function FeedPage() {
         onAtTopChange={feed.setAtTop}
         filters={feed.filters}
         actorFilter={filter.actor}
-        projectFilter={filter.product}
+        productFilter={filter.product}
+        projectFilter={filter.project}
         onActorFilterChange={(actor) => setFilter((f) => ({ ...f, actor }))}
+        onProductFilterChange={(product) =>
+          setFilter((f) => ({ ...f, product }))
+        }
         onProjectFilterChange={(project) =>
-          setFilter((f) => ({ ...f, product: project }))
+          setFilter((f) => ({ ...f, project }))
         }
         onRetry={feed.retry}
-        noProjects={noProjects}
+        noProducts={noProducts}
       />
     </AppPage>
   );

@@ -1,4 +1,9 @@
-import { FolderIcon, SearchIcon, TriangleAlertIcon } from "lucide-react";
+import {
+  FolderIcon,
+  PackageIcon,
+  SearchIcon,
+  TriangleAlertIcon,
+} from "lucide-react";
 import { AppLink } from "@/components/app-link";
 import { EmptyState, SkeletonBlock } from "@/components/states";
 import { StatusIcon } from "@/components/status";
@@ -11,8 +16,8 @@ export type SearchResultsProps = {
   query: string;
   /** The query `results` and `status` answer; while it trails `query` the panel shows loading. */
   answeredQuery: string;
-  /** Visible projects and issues matching `answeredQuery`; null before the first answer. */
-  results: Pick<SearchView, "items" | "products"> | null;
+  /** Visible products, projects and items matching `answeredQuery`; null before the first answer. */
+  results: SearchView | null;
   status: "loading" | "error" | "ready";
 };
 
@@ -26,7 +31,7 @@ const row =
 
 /**
  * The search box's results, drawn in the shell's `searchResults` slot at both widths:
- * one list of projects (folder glyph), then issues (status glyph), each a link reachable
+ * one list of products (package glyph), projects (folder glyph), then items (status glyph), each a link reachable
  * by Tab from the box. Following one ends the search: the shell clears the box, so
  * there is no callback here.
  */
@@ -64,7 +69,8 @@ type Results = NonNullable<SearchResultsProps["results"]>;
 function announcement(shown: Results | "loading" | "error" | null): string {
   if (shown === "loading" || shown === null) return "Loading";
   if (shown === "error") return "Couldn't search";
-  const count = shown.products.length + shown.items.length;
+  const count =
+    shown.products.length + shown.projects.length + shown.items.length;
   if (count === 0) return "No results";
   return count === 1 ? "1 result" : `${count} results`;
 }
@@ -90,7 +96,11 @@ function SearchResultsPlaceholder({ status }: { status: "loading" | "error" }) {
 }
 
 function SearchResultsBody({ results }: { results: Results }) {
-  if (results.products.length === 0 && results.items.length === 0) {
+  if (
+    results.products.length === 0 &&
+    results.projects.length === 0 &&
+    results.items.length === 0
+  ) {
     return (
       <EmptyState
         icon={SearchIcon}
@@ -102,19 +112,30 @@ function SearchResultsBody({ results }: { results: Results }) {
   }
   return (
     <ul aria-label="Search results">
-      {results.products.map((project) => (
-        <li key={project.key}>
+      {results.products.map((product) => (
+        <li key={product.key}>
           <AppLink
-            href={paths.project(project.key)}
+            href={paths.product(product.key)}
             // spans with no space between would be read as one word: "TRLtrail"
-            aria-label={`${project.key} ${project.name}`}
+            aria-label={`${product.key} ${product.name}`}
             className={row}
           >
+            <PackageIcon
+              aria-hidden="true"
+              className="size-3.5 shrink-0 text-muted-foreground"
+            />
+            <KeyText>{product.key}</KeyText>
+            <span className="truncate">{product.name}</span>
+          </AppLink>
+        </li>
+      ))}
+      {results.projects.map((project) => (
+        <li key={project.slug}>
+          <AppLink href={paths.project(project.slug)} className={row}>
             <FolderIcon
               aria-hidden="true"
               className="size-3.5 shrink-0 text-muted-foreground"
             />
-            <KeyText>{project.key}</KeyText>
             <span className="truncate">{project.name}</span>
           </AppLink>
         </li>

@@ -8,18 +8,18 @@ import {
   type RowMutation,
 } from "@/components/people";
 import type { PersonView } from "@/lib/api-types";
-import { allProjects, people, photoUrlFor } from "@/test/fixtures";
+import { allProducts, people, photoUrlFor } from "@/test/fixtures";
 
 function renderPeople(overrides: Partial<PeopleViewProps> = {}) {
   const props: PeopleViewProps = {
     status: "ready",
     people,
-    projects: allProjects,
+    products: allProducts,
     onRetry: vi.fn(),
     onInvite: vi.fn(),
     invitePending: false,
     inviteError: null,
-    onSaveProjects: vi.fn(),
+    onSaveProducts: vi.fn(),
     onRemove: vi.fn(),
     rowMutations: [],
     ...overrides,
@@ -91,7 +91,7 @@ describe("people list", () => {
     renderPeople();
     expect(
       row("mayachen").getByRole("button", {
-        name: "Edit projects for @mayachen",
+        name: "Edit products for @mayachen",
       }),
     ).toBeInTheDocument();
     expect(
@@ -134,12 +134,12 @@ describe("people list", () => {
     expect(props.onRemove).toHaveBeenCalledExactlyOnceWith("kai-dev");
   });
 
-  test("Edit projects ticks the current projects and Save projects sends the new set", async () => {
+  test("Edit products ticks the current products and Save products sends the new set", async () => {
     const user = userEvent.setup();
     const { props } = renderPeople();
     await user.click(
       row("mayachen").getByRole("button", {
-        name: "Edit projects for @mayachen",
+        name: "Edit products for @mayachen",
       }),
     );
     const trail = row("mayachen").getByRole("checkbox", { name: "TRL trail" });
@@ -153,24 +153,24 @@ describe("people list", () => {
       row("mayachen").getByRole("checkbox", { name: "OPB OpenBot" }),
     );
     await user.click(
-      row("mayachen").getByRole("button", { name: "Save projects" }),
+      row("mayachen").getByRole("button", { name: "Save products" }),
     );
-    expect(props.onSaveProjects).toHaveBeenCalledWith("mayachen", [
+    expect(props.onSaveProducts).toHaveBeenCalledWith("mayachen", [
       "DOC",
       "OPB",
     ]);
   });
 
-  test("Cancel leaves the projects as they were", async () => {
+  test("Cancel leaves the products as they were", async () => {
     const user = userEvent.setup();
     const { props } = renderPeople();
     await user.click(
       row("mayachen").getByRole("button", {
-        name: "Edit projects for @mayachen",
+        name: "Edit products for @mayachen",
       }),
     );
     await user.click(row("mayachen").getByRole("button", { name: "Cancel" }));
-    expect(props.onSaveProjects).not.toHaveBeenCalled();
+    expect(props.onSaveProducts).not.toHaveBeenCalled();
     expect(row("mayachen").queryByRole("checkbox")).not.toBeInTheDocument();
   });
 });
@@ -195,7 +195,7 @@ describe("after a row changes", () => {
     );
   }
 
-  test("removing a person moves focus to the next row's Edit projects", async () => {
+  test("removing a person moves focus to the next row's Edit products", async () => {
     const { props, rerender } = renderPeople();
     await confirmRemove("mayachen");
     rerender(
@@ -206,7 +206,7 @@ describe("after a row changes", () => {
     );
     expect(
       row("kai-dev").getByRole("button", {
-        name: "Edit projects for @kai-dev",
+        name: "Edit products for @kai-dev",
       }),
     ).toHaveFocus();
   });
@@ -250,13 +250,13 @@ describe("after a row changes", () => {
     const { props, rerender } = renderPeople();
     await user.click(
       row("kai-dev").getByRole("button", {
-        name: "Edit projects for @kai-dev",
+        name: "Edit products for @kai-dev",
       }),
     );
     const status = row("kai-dev").getByRole("status");
     expect(status).toHaveTextContent(/^$/);
     await user.click(
-      row("kai-dev").getByRole("button", { name: "Save projects" }),
+      row("kai-dev").getByRole("button", { name: "Save products" }),
     );
     rerender(<PeopleView {...props} rowMutations={[failedSave("kai-dev")]} />);
     expect(row("kai-dev").getByRole("status")).toBe(status);
@@ -267,11 +267,11 @@ describe("after a row changes", () => {
     const user = userEvent.setup();
     await user.click(
       row(username).getByRole("button", {
-        name: `Edit projects for @${username}`,
+        name: `Edit products for @${username}`,
       }),
     );
     await user.click(
-      row(username).getByRole("button", { name: "Save projects" }),
+      row(username).getByRole("button", { name: "Save products" }),
     );
     return user;
   }
@@ -309,7 +309,7 @@ describe("after a row changes", () => {
       ],
     });
     await saveFor("mayachen");
-    expect(props.onSaveProjects).toHaveBeenCalledExactlyOnceWith("mayachen", [
+    expect(props.onSaveProducts).toHaveBeenCalledExactlyOnceWith("mayachen", [
       "TRL",
       "DOC",
     ]);
@@ -327,14 +327,14 @@ describe("after a row changes", () => {
     expect(row("kai-dev").getByRole("status")).toHaveTextContent(/^$/);
   });
 
-  test("Edit projects opened again starts without the last failure", async () => {
+  test("Edit products opened again starts without the last failure", async () => {
     const { props, rerender } = renderPeople();
     const user = await saveFor("kai-dev");
     rerender(<PeopleView {...props} rowMutations={[failedSave("kai-dev")]} />);
     await user.click(row("kai-dev").getByRole("button", { name: "Cancel" }));
     await user.click(
       row("kai-dev").getByRole("button", {
-        name: "Edit projects for @kai-dev",
+        name: "Edit products for @kai-dev",
       }),
     );
     expect(row("kai-dev").getByRole("status")).toHaveTextContent(/^$/);
@@ -368,22 +368,22 @@ describe("after a row changes", () => {
     ).toBeInTheDocument();
   });
 
-  test("Escape cancels Edit projects and focus returns to Edit projects", async () => {
+  test("Escape cancels Edit products and focus returns to Edit products", async () => {
     const user = userEvent.setup();
     const { props } = renderPeople();
     await user.click(
       row("mayachen").getByRole("button", {
-        name: "Edit projects for @mayachen",
+        name: "Edit products for @mayachen",
       }),
     );
     await user.keyboard("{Escape}");
     expect(row("mayachen").queryByRole("checkbox")).not.toBeInTheDocument();
     expect(
       row("mayachen").getByRole("button", {
-        name: "Edit projects for @mayachen",
+        name: "Edit products for @mayachen",
       }),
     ).toHaveFocus();
-    expect(props.onSaveProjects).not.toHaveBeenCalled();
+    expect(props.onSaveProducts).not.toHaveBeenCalled();
   });
 
   test("Escape backs out of Remove and focus returns to Remove", async () => {
@@ -465,12 +465,12 @@ describe("people invited by email", () => {
     withEmailPeople();
     expect(
       row("dana@example.com").getByRole("button", {
-        name: "Edit projects for dana@example.com",
+        name: "Edit products for dana@example.com",
       }),
     ).toBeInTheDocument();
   });
 
-  test("Remove and Save projects call back with the address", async () => {
+  test("Remove and Save products call back with the address", async () => {
     const user = userEvent.setup();
     const { props } = withEmailPeople();
     await user.click(
@@ -486,16 +486,16 @@ describe("people invited by email", () => {
 
     await user.click(
       screen.getByRole("button", {
-        name: "Edit projects for sam@studio.example",
+        name: "Edit products for sam@studio.example",
       }),
     );
     await user.click(
       row("sam@studio.example").getByRole("checkbox", { name: "OPB OpenBot" }),
     );
     await user.click(
-      row("sam@studio.example").getByRole("button", { name: "Save projects" }),
+      row("sam@studio.example").getByRole("button", { name: "Save products" }),
     );
-    expect(props.onSaveProjects).toHaveBeenCalledWith("sam@studio.example", [
+    expect(props.onSaveProducts).toHaveBeenCalledWith("sam@studio.example", [
       "OPB",
     ]);
   });
@@ -508,7 +508,7 @@ describe("invite", () => {
   test("shows the line about how each kind signs in and what they'll see", () => {
     renderPeople();
     expect(entry()).toHaveAccessibleDescription(
-      "GitHub invitees sign in with GitHub; email invitees get a sign-in link by email. They see only the projects you pick.",
+      "GitHub invitees sign in with GitHub; email invitees get a sign-in link by email. They see only the products you pick; a project shows them just the items from those products.",
     );
   });
 
@@ -546,26 +546,26 @@ describe("invite", () => {
     await user.click(screen.getByRole("button", { name: "Invite" }));
     expect(props.onInvite).toHaveBeenCalledWith({
       username: "priya@studio.example",
-      projectKeys: [],
+      productKeys: [],
     });
   });
 
-  test("an empty project set is allowed; the username goes out lowercased without the @", async () => {
+  test("an empty product set is allowed; the username goes out lowercased without the @", async () => {
     const user = userEvent.setup();
     const { props } = renderPeople();
     await user.type(entry(), " @Devon-R ");
     await user.click(screen.getByRole("button", { name: "Invite" }));
     expect(props.onInvite).toHaveBeenCalledWith({
       username: "devon-r",
-      projectKeys: [],
+      productKeys: [],
     });
   });
 
-  test("projects picked in the popover go with the invite", async () => {
+  test("products picked in the popover go with the invite", async () => {
     const user = userEvent.setup();
     const { props } = renderPeople();
     await user.type(entry(), "devon-r");
-    await user.click(screen.getByRole("button", { name: /^Projects:/ }));
+    await user.click(screen.getByRole("button", { name: /^Products:/ }));
     await user.click(
       await screen.findByRole("checkbox", { name: "TRL trail" }),
     );
@@ -574,7 +574,7 @@ describe("invite", () => {
     await user.click(screen.getByRole("button", { name: "Invite" }));
     expect(props.onInvite).toHaveBeenCalledWith({
       username: "devon-r",
-      projectKeys: ["TRL", "DOC"],
+      productKeys: ["TRL", "DOC"],
     });
   });
 });
@@ -650,5 +650,52 @@ describe("parseEntry", () => {
     "@devon@example",
   ])("refuses %j", (raw) => {
     expect(parseEntry(raw)).toBeNull();
+  });
+});
+
+describe("products", () => {
+  test("the invite's picker says Pick products until one is picked, then shows the picked keys alone", async () => {
+    const user = userEvent.setup();
+    renderPeople();
+    const picker = screen.getByRole("button", { name: /^Products:/ });
+    expect(picker).toHaveTextContent("Pick products");
+    await user.click(picker);
+    await user.click(
+      await screen.findByRole("checkbox", { name: "TRL trail" }),
+    );
+    await user.click(screen.getByRole("checkbox", { name: "DOC Docs site" }));
+    await user.keyboard("{Escape}");
+    expect(picker).toHaveTextContent(/^Products:\s*TRL\s*DOC$/);
+  });
+
+  test("a person's row lists each product as key and name", () => {
+    renderPeople();
+    const chips = document.querySelectorAll(
+      '[data-person="mayachen"] [data-product-chip]',
+    );
+    expect([...chips].map((chip) => chip.textContent)).toEqual([
+      "TRL trail",
+      "DOC Docs site",
+    ]);
+  });
+
+  test("the owner's row reads All products", () => {
+    renderPeople();
+    expect(row("justinsalas").getAllByText(/All products/)).not.toEqual([]);
+  });
+
+  test("editing names the products the person can see", async () => {
+    const user = userEvent.setup();
+    renderPeople();
+    await user.click(
+      row("mayachen").getByRole("button", {
+        name: "Edit products for @mayachen",
+      }),
+    );
+    expect(
+      row("mayachen").getByRole("group", {
+        name: "Choose the products Maya can see",
+      }),
+    ).toBeInTheDocument();
   });
 });

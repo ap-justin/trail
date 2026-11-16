@@ -26,7 +26,7 @@ import { cn } from "@/lib/utils";
 import { INVITEE_HINT, parseInvitee } from "../../shared/invitee";
 
 /** `username` is the server's field name; it holds a GitHub username or an email address. */
-export type Invite = { username: string; projectKeys: string[] };
+export type Invite = { username: string; productKeys: string[] };
 
 /** Why the last invite failed. `atField` marks a refusal of the entry itself, such as already invited. */
 export type InviteError = { message: string; atField: boolean };
@@ -45,16 +45,16 @@ export type PeopleViewProps = {
   status: "loading" | "error" | "ready";
   /** The owner's row first, then everyone invited. */
   people: PersonView[];
-  /** Every project the owner can give access to. */
-  projects: WebProductRefView[];
+  /** Every product the owner can give access to. */
+  products: WebProductRefView[];
   onRetry: () => void;
-  /** The entry arrives trimmed and lowercased, without a leading @; an empty project list is allowed. */
+  /** The entry arrives trimmed and lowercased, without a leading @; an empty product list is allowed. */
   onInvite: (invite: Invite) => void;
   invitePending: boolean;
   /** Why the last invite failed; null when it didn't. */
   inviteError: InviteError | null;
   /** Called with the person's id, as `personId` gives it. */
-  onSaveProjects: (id: string, projectKeys: string[]) => void;
+  onSaveProducts: (id: string, productKeys: string[]) => void;
   onRemove: (id: string) => void;
   /** One entry per row with a save or remove in flight or just failed, matched by id. */
   rowMutations: RowMutation[];
@@ -115,33 +115,34 @@ function PersonAvatar({ person }: { person: PersonView }) {
   );
 }
 
-function ProjectChip({
-  project,
+function ProductChip({
+  product,
   keyOnly = false,
 }: {
-  project: WebProductRefView;
+  product: WebProductRefView;
   keyOnly?: boolean;
 }) {
   return (
     <Badge
       variant="outline"
+      data-product-chip
       className="h-5.5 gap-1.5 rounded-md px-2 text-xs font-normal"
     >
-      <KeyText className="text-current">{project.key}</KeyText>{" "}
-      {!keyOnly && project.name}
+      <KeyText className="text-current">{product.key}</KeyText>
+      {!keyOnly && ` ${product.name}`}
     </Badge>
   );
 }
 
-/** One checkbox per project, each inside its own label. */
-function ProjectChecklist({
-  projects,
+/** One checkbox per product, each inside its own label. */
+function ProductChecklist({
+  products,
   selected,
   onChange,
   firstRef,
   className,
 }: {
-  projects: WebProductRefView[];
+  products: WebProductRefView[];
   selected: string[];
   onChange: (keys: string[]) => void;
   firstRef?: Ref<HTMLButtonElement>;
@@ -149,12 +150,12 @@ function ProjectChecklist({
 }) {
   return (
     <div className={cn("flex flex-col", className)}>
-      {projects.map((project, index) => {
-        const checked = selected.includes(project.key);
+      {products.map((product, index) => {
+        const checked = selected.includes(product.key);
         return (
           // biome-ignore lint/a11y/noLabelWithoutControl: Base UI's Checkbox renders the input this label wraps
           <label
-            key={project.key}
+            key={product.key}
             className="flex min-h-10 cursor-pointer items-center gap-2 lg:min-h-7"
           >
             <Checkbox
@@ -163,13 +164,13 @@ function ProjectChecklist({
               onCheckedChange={(next) =>
                 onChange(
                   next
-                    ? [...selected, project.key]
-                    : selected.filter((key) => key !== project.key),
+                    ? [...selected, product.key]
+                    : selected.filter((key) => key !== product.key),
                 )
               }
             />
-            <KeyText className="text-foreground">{project.key}</KeyText>{" "}
-            {project.name}
+            <KeyText className="text-foreground">{product.key}</KeyText>{" "}
+            {product.name}
           </label>
         );
       })}
@@ -177,32 +178,32 @@ function ProjectChecklist({
   );
 }
 
-function ProjectPicker({
-  projects,
+function ProductPicker({
+  products,
   selected,
   onChange,
 }: {
-  projects: WebProductRefView[];
+  products: WebProductRefView[];
   selected: string[];
   onChange: (keys: string[]) => void;
 }) {
-  const picked = projects.filter((p) => selected.includes(p.key));
+  const picked = products.filter((p) => selected.includes(p.key));
   return (
     <Popover>
       <PopoverTrigger className="flex h-8 min-w-0 shrink-0 items-center gap-1.5 rounded-lg border border-input px-1.5 lg:flex-1 text-left outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/25 max-lg:h-10 dark:bg-input/30">
-        <span className="sr-only">Projects:</span>
-        {picked.map((project) => (
-          <ProjectChip key={project.key} project={project} keyOnly />
+        <span className="sr-only">Products:</span>
+        {picked.map((product) => (
+          <ProductChip key={product.key} product={product} keyOnly />
         ))}
         {picked.length === 0 && (
           <span className="truncate px-1 text-muted-foreground lg:ml-auto">
-            Pick projects
+            Pick products
           </span>
         )}
       </PopoverTrigger>
       <PopoverContent align="start" className="w-64">
-        <ProjectChecklist
-          projects={projects}
+        <ProductChecklist
+          products={products}
           selected={selected}
           onChange={onChange}
         />
@@ -212,18 +213,18 @@ function ProjectPicker({
 }
 
 function InviteForm({
-  projects,
+  products,
   onInvite,
   pending,
   error,
 }: {
-  projects: WebProductRefView[];
+  products: WebProductRefView[];
   onInvite: (invite: Invite) => void;
   pending: boolean;
   error: InviteError | null;
 }) {
   const [username, setUsername] = useState("");
-  const [projectKeys, setProjectKeys] = useState<string[]>([]);
+  const [productKeys, setProductKeys] = useState<string[]>([]);
   // null until the first submit; from then on each edit re-checks
   const [usernameError, setUsernameError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
@@ -235,7 +236,7 @@ function InviteForm({
     // the invite landed and its row is in the list, so the form starts over
     if (!pending && !error) {
       setUsername("");
-      setProjectKeys([]);
+      setProductKeys([]);
       setSubmitted(false);
       setUsernameError(null);
     }
@@ -271,7 +272,7 @@ function InviteForm({
     }
     setUsernameError(null);
     setEditedSinceInvite(false);
-    onInvite({ username: entry, projectKeys });
+    onInvite({ username: entry, productKeys });
   };
 
   return (
@@ -313,10 +314,10 @@ function InviteForm({
             </p>
           )}
         </div>
-        <ProjectPicker
-          projects={projects}
-          selected={projectKeys}
-          onChange={setProjectKeys}
+        <ProductPicker
+          products={products}
+          selected={productKeys}
+          onChange={setProductKeys}
         />
         <Button
           type="submit"
@@ -329,7 +330,8 @@ function InviteForm({
       </div>
       <p id={ids.hint} className="text-xs text-muted-foreground">
         GitHub invitees sign in with GitHub; email invitees get a sign-in link
-        by email. They see only the projects you pick.
+        by email. They see only the products you pick; a project shows them just
+        the items from those products.
       </p>
       <p id={ids.status} role="status" className="text-xs text-destructive">
         {answered && !answered.atField ? answered.message : null}
@@ -363,14 +365,14 @@ function RowStatus({
 
 function PersonRow({
   person,
-  projects,
-  onSaveProjects,
+  products,
+  onSaveProducts,
   onRemove,
   mutation,
 }: {
   person: PersonView;
-  projects: WebProductRefView[];
-  onSaveProjects: (id: string, projectKeys: string[]) => void;
+  products: WebProductRefView[];
+  onSaveProducts: (id: string, productKeys: string[]) => void;
   onRemove: (id: string) => void;
   mutation: RowMutation | null;
 }) {
@@ -384,7 +386,7 @@ function PersonRow({
   const [wasSaving, setWasSaving] = useState(saving);
   if (saving !== wasSaving) {
     setWasSaving(saving);
-    // a save landed: the row shows the saved projects again
+    // a save landed: the row shows the saved products again
     if (!saving && !mutation?.error) {
       setSent(null);
       if (mode === "edit") setMode("view");
@@ -459,7 +461,7 @@ function PersonRow({
                   <span className="font-mono text-xs">{handle}</span>
                 )}
                 {person.owner && (
-                  <span className="lg:hidden"> · All projects</span>
+                  <span className="lg:hidden"> · All products</span>
                 )}
               </>
             )}
@@ -469,7 +471,7 @@ function PersonRow({
 
       {person.owner ? (
         <span className="text-muted-foreground max-lg:hidden">
-          All projects
+          All products
         </span>
       ) : editing ? (
         <form
@@ -479,15 +481,15 @@ function PersonRow({
             event.preventDefault();
             if (busy) return;
             setSent("save");
-            onSaveProjects(personId(person), draft);
+            onSaveProducts(personId(person), draft);
           }}
         >
           <fieldset className="flex flex-col gap-1">
             <legend className="mb-1 text-muted-foreground">
-              Choose the projects {firstName} can see
+              Choose the products {firstName} can see
             </legend>
-            <ProjectChecklist
-              projects={projects}
+            <ProductChecklist
+              products={products}
               selected={draft}
               onChange={setDraft}
               firstRef={firstCheckboxRef}
@@ -502,7 +504,7 @@ function PersonRow({
               aria-busy={saving || undefined}
               className="max-lg:h-10 max-lg:flex-1"
             >
-              {saving ? "Saving…" : "Save projects"}
+              {saving ? "Saving…" : "Save products"}
             </Button>
             <Button
               type="button"
@@ -518,8 +520,8 @@ function PersonRow({
       ) : (
         <>
           <div className="flex min-w-0 flex-1 flex-wrap gap-1">
-            {person.products.map((project) => (
-              <ProjectChip key={project.key} project={project} />
+            {person.products.map((product) => (
+              <ProductChip key={product.key} product={product} />
             ))}
           </div>
           {mode === "confirm" ? (
@@ -563,14 +565,14 @@ function PersonRow({
                 data-row-action="edit"
                 variant="outline"
                 size="sm"
-                aria-label={`Edit projects for ${handle}`}
+                aria-label={`Edit products for ${handle}`}
                 className="max-lg:h-10 max-lg:flex-1"
                 onClick={() => {
                   setDraft(person.products.map((p) => p.key));
                   changeMode("edit");
                 }}
               >
-                Edit projects
+                Edit products
               </Button>
               <Button
                 ref={removeRef}
@@ -595,7 +597,7 @@ function PersonRow({
 }
 
 /**
- * The owner's People page: invite by GitHub username or email with the projects they may see,
+ * The owner's People page: invite by GitHub username or email with the products they may see,
  * then everyone with access. The owner's row has no actions.
  */
 export function PeopleView(props: PeopleViewProps) {
@@ -623,7 +625,7 @@ export function PeopleView(props: PeopleViewProps) {
     <div className="mx-auto flex w-full max-w-220 flex-col gap-6 pt-3 lg:px-6 lg:py-6">
       <div className="px-4 lg:px-0">
         <InviteForm
-          projects={props.projects}
+          products={props.products}
           onInvite={props.onInvite}
           pending={props.invitePending}
           error={props.inviteError}
@@ -659,8 +661,8 @@ export function PeopleView(props: PeopleViewProps) {
               <PersonRow
                 key={personId(person)}
                 person={person}
-                projects={props.projects}
-                onSaveProjects={props.onSaveProjects}
+                products={props.products}
+                onSaveProducts={props.onSaveProducts}
                 onRemove={props.onRemove}
                 mutation={
                   props.rowMutations.find(

@@ -8,7 +8,7 @@ import { RowLink } from "@/components/app-link";
 import { MarkdownText } from "@/components/markdown-text";
 import {
   ListSkeleton,
-  ProjectsEmpty,
+  ProductsEmpty,
   ProjectsError,
 } from "@/components/states";
 import { HealthPill } from "@/components/status";
@@ -114,7 +114,7 @@ function LatestUpdate({
 function ProjectName({ project }: { project: WebProductView }) {
   return (
     <RowLink
-      href={paths.project(project.key)}
+      href={paths.product(project.key)}
       className="flex items-center gap-2"
     >
       <KeyText className="text-sm text-foreground">{project.key}</KeyText>{" "}
@@ -236,7 +236,7 @@ export function ProjectsView(props: ProjectsViewProps) {
     return <ProjectsError onRetry={props.onRetry} />;
   if (props.projects.length === 0) {
     return (
-      <ProjectsEmpty ownerName={props.ownerName} isOwner={props.isOwner} />
+      <ProductsEmpty ownerName={props.ownerName} isOwner={props.isOwner} />
     );
   }
   return (

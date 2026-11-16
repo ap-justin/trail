@@ -79,7 +79,12 @@ const query = (params: Record<string, string | number | null | undefined>) => {
 const web = (path: string) => `/api/web${path}`;
 const seg = encodeURIComponent;
 
-export type FeedFilter = { actor: string | null; product: string | null };
+export type FeedFilter = {
+  actor: string | null;
+  product: string | null;
+  /** A project slug. */
+  project: string | null;
+};
 
 /** The server's page-size ceiling (`pageQuerySchema` in src/shared/schemas.ts). */
 export const MAX_PAGE = 200;

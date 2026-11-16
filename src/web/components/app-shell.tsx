@@ -5,6 +5,7 @@ import {
   FolderIcon,
   LogOutIcon,
   type LucideIcon,
+  PackageIcon,
   PlusIcon,
   SearchIcon,
   UserIcon,
@@ -49,16 +50,21 @@ export type ShellViewer = {
   photoUrl: string | null;
 };
 
-export type ShellSection = "feed" | "projects" | "people" | "account";
+export type ShellSection =
+  | "feed"
+  | "products"
+  | "projects"
+  | "people"
+  | "account";
 
 export type AppShellProps = {
   viewer: ShellViewer;
-  /** The projects the viewer can see, as key plus name. */
-  projects: WebProductRefView[];
-  /** The nav item for the current page; null on pages under none (an issue, Not found). */
+  /** The products the viewer can see, as key plus name. */
+  products: WebProductRefView[];
+  /** The nav item for the current page; null on pages under none (an item, Not found). */
   section: ShellSection | null;
-  /** The project the page sits in: a project page's own key, or an issue's project. */
-  projectKey?: string;
+  /** The product the page sits in: a product page's own key, or an item's product. */
+  productKey?: string;
   /** The page title or breadcrumb: in the top bar at 1440, under it at 375. Null draws no heading. */
   heading: ReactNode;
   /**
@@ -93,30 +99,36 @@ type NavItem = {
 
 type Current = AppLinkProps["aria-current"];
 
-// A project's own row marks its page, not Projects; under a project (an issue) the row and
-// the Projects tab mark where the page sits.
+// A product's own row marks its page, not Products; under a product (an item) the row and
+// the Products tab mark where the page sits.
 function sectionCurrent(
   item: ShellSection,
   section: ShellSection | null,
-  projectKey: string | undefined,
+  productKey: string | undefined,
   { tab }: { tab: boolean },
 ): Current {
-  if (item === section) return tab || !projectKey ? "page" : undefined;
-  return tab && item === "projects" && projectKey ? "location" : undefined;
+  if (item === section) return tab || !productKey ? "page" : undefined;
+  return tab && item === "products" && productKey ? "location" : undefined;
 }
 
-function projectCurrent(
+function productCurrent(
   key: string,
   section: ShellSection | null,
-  projectKey: string | undefined,
+  productKey: string | undefined,
 ): Current {
-  if (key !== projectKey) return undefined;
-  return section === "projects" ? "page" : "location";
+  if (key !== productKey) return undefined;
+  return section === "products" ? "page" : "location";
 }
 
 function navItems(isOwner: boolean, withAccount: boolean): NavItem[] {
   return [
     { section: "feed", label: "Feed", href: paths.feed, icon: ActivityIcon },
+    {
+      section: "products",
+      label: "Products",
+      href: paths.products,
+      icon: PackageIcon,
+    },
     {
       section: "projects",
       label: "Projects",
@@ -152,15 +164,15 @@ const sideItem =
 
 function Sidebar({
   viewer,
-  projects,
+  products,
   section,
-  projectKey,
+  productKey,
   onSignOut,
 }: Pick<
   AppShellProps,
-  "viewer" | "projects" | "section" | "projectKey" | "onSignOut"
+  "viewer" | "products" | "section" | "productKey" | "onSignOut"
 >) {
-  const projectsLabel = useId();
+  const productsLabel = useId();
   return (
     <aside className="sticky top-0 hidden h-dvh w-58 shrink-0 flex-col gap-0.5 border-r px-2 py-3 lg:flex">
       <Logo className="h-8 px-2" />
@@ -169,7 +181,7 @@ function Sidebar({
           <AppLink
             key={item.section}
             href={item.href}
-            aria-current={sectionCurrent(item.section, section, projectKey, {
+            aria-current={sectionCurrent(item.section, section, productKey, {
               tab: false,
             })}
             className={sideItem}
@@ -179,32 +191,32 @@ function Sidebar({
           </AppLink>
         ))}
       </nav>
-      {projects.length > 0 && (
+      {products.length > 0 && (
         // scrolls on its own so a long list never pushes the account menu off-screen; the
         // inline padding keeps the links' focus rings inside the clip
         <nav
-          aria-labelledby={projectsLabel}
+          aria-labelledby={productsLabel}
           className="-mx-1 flex min-h-0 flex-col gap-0.5 overflow-y-auto px-1 pb-1"
         >
           <h2
-            id={projectsLabel}
+            id={productsLabel}
             className="px-2 pt-3.5 pb-1 text-2xs font-normal text-muted-foreground"
           >
-            Projects
+            Products
           </h2>
-          {projects.map((project) => {
-            const current = projectCurrent(project.key, section, projectKey);
+          {products.map((product) => {
+            const current = productCurrent(product.key, section, productKey);
             return (
               <AppLink
-                key={project.key}
-                href={paths.project(project.key)}
+                key={product.key}
+                href={paths.product(product.key)}
                 aria-current={current}
                 className={sideItem}
               >
                 <KeyText className={cn(current && "text-current")}>
-                  {project.key}
+                  {product.key}
                 </KeyText>{" "}
-                <span className="truncate">{project.name}</span>
+                <span className="truncate">{product.name}</span>
               </AppLink>
             );
           })}
@@ -384,8 +396,8 @@ function ShellHeading({
 function TabBar({
   viewer,
   section,
-  projectKey,
-}: Pick<AppShellProps, "viewer" | "section" | "projectKey">) {
+  productKey,
+}: Pick<AppShellProps, "viewer" | "section" | "productKey">) {
   return (
     <nav
       aria-label="Main"
@@ -395,7 +407,7 @@ function TabBar({
         <AppLink
           key={item.section}
           href={item.href}
-          aria-current={sectionCurrent(item.section, section, projectKey, {
+          aria-current={sectionCurrent(item.section, section, productKey, {
             tab: true,
           })}
           className="flex flex-1 flex-col items-center justify-center gap-0.5 text-2xs text-muted-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/25 focus-visible:ring-inset aria-[current]:text-foreground"
@@ -415,9 +427,9 @@ function TabBar({
  */
 export function AppShell({
   viewer,
-  projects,
+  products,
   section,
-  projectKey,
+  productKey,
   heading,
   headingKind = "title",
   headingAccessory,
@@ -457,9 +469,9 @@ export function AppShell({
     <div className="flex min-h-dvh">
       <Sidebar
         viewer={viewer}
-        projects={projects}
+        products={products}
         section={section}
-        projectKey={projectKey}
+        productKey={productKey}
         onSignOut={onSignOut}
       />
       <div className="flex min-w-0 flex-1 flex-col pb-14 lg:pb-0">
@@ -557,7 +569,7 @@ export function AppShell({
         )}
         <main className="flex min-w-0 flex-1 flex-col">{children}</main>
       </div>
-      <TabBar viewer={viewer} section={section} projectKey={projectKey} />
+      <TabBar viewer={viewer} section={section} productKey={productKey} />
     </div>
   );
 }
