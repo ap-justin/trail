@@ -26,6 +26,20 @@ export function useActorStream() {
   const readEverything = useEffectEvent(() => {
     void queryClient.invalidateQueries();
   });
+  // what this person may see changed: `/me`, the pages on screen and Working now (even off the
+  // feed) are read again. Pages off screen are dropped, not invalidated, since an invalidated
+  // page still paints its stale content, a revoked product's, on return
+  const onAccess = useEffectEvent(() => {
+    void queryClient.refetchQueries({
+      queryKey: keys.workingNow,
+      type: "inactive",
+    });
+    queryClient.removeQueries({
+      type: "inactive",
+      predicate: (query) => query.queryKey[0] !== keys.workingNow[0],
+    });
+    readEverything();
+  });
   const recheckSession = useEffectEvent(() => {
     void queryClient.invalidateQueries({ queryKey: keys.me });
   });
@@ -59,6 +73,7 @@ export function useActorStream() {
     source.addEventListener("actor", (event) => {
       onActor(JSON.parse((event as MessageEvent<string>).data) as ActorUpdate);
     });
+    source.addEventListener("access", () => onAccess());
     return () => {
       source.close();
       clearTimeout(retry);

@@ -43,6 +43,14 @@ export function AppLink(props: AppLinkProps) {
   return <Link {...props} />;
 }
 
+/** A text link's keyboard focus: the 2px `--ring` outline every control draws. */
+export const textLinkFocus =
+  "rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
+
+/** A standalone text link's 44px tap area below lg; from lg its box is the text's own. */
+export const textLinkTap =
+  "max-lg:inline-flex max-lg:min-h-11 max-lg:items-center";
+
 /**
  * The link a row opens; its ::after covers the nearest positioned ancestor (the row), so
  * the whole row is the target while the link's name stays its own text.
@@ -63,7 +71,7 @@ export function RowLink({
       href={href}
       aria-label={label}
       className={cn(
-        "outline-none after:absolute after:inset-0 focus-visible:after:ring-3 focus-visible:after:ring-ring/25 focus-visible:after:ring-inset",
+        "outline-none after:absolute after:inset-0 focus-visible:after:outline-2 focus-visible:after:-outline-offset-2 focus-visible:after:outline-ring",
         className,
       )}
     >

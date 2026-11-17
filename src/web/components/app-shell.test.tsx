@@ -6,8 +6,8 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useState } from "react";
-import { describe, expect, test, vi } from "vitest";
+import { type ReactNode, useState } from "react";
+import { describe, expect, onTestFinished, test, vi } from "vitest";
 import { sessionOf } from "@/app/chrome";
 import { AccountPanel } from "@/components/account-panel";
 import {
@@ -15,9 +15,13 @@ import {
   type ShellSection,
   type ShellViewer,
 } from "@/components/app-shell";
+import { IssueBreadcrumb } from "@/components/issue";
+import { ProductHeading } from "@/components/product";
+import { ProjectHeading } from "@/components/project";
 import { SearchResults } from "@/components/search-results";
 import { ThemeProvider } from "@/components/theme-provider";
 import type { MeView } from "@/lib/api-types";
+import { applyCompiledCss } from "@/test/compiled-css";
 import { photoUrlFor } from "@/test/fixtures";
 
 function renderShell(viewer: ShellViewer) {
@@ -613,6 +617,234 @@ test("a breadcrumb heading is a nav, not an h1, so the page's own h1 stands alon
   expect(
     screen.getAllByRole("navigation", { name: "Breadcrumb" }),
   ).toHaveLength(2);
+});
+
+// a link's 2px focus ring sits 2px outside it, where any clipping ancestor cuts it
+test("a breadcrumb link's focus ring is clipped by nothing in the bar; a long crumb still truncates", async () => {
+  const productName = "Customer onboarding and billing reconciliation";
+  const { container } = render(
+    <ThemeProvider>
+      <AppShell
+        viewer={owner}
+        products={[]}
+        section={null}
+        heading={
+          <IssueBreadcrumb
+            issueKey="TRL-14"
+            product={{ key: "TRL", name: productName }}
+          />
+        }
+        headingKind="breadcrumb"
+        back={{ href: "/products/TRL", label: "Back to trail" }}
+        onSearch={vi.fn()}
+        onNewIssue={vi.fn()}
+        onSignOut={vi.fn()}
+      >
+        <h1>Team access</h1>
+      </AppShell>
+    </ThemeProvider>,
+  );
+  onTestFinished(await applyCompiledCss(container));
+  const navs = screen.getAllByRole("navigation", {
+    name: "Breadcrumb",
+    hidden: true,
+  });
+  expect(navs).toHaveLength(2);
+  for (const nav of navs) {
+    const link = within(nav).getByRole("link", {
+      name: productName,
+      hidden: true,
+    });
+    const clipping: string[] = [];
+    const header = link.closest("header");
+    for (let el = link.parentElement; el; el = el.parentElement) {
+      if (getComputedStyle(el).overflow !== "visible") {
+        clipping.push(`<${el.localName} class="${el.className}">`);
+      }
+      if (el === header) break;
+    }
+    expect(clipping).toEqual([]);
+    const crumb = getComputedStyle(link);
+    expect(crumb.overflow).toBe("hidden");
+    expect(crumb.textOverflow).toBe("ellipsis");
+    expect(crumb.whiteSpace).toBe("nowrap");
+  }
+});
+
+/** Every ancestor of `el` up to its header that clips overflow, as a printable list. */
+function clippingAncestors(el: Element): string[] {
+  const clipping: string[] = [];
+  const header = el.closest("header");
+  for (let at = el.parentElement; at; at = at.parentElement) {
+    if (getComputedStyle(at).overflow !== "visible") {
+      clipping.push(`<${at.localName} class="${at.className}">`);
+    }
+    if (at === header) break;
+  }
+  return clipping;
+}
+
+function expectEllipsis(el: Element) {
+  const style = getComputedStyle(el);
+  expect(style.overflow).toBe("hidden");
+  expect(style.textOverflow).toBe("ellipsis");
+  expect(style.whiteSpace).toBe("nowrap");
+}
+
+function renderTitled(heading: ReactNode) {
+  return render(
+    <ThemeProvider>
+      <AppShell
+        viewer={owner}
+        products={[]}
+        section={null}
+        heading={heading}
+        onSearch={vi.fn()}
+        onNewIssue={vi.fn()}
+        onSignOut={vi.fn()}
+      >
+        <p>page</p>
+      </AppShell>
+    </ThemeProvider>,
+  );
+}
+
+const longName = "Customer onboarding and billing reconciliation";
+
+describe("a title heading in the top bar at lg", () => {
+  test.each([
+    [
+      "Products",
+      "a product's",
+      <ProductHeading key="p" product={{ key: "ALPHA", name: longName }} />,
+    ],
+    [
+      "Projects",
+      "a project's",
+      <ProjectHeading key="p" project={{ name: longName }} />,
+    ],
+  ])(
+    "the %s link's focus ring is clipped by nothing; %s long name still ends in an ellipsis",
+    async (linkName, _, heading) => {
+      const { container } = renderTitled(heading);
+      onTestFinished(await applyCompiledCss(container));
+      const header = container.querySelector("header") as HTMLElement;
+      const h1 = within(header).getByRole("heading", { level: 1 });
+      const link = within(h1).getByRole("link", { name: linkName });
+      expect(clippingAncestors(link)).toEqual([]);
+      expectEllipsis(within(h1).getByText(longName));
+    },
+  );
+
+  test("a plain title clips nothing around it and still ends in an ellipsis", async () => {
+    const { container } = renderTitled(longName);
+    onTestFinished(await applyCompiledCss(container));
+    const header = container.querySelector("header") as HTMLElement;
+    const h1 = within(header).getByRole("heading", { level: 1 });
+    expect(getComputedStyle(h1).overflow).toBe("visible");
+    expect(getComputedStyle(h1).minWidth).toBe("0px");
+    const text = within(h1).getByText(longName);
+    expect(text).not.toBe(h1);
+    expectEllipsis(text);
+  });
+});
+
+// jsdom matches media queries against its 1024px window: lg, not xl
+test("at 1024px a long issue breadcrumb fits its bar column: Products drops, the name truncates, the key stays whole", async () => {
+  expect(window.innerWidth).toBe(1024);
+  const { container } = render(
+    <ThemeProvider>
+      <AppShell
+        viewer={owner}
+        products={[]}
+        section={null}
+        heading={
+          <IssueBreadcrumb
+            issueKey="PLATFORMXX-1234"
+            product={{ key: "PLATFORMXX", name: longName }}
+          />
+        }
+        headingKind="breadcrumb"
+        onSearch={vi.fn()}
+        onNewIssue={vi.fn()}
+        onSignOut={vi.fn()}
+      >
+        <h1>Team access</h1>
+      </AppShell>
+    </ThemeProvider>,
+  );
+  onTestFinished(await applyCompiledCss(container));
+  const header = container.querySelector("header") as HTMLElement;
+  const nav = within(header).getByRole("navigation", { name: "Breadcrumb" });
+  // the bar column, the nav and the crumb row may all shrink below their content
+  const column = nav.parentElement as HTMLElement;
+  const crumb = nav.firstElementChild as HTMLElement;
+  for (const el of [column, nav, crumb]) {
+    expect(getComputedStyle(el).minWidth).toBe("0px");
+  }
+  expect(clippingAncestors(crumb)).toEqual([]);
+
+  const products = within(nav).getByText("Products");
+  expect(getComputedStyle(products).display).toBe("none");
+  const slashes = [...nav.querySelectorAll("[aria-hidden='true']")].filter(
+    (el) => el.textContent?.trim() === "/",
+  );
+  expect(slashes).toHaveLength(2);
+  const [afterProducts, afterName] = slashes as [Element, Element];
+  expect(getComputedStyle(afterProducts).display).toBe("none");
+  expect(getComputedStyle(afterName).display).not.toBe("none");
+
+  const name = within(nav).getByRole("link", { name: longName });
+  expect(getComputedStyle(name).minWidth).toBe("0px");
+  expectEllipsis(name);
+
+  const key = within(nav).getByText("PLATFORMXX-1234");
+  expect(getComputedStyle(key).flexShrink).toBe("0");
+  expect(getComputedStyle(key).whiteSpace).toBe("nowrap");
+});
+
+test("from xl the issue breadcrumb shows Products and both slashes", async () => {
+  const { container } = render(
+    <ThemeProvider>
+      <AppShell
+        viewer={owner}
+        products={[]}
+        section={null}
+        heading={
+          <IssueBreadcrumb
+            issueKey="PLATFORMXX-1234"
+            product={{ key: "PLATFORMXX", name: longName }}
+          />
+        }
+        headingKind="breadcrumb"
+        onSearch={vi.fn()}
+        onNewIssue={vi.fn()}
+        onSignOut={vi.fn()}
+      >
+        <h1>Team access</h1>
+      </AppShell>
+    </ThemeProvider>,
+  );
+  onTestFinished(await applyCompiledCss(container));
+  const style = document.head.lastElementChild as HTMLStyleElement;
+  // jsdom's window is fixed at 1024px (64rem), so xl (80rem) is simulated by lowering its threshold to that
+  expect(style.textContent).toContain("min-width: 80rem");
+  style.textContent = (style.textContent ?? "").replaceAll(
+    "min-width: 80rem",
+    "min-width: 64rem",
+  );
+  const header = container.querySelector("header") as HTMLElement;
+  const nav = within(header).getByRole("navigation", { name: "Breadcrumb" });
+  expect(getComputedStyle(within(nav).getByText("Products")).display).not.toBe(
+    "none",
+  );
+  const slashes = [...nav.querySelectorAll("[aria-hidden='true']")].filter(
+    (el) => el.textContent?.trim() === "/",
+  );
+  expect(slashes).toHaveLength(2);
+  for (const slash of slashes) {
+    expect(getComputedStyle(slash).display).not.toBe("none");
+  }
 });
 
 /** The mark's svg (three pills) and the wordmark beside it, inside `scope`. */

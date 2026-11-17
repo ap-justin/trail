@@ -36,6 +36,12 @@ const row = (username: string) => {
   return within(item);
 };
 
+/** The prompt splits across the handle's mono span, so it is matched on the whole line. */
+const removePrompt = (person: string, handle = `@${person}`) =>
+  row(person).queryByText(
+    (_, el) => el?.tagName === "SPAN" && el.textContent === `Remove ${handle}?`,
+  );
+
 describe("people list", () => {
   test("a person with a photo shows it; one without shows initials", () => {
     renderPeople({
@@ -102,7 +108,7 @@ describe("people list", () => {
   test('a pending invite says "Invited · hasn\'t signed in"', () => {
     renderPeople();
     expect(
-      row("alpha-dev").getByText("Invited · hasn't signed in"),
+      row("alpha-dev").getByText("Invited, hasn't signed in"),
     ).toBeInTheDocument();
   });
 
@@ -112,16 +118,17 @@ describe("people list", () => {
     await user.click(
       row("alpha-dev").getByRole("button", { name: "Remove @alpha-dev" }),
     );
+    expect(removePrompt("alpha-dev")).toBeInTheDocument();
     expect(
-      row("alpha-dev").getByText("Remove @alpha-dev?"),
-    ).toBeInTheDocument();
+      within(
+        row("alpha-dev").getByRole("group", { name: "Remove @alpha-dev" }),
+      ).getByText("@alpha-dev"),
+    ).toHaveClass("font-mono");
     const keep = row("alpha-dev").getByRole("button", { name: "Keep" });
     expect(keep).toHaveFocus();
     await user.click(keep);
     expect(props.onRemove).not.toHaveBeenCalled();
-    expect(
-      row("alpha-dev").queryByText("Remove @alpha-dev?"),
-    ).not.toBeInTheDocument();
+    expect(removePrompt("alpha-dev")).toBeNull();
     expect(
       row("alpha-dev").getByRole("button", { name: "Remove @alpha-dev" }),
     ).toHaveFocus();
@@ -329,9 +336,7 @@ describe("after a row changes", () => {
     await user.click(
       row("alpha-dev").getByRole("button", { name: "Remove @alpha-dev" }),
     );
-    expect(
-      row("alpha-dev").getByText("Remove @alpha-dev?"),
-    ).toBeInTheDocument();
+    expect(removePrompt("alpha-dev")).toBeInTheDocument();
     expect(row("alpha-dev").getByRole("status")).toHaveTextContent(/^$/);
   });
 
@@ -403,9 +408,7 @@ describe("after a row changes", () => {
       row("alpha-dev").getByRole("button", { name: "Remove @alpha-dev" }),
     );
     await user.keyboard("{Escape}");
-    expect(
-      row("alpha-dev").queryByText("Remove @alpha-dev?"),
-    ).not.toBeInTheDocument();
+    expect(removePrompt("alpha-dev")).toBeNull();
     expect(
       row("alpha-dev").getByRole("button", { name: "Remove @alpha-dev" }),
     ).toHaveFocus();
@@ -462,7 +465,7 @@ describe("people invited by email", () => {
       row("sam@studio.example").getByText("sam@studio.example"),
     ).toBeInTheDocument();
     expect(
-      row("sam@studio.example").getByText("Invited · hasn't signed in"),
+      row("sam@studio.example").getByText("Invited, hasn't signed in"),
     ).toBeInTheDocument();
     const pending = document.querySelector(
       '[data-person="sam@studio.example"] .border-dashed',
@@ -487,7 +490,7 @@ describe("people invited by email", () => {
       screen.getByRole("button", { name: "Remove dana@example.com" }),
     );
     expect(
-      row("dana@example.com").getByText("Remove dana@example.com?"),
+      removePrompt("dana@example.com", "dana@example.com"),
     ).toBeInTheDocument();
     await user.click(
       row("dana@example.com").getByRole("button", { name: "Remove" }),
@@ -575,7 +578,9 @@ describe("invite", () => {
     const user = userEvent.setup();
     const { props } = renderPeople();
     await user.type(entry(), "devon-r");
-    await user.click(screen.getByRole("button", { name: /^Products:/ }));
+    await user.click(
+      screen.getByRole("button", { name: /^Products they can see/ }),
+    );
     await user.click(
       await screen.findByRole("checkbox", { name: "TRL trail" }),
     );
@@ -664,10 +669,12 @@ describe("parseEntry", () => {
 });
 
 describe("products", () => {
-  test("the invite's picker says Pick products until one is picked, then shows the picked keys alone", async () => {
+  test("the invite's picker is named by its label, says Pick products until one is picked, then shows each picked key and name", async () => {
     const user = userEvent.setup();
     renderPeople();
-    const picker = screen.getByRole("button", { name: /^Products:/ });
+    const picker = screen.getByRole("button", {
+      name: /^Products they can see/,
+    });
     expect(picker).toHaveTextContent("Pick products");
     await user.click(picker);
     await user.click(
@@ -675,7 +682,30 @@ describe("products", () => {
     );
     await user.click(screen.getByRole("checkbox", { name: "DOC Docs site" }));
     await user.keyboard("{Escape}");
-    expect(picker).toHaveTextContent(/^Products:\s*TRL\s*DOC$/);
+    expect(picker).toHaveTextContent(/^TRL trail\s*DOC Docs site$/);
+    expect(picker).toHaveAccessibleName(
+      "Products they can see TRL trail DOC Docs site",
+    );
+  });
+
+  test("the invite fields have visible labels and no placeholder", () => {
+    renderPeople();
+    const box = screen.getByRole("textbox", {
+      name: "GitHub username or email",
+    });
+    expect(box).not.toHaveAttribute("placeholder");
+    expect(document.querySelector(`label[for="${box.id}"]`)).not.toHaveClass(
+      "sr-only",
+    );
+    expect(screen.getByText("Products they can see")).not.toHaveClass(
+      "sr-only",
+    );
+  });
+
+  test("the owner is named in plain text, not a badge", () => {
+    renderPeople();
+    const owner = row("jordansmith").getByText("Owner");
+    expect(owner).not.toHaveAttribute("data-slot", "badge");
   });
 
   test("a person's row lists each product as key and name", () => {
@@ -689,9 +719,11 @@ describe("products", () => {
     ]);
   });
 
-  test("the owner's row reads All products", () => {
+  test("the owner's row reads All products once, on its own line under the name", () => {
     renderPeople();
-    expect(row("jordansmith").getAllByText(/All products/)).not.toEqual([]);
+    const all = row("jordansmith").getByText("All products");
+    expect(all.tagName).toBe("SPAN");
+    expect(all.closest("li")?.firstElementChild).not.toContainElement(all);
   });
 
   test("editing names the products the person can see", async () => {

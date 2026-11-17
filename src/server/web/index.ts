@@ -14,6 +14,7 @@ import { peopleRoutes } from "./people.js";
 import { productRoutes } from "./products.js";
 import { projectRoutes } from "./projects.js";
 import { searchRoutes } from "./search.js";
+import { workingNowRoutes } from "./working-now.js";
 
 /**
  * The `/api/web` app the SPA calls with a session cookie. `GET /me` answers
@@ -44,8 +45,9 @@ export function createWeb({
   web.route("/", projectRoutes(db));
   web.route("/", itemRoutes(db, service));
   web.route("/", feedRoutes(db));
+  web.route("/", workingNowRoutes(db));
   web.route("/", searchRoutes(db));
-  web.route("/", peopleRoutes(db));
+  web.route("/", peopleRoutes(db, bus));
   web.route("/", messageRoutes(db, service));
   web.route("/", eventRoutes(db, bus, auth, streams));
   return web;

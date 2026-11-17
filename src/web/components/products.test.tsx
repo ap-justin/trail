@@ -2,7 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 import { ProductsView, type ProductsViewProps } from "@/components/products";
-import { product, statusUpdate } from "@/test/fixtures";
+import { beta, product, statusUpdate } from "@/test/fixtures";
 
 const now = new Date("2026-11-11T09:53:00.000Z");
 
@@ -52,21 +52,43 @@ describe("products", () => {
     renderProducts();
     expect(within(table()).getByText("On track")).toBeInTheDocument();
     expect(within(table()).getByText("Beta")).toBeInTheDocument();
-    expect(within(table()).getByText("Bot")).toBeInTheDocument();
+    expect(
+      within(table()).getByRole("img", { name: "Beta, bot" }),
+    ).toBeInTheDocument();
+    expect(within(table()).queryByText("Bot")).toBeNull();
     expect(within(table()).getByText("41m ago")).toBeInTheDocument();
   });
 
-  test('"No status update yet" shows no health, even with a health on file', () => {
+  test("the latest update's bot name truncates only once its title has given way", () => {
+    renderProducts({
+      products: [
+        product({
+          latestStatusUpdate: statusUpdate({
+            author: { ...beta, title: "Release manager for the web client" },
+          }),
+        }),
+      ],
+    });
+    const name = within(table()).getByText("Beta");
+    expect(name).toHaveClass("min-w-0", "truncate");
+    expect(name).not.toHaveClass("shrink-0");
+    expect(
+      within(table()).getByText("Release manager for the web client"),
+    ).toHaveClass("min-w-0", "truncate", "shrink-4");
+  });
+
+  test('"No status update yet" shows no health, even with a health on file; the Health column reads "No update yet"', () => {
     renderProducts({
       products: [product({ latestStatusUpdate: null, health: "at_risk" })],
     });
     expect(screen.getAllByText("No status update yet")).toHaveLength(2);
+    expect(within(table()).getByText("No update yet")).toBeInTheDocument();
     for (const word of ["On track", "At risk", "Off track"]) {
       expect(screen.queryByText(word)).not.toBeInTheDocument();
     }
   });
 
-  test("open issues, open todos and projects each get a column; the card says them in a line", () => {
+  test("open issues, open todos and projects each get a column; the card says them in a line, figures in ink", () => {
     renderProducts({
       products: [product({ openIssues: 6, openTodos: 1, projectCount: 2 })],
     });
@@ -74,9 +96,14 @@ describe("products", () => {
     expect(cells[3]).toHaveTextContent(/^6$/);
     expect(cells[4]).toHaveTextContent(/^1$/);
     expect(cells[5]).toHaveTextContent(/^2$/);
-    expect(
-      card().getByText("6 issues · 1 todo open · 2 projects"),
-    ).toBeInTheDocument();
+    const counts = card().getByText(/issues/).parentElement;
+    expect(counts).toHaveTextContent(/^6 open issues 1 open todo 2 projects/);
+    for (const figure of ["6", "1", "2"]) {
+      expect(within(counts as HTMLElement).getByText(figure)).toHaveClass(
+        "font-medium",
+        "text-foreground",
+      );
+    }
   });
 
   test("the repo line shows owner/name and opens GitHub, only for a product with a repo", () => {
@@ -87,8 +114,8 @@ describe("products", () => {
       ],
     });
     const repoLinks = screen.getAllByRole("link", { name: /example\/trail/ });
-    // one in the table, one on the card
-    expect(repoLinks).toHaveLength(2);
+    // the table's alone: the card has no repo line
+    expect(repoLinks).toHaveLength(1);
     for (const link of repoLinks) {
       expect(link).toHaveAttribute("href", "https://github.com/example/trail");
       expect(link).toHaveAttribute("target", "_blank");
@@ -99,15 +126,18 @@ describe("products", () => {
     expect(within(docRow).getAllByRole("link")).toHaveLength(1);
   });
 
-  test("a card reads name, the update, its author and age, then the counts", () => {
+  test("a card reads name, the update's author, the update, then the counts and the product's age", () => {
     renderProducts();
     const item = screen.getByRole("listitem");
+    const age = within(item).getByRole("time");
+    expect(age).toHaveAttribute("datetime", "2026-11-11T09:12:00.000Z");
+    expect(age).toHaveTextContent(/^41m$/);
     const order = [
       within(item).getByRole("link", { name: "TRL trail" }),
-      within(item).getByText(/^SSE feed shipped/),
       within(item).getByText("Beta"),
-      within(item).getByText("41m ago"),
-      within(item).getByText("7 issues · 2 todos open · 0 projects"),
+      within(item).getByText(/^SSE feed shipped/),
+      within(item).getByText(/issues/),
+      age,
     ];
     for (const [before, after] of order
       .slice(0, -1)

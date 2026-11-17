@@ -1,7 +1,7 @@
 import { ExternalLinkIcon } from "lucide-react";
 import { type ReactNode, useId, useRef, useState } from "react";
 import { ActorAvatar } from "@/components/actor";
-import { AppLink, RowLink } from "@/components/app-link";
+import { AppLink, RowLink, textLinkFocus } from "@/components/app-link";
 import {
   FilterEmpty,
   ItemFilterBar,
@@ -65,7 +65,10 @@ export function ProductHeading({ product }: { product: WebProductRefView }) {
   return (
     <span className="flex min-w-0 items-center gap-2">
       <span className="flex items-center gap-2 font-normal text-muted-foreground max-lg:hidden">
-        <AppLink href={paths.products} className="hover:text-foreground">
+        <AppLink
+          href={paths.products}
+          className={cn(textLinkFocus, "hover:text-foreground")}
+        >
           Products
         </AppLink>
         <span aria-hidden="true">/</span>
@@ -104,7 +107,7 @@ export function RepoLink({
       target="_blank"
       rel="noreferrer"
       className={cn(
-        "inline-flex max-w-full min-w-0 items-center gap-2 rounded-sm outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/25",
+        "inline-flex max-w-full min-w-0 items-center gap-2 rounded-sm hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
         className,
       )}
     >
@@ -179,7 +182,7 @@ function ItemsBody({
 
 function ProjectItem({ project, now }: { project: WebProjectView; now: Date }) {
   return (
-    <li className="relative flex flex-col gap-1 border-b py-2 max-lg:px-4 max-lg:py-3">
+    <li className="relative flex flex-col gap-1 border-b border-rule py-2 max-lg:px-4 max-lg:py-3">
       <span className="flex min-w-0 items-center gap-2">
         <RowLink
           href={paths.project(project.slug)}
@@ -241,7 +244,10 @@ export function ProductView(props: ProductViewProps) {
       className="gap-0 lg:gap-8 lg:px-6 lg:py-4 lg:data-horizontal:flex-row"
     >
       {detail?.repoUrl && (
-        <RepoLink url={detail.repoUrl} className="mx-4 mt-0.5 lg:hidden" />
+        <RepoLink
+          url={detail.repoUrl}
+          className="mx-4 mt-0.5 max-lg:min-h-11 lg:hidden"
+        />
       )}
       <PaneTabs panes={panes} className="mt-1.5" />
       <Pane value="items" className="min-w-0 flex-1">
@@ -263,6 +269,7 @@ export function ProductView(props: ProductViewProps) {
           <TabsContent
             ref={listRef}
             value={statusTabValue(filters)}
+            tabIndex={-1}
             className="outline-none"
           >
             <ItemsBody

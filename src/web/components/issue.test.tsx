@@ -6,7 +6,15 @@ import {
   IssueView,
   type IssueViewProps,
 } from "@/components/issue";
-import { humanUi, issue, maya, teamAccess, todo } from "@/test/fixtures";
+import {
+  alpha,
+  beta,
+  humanUi,
+  issue,
+  maya,
+  teamAccess,
+  todo,
+} from "@/test/fixtures";
 
 function renderIssue(overrides: Partial<IssueViewProps> = {}) {
   const props: IssueViewProps = {
@@ -22,6 +30,12 @@ function renderIssue(overrides: Partial<IssueViewProps> = {}) {
   const view = render(<IssueView {...props} />);
   return { props, ...view };
 }
+
+const focusRing = [
+  "focus-visible:outline-2",
+  "focus-visible:outline-offset-2",
+  "focus-visible:outline-ring",
+];
 
 const absoluteTime = /^[A-Z][a-z]{2} \d{1,2}, \d{2}:\d{2}$/;
 
@@ -53,18 +67,31 @@ describe("properties", () => {
     ]);
   });
 
-  test("show status, priority, estimate, assignee with badge, labels and project", () => {
+  test("show status, priority, estimate, assignee with avatar, labels and project", () => {
     renderIssue();
     const props = screen.getByRole("region", { name: "Properties" });
     expect(within(props).getByText("In progress")).toBeInTheDocument();
     expect(within(props).getByText("High")).toBeInTheDocument();
     expect(within(props).getByText("6 h")).toBeInTheDocument();
     expect(within(props).getByText("Alpha")).toBeInTheDocument();
-    expect(within(props).getByText("Bot")).toBeInTheDocument();
+    expect(
+      within(props).getByRole("img", { name: "Alpha, bot" }),
+    ).toBeInTheDocument();
+    expect(within(props).queryByText("Bot")).toBeNull();
     expect(within(props).getByText("auth")).toBeInTheDocument();
     expect(
       within(props).getByRole("link", { name: "TRL trail" }),
     ).toHaveAttribute("href", "/products/TRL");
+  });
+
+  test("the product and project links draw the shared focus outline", () => {
+    renderIssue({
+      issue: { status: "ready", data: issue({ projects: [humanUi] }) },
+    });
+    const props = screen.getByRole("region", { name: "Properties" });
+    const links = within(props).getAllByRole("link");
+    expect(links).toHaveLength(2);
+    for (const link of links) expect(link).toHaveClass(...focusRing);
   });
 
   test("a link row shows its title and its URL in mono, and opens safely", () => {
@@ -123,22 +150,26 @@ describe("timeline", () => {
     ]);
   });
 
-  test("every entry carries a badge and an absolute Mon D, HH:mm time", () => {
+  test("every entry carries an avatar named for its kind, no kind pill, and an absolute Mon D, HH:mm time", () => {
     renderIssue();
     for (const entry of entries()) {
-      expect(within(entry).getByText(/^(Bot|Human)$/)).toBeInTheDocument();
+      expect(
+        within(entry).getByRole("img", { name: /, (bot|person)$/ }),
+      ).toBeInTheDocument();
+      expect(within(entry).queryByText(/^(Bot|Human)$/)).toBeNull();
       const times = entry.querySelectorAll("time");
       expect(times.length).toBeGreaterThan(0);
       for (const time of times) expect(time.textContent).toMatch(absoluteTime);
     }
   });
 
-  test("comments are cards and changes are one line with the change in words", () => {
+  test("comments sit in a flat well and changes are one line with the change in words", () => {
     renderIssue();
     const [created, priority, comment, status] = entries();
     expect(created).toHaveTextContent("filed this issue");
     expect(priority).toHaveTextContent("set priority to High");
-    expect(comment).toHaveClass("rounded-xl", "border");
+    expect(comment).toHaveClass("bg-muted");
+    expect(comment).not.toHaveClass("border");
     expect(comment).toHaveTextContent("Owner only for invites.");
     expect(status).toHaveTextContent("changed status from Open to In progress");
   });
@@ -190,18 +221,30 @@ describe("timeline", () => {
 });
 
 describe("comment box", () => {
-  test("Comment is disabled while the box is empty or only whitespace", async () => {
+  test("Comment is aria-disabled with its reason while the box is empty or only whitespace", async () => {
     const user = userEvent.setup();
     renderIssue();
     const button = screen.getByRole("button", { name: "Comment" });
-    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    expect(button).toHaveAccessibleDescription("Write something to post it");
+    // focusable while held, so the reason is read where the operator stands
+    expect(button).toBeEnabled();
     await user.type(screen.getByRole("textbox", { name: "Comment" }), "   ");
-    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("aria-disabled", "true");
     await user.type(
       screen.getByRole("textbox", { name: "Comment" }),
       "Looks right",
     );
-    expect(button).toBeEnabled();
+    expect(button).not.toHaveAttribute("aria-disabled");
+    expect(screen.queryByText("Write something to post it")).toBeNull();
+  });
+
+  test("an empty box posts nothing", async () => {
+    const user = userEvent.setup();
+    const { props } = renderIssue();
+    screen.getByRole("button", { name: "Comment" }).focus();
+    await user.keyboard("{Enter}");
+    expect(props.onComment).not.toHaveBeenCalled();
   });
 
   test("Comment sends the trimmed body", async () => {
@@ -215,19 +258,19 @@ describe("comment box", () => {
     expect(props.onComment).toHaveBeenCalledWith("Ship it");
   });
 
-  test('says "Commenting as {name}" with the Human badge', () => {
+  test('says "Commenting as {name}" with no kind pill', () => {
     renderIssue();
     const line = screen.getByText(/^Commenting as/);
-    expect(line).toHaveTextContent("Commenting as Maya Chen");
-    expect(within(line).getByText("Human")).toBeInTheDocument();
+    expect(line).toHaveTextContent("Commenting as Maya Chen. Markdown works.");
+    expect(within(line).queryByText("Human")).toBeNull();
   });
 
-  test("the placeholder invites Markdown", () => {
+  test("the box is labelled Comment above it, with no placeholder", () => {
     renderIssue();
-    expect(screen.getByRole("textbox", { name: "Comment" })).toHaveAttribute(
-      "placeholder",
-      "Leave a comment. Markdown works.",
-    );
+    const box = screen.getByRole("textbox", { name: "Comment" });
+    expect(box).not.toHaveAttribute("placeholder");
+    const label = document.querySelector(`label[for="${box.id}"]`);
+    expect(label).not.toHaveClass("sr-only");
   });
 
   test("clears once the comment lands, and keeps the text when it fails", async () => {
@@ -237,7 +280,7 @@ describe("comment box", () => {
     await user.type(box, "First");
     rerender(<IssueView {...props} commentPending />);
     expect(screen.getByRole("button", { name: "Commenting…" })).toHaveAttribute(
-      "aria-disabled",
+      "aria-busy",
       "true",
     );
     rerender(
@@ -301,6 +344,35 @@ const propertyValue = (label: string) => {
   return dd;
 };
 
+describe("reading order", () => {
+  test("the description comes before Properties", () => {
+    renderIssue();
+    const description = screen.getByText("Invited people sign in with GitHub.");
+    expect(
+      description.compareDocumentPosition(propertiesRegion()) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  test("the header carries the item's status for the phone, where Properties drops it", () => {
+    renderIssue();
+    const header = screen.getByRole("banner");
+    expect(within(header).getByText("In progress")).toHaveClass("lg:hidden");
+    expect(
+      propertyValue("Status").parentElement?.className.split(" "),
+    ).toContain("max-lg:hidden");
+  });
+
+  test("at lg the header is one unwrapped column, so the byline sits under the full-width title", () => {
+    renderIssue();
+    // a wrapping column breaks the basis-full title and the byline into side-by-side columns
+    expect(screen.getByRole("banner")).toHaveClass(
+      "lg:flex-col",
+      "lg:flex-nowrap",
+    );
+  });
+});
+
 describe("item type", () => {
   test("properties run Type, Status, Priority, Estimate, Assignee, Labels, Product, Projects, Created, Updated", () => {
     renderIssue();
@@ -318,18 +390,20 @@ describe("item type", () => {
     ]);
   });
 
-  test("an issue: the Issue badge with the inbox glyph in the byline and Type, filed by its creator", () => {
+  test("an issue: the inbox glyph and the word Issue in the byline and Type, filed by its creator", () => {
     renderIssue();
     const line = byline();
-    for (const badge of [
+    for (const type of [
       within(line).getByText("Issue"),
       within(propertyValue("Type")).getByText("Issue"),
     ]) {
-      expect(badge).toHaveAttribute("data-item-type", "issue");
-      expect(badge.querySelector("svg")).toHaveClass("lucide-inbox");
+      const glyph = type.querySelector("svg");
+      expect(glyph).toHaveAttribute("data-item-type", "issue");
+      expect(glyph).toHaveClass("lucide-inbox");
     }
     expect(line).toHaveTextContent(/Issue\s*TRL-14\s*filed by.*Beta/);
-    expect(within(line).getByText("Bot")).toBeInTheDocument();
+    expect(within(line).getByRole("img", { name: "Beta, bot" })).toBeVisible();
+    expect(within(line).queryByText("Bot")).toBeNull();
   });
 
   test("a todo: the Todo badge with the list glyph, planned by its creator", () => {
@@ -338,18 +412,20 @@ describe("item type", () => {
       issue: { status: "ready", data: todo() },
     });
     const line = byline();
-    const badge = within(line).getByText("Todo");
-    expect(badge).toHaveAttribute("data-item-type", "todo");
-    expect(badge.querySelector("svg")).toHaveClass("lucide-list-todo");
+    const glyph = within(line).getByText("Todo").querySelector("svg");
+    expect(glyph).toHaveAttribute("data-item-type", "todo");
+    expect(glyph).toHaveClass("lucide-list-todo");
     expect(within(propertyValue("Type")).getByText("Todo")).toBeInTheDocument();
     expect(line).toHaveTextContent(/Todo\s*TRL-15\s*planned by.*Alpha/);
   });
 
-  test("a person's issue is filed by a Human", () => {
+  test("a person's issue is filed by them, their avatar named a person", () => {
     renderIssue({ issue: { status: "ready", data: issue({ creator: maya }) } });
     const line = byline();
     expect(line).toHaveTextContent(/filed by.*Maya Chen/);
-    expect(within(line).getByText("Human")).toBeInTheDocument();
+    expect(
+      within(line).getByRole("img", { name: "Maya Chen, person" }),
+    ).toBeInTheDocument();
   });
 
   test("an issue a bot filed and the owner accepted as a todo is still filed by it", () => {
@@ -429,6 +505,37 @@ describe("projects property", () => {
       name: "TRL trail",
     });
     expect(within(link).getByText("TRL")).toHaveClass("font-mono");
+  });
+
+  test("below lg each project's trailing comma sits centred beside its 44px link", () => {
+    renderIssue({
+      issue: {
+        status: "ready",
+        data: issue({ projects: [teamAccess, humanUi] }),
+      },
+    });
+    for (const row of within(propertyValue("Projects")).getAllByRole(
+      "listitem",
+    )) {
+      expect(row).toHaveClass(
+        "flex",
+        "items-center",
+        "max-lg:not-last:after:content-[',']",
+      );
+    }
+  });
+
+  test("the Product and Projects links are 44px tap targets below lg", () => {
+    renderIssue({
+      issue: { status: "ready", data: issue({ projects: [humanUi] }) },
+    });
+    for (const link of [
+      within(propertyValue("Product")).getByRole("link"),
+      within(propertyValue("Projects")).getByRole("link"),
+    ]) {
+      expect(link).toHaveClass("max-lg:min-h-11");
+      expect(link).not.toHaveClass("min-h-11");
+    }
   });
 });
 
@@ -542,4 +649,37 @@ test("the breadcrumb reads Products / product name / key", () => {
     "/products/TRL",
   );
   expect(screen.getByText("TRL-14")).toBeInTheDocument();
+  for (const link of screen.getAllByRole("link"))
+    expect(link).toHaveClass(...focusRing);
+});
+
+test("an assignment line shows the assignee's avatar before their name", () => {
+  const base = issue();
+  renderIssue({
+    issue: {
+      status: "ready",
+      data: issue({
+        timeline: [
+          {
+            product: base.product,
+            item: { key: "TRL-14", title: "Team access", type: "issue" },
+            project: null,
+            kind: "assignee_changed",
+            id: "assign",
+            createdAt: "2026-11-09T14:03:00.000Z",
+            actor: beta,
+            from: null,
+            to: alpha,
+          },
+        ],
+      }),
+    },
+  });
+  const line = document.querySelector<HTMLElement>('[data-entry-id="assign"]');
+  if (!line) throw new Error("no assignment line");
+  const avatar = within(line).getByRole("img", { name: "Alpha, bot" });
+  const name = within(line).getByText("Alpha");
+  expect(
+    avatar.compareDocumentPosition(name) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
 });

@@ -1,7 +1,12 @@
 import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
 import { render } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
-import type { EntryView, FeedView, MeView } from "@/lib/api-types";
+import type {
+  EntryView,
+  FeedView,
+  MeView,
+  WebWorkingNowView,
+} from "@/lib/api-types";
 import { createQueryClient } from "@/lib/queries";
 import { createAppRouter } from "@/router";
 import { allProducts, alpha, maya, trail } from "@/test/fixtures";
@@ -59,8 +64,12 @@ export function meView(state: MeView["state"]): MeView {
   }
 }
 
-/** Answers `/me` with `state`; `server.use` it again to change who is signed in. */
+/**
+ * Answers `/me` with `state`, and Working now's read on the feed with nothing in progress;
+ * `server.use` it again to change who is signed in.
+ */
 export function signedInAs(state: MeView["state"]) {
+  serveInProgress();
   server.use(http.get("/api/web/me", () => HttpResponse.json(meView(state))));
 }
 
@@ -76,6 +85,18 @@ export function feedPage(items: EntryView[]): FeedView {
     nextCursor: null,
     filters: { actors: [alpha], products: [trail], projects: [] },
   };
+}
+
+/** Answers the feed's Working now read with `entries`, the bots at work. */
+export function serveInProgress(entries: WebWorkingNowView["entries"] = []) {
+  server.use(
+    http.get("/api/web/working-now", () =>
+      HttpResponse.json({
+        total: entries.length,
+        entries,
+      } satisfies WebWorkingNowView),
+    ),
+  );
 }
 
 /** Answers /feed with `items`, recording each request's query. */

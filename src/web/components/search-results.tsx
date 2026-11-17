@@ -27,7 +27,7 @@ const panel =
   "flex min-h-0 flex-col overflow-y-auto overscroll-contain rounded-xl bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10";
 
 const row =
-  "flex h-8 items-center gap-2 rounded-md px-2 outline-none hover:bg-accent focus-visible:bg-accent focus-visible:ring-3 focus-visible:ring-ring/25 max-lg:h-10";
+  "flex h-8 items-center gap-2 rounded-md px-2 hover:bg-accent focus-visible:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring max-lg:h-11";
 
 /**
  * The search box's results, drawn in the shell's `searchResults` slot at both widths:

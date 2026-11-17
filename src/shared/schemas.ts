@@ -1777,6 +1777,20 @@ export const searchSchema = z.object({
   projects: z.array(webProjectRefSchema),
 });
 
+export const workingNowSchema = z.object({
+  total: z.int().meta({
+    description:
+      "Every in-progress item assigned to a bot in a visible product, however many `entries` has.",
+  }),
+  entries: z.array(
+    z.object({
+      item: webItemRefSchema.pick({ key: true, title: true }),
+      productKey: z.string(),
+      bot: webActorSchema.meta({ description: "The item's assignee." }),
+    }),
+  ),
+});
+
 export const personSchema = z.object({
   username: z.string().nullable().meta({
     description:
@@ -1970,6 +1984,7 @@ export type WebProjectPageView = z.infer<typeof webProjectPageSchema>;
 export type WebProjectDetailView = z.infer<typeof webProjectDetailSchema>;
 export type WebProjectItemsView = z.infer<typeof webProjectItemsSchema>;
 export type WebItemRowView = z.infer<typeof webItemRowSchema>;
+export type WebWorkingNowView = z.infer<typeof workingNowSchema>;
 export type WebItemListView = z.infer<typeof webItemListSchema>;
 export type WebStatusUpdateView = z.infer<typeof webStatusUpdateSchema>;
 export type WebStatusUpdatePageView = z.infer<typeof webStatusUpdatePageSchema>;

@@ -20,6 +20,7 @@ import {
   product,
   productMember,
 } from "../db/schema.js";
+import type { EventBus } from "../events/bus.js";
 import {
   ConflictError,
   NotFoundError,
@@ -200,7 +201,7 @@ function invitees(db: Db | Tx, ids?: number[]): PersonView[] {
 
 const one = (db: Db | Tx, id: number) => invitees(db, [id])[0] as PersonView;
 
-export function peopleRoutes(db: Db) {
+export function peopleRoutes(db: Db, bus: EventBus) {
   const people = createWebRouter();
   people.use("/people", ownerOnly);
   people.use("/people/*", ownerOnly);
@@ -255,21 +256,29 @@ export function peopleRoutes(db: Db) {
       const updated = db.transaction(
         (tx) => {
           const found = tx
-            .select({ id: invite.id })
+            .select({
+              id: invite.id,
+              githubId: invite.githubId,
+              email: invite.email,
+            })
             .from(invite)
             .where(inviteFor(invitee))
             .get();
           if (!found) throw noInvite(invitee);
           setMemberships(tx, found.id, productIdsOf(tx, products));
-          return one(tx, found.id);
+          return { holder: found, view: one(tx, found.id) };
         },
         { behavior: "immediate" },
       );
-      return c.json(updated, 200);
+      bus.publishAccess({
+        githubId: updated.holder.githubId,
+        email: updated.holder.email,
+      });
+      return c.json(updated.view, 200);
     })
     .openapi(removePerson, (c) => {
       const invitee = inviteeOfParam(c.req.valid("param").username);
-      db.transaction(
+      const removed = db.transaction(
         (tx) => {
           // product_member rows go with it (on delete cascade)
           const removed = tx
@@ -279,9 +288,12 @@ export function peopleRoutes(db: Db) {
             .get();
           if (!removed) throw noInvite(invitee);
           endSessionsOfInvite(tx, removed);
+          return removed;
         },
         { behavior: "immediate" },
       );
+      // the sessions are gone, so the re-read of /me signs the page out now, not at the stream's next check
+      bus.publishAccess({ githubId: removed.githubId, email: removed.email });
       return c.body(null, 204);
     });
 }

@@ -1,14 +1,18 @@
-import { BotIcon, UserIcon } from "lucide-react";
 import { useCallback, useState } from "react";
-import { Badge } from "@/components/ui/badge";
 import type { WebActorView } from "@/lib/api-types";
 import { cn } from "@/lib/utils";
 
 type ActorKind = WebActorView["kind"];
 
+const kindWords: Record<ActorKind, string> = { bot: "Bot", human: "Human" };
+const kindNouns: Record<ActorKind, string> = { bot: "bot", human: "person" };
+
+/** "bot" or "person", for screen-reader text that names an actor's kind in a phrase. */
+export const kindNoun = (kind: ActorKind) => kindNouns[kind];
+
 /**
- * Bot or Human, always as a word with its glyph: indigo for bots, outline for people.
- * The word carries the meaning, so the rule never rests on colour alone.
+ * The actor's kind as screen-reader text, for a name shown without its avatar. Where
+ * the avatar sits beside the name, its shape and accessible name already say it.
  */
 export function ActorBadge({
   kind,
@@ -17,37 +21,22 @@ export function ActorBadge({
   kind: ActorKind;
   className?: string;
 }) {
-  const bot = kind === "bot";
-  const Icon = bot ? BotIcon : UserIcon;
   return (
-    <Badge
-      variant={bot ? "secondary" : "outline"}
-      data-actor-kind={kind}
-      className={cn(
-        "h-4.5 gap-0.75 rounded-sm px-1.5 text-2xs",
-        bot ? "bg-bot-muted text-bot" : "text-muted-foreground",
-        className,
-      )}
-    >
-      <Icon data-icon="inline-start" aria-hidden="true" />
-      {bot ? "Bot" : "Human"}
-    </Badge>
+    <span data-actor-kind={kind} className={cn("sr-only", className)}>
+      {kindWords[kind]}
+    </span>
   );
 }
 
 /**
- * A bot's title as a pill; `ActorName` places it between the name and the Bot badge.
- * Nothing for a person or a bot without one. Capped in width, it ellipsizes and keeps the
- * whole title in its tooltip.
- * `surface="card"` sits it on the background inside a muted comment header.
+ * A bot's title as plain grey text after its name, ellipsized past its width with the
+ * whole title in its tooltip. Nothing for a person or a bot without one.
  */
 export function BotTitle({
   actor,
-  surface = "muted",
   className,
 }: {
   actor: Pick<WebActorView, "kind" | "title">;
-  surface?: "muted" | "card";
   className?: string;
 }) {
   if (actor.kind !== "bot" || !actor.title) return null;
@@ -55,41 +44,36 @@ export function BotTitle({
     <span
       title={actor.title}
       className={cn(
-        "inline-flex h-4.5 max-w-36 min-w-0 shrink-4 items-center rounded-4xl border border-border px-2 text-2xs leading-none font-normal text-secondary-foreground lg:max-w-48",
-        surface === "card" ? "bg-background" : "bg-muted",
+        "max-w-36 min-w-0 shrink-4 truncate text-xs font-normal text-muted-foreground lg:max-w-48",
         className,
       )}
     >
-      <span className="truncate">{actor.title}</span>
+      {actor.title}
     </span>
   );
 }
 
 /**
- * Holds an actor's name, `BotTitle` and badge. One line while they fit; past that the
- * pill and badge wrap under the name, and a name too long for a line of its own
- * truncates (give it `min-w-0 truncate`), so the page never overflows and the pill is
- * never squeezed past its label.
+ * Holds an actor's name and `BotTitle`. One line while they fit; past that the title
+ * wraps under the name, and a name too long for a line of its own truncates (give it
+ * `min-w-0 truncate`), so the page never overflows.
  */
 export const actorNameGroup =
   "inline-flex max-w-full min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5";
 
 /**
- * An actor's name, `BotTitle` and badge in that order, in an `actorNameGroup` with the
- * name truncating. The spaces keep the parts apart in copied text and textContent; a
- * flex row draws none of them.
+ * An actor's name, then `BotTitle`, in an `actorNameGroup` with the name truncating.
+ * The space keeps the parts apart in copied text and textContent; a flex row draws none.
  */
 export function ActorName({
   actor,
   className,
   nameClassName,
-  titleSurface,
   titleClassName,
 }: {
   actor: Pick<WebActorView, "name" | "kind" | "title">;
   className?: string;
   nameClassName?: string;
-  titleSurface?: "muted" | "card";
   titleClassName?: string;
 }) {
   return (
@@ -97,12 +81,7 @@ export function ActorName({
       <span className={cn("min-w-0 truncate", nameClassName)}>
         {actor.name}
       </span>{" "}
-      <BotTitle
-        actor={actor}
-        surface={titleSurface}
-        className={titleClassName}
-      />{" "}
-      <ActorBadge kind={actor.kind} />
+      <BotTitle actor={actor} className={titleClassName} />
     </span>
   );
 }
@@ -132,10 +111,10 @@ function initials(actor: Pick<WebActorView, "name" | "kind">): string {
 /**
  * The actor's initials on a tinted ground, with their photo stacked on top when there
  * is one: a rounded square for a bot, a circle for a person. A bot's photo, once shown,
- * gets a thin indigo frame, so it still reads as a bot at 18px. The initials show while
+ * gets a thin teal frame, so it still reads as a bot at 18px. The initials show while
  * the photo loads and stay if it fails; once it loads they go, so a transparent photo
  * never shows them through.
- * Decorative: the name always sits beside it.
+ * The one mark of an actor's kind, so it is an image named for it: "Alpha, bot".
  * `loading="eager"` for an avatar at the top of its screen (the account panel); lists
  * keep the lazy default.
  */
@@ -170,7 +149,8 @@ export function ActorAvatar({
   );
   return (
     <span
-      aria-hidden="true"
+      role="img"
+      aria-label={`${actor.name}, ${kindNoun(actor.kind)}`}
       data-actor-kind={actor.kind}
       className={cn(
         "grid shrink-0 place-items-center overflow-hidden font-semibold select-none",

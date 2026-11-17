@@ -1,8 +1,10 @@
+import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { AppPage, useChrome } from "@/app/chrome";
 import { FeedView, LiveIndicator } from "@/components/feed";
 import type { FeedFilter } from "@/lib/api";
 import { type FeedSearch, validateFeedSearch } from "@/lib/item-search";
+import { workingNowQuery } from "@/lib/queries";
 import { useLiveFeed } from "@/lib/use-live-feed";
 
 export const Route = createFileRoute("/_app/")({
@@ -36,6 +38,9 @@ function FeedPage() {
       }));
     },
   });
+  // no strip until the first read answers, nor if it fails; a later failed re-read keeps the
+  // last good one, except after an access event, which drops it (`useLiveFeed`)
+  const workingNow = useQuery(workingNowQuery).data;
   const noProducts = !session.viewer.isOwner && session.products.length === 0;
   return (
     <AppPage
@@ -80,6 +85,7 @@ function FeedPage() {
         }
         onRetry={feed.retry}
         noProducts={noProducts}
+        workingNow={workingNow}
       />
     </AppPage>
   );

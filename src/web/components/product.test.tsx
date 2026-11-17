@@ -3,8 +3,13 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, test, vi } from "vitest";
 import type { ItemFilters } from "@/components/item-list";
-import { ProductView, type ProductViewProps } from "@/components/product";
 import {
+  ProductHeading,
+  ProductView,
+  type ProductViewProps,
+} from "@/components/product";
+import {
+  beta,
   issueRow,
   itemList,
   productDetail,
@@ -86,13 +91,16 @@ const tableRow = (key: string) => {
 };
 const tabs = () => screen.getByRole("tablist", { name: "Filter by status" });
 const typeToggle = () => screen.getByRole("group", { name: "Filter by type" });
+const titledUpdate = statusUpdate({
+  author: { ...beta, title: "Release manager for the web client" },
+});
 const aside = (name: string) => screen.getByRole("region", { name });
 const panes = () => screen.getByRole("tablist", { name: "Show" });
 const paneTab = (name: string) => within(panes()).getByRole("tab", { name });
 const pane = (name: string) => screen.getByRole("tabpanel", { name });
 
 describe("items", () => {
-  test("the columns read status, Key, Type, Title, Priority, Labels, Assignee, Updated", () => {
+  test("the columns read status, type, Key, Title, Priority, Labels, Assignee, Updated, the status and type headers for screen readers alone", () => {
     renderProduct();
     expect(
       within(table())
@@ -100,25 +108,31 @@ describe("items", () => {
         .map((th) => th.textContent),
     ).toEqual([
       "Status",
-      "Key",
       "Type",
+      "Key",
       "Title",
       "Priority",
       "Labels",
       "Assignee",
       "Updated",
     ]);
+    for (const name of ["Status", "Type"]) {
+      expect(within(table()).getByText(name)).toHaveClass("sr-only");
+    }
   });
 
-  test("every row, in the table and below 1024px, carries a type badge that follows its type", () => {
+  test("every row, in the table and below 1024px, carries a type glyph that follows its type", () => {
     renderProduct();
     const rendered = document.querySelectorAll<HTMLElement>("[data-item-key]");
     expect(rendered).toHaveLength(rows.length * 2);
     for (const row of rendered) {
       const item = rows.find((r) => r.key === row.dataset.itemKey);
-      const badge = row.querySelector<HTMLElement>("[data-item-type]");
-      expect(badge?.dataset.itemType).toBe(item?.type);
-      expect(badge).toHaveTextContent(item?.type === "todo" ? "Todo" : "Issue");
+      const glyph = row.querySelector<HTMLElement>("[data-item-type]");
+      expect(glyph?.dataset.itemType).toBe(item?.type);
+      // named in the table; below 1024px the row's description says the type
+      const word = item?.type === "todo" ? "Todo" : "Issue";
+      if (row.tagName === "TR") expect(glyph).toHaveAccessibleName(word);
+      else expect(row).toHaveTextContent(word);
     }
   });
 
@@ -134,7 +148,11 @@ describe("items", () => {
     });
     expect(tableRow("TRL-19")).toHaveTextContent("Unassigned");
     expect(tableRow("TRL-22")).not.toHaveTextContent("Unassigned");
-    expect(screen.getAllByText("Unassigned")).toHaveLength(1);
+    const phoneRow = (key: string) =>
+      document.querySelector<HTMLElement>(`li[data-item-key="${key}"]`);
+    expect(phoneRow("TRL-19")).toHaveTextContent("Unassigned");
+    expect(phoneRow("TRL-22")).not.toHaveTextContent("Unassigned");
+    expect(screen.getAllByText("Unassigned")).toHaveLength(2);
   });
 
   test("each row opens its item", () => {
@@ -146,7 +164,7 @@ describe("items", () => {
     }
   });
 
-  test("below 1024px the whole row is the link, described by its type, status, priority, labels and assignee", () => {
+  test("below 1024px the whole row is the link, described by its type, status, assignee, priority and labels", () => {
     renderProduct();
     const item = document.querySelector('li[data-item-key="TRL-17"]');
     if (!(item instanceof HTMLElement)) throw new Error("no 375 row");
@@ -154,7 +172,7 @@ describe("items", () => {
       name: "TRL-17 Human UI: feed, projects, issue page",
     });
     expect(link).toHaveAccessibleDescription(
-      /^Issue Open .*ui design Assigned to Beta, Bot$/,
+      /^Issue Open Assigned to Beta, bot .*ui design$/,
     );
   });
 
@@ -340,6 +358,14 @@ describe("type toggle and status tabs", () => {
     expect(screen.getByRole("tabpanel", { name: /^All/ })).toHaveFocus();
   });
 
+  test("the status tab panel is focused from script only, never a Tab stop", () => {
+    renderProduct();
+    expect(screen.getByRole("tabpanel", { name: /^All/ })).toHaveAttribute(
+      "tabindex",
+      "-1",
+    );
+  });
+
   test("a product with no items at all offers New issue", async () => {
     const user = userEvent.setup();
     const p = renderProduct({ items: { status: "ready", data: itemList([]) } });
@@ -365,6 +391,15 @@ describe("type toggle and status tabs", () => {
 });
 
 describe("aside", () => {
+  test("below lg the repo link under the heading is a 44px tap target", () => {
+    renderProduct();
+    const links = screen.getAllByRole("link", {
+      name: /github\.com\/example\/trail/,
+    });
+    const phone = links.find((link) => link.classList.contains("lg:hidden"));
+    expect(phone).toHaveClass("max-lg:min-h-11");
+  });
+
   test("Repository shows the repo and opens GitHub; with no repo there is no section", () => {
     const { unmount } = render(<ProductView {...props()} />);
     const repo = within(aside("Repository")).getByRole("link");
@@ -432,6 +467,21 @@ describe("aside", () => {
       statusUpdates: { status: "ready", data: { items: [], nextCursor: null } },
     });
     expect(aside("Status updates")).toHaveTextContent("No status update yet");
+  });
+
+  test("a status update's bot name truncates only once its title has given way", () => {
+    renderProduct({
+      statusUpdates: {
+        status: "ready",
+        data: { items: [titledUpdate], nextCursor: null },
+      },
+    });
+    const section = aside("Status updates");
+    const name = within(section).getByText("Beta");
+    expect(name).toHaveClass("shrink-0", "max-w-full", "truncate");
+    expect(
+      within(section).getByText("Release manager for the web client"),
+    ).toHaveClass("min-w-0", "truncate", "shrink-4");
   });
 
   test("Try again on status updates leaves focus on their heading", async () => {
@@ -525,4 +575,13 @@ describe("aside", () => {
     expect(screen.queryByRole("region", { name: "Repository" })).toBeNull();
     expect(screen.queryByRole("region", { name: /^Projects/ })).toBeNull();
   });
+});
+
+test("the Products link in the heading draws the shared focus outline", () => {
+  render(<ProductHeading product={{ key: "TRL", name: "trail" }} />);
+  expect(screen.getByRole("link", { name: "Products" })).toHaveClass(
+    "focus-visible:outline-2",
+    "focus-visible:outline-offset-2",
+    "focus-visible:outline-ring",
+  );
 });

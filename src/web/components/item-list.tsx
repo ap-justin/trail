@@ -1,16 +1,18 @@
 import { SearchIcon } from "lucide-react";
 import { Fragment, type ReactNode, useId } from "react";
-import { ActorAvatar, ActorBadge } from "@/components/actor";
+import { ActorAvatar, kindNoun } from "@/components/actor";
 import { AppLink, RowLink } from "@/components/app-link";
+import { FiltersSheet, TypeSelect } from "@/components/filter-select";
 import { EmptyState } from "@/components/states";
 import {
   type IssueStatus,
   type ItemType,
   PriorityLabel,
+  priorityLabel,
   StatusIcon,
-  StatusLabel,
   statusLabel,
-  TypeBadge,
+  TypeIcon,
+  typeLabel,
 } from "@/components/status";
 import { Age } from "@/components/status-updates";
 import { KeyText, LabelChip } from "@/components/text";
@@ -78,9 +80,9 @@ const typeOptions = [
 ] as const;
 
 /**
- * All, Issues or Todos, each with its count. 28px beside the status tabs at 1024px and up;
- * 40px and as wide as it's let below. `countsBelowLg={false}` drops the counts there,
- * where the toggle shares its row with the product select.
+ * All, Issues or Todos, each with its count, on a segmented track: 32px beside the status
+ * tabs at 1024px and up; 44px below, like the product select it can share a row with, and
+ * as wide as it's let. `countsBelowLg={false}` drops the counts there, on that shared row.
  */
 export function TypeToggle({
   value,
@@ -107,17 +109,14 @@ export function TypeToggle({
         const type = picked === "issue" || picked === "todo" ? picked : null;
         if (type !== value) onChange(type);
       }}
-      spacing={0}
-      className={cn(
-        "h-7 overflow-hidden rounded-md border max-lg:h-10 max-lg:w-full",
-        className,
-      )}
+      variant="segmented"
+      className={cn("max-lg:w-full", className)}
     >
       {typeOptions.map((option) => (
         <ToggleGroupItem
           key={option.value}
           value={option.value}
-          className="h-full gap-1.25 rounded-none border-l px-2.5 text-xs font-normal text-muted-foreground first:border-l-0 aria-pressed:bg-muted aria-pressed:font-medium aria-pressed:text-foreground max-lg:flex-1 max-lg:text-sm"
+          className="gap-1.25 text-xs max-lg:flex-1 max-lg:text-sm"
         >
           {option.label}
           {counts && (
@@ -150,23 +149,40 @@ function statusOptions(statuses: StatusFilter[], counts: StatusCounts | null) {
   ];
 }
 
-/** The 1024px status tabs; render inside the `Tabs` whose value is the status filter. */
-function StatusTabs({ counts }: { counts: StatusCounts | null }) {
+/**
+ * The status tabs; render inside the `Tabs` whose value is the status filter. At 1024px
+ * and up beside the type toggle. Below, only with `belowLg`: a full-bleed row on its own
+ * rule that scrolls sideways, its right edge masked so a tab cut there reads as more.
+ */
+function StatusTabs({
+  counts,
+  belowLg,
+}: {
+  counts: StatusCounts | null;
+  belowLg: boolean;
+}) {
   return (
     <TabsList
       variant="line"
       aria-label="Filter by status"
-      className="h-8 justify-start gap-3 rounded-none p-0 max-lg:hidden"
+      className={cn(
+        // at lg the bar under the tabs and the type toggle draws the one rule
+        "rounded-none p-0 lg:h-8 lg:gap-3 lg:data-[variant=line]:border-b-0",
+        belowLg
+          ? // the stock line variant's p-0 is an attribute selector, so the inset needs one too
+            "max-lg:scrollbar-none max-lg:overflow-x-auto max-lg:mask-r-from-88% max-lg:data-[variant=line]:px-4"
+          : "max-lg:hidden",
+      )}
     >
       {statusOptions(filterStatuses, counts).map((option) => (
         <TabsTrigger
           key={option.value}
           value={option.value}
-          className="h-8 flex-none px-1 font-normal text-muted-foreground data-active:text-foreground"
+          className="flex-none px-1 font-normal text-muted-foreground data-active:text-foreground max-lg:px-0 max-lg:data-active:font-medium lg:h-8"
         >
           {option.label}{" "}
           {option.count !== undefined && (
-            <span className="text-2xs text-muted-foreground">
+            <span className="text-muted-foreground lg:text-2xs">
               {option.count}
             </span>
           )}
@@ -174,6 +190,12 @@ function StatusTabs({ counts }: { counts: StatusCounts | null }) {
       ))}
     </TabsList>
   );
+}
+
+/** The Filters sheet's primary button; without a count while the list loads. */
+function showItemsLabel(count: number | undefined) {
+  if (count === undefined) return "Show items";
+  return `Show ${count} ${itemNoun(count)}`;
 }
 
 function StatusChips({
@@ -204,7 +226,7 @@ function StatusChips({
           key={option.value}
           value={option.value}
           variant="outline"
-          className="h-10 rounded-4xl border-border px-3.5 font-normal text-muted-foreground aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background"
+          className="h-11 rounded-4xl px-3.5 font-normal text-muted-foreground aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background"
         >
           {option.label}
         </ToggleGroupItem>
@@ -214,25 +236,36 @@ function StatusChips({
 }
 
 /**
- * Status tabs with the type toggle at their right at 1024px and up; below, the toggle
- * (after `select`, when given) on a row of its own over the status chips. The tab counts
- * follow the toggle. Render inside a `Tabs` whose value is `filters.status ?? "all"`.
+ * Status tabs with the type toggle at their right (after `select`, when given) at 1024px
+ * and up. Below, by default the toggle on a row of its own over the status chips; with
+ * `sheet`, the status tabs scroll in a row of their own over one Filters button, whose
+ * sheet holds `sheet.select` and the type. The tab counts follow the type. Render inside
+ * a `Tabs` whose value is `filters.status ?? "all"`.
  */
 export function ItemFilterBar({
   filters,
   counts,
   onFiltersChange,
   select,
+  sheet,
 }: {
   filters: ItemFilters;
   counts: WebItemCountsView | null;
   onFiltersChange: (filters: ItemFilters) => void;
   select?: ReactNode;
+  /** `select` as the sheet stacks it (with a `fieldLabel`), and whether it is in force. */
+  sheet?: { select: ReactNode; active: boolean };
 }) {
+  const typeCounts = counts?.[filters.type ?? "all"];
   return (
     <div className="flex flex-col lg:flex-row lg:items-end lg:border-b">
-      <StatusTabs counts={counts?.[filters.type ?? "all"] ?? null} />
-      <div className="flex items-center gap-2 max-lg:px-4 max-lg:pt-3 lg:mb-0.5 lg:ml-auto">
+      <StatusTabs counts={typeCounts ?? null} belowLg={sheet !== undefined} />
+      <div
+        className={cn(
+          "flex items-center gap-2 max-lg:px-4 max-lg:pt-3 lg:mb-0.5 lg:ml-auto",
+          sheet && "max-lg:hidden",
+        )}
+      >
         {select}
         <TypeToggle
           value={filters.type}
@@ -242,10 +275,27 @@ export function ItemFilterBar({
           className="max-lg:flex-1"
         />
       </div>
-      <StatusChips
-        value={filters.status}
-        onChange={(status) => onFiltersChange({ ...filters, status })}
-      />
+      {sheet ? (
+        <FiltersSheet
+          activeCount={
+            [sheet.active, filters.type !== null].filter(Boolean).length
+          }
+          doneLabel={showItemsLabel(typeCounts?.[filters.status ?? ALL])}
+          className="mx-4 mt-3 self-start lg:hidden"
+        >
+          {sheet.select}
+          <TypeSelect
+            fieldLabel="Type"
+            value={filters.type}
+            onChange={(type) => onFiltersChange({ ...filters, type })}
+          />
+        </FiltersSheet>
+      ) : (
+        <StatusChips
+          value={filters.status}
+          onChange={(status) => onFiltersChange({ ...filters, status })}
+        />
+      )}
     </div>
   );
 }
@@ -278,12 +328,7 @@ export function FilterEmpty({
       }
       description="Try another filter."
       action={
-        <Button
-          variant="outline"
-          size="sm"
-          className="max-lg:h-10 max-lg:px-3.5"
-          onClick={onShowAll}
-        >
+        <Button variant="outline" size="sm" onClick={onShowAll}>
           Show all
         </Button>
       }
@@ -302,7 +347,19 @@ function Assignee({ item }: { item: WebItemRowView }) {
     <span className="flex min-w-0 items-center gap-2">
       <ActorAvatar actor={item.assignee} size="xs" />
       <span className="truncate">{item.assignee.name}</span>
-      <ActorBadge kind={item.assignee.kind} />
+    </span>
+  );
+}
+
+/** The phone row's assignee: the name, with its kind for screen readers. */
+function RowAssignee({ item }: { item: WebItemRowView }) {
+  if (!item.assignee) {
+    return item.type === "issue" ? <span>Unassigned</span> : null;
+  }
+  return (
+    <span className="min-w-0 truncate">
+      <span className="sr-only">Assigned to</span> {item.assignee.name}
+      <span className="sr-only">, {kindNoun(item.assignee.kind)}</span>
     </span>
   );
 }
@@ -346,7 +403,7 @@ export function GroupHeading({
     <span className="flex min-w-0 items-center gap-2">
       <KeyText className="text-foreground">{product.key}</KeyText>{" "}
       <span className="truncate font-medium">{product.name}</span>{" "}
-      <span className="shrink-0 font-normal whitespace-nowrap text-muted-foreground">
+      <span className="shrink-0 text-xs font-normal whitespace-nowrap text-muted-foreground">
         {count} {itemNoun(count)}
       </span>
     </span>
@@ -360,10 +417,10 @@ export type ItemGroup = {
   items: WebItemRowView[];
 };
 
-const head = "h-7.5 px-0 text-2xs text-muted-foreground";
+const head = "h-7.5 px-0";
 
 /**
- * The 1024px table: status, key, type, title, priority, (labels,) assignee, updated. A
+ * The 1024px table: status, type, key, title, priority, (labels,) assignee, updated. A
  * group with a product gets a heading row; groups after the first sit 12px apart.
  */
 export function ItemTable({
@@ -383,8 +440,10 @@ export function ItemTable({
           <TableHead className={cn(head, "w-8.5 pl-2")}>
             <span className="sr-only">Status</span>
           </TableHead>
-          <TableHead className={cn(head, "w-16.5")}>Key</TableHead>
-          <TableHead className={cn(head, "w-17.5")}>Type</TableHead>
+          <TableHead className={cn(head, "w-5.5")}>
+            <span className="sr-only">Type</span>
+          </TableHead>
+          <TableHead className={cn(head, "w-18")}>Key</TableHead>
           <TableHead className={head}>Title</TableHead>
           <TableHead className={cn(head, "w-21.5")}>Priority</TableHead>
           {labels && (
@@ -403,7 +462,7 @@ export function ItemTable({
         >
           {group.product && (
             <TableRow className="hover:bg-transparent">
-              {/* the band is the inner div, so the cell's top padding parts it from the group above: a tbody takes no margin */}
+              {/* the heading is the inner div, so the cell's top padding parts it from the group above: a tbody takes no margin */}
               <TableHead
                 colSpan={columns}
                 scope="colgroup"
@@ -412,7 +471,7 @@ export function ItemTable({
                   index > 0 && "pt-3",
                 )}
               >
-                <div className="flex h-8.5 items-center bg-muted px-2">
+                <div className="flex h-8.5 items-center px-2">
                   <GroupHeading product={group.product} count={group.count} />
                 </div>
               </TableHead>
@@ -428,10 +487,10 @@ export function ItemTable({
                 <StatusIcon status={item.status} label />
               </TableCell>
               <TableCell className="px-0 py-2">
-                <KeyText>{item.key}</KeyText>
+                <TypeIcon type={item.type} />
               </TableCell>
               <TableCell className="px-0 py-2">
-                <TypeBadge type={item.type} />
+                <KeyText>{item.key}</KeyText>
               </TableCell>
               <TableCell className="truncate px-0 py-2 pr-2.5">
                 <RowLink
@@ -467,10 +526,10 @@ export function ItemTable({
 }
 
 /**
- * Below 1024px, three lines a row: key, type badge and age; the title; status, priority
- * glyph, labels and the assignee's avatar. The whole row is the link, named by key and
- * title and described by its type and the last line. A group with a product gets a 36px
- * heading.
+ * Below 1024px, two lines a row beside the status glyph: the title; then the type glyph,
+ * key, assignee, priority, labels and age in grey. The whole row is the link, named by
+ * key and title and described by its type, status, assignee, priority and labels. A
+ * group with a product gets a heading.
  */
 export function ItemRows({ groups, now }: { groups: ItemGroup[]; now: Date }) {
   const id = useId();
@@ -487,7 +546,7 @@ export function ItemRows({ groups, now }: { groups: ItemGroup[]; now: Date }) {
           {group.product && (
             <h3
               id={`${id}-${group.product.key}`}
-              className="flex h-9 items-center border-b bg-muted px-4 font-normal"
+              className="flex items-center px-4 pt-5 pb-0.5 font-normal"
             >
               <GroupHeading product={group.product} count={group.count} />
             </h3>
@@ -500,47 +559,43 @@ export function ItemRows({ groups, now }: { groups: ItemGroup[]; now: Date }) {
                 <li
                   key={item.key}
                   data-item-key={item.key}
-                  className="border-b"
+                  className="mx-4 border-b border-rule"
                 >
                   <AppLink
                     href={paths.issue(item.key)}
                     aria-label={`${item.key} ${item.title}`}
                     aria-describedby={`${typeId} ${metaId}`}
-                    className="flex flex-col px-4 py-3 outline-none focus-visible:ring-3 focus-visible:ring-ring/25 focus-visible:ring-inset"
+                    className="flex gap-2.5 py-3 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
                   >
-                    <span className="flex items-center gap-2">
-                      <KeyText>{item.key}</KeyText>
-                      <span id={typeId}>
-                        <TypeBadge type={item.type} />
+                    <StatusIcon status={item.status} className="mt-0.75" />
+                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <span
+                        className={cn(
+                          item.status === "canceled" && "text-muted-foreground",
+                        )}
+                      >
+                        {item.title}
                       </span>
-                      <span className="ml-auto text-muted-foreground">
+                      <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+                        <TypeIcon type={item.type} decorative />
+                        <span id={typeId} className="sr-only">
+                          {typeLabel(item.type)}
+                        </span>
+                        <KeyText>{item.key}</KeyText>{" "}
+                        <span id={metaId} className="contents">
+                          <span className="sr-only">
+                            {statusLabel(item.status)}
+                          </span>{" "}
+                          <RowAssignee item={item} />{" "}
+                          {item.priority !== 0 && (
+                            <span>{priorityLabel(item.priority)} </span>
+                          )}
+                          {item.labels.length > 0 && (
+                            <Labels labels={item.labels} />
+                          )}
+                        </span>{" "}
                         <Age iso={item.updatedAt} now={now} />
                       </span>
-                    </span>
-                    <span
-                      className={cn(
-                        "mt-0.5 mb-1.5",
-                        item.status === "canceled" && "text-muted-foreground",
-                      )}
-                    >
-                      {item.title}
-                    </span>
-                    <span
-                      id={metaId}
-                      className="flex items-center gap-2 text-xs"
-                    >
-                      <StatusLabel status={item.status} />{" "}
-                      <PriorityLabel priority={item.priority} iconOnly />{" "}
-                      <Labels labels={item.labels} />{" "}
-                      {item.assignee && (
-                        <span className="ml-auto">
-                          <ActorAvatar actor={item.assignee} size="xs" />
-                          <span className="sr-only">
-                            Assigned to {item.assignee.name},{" "}
-                            {item.assignee.kind === "bot" ? "Bot" : "Human"}
-                          </span>
-                        </span>
-                      )}
                     </span>
                   </AppLink>
                 </li>

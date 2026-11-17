@@ -1,10 +1,11 @@
 import { FolderIcon } from "lucide-react";
-import { ActorAvatar, ActorBadge } from "@/components/actor";
+import { ActorAvatar } from "@/components/actor";
 import { RowLink } from "@/components/app-link";
 import { EmptyState, ListSkeleton, ProjectsError } from "@/components/states";
 import {
   Age,
   LatestUpdate,
+  NO_HEALTH,
   TargetDate,
   UpdateHealth,
 } from "@/components/status-updates";
@@ -56,7 +57,7 @@ function ProjectName({ project }: { project: WebProjectView }) {
 }
 
 // 16px between columns, 12px at the row's ends
-const head = "h-10 px-2 text-2xs text-muted-foreground first:pl-3 last:pr-3";
+const head = "h-10 px-2 first:pl-3 last:pr-3";
 const cell = "px-2 first:pl-3 last:pr-3";
 
 function ProjectsTable({
@@ -92,7 +93,7 @@ function ProjectsTable({
               <p className="truncate text-muted-foreground">{project.goal}</p>
             </TableCell>
             <TableCell className={cell}>
-              <UpdateHealth of={project} />
+              <UpdateHealth of={project} empty={NO_HEALTH} />
             </TableCell>
             <TableCell className={cn(cell, "whitespace-normal")}>
               <ProductKeys project={project} />
@@ -100,8 +101,7 @@ function ProjectsTable({
             <TableCell className={cell}>
               <span className="flex min-w-0 items-center gap-2">
                 <ActorAvatar actor={project.lead} size="xs" />
-                <span className="truncate">{project.lead.name}</span>{" "}
-                <ActorBadge kind={project.lead.kind} />
+                <span className="truncate">{project.lead.name}</span>
               </span>
             </TableCell>
             {/* a date in another year carries it and is wider than the 72px column: its year wraps under */}
@@ -117,10 +117,9 @@ function ProjectsTable({
                 update={project.latestStatusUpdate}
                 now={now}
                 layout="table"
-                badge={false}
               />
             </TableCell>
-            <TableCell className={cn(cell, "text-right tabular-nums")}>
+            <TableCell className={cn(cell, "text-right")}>
               {project.openCount}
             </TableCell>
             <TableCell className={cn(cell, "text-right text-muted-foreground")}>
@@ -141,12 +140,12 @@ function ProjectCards({
   now: Date;
 }) {
   return (
-    <ul className="border-t lg:hidden">
+    <ul className="lg:hidden">
       {projects.map((project) => (
         <li
           key={project.slug}
           data-project-slug={project.slug}
-          className="relative flex flex-col gap-2 border-b px-4 py-3.5"
+          className="relative flex flex-col gap-2 border-b border-rule px-4 py-3.5"
         >
           <div className="flex flex-col gap-0.5">
             <div className="flex items-center justify-between gap-2">

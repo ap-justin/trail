@@ -82,11 +82,31 @@ describe("new issue dialog", () => {
     );
   });
 
-  test('says "Filing as {name}" with the Human badge', () => {
+  test('says "Filing as {name}" with their avatar and no kind pill', () => {
     renderDialog();
     const line = within(dialog()).getByText(/^Filing as/);
-    expect(line).toHaveTextContent("Filing as Maya Chen");
-    expect(within(line).getByText("Human")).toBeInTheDocument();
+    expect(line).toHaveTextContent(/^Filing as\s*MC\s*Maya Chen$/);
+    expect(within(line).queryByText("Human")).toBeNull();
+  });
+
+  test("Product, Title and Description are labelled above their fields, with no placeholder", () => {
+    renderDialog();
+    for (const name of ["Product", "Title", /^Description/]) {
+      const field = within(dialog()).getByLabelText(name);
+      expect(field).not.toHaveAttribute("placeholder");
+      expect(
+        dialog().querySelector(`label[for="${field.id}"]`),
+      ).not.toHaveClass("sr-only");
+    }
+  });
+
+  test("the description says it is optional and who reads it", () => {
+    renderDialog();
+    expect(
+      within(dialog()).getByLabelText(/^Description/),
+    ).toHaveAccessibleDescription(
+      "Optional. Bots read this before they pick the issue up.",
+    );
   });
 
   test("Cancel closes without sending", async () => {

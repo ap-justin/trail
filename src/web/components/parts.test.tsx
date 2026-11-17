@@ -7,19 +7,34 @@ import { photoUrlFor } from "@/test/fixtures";
 
 describe("ActorBadge", () => {
   test.each([
-    ["bot", "Bot", "lucide-bot"],
-    ["human", "Human", "lucide-user"],
-  ] as const)(
-    "%s: a text label and its glyph, never colour alone",
-    (kind, word, glyph) => {
-      const { container } = render(<ActorBadge kind={kind} />);
-      const badge = container.firstElementChild;
-      expect(badge).toHaveTextContent(word);
-      expect(badge?.querySelector(`svg.${glyph}`)).not.toBeNull();
-    },
-  );
+    ["bot", "Bot"],
+    ["human", "Human"],
+  ] as const)("%s: the kind as screen-reader text, no pill", (kind, word) => {
+    const { container } = render(<ActorBadge kind={kind} />);
+    const badge = container.firstElementChild;
+    expect(badge).toHaveTextContent(word);
+    expect(badge).toHaveClass("sr-only");
+    expect(badge?.querySelector("svg")).toBeNull();
+  });
+});
 
-  test("bot avatars are rounded squares, human avatars circles", () => {
+describe("avatar shape and name", () => {
+  test("each avatar is an image named for the actor and their kind", () => {
+    render(
+      <>
+        <ActorAvatar actor={{ name: "Alpha", kind: "bot", photoUrl: null }} />
+        <ActorAvatar
+          actor={{ name: "Olive Owner", kind: "human", photoUrl: null }}
+        />
+      </>,
+    );
+    expect(screen.getByRole("img", { name: "Alpha, bot" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("img", { name: "Olive Owner, person" }),
+    ).toBeInTheDocument();
+  });
+
+  test("bot avatars are teal rounded squares, human avatars grey circles", () => {
     const { container } = render(
       <>
         <ActorAvatar actor={{ name: "Alpha", kind: "bot", photoUrl: null }} />
@@ -30,9 +45,9 @@ describe("ActorBadge", () => {
     );
     const [bot, human] = container.children;
     expect(bot).toHaveTextContent("A");
-    expect(bot).toHaveClass("rounded-md");
+    expect(bot).toHaveClass("rounded-md", "bg-bot-muted", "text-bot");
     expect(human).toHaveTextContent("MC");
-    expect(human).toHaveClass("rounded-full");
+    expect(human).toHaveClass("rounded-full", "bg-muted");
   });
 });
 
@@ -78,7 +93,7 @@ describe("ActorAvatar", () => {
   );
 
   test.each(sizes)(
-    "%s: a bot's photo wears the indigo border and rounded-md classes; a person's has the round class and no border",
+    "%s: a bot's photo wears the teal border and rounded-md classes; a person's has the round class and no border",
     (size, sizeClass) => {
       const { container } = render(
         <>
@@ -187,12 +202,12 @@ describe("ActorAvatar", () => {
     expect(avatar).not.toHaveClass("border");
   });
 
-  test("the photo is decorative and loads lazily", () => {
+  test("the photo is decorative inside the named avatar, and loads lazily", () => {
     const { container } = render(
       <ActorAvatar actor={{ name: "Alpha", kind: "bot", photoUrl: photo }} />,
     );
     const img = container.querySelector("img");
-    expect(container.firstElementChild).toHaveAttribute("aria-hidden", "true");
+    expect(container.firstElementChild).toHaveAccessibleName("Alpha, bot");
     expect(img).toHaveAttribute("alt", "");
     expect(img).toHaveAttribute("loading", "lazy");
     // async decoding can fire load before the pixels are ready, leaving a blank frame

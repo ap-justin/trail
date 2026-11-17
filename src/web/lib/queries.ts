@@ -36,6 +36,7 @@ export const keys = {
     ["project", slug, "status-updates"] as const,
   issue: (key: string) => ["issue", key] as const,
   feed: (filter: FeedFilter) => ["feed", filter] as const,
+  workingNow: ["working-now"] as const,
   search: (q: string) => ["search", q] as const,
   people: ["people"] as const,
   conversations: ["conversations"] as const,
@@ -130,6 +131,15 @@ export const projectItemsQuery = (slug: string, filters: ProjectItemQuery) =>
     // no placeholder: a group's count follows every filter, so any other list's would miscount
   });
 
+/** Bots at work across the viewer's products, for the feed's Working now strip. */
+export const workingNowQuery = queryOptions({
+  queryKey: keys.workingNow,
+  queryFn: api.workingNow,
+  // the feed's stream re-reads it as bot work moves; a mount still reads, since no stream
+  // ran while the viewer was off the feed
+  refetchOnWindowFocus: false,
+});
+
 const nextCursor = (page: { nextCursor: string | null }) => page.nextCursor;
 
 /**
@@ -186,8 +196,9 @@ export function createQueryClient(config: QueryClientConfig = {}) {
       void client.invalidateQueries({ queryKey: keys.me });
     }
   };
-  // the feed never refetches on focus, so when `/me` grants or takes away a project, this
-  // re-reads the feed: its rows and its filter options both come from `/feed`
+  // the feed and Working now never refetch on focus, so when `/me` grants or takes away a
+  // project, this re-reads both: the feed's rows and filter options come from `/feed`, and
+  // no `work` event follows a membership change
   let projectsSeen: string | undefined;
   const followProjects = () => {
     const me = client.getQueryData(meQuery.queryKey);
@@ -198,6 +209,7 @@ export function createQueryClient(config: QueryClientConfig = {}) {
       .join("\u0000");
     if (projectsSeen !== undefined && projects !== projectsSeen) {
       void client.invalidateQueries({ queryKey: ["feed"] });
+      void client.invalidateQueries({ queryKey: keys.workingNow });
     }
     projectsSeen = projects;
   };

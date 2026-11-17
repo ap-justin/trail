@@ -22,7 +22,7 @@ export function KeyText({
   );
 }
 
-/** An issue label: an outline pill. */
+/** An issue label: the neutral tag chip. */
 export function LabelChip({
   name,
   className,
@@ -31,19 +31,13 @@ export function LabelChip({
   className?: string;
 }) {
   return (
-    <Badge
-      variant="outline"
-      className={cn(
-        "h-4.5 px-1.75 text-2xs font-normal text-muted-foreground",
-        className,
-      )}
-    >
+    <Badge variant="tag" className={className}>
       {name}
     </Badge>
   );
 }
 
-/** `trail` with the bot-indigo dot. */
+/** `trail` with the bot-teal dot. */
 export function Wordmark({ className }: { className?: string }) {
   return (
     <span className={cn("font-semibold", className)}>

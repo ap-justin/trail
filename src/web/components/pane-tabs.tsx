@@ -19,7 +19,7 @@ export function PaneTabs({
       variant="line"
       aria-label="Show"
       className={cn(
-        "w-full justify-start gap-4 rounded-none border-b p-0 px-4 group-data-horizontal/tabs:h-10 lg:hidden",
+        "w-full justify-start gap-4 rounded-none border-b p-0 px-4 lg:hidden",
         className,
       )}
     >
@@ -27,7 +27,7 @@ export function PaneTabs({
         <TabsTrigger
           key={value}
           value={value}
-          className="h-10 min-w-10 flex-none px-0.5 font-normal text-muted-foreground group-data-horizontal/tabs:after:-bottom-px data-active:text-foreground"
+          className="min-w-11 flex-none px-0.5 font-normal text-muted-foreground group-data-horizontal/tabs:after:-bottom-px data-active:text-foreground"
         >
           {label}
         </TabsTrigger>
@@ -76,7 +76,7 @@ export function Pane({
           : undefined
       }
       className={cn(
-        "flex-none rounded-sm focus-visible:ring-3 focus-visible:ring-ring/25 max-lg:data-hidden:hidden",
+        "flex-none rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring max-lg:data-hidden:hidden",
         className,
       )}
       {...props}

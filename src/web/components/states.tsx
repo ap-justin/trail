@@ -22,8 +22,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { paths } from "@/lib/paths";
 import { cn } from "@/lib/utils";
 
-// 28px at 1440, a 40px tap target below the desktop layout
-const panelAction = "max-lg:h-10 max-lg:px-3.5";
+// 28px at 1440 (size sm), 44px below like every control, with room either side of the word
+const panelAction = "max-lg:px-3.5";
 
 /** The empty-state layout: icon, title, one line of help, an optional action. */
 export function EmptyState({

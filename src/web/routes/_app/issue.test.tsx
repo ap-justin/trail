@@ -199,7 +199,7 @@ describe("filing an issue", () => {
 });
 
 describe("commenting", () => {
-  test("Comment is disabled while empty; a posted comment appends to the timeline as the human", async () => {
+  test("Comment is held while empty; a posted comment appends to the timeline as the human", async () => {
     signedInAs("member");
     serveIssue();
     const sent: unknown[] = [];
@@ -221,18 +221,16 @@ describe("commenting", () => {
     );
     renderApp("/products/TRL/14");
     const button = await screen.findByRole("button", { name: "Comment" });
-    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("aria-disabled", "true");
     await userEvent.type(
-      screen.getByPlaceholderText("Leave a comment. Markdown works."),
+      screen.getByRole("textbox", { name: "Comment" }),
       "Ship it.",
     );
     await userEvent.click(button);
     expect(await screen.findAllByText("Ship it.")).not.toHaveLength(0);
     expect(sent).toEqual([{ body: "Ship it." }]);
     await waitFor(() =>
-      expect(
-        screen.getByPlaceholderText("Leave a comment. Markdown works."),
-      ).toHaveValue(""),
+      expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue(""),
     );
   });
 
@@ -268,7 +266,7 @@ describe("commenting", () => {
     );
     const { router, queryClient } = renderApp("/products/TRL/14");
     await userEvent.type(
-      await screen.findByPlaceholderText("Leave a comment. Markdown works."),
+      await screen.findByRole("textbox", { name: "Comment" }),
       "Ship it.",
     );
     await userEvent.click(screen.getByRole("button", { name: "Comment" }));
@@ -278,7 +276,7 @@ describe("commenting", () => {
     });
     expect(await screen.findByText("Search")).toBeInTheDocument();
     // the new issue starts with an empty draft and no write in flight
-    const box = screen.getByPlaceholderText("Leave a comment. Markdown works.");
+    const box = screen.getByRole("textbox", { name: "Comment" });
     expect(box).toHaveValue("");
     await userEvent.type(box, "Next");
     expect(screen.getByRole("button", { name: "Comment" })).toBeEnabled();
@@ -308,9 +306,7 @@ describe("commenting", () => {
       ),
     );
     renderApp("/products/TRL/14");
-    const box = await screen.findByPlaceholderText(
-      "Leave a comment. Markdown works.",
-    );
+    const box = await screen.findByRole("textbox", { name: "Comment" });
     await userEvent.type(box, "Hello");
     await userEvent.click(screen.getByRole("button", { name: "Comment" }));
     expect(await screen.findByText("Comment is too long")).toBeInTheDocument();

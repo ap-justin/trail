@@ -25,7 +25,7 @@ import { actorsById } from "./visible.js";
 type Change<T> = { from: T; to: T };
 
 /** The part of an `issue.updated` payload (field → from/to) the feed shows. */
-type IssueChanges = {
+export type IssueChanges = {
   status?: Change<IssueStatus>;
   type?: Change<IssueType>;
   priority?: Change<number>;

@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { ActorBadge } from "@/components/actor";
+import { ActorAvatar } from "@/components/actor";
 import { ProductsEmpty } from "@/components/states";
 import { KeyText } from "@/components/text";
 import { Button } from "@/components/ui/button";
@@ -101,6 +101,7 @@ function NewIssueForm({
     product: useId(),
     title: useId(),
     description: useId(),
+    descriptionHelp: useId(),
     status: useId(),
   };
 
@@ -150,7 +151,7 @@ function NewIssueForm({
               aria-describedby={
                 errors?.product ? `${ids.product}-error` : undefined
               }
-              className="w-full data-[size=default]:h-9 max-lg:data-[size=default]:h-10"
+              className="w-full data-[size=default]:lg:h-9"
             >
               <SelectValue placeholder="Pick a product">
                 {(key: string | null) => {
@@ -200,7 +201,7 @@ function NewIssueForm({
             }}
             aria-invalid={errors?.title ? true : undefined}
             aria-describedby={errors?.title ? `${ids.title}-error` : undefined}
-            className="h-9 max-lg:h-10"
+            className="lg:h-9"
           />
           {errors?.title && (
             <p id={`${ids.title}-error`} className="text-xs text-destructive">
@@ -211,32 +212,49 @@ function NewIssueForm({
         <div className="flex flex-col gap-1.5">
           <label htmlFor={ids.description} className="flex gap-1 font-medium">
             Description
-            <span className="font-normal text-muted-foreground">Markdown</span>
+            <span className="font-normal text-muted-foreground">
+              Markdown works
+            </span>
           </label>
           <Textarea
             id={ids.description}
             value={description}
             onChange={(event) => setDescription(event.currentTarget.value)}
-            placeholder="What should the bots know?"
-            className="min-h-35 resize-none text-sm max-lg:min-h-45"
+            aria-describedby={ids.descriptionHelp}
+            className="min-h-32 resize-none text-sm max-lg:min-h-40"
           />
+          <p id={ids.descriptionHelp} className="text-xs text-muted-foreground">
+            Optional. Bots read this before they pick the issue up.
+          </p>
         </div>
       </div>
-      <p id={ids.status} role="status" className="text-xs text-destructive">
+      <p
+        id={ids.status}
+        role="status"
+        // empty, it leaves the flow: an empty item would still take a gap
+        className="text-xs text-destructive empty:absolute"
+      >
         {error}
       </p>
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:gap-2">
-        <p className="flex flex-wrap items-center gap-1 text-muted-foreground">
+      <div className="flex flex-1 flex-col gap-4 lg:mt-1 lg:flex-row lg:items-center lg:gap-2">
+        <p className="flex flex-wrap items-center gap-2 text-muted-foreground">
           Filing as{" "}
+          {/* the name beside it says who; the avatar adds nothing to read aloud */}
+          <span aria-hidden="true" className="contents">
+            <ActorAvatar
+              actor={{ name: viewer.name, kind: "human", photoUrl: null }}
+              size="xs"
+            />
+          </span>
           <span className="font-medium text-foreground">{viewer.name}</span>
-          <ActorBadge kind="human" />
         </p>
-        <div className="flex gap-2 lg:ml-auto">
+        {/* below lg the buttons sit at the foot of the full-screen sheet */}
+        <div className="flex gap-2 max-lg:mt-auto lg:ml-auto">
           <DialogClose
             render={
               <Button
                 variant="outline"
-                className="max-lg:h-11 max-lg:flex-1 lg:px-3"
+                className="max-lg:flex-1 lg:h-9 lg:px-3.5"
               />
             }
           >
@@ -247,7 +265,7 @@ function NewIssueForm({
             aria-disabled={pending || undefined}
             aria-busy={pending || undefined}
             aria-describedby={ids.status}
-            className="max-lg:h-11 max-lg:flex-1 lg:px-3"
+            className="max-lg:flex-1 lg:h-9 lg:px-3.5"
           >
             {pending ? "Creating…" : "Create issue"}
           </Button>
@@ -281,7 +299,7 @@ export function NewIssueDialog({
         initialFocus={titleRef}
         className="flex max-w-none flex-col gap-0 overflow-y-auto p-0 ring-0 sm:max-w-none max-lg:inset-0 max-lg:h-dvh max-lg:translate-none max-lg:rounded-none lg:w-140 lg:gap-4 lg:rounded-2xl lg:border lg:p-5 lg:shadow-xl"
       >
-        <div className="flex items-center max-lg:h-12 max-lg:border-b max-lg:pr-2 max-lg:pl-4">
+        <div className="flex items-center max-lg:h-12 max-lg:pr-2 max-lg:pl-4">
           <DialogTitle className="flex-1 text-base font-medium">
             New issue
           </DialogTitle>
@@ -291,7 +309,8 @@ export function NewIssueDialog({
                 variant="ghost"
                 size="icon"
                 aria-label="Close"
-                className="text-muted-foreground max-lg:size-10"
+                // the row is the title's height, as in the frame; the 32px target overhangs it
+                className="text-muted-foreground lg:-my-1"
               />
             }
           >

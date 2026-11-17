@@ -27,28 +27,35 @@ const types: Record<WebItemType, { label: string; icon: LucideIcon }> = {
   todo: { label: "Todo", icon: ListTodoIcon },
 };
 
-/** Issue or Todo, glyph plus word. Neutral on purpose: indigo is for bots alone. */
-export function TypeBadge({
+export function typeLabel(type: WebItemType): string {
+  return types[type].label;
+}
+
+/**
+ * Issue or Todo as one grey glyph, an image named for the type; `decorative` where
+ * the type is said in words beside it.
+ */
+export function TypeIcon({
   type,
+  decorative = false,
   className,
 }: {
   type: WebItemType;
+  decorative?: boolean;
   className?: string;
 }) {
   const { icon: Icon, label } = types[type];
   return (
-    <span
+    <Icon
+      {...(decorative
+        ? { "aria-hidden": true }
+        : { role: "img", "aria-label": label })}
       data-item-type={type}
-      className={cn(
-        "inline-flex h-4.5 shrink-0 items-center gap-0.75 rounded-sm bg-secondary px-1.5 text-2xs leading-none font-medium whitespace-nowrap text-secondary-foreground",
-        className,
-      )}
-    >
-      <Icon aria-hidden="true" className="size-3.5 shrink-0" />
-      {label}
-    </span>
+      className={cn("size-3.5 shrink-0 text-muted-foreground", className)}
+    />
   );
 }
+
 export type ProjectHealth = NonNullable<WebProductView["health"]>;
 
 const statuses: Record<

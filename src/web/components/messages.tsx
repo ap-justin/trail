@@ -1,7 +1,12 @@
 import { ArrowLeftRightIcon, MessagesSquareIcon } from "lucide-react";
 import { type ReactNode, useEffect, useRef } from "react";
 import { ActorAvatar, ActorName } from "@/components/actor";
-import { AppLink, RowLink } from "@/components/app-link";
+import {
+  AppLink,
+  RowLink,
+  textLinkFocus,
+  textLinkTap,
+} from "@/components/app-link";
 import { RowTime } from "@/components/feed";
 import { Markdown } from "@/components/markdown";
 import { MarkdownText } from "@/components/markdown-text";
@@ -64,8 +69,6 @@ export type ConversationViewProps = Paging & {
 // the feed's 880px column, inside the page padding
 const page = "w-full lg:px-6 lg:py-4";
 const column = "mx-auto flex max-w-220 flex-col";
-// 28px at 1440, a 40px tap target below the desktop layout, as the panels' actions
-const panelAction = "max-lg:h-10 max-lg:px-3.5";
 
 const pairName = (bots: readonly [WebActorView, WebActorView]) =>
   `${bots[0].name} and ${bots[1].name}`;
@@ -110,7 +113,10 @@ export function ConversationBreadcrumb({
           bots && "max-lg:hidden",
         )}
       >
-        <AppLink href={listHref} className="hover:text-foreground">
+        <AppLink
+          href={listHref}
+          className={cn(textLinkFocus, textLinkTap, "hover:text-foreground")}
+        >
           Messages
         </AppLink>
         {bots && <span aria-hidden="true">/</span>}
@@ -120,7 +126,7 @@ export function ConversationBreadcrumb({
   );
 }
 
-/** A bot's avatar, name, title pill and Bot badge. */
+/** A bot's avatar, name and title. */
 function Bot({ bot }: { bot: WebActorView }) {
   return (
     <span className="inline-flex max-w-full min-w-0 items-center gap-1.5">
@@ -181,7 +187,6 @@ function LoadMore({
       <Button
         variant="outline"
         size="sm"
-        className={panelAction}
         aria-busy={pending || undefined}
         aria-disabled={pending || undefined}
         onClick={() => {
@@ -382,14 +387,13 @@ function MessageCard({ message }: { message: WebMessageView }) {
     // its scroll margins keep focus() scrolling it clear of the 48px top bar and, below lg, the 56px tab bar
     <li
       tabIndex={-1}
-      className="scroll-mt-12 rounded-xl border outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/25 max-lg:scroll-mb-14"
+      className="scroll-mt-12 rounded-xl border focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring max-lg:scroll-mb-14"
     >
       <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 rounded-t-xl border-b bg-muted px-3 py-2">
         <ActorAvatar actor={message.sender} size="xs" />
         <ActorName
           actor={message.sender}
           nameClassName="font-medium text-foreground"
-          titleSurface="card"
         />
         {!message.expectsReply && (
           <Badge

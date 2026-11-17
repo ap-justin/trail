@@ -9,7 +9,7 @@
 /*
  * The design system's closed set: values from the "trail-tokens" guideline and the
  * approved frames on the doop canvas ltdlIxhvr2. Each `initial` drops Tailwind's
- * stock scale, so a class outside the set (`text-gray-500`, `text-2xl`, `rounded-3xl`,
+ * stock scale, so a class outside the set (`text-gray-500`, `text-2xl`, `rounded-xs`,
  * `shadow-sm`) compiles to nothing; design-system.test.ts sweeps the rest.
  */
 @theme {
@@ -32,12 +32,13 @@
   --text-xl: 20px;
   --text-display: 28px;
 
-  /* badge · controls and chips · cards and menus · dialog · pill */
+  /* badge · controls and chips · cards and menus · dialog · the framed sheet · pill */
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 6px;
   --radius-xl: 8px;
   --radius-2xl: 10px;
+  --radius-3xl: 16px;
   --radius-4xl: 9999px;
 
   --shadow-md: 0 4px 16px oklch(0 0 0 / 12%);
@@ -48,6 +49,7 @@
   --ease-out: ease-out;
   /* what a bare `transition-colors` / `transition-opacity` runs on */
   --default-transition-timing-function: var(--ease-out);
+  --default-transition-duration: var(--duration-fast);
 }
 
 @theme inline {
@@ -65,7 +67,9 @@
   --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+  --color-frame: var(--frame);
   --color-border: var(--border);
+  --color-rule: var(--rule);
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-success: var(--success);
@@ -82,6 +86,8 @@
 :root {
   color-scheme: light;
 
+  /* the L-frame around the sheet: sidebar, top bar, tab bar */
+  --frame: oklch(0.968 0.005 215);
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -93,18 +99,20 @@
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.5 0 0);
-  --accent: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.48 0 0);
+  --accent: oklch(0.93 0.004 215);
   --accent-foreground: oklch(0.205 0 0);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  /* lines in three steps: sheet and card edges · row rules · control borders */
+  --border: oklch(0.925 0 0);
+  --rule: oklch(0.955 0 0);
+  --input: oklch(0.87 0 0);
+  --ring: oklch(0.205 0 0);
 
-  /* bots only: badge, square avatar */
-  --bot: oklch(0.48 0.17 265);
-  --bot-muted: oklch(0.95 0.03 265);
+  /* bots only: square avatar */
+  --bot: oklch(0.46 0.085 215);
+  --bot-muted: oklch(0.95 0.025 215);
   /* a feed row received over SSE in the last 2 seconds */
-  --highlight: oklch(0.97 0.02 265);
+  --highlight: oklch(0.968 0.016 215);
   /* status and health ink; each -muted is the surface its ink sits on (the Reconnecting banner) */
   --success: oklch(0.5 0.13 150);
   --success-muted: oklch(0.96 0.04 150);
@@ -113,6 +121,8 @@
   --destructive: oklch(0.54 0.21 27);
   --destructive-muted: oklch(0.96 0.02 25);
 
+  /* colour and opacity changes: hovers, a tab's underline */
+  --duration-fast: 150ms;
   --duration-press: 100ms;
   --duration-menu: 120ms;
   --duration-dialog: 150ms;
@@ -127,7 +137,8 @@
 .dark {
   color-scheme: dark;
 
-  --background: oklch(0.145 0 0);
+  --frame: oklch(0.135 0 0);
+  --background: oklch(0.18 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
   --card-foreground: oklch(0.985 0 0);
@@ -138,16 +149,17 @@
   --secondary: oklch(0.269 0 0);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.22 0 0);
-  --muted-foreground: oklch(0.7 0 0);
+  --muted-foreground: oklch(0.72 0 0);
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --border: oklch(1 0 0 / 9%);
+  --rule: oklch(1 0 0 / 6%);
+  --input: oklch(1 0 0 / 16%);
+  --ring: oklch(0.922 0 0);
 
-  --bot: oklch(0.76 0.12 265);
-  --bot-muted: oklch(0.27 0.06 265);
-  --highlight: oklch(0.2 0.03 265);
+  --bot: oklch(0.78 0.09 210);
+  --bot-muted: oklch(0.3 0.045 215);
+  --highlight: oklch(0.235 0.03 215);
   --success: oklch(0.75 0.14 150);
   --success-muted: oklch(0.27 0.05 150);
   --warning: oklch(0.78 0.13 75);
@@ -165,7 +177,7 @@
     @apply scroll-pt-12 font-sans max-lg:scroll-pb-14;
   }
   body {
-    @apply bg-background text-sm text-foreground antialiased;
+    @apply bg-background text-sm text-foreground tabular-nums antialiased;
     line-height: 1.45;
   }
 }

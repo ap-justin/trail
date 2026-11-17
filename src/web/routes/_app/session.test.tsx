@@ -5,7 +5,13 @@ import { HttpResponse, http } from "msw";
 import { describe, expect, test } from "vitest";
 import type { MeView } from "@/lib/api-types";
 import { keys } from "@/lib/queries";
-import { meView, renderApp, serveFeed, signedInAs } from "@/test/app";
+import {
+  meView,
+  renderApp,
+  serveFeed,
+  serveInProgress,
+  signedInAs,
+} from "@/test/app";
 import { FakeEventSource } from "@/test/event-source";
 import { commentEntry } from "@/test/fixtures";
 import { server } from "@/test/server";
@@ -18,8 +24,9 @@ async function onFeed() {
   return app;
 }
 
-/** The feed a member with no project is served: nothing, and nothing to filter by. */
+/** The feed a member with no project is served: nothing, nothing to filter by, no bot at work. */
 function serveNoProjectsFeed() {
+  serveInProgress();
   server.use(
     http.get("/api/web/feed", () =>
       HttpResponse.json({
@@ -190,6 +197,7 @@ describe("session", () => {
         HttpResponse.json({ success: true }),
       ),
     );
+    serveInProgress();
     serveFeed();
     const { router, queryClient } = renderApp("/");
     expect(await screen.findByText("No activity yet")).toBeInTheDocument();

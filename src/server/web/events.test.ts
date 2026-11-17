@@ -16,6 +16,8 @@ const {
   bus,
   bot,
   request,
+  inviteEmail,
+  signInWithEmail,
   signIn,
   owner,
   addMember,
@@ -389,14 +391,14 @@ test.each([
     "the member signs out",
     async () => {
       const cookie = await addMember("signs-out", []);
-      return { cookie, revoke: () => signOut(cookie) };
+      return { cookie, revoke: () => signOut(cookie), told: [] };
     },
   ],
   [
     "the owner signs out",
     async () => {
       const cookie = await signIn(owner);
-      return { cookie, revoke: () => signOut(cookie) };
+      return { cookie, revoke: () => signOut(cookie), told: [] };
     },
   ],
   [
@@ -408,16 +410,18 @@ test.each([
           key: null,
           cookie: ownerCookie,
         });
-      return { cookie, revoke };
+      return { cookie, revoke, told: [accessMessage] };
     },
   ],
 ])("the stream ends at the next heartbeat once %s", async (_, setup) => {
-  const { cookie, revoke } = await setup();
+  const { cookie, revoke, told } = await setup();
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   const stream = await openStream(cookie);
   await vi.advanceTimersByTimeAsync(15_000);
   expect(await stream.next()).toEqual({ comment: "heartbeat" });
   expect((await revoke()).status).toBeLessThan(300);
+  for (const message of told)
+    expect(await stream.next()).toStrictEqual(message);
   await vi.advanceTimersByTimeAsync(15_000);
   expect(await stream.next()).toBeNull();
 });
@@ -897,4 +901,292 @@ test("a photo change writes no activity event and no webhook delivery", async ()
   expect((await putPhoto(hooked.key, PNG)).status).toBe(200);
   expect((await clearPhoto(hooked.key)).status).toBe(200);
   expect(rows()).toEqual(before);
+});
+
+/** The next message that isn't a comment line: a heartbeat or the like. */
+async function nextMessage(stream: Awaited<ReturnType<typeof openStream>>) {
+  for (;;) {
+    const message = await stream.next();
+    if (message === null || message.comment === undefined) return message;
+  }
+}
+
+const workMessage = (productKey: string) => ({
+  event: "work",
+  data: JSON.stringify({ productKey }),
+});
+
+/** The named events up to and including the next work event: entries and comment lines left out. */
+async function untilWork(stream: Awaited<ReturnType<typeof openStream>>) {
+  const named = [];
+  for (;;) {
+    const message = await nextMessage(stream);
+    if (message === null) return named;
+    if (message.event !== undefined) named.push(message);
+    if (message.event === "work") return named;
+  }
+}
+
+const todo = async (productKey: string, title: string) => {
+  const res = await request("POST", "/api/v1/items", {
+    json: { type: "todo", product: productKey, title },
+  });
+  expect(res.status).toBe(201);
+  return ((await res.json()) as { key: string }).key;
+};
+
+const patchItem = (key: string, json: Record<string, unknown>) =>
+  request("PATCH", `/api/v1/items/${key}`, { json });
+
+test("a work event, with no id, follows an item moving into and out of in progress, and a new assignee or title on an in-progress item", async () => {
+  const alpha = addProject("alpha");
+  const other = addBot("other-bot");
+  const stream = await openStream(await addMember("work-alpha", [alpha.id]));
+  const key = await todo(alpha.key, "alpha work");
+  await patchItem(key, { status: "in_progress" });
+  expect(await untilWork(stream)).toStrictEqual([workMessage(alpha.key)]);
+  await patchItem(key, { assignee: other.actor.id });
+  expect(await untilWork(stream)).toStrictEqual([workMessage(alpha.key)]);
+  await patchItem(key, { title: "alpha work, renamed" });
+  expect(await untilWork(stream)).toStrictEqual([workMessage(alpha.key)]);
+  await patchItem(key, { status: "done" });
+  expect(await untilWork(stream)).toStrictEqual([workMessage(alpha.key)]);
+  await stream.cancel();
+});
+
+test("an item created in progress sends a work event", async () => {
+  const alpha = addProject("alpha");
+  const beta = addProject("beta");
+  const stream = await openStream(
+    await addMember("work-created", [alpha.id, beta.id]),
+    { query: `?product=${beta.key}` },
+  );
+  await todo(alpha.key, "alpha work");
+  const created = db
+    .select()
+    .from(activityEvent)
+    .where(eq(activityEvent.productId, alpha.id))
+    .orderBy(desc(activityEvent.seq))
+    .get();
+  if (!created) throw new Error("no event");
+  // no route creates an item in progress, so the event is published as one would be
+  bus.publish({
+    ...created,
+    seq: created.seq + 1,
+    payload: { ...created.payload, status: "in_progress" },
+  });
+  expect(await untilWork(stream)).toStrictEqual([workMessage(alpha.key)]);
+  await stream.cancel();
+});
+
+test("no work event for a title edit on an open item, a comment, a todo done from open, a new assignee on an open item, an issue filed in triage, or a product the member can't see", async () => {
+  const alpha = addProject("alpha");
+  const beta = addProject("beta");
+  const hidden = addProject("hidden");
+  const other = addBot("quiet-bot");
+  const key = await todo(alpha.key, "alpha work");
+  const hiddenKey = await todo(hidden.key, "out of sight");
+  const sentinel = await todo(beta.key, "beta work");
+  const stream = await openStream(
+    await addMember("work-quiet", [alpha.id, beta.id]),
+  );
+  await patchItem(key, { title: "alpha work, renamed" });
+  await request("POST", `/api/v1/items/${key}/comments`, {
+    json: { body: "just talk" },
+  });
+  await patchItem(key, { assignee: other.actor.id });
+  await patchItem(key, { status: "done" });
+  await file(alpha.id, "filed in triage");
+  await patchItem(hiddenKey, { status: "in_progress" });
+  await patchItem(sentinel, { status: "in_progress" });
+  expect(await untilWork(stream)).toStrictEqual([workMessage(beta.key)]);
+  await stream.cancel();
+});
+
+test("a stream whose filter shows the entry gets the work event after it", async () => {
+  const alpha = addProject("alpha");
+  const key = await todo(alpha.key, "alpha work");
+  const stream = await openStream(ownerCookie, {
+    query: `?product=${alpha.key}`,
+  });
+  await patchItem(key, { status: "in_progress" });
+  const entry = await nextMessage(stream);
+  expect(JSON.parse(entry?.data ?? "null")).toMatchObject({
+    kind: "status_changed",
+    item: { key },
+  });
+  expect(await nextMessage(stream)).toStrictEqual(workMessage(alpha.key));
+  await stream.cancel();
+});
+
+test("an import into a visible product sends a work event, since its issues may arrive in progress", async () => {
+  const importOf = (title: string) =>
+    request("POST", "/api/v1/import", {
+      json: {
+        externalRef: "LIN-WORK",
+        key: "IMPWORK",
+        name: "Imported for work",
+        issues: [
+          {
+            externalRef: "lin-1",
+            title,
+            status: "Todo",
+            createdAt: "2026-01-02T03:04:05.000Z",
+            comments: [],
+          },
+        ],
+      },
+    });
+  const first = await importOf("carried over");
+  expect(first.status).toBe(200);
+  const imported = ((await first.json()) as { project: { id: string } }).project
+    .id;
+  const stream = await openStream(await addMember("work-import", [imported]));
+  // a retitle on re-import is an import event, and no issue event
+  expect((await importOf("carried over, renamed")).status).toBe(200);
+  expect(await untilWork(stream)).toStrictEqual([workMessage("IMPWORK")]);
+  await stream.cancel();
+});
+
+test("one work event per product per batch, however many of its events the batch holds", async () => {
+  const alpha = addProject("alpha");
+  const beta = addProject("beta");
+  await todo(alpha.key, "alpha work");
+  await todo(beta.key, "beta work");
+  const newestOf = (productId: string) => {
+    const event = db
+      .select()
+      .from(activityEvent)
+      .where(eq(activityEvent.productId, productId))
+      .orderBy(desc(activityEvent.seq))
+      .get();
+    if (!event) throw new Error("no event");
+    return event;
+  };
+  const inProgress = (event: ReturnType<typeof newestOf>, seq: number) => ({
+    ...event,
+    seq,
+    payload: { ...event.payload, status: "in_progress" },
+  });
+  const [forAlpha, forBeta] = [newestOf(alpha.id), newestOf(beta.id)];
+  const stream = await openStream(
+    await addMember("work-batch", [alpha.id, beta.id]),
+  );
+  // published together, so the stream drains all three as one batch
+  const top = newestSeq();
+  bus.publish(inProgress(forAlpha, top + 1));
+  bus.publish(inProgress(forAlpha, top + 2));
+  bus.publish(inProgress(forBeta, top + 3));
+  expect(await untilWork(stream)).toStrictEqual([workMessage(alpha.key)]);
+  // a second alpha event would come before beta's
+  expect(await untilWork(stream)).toStrictEqual([workMessage(beta.key)]);
+  await stream.cancel();
+});
+
+const accessMessage = { event: "access", data: "{}" };
+
+const putProducts = (login: string, products: string[]) =>
+  request("PUT", `/api/web/people/${login}`, {
+    key: null,
+    cookie: ownerCookie,
+    json: { products },
+  });
+
+/** Publishes an update to `actorId` and returns its message: a stream hearing of that actor sends anything already queued first. */
+function closeBatch(actorId: string) {
+  bus.publishActor({ actorId, photoUrl: "/closer", title: null });
+  return actorMessage(actorId, "/closer");
+}
+
+test("a revoked product sends an access event, with no id, to each of that member's streams and to no other member's or the owner's", async () => {
+  const alpha = addProject("alpha");
+  const beta = addProject("beta");
+  const memberCookie = await addMember("access-revoked", [alpha.id, beta.id]);
+  const feed = await openStream(memberCookie);
+  const shell = await openStream(memberCookie, { query: "?only=actors" });
+  const otherStream = await openStream(
+    await addMember("access-bystander", [alpha.id]),
+  );
+  const ownerStream = await openStream(ownerCookie);
+
+  expect((await putProducts("access-revoked", [alpha.key])).status).toBe(200);
+
+  // the bystander shares alpha and the owner hears of everyone, so all four
+  // hear it; the member's own streams stay open after their access event
+  const closer = closeBatch(actorIdOf("access-revoked"));
+  for (const stream of [feed, shell]) {
+    expect(await stream.next()).toStrictEqual(accessMessage);
+    expect(await stream.next()).toStrictEqual(closer);
+    await stream.cancel();
+  }
+  for (const stream of [otherStream, ownerStream]) {
+    expect(await stream.next()).toStrictEqual(closer);
+    await stream.cancel();
+  }
+});
+
+test("a granted product sends an access event to the email member it was granted to, and another member's change sends them none", async () => {
+  const alpha = addProject("alpha");
+  const beta = addProject("beta");
+  inviteEmail("access-granted@example.com", [alpha.id]);
+  const granted = await openStream(
+    await signInWithEmail("access-granted@example.com"),
+  );
+  await addMember("access-elsewhere", [alpha.id]);
+
+  expect(
+    (await putProducts("access-granted@example.com", [alpha.key, beta.key]))
+      .status,
+  ).toBe(200);
+  expect(await granted.next()).toStrictEqual(accessMessage);
+
+  expect((await putProducts("access-elsewhere", [beta.key])).status).toBe(200);
+  const own =
+    db
+      .select()
+      .from(actor)
+      .where(eq(actor.email, "access-granted@example.com"))
+      .get()?.id ?? "";
+  const closer = closeBatch(own);
+  expect(await granted.next()).toStrictEqual(closer);
+  await granted.cancel();
+});
+
+test("removing a member sends their open stream an access event and then ends it, without waiting for the heartbeat", async () => {
+  const alpha = addProject("alpha");
+  // the heartbeat's re-check never fires, so only the access event's can end the stream
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const stream = await openStream(
+    await addMember("access-removed", [alpha.id]),
+  );
+  const res = await request("DELETE", "/api/web/people/access-removed", {
+    key: null,
+    cookie: ownerCookie,
+  });
+  expect(res.status).toBe(204);
+  expect(await stream.next()).toStrictEqual(accessMessage);
+  expect(await stream.next()).toBeNull();
+});
+
+test("a PUT or DELETE that fails publishes no access notice, and one that succeeds publishes exactly one", async () => {
+  const alpha = addProject("alpha");
+  await addMember("access-failing", [alpha.id]);
+  const notices: unknown[] = [];
+  const unsubscribe = bus.subscribeAccess((n) => notices.push(n));
+
+  expect((await putProducts("access-ghost", [alpha.key])).status).toBe(404);
+  expect(
+    (
+      await request("DELETE", "/api/web/people/access-ghost", {
+        key: null,
+        cookie: ownerCookie,
+      })
+    ).status,
+  ).toBe(404);
+  expect((await putProducts("access-failing", ["NOPE"])).status).toBe(422);
+  expect(notices).toEqual([]);
+
+  expect((await putProducts("access-failing", [])).status).toBe(200);
+  unsubscribe();
+  expect(notices).toHaveLength(1);
 });

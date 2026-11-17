@@ -22,6 +22,15 @@ export type MessageNotice = { id: string; recipientId: string };
 
 export type MessageSubscriber = (notice: MessageNotice) => void;
 
+/**
+ * An invite's products were set (possibly to the same list), or it was removed,
+ * named by the invite's GitHub id or email; subscribers match it to a holder.
+ * Live-only; it tells that person's open streams to re-read.
+ */
+export type AccessNotice = { githubId: number | null; email: string | null };
+
+export type AccessSubscriber = (notice: AccessNotice) => void;
+
 export interface EventBus {
   /** Calls every subscriber in turn; one that throws is logged and skipped. */
   publish(event: ActivityEvent): void;
@@ -35,6 +44,10 @@ export interface EventBus {
   publishMessage(notice: MessageNotice): void;
   /** Returns the unsubscribe function; messages never reach `subscribe`'s subscribers. */
   subscribeMessages(fn: MessageSubscriber): () => void;
+  /** Calls every access subscriber in turn; one that throws is logged and skipped. */
+  publishAccess(notice: AccessNotice): void;
+  /** Returns the unsubscribe function; access notices never reach `subscribe`'s subscribers. */
+  subscribeAccess(fn: AccessSubscriber): () => void;
 }
 
 function callEach<T>(
@@ -55,6 +68,7 @@ export function createEventBus(): EventBus {
   const subscribers = new Set<Subscriber>();
   const actorSubscribers = new Set<ActorSubscriber>();
   const messageSubscribers = new Set<MessageSubscriber>();
+  const accessSubscribers = new Set<AccessSubscriber>();
   return {
     publish(event) {
       callEach(subscribers, event, `${event.action} ${event.id}`);
@@ -76,6 +90,17 @@ export function createEventBus(): EventBus {
     subscribeMessages(fn) {
       messageSubscribers.add(fn);
       return () => messageSubscribers.delete(fn);
+    },
+    publishAccess(notice) {
+      callEach(
+        accessSubscribers,
+        notice,
+        `access ${notice.githubId ?? notice.email}`,
+      );
+    },
+    subscribeAccess(fn) {
+      accessSubscribers.add(fn);
+      return () => accessSubscribers.delete(fn);
     },
   };
 }

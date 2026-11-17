@@ -11,12 +11,18 @@ import {
   activityEvent,
   actor,
   invite,
+  issue,
   productMember,
   projectProduct,
 } from "../db/schema.js";
-import type { ActivityEvent, ActorUpdate, EventBus } from "../events/bus.js";
+import type {
+  AccessNotice,
+  ActivityEvent,
+  ActorUpdate,
+  EventBus,
+} from "../events/bus.js";
 import type { FeedFilters } from "../service/paging.js";
-import { entriesByEvent } from "./entries.js";
+import { entriesByEvent, type IssueChanges, productRefs } from "./entries.js";
 import { createWebRouter, type Member } from "./env.js";
 import { eventsAfter, feedFilters, ofItemType } from "./feed.js";
 import { visibleIds } from "./visible.js";
@@ -94,7 +100,7 @@ const streamEvents = createRoute({
     200: {
       content: { "text/event-stream": { schema: z.string() } },
       description:
-        "Feed entries as they happen, each event's seq its id; Last-Event-ID resumes after that seq. A `reset` event means the client is too far behind: refetch /feed. An `actor` event, `{actorId, photoUrl, title}` with no id, says an actor's photo or a bot's title was set, replaced or removed, and carries both as they are now (each null when unset; title always null on a person), so the latest event for an actor is its whole state: sent whatever the stream's filters, but only to a viewer who can see that actor (the person who runs this trail sees all; a member sees themselves, bots acting in their products and people who share a product with them), and it is not a feed entry, so Last-Event-ID never replays it. With only=actors the stream carries `actor` events and heartbeats alone.",
+        "Feed entries as they happen, each event's seq its id; Last-Event-ID resumes after that seq. A `reset` event means the client is too far behind: refetch /feed. An `actor` event, `{actorId, photoUrl, title}` with no id, says an actor's photo or a bot's title was set, replaced or removed, and carries both as they are now (each null when unset; title always null on a person), so the latest event for an actor is its whole state: sent whatever the stream's filters, but only to a viewer who can see that actor (the person who runs this trail sees all; a member sees themselves, bots acting in their products and people who share a product with them), and it is not a feed entry, so Last-Event-ID never replays it. A `work` event, `{productKey}` with no id, says what /working-now shows for that product may have changed: an item was created in progress, moved into or out of in_progress, or otherwise updated (a new title or assignee, say) while in progress, or the product was imported. Sent whatever the stream's filters, after any entry the batch carries (one per product per batch), only for a product the viewer sees, so a client can re-read /working-now; it is never replayed. An `access` event, `{}` with no id, says the products the viewer's invite lists were set (possibly to the same list), so a client can re-read /me and /working-now, or the invite was removed, in which case the stream ends after it, a reconnect is refused, and /me, the one re-read that answers, shows no one signed in. Sent only to that member's own streams, whatever their filters, never to the owner or anyone else, and never replayed. With only=actors the stream carries `actor` and `access` events and heartbeats alone.",
     },
     404: jsonContent(errorSchema, "No such product or project to filter by"),
     429: jsonContent(
@@ -197,6 +203,13 @@ function mayHearOf(db: Db, member: Member, actorId: string): boolean {
   return theirs.some((r) => visible.has(r.productId));
 }
 
+/** Whether the notice names the invite `member` is let in through, as `inviteOf` matches it; never the owner, who has none. */
+const isAccessOf = (member: Member, notice: AccessNotice) =>
+  member.kind === "member" &&
+  (member.actor.githubId === null
+    ? notice.email === member.actor.email
+    : notice.githubId === member.actor.githubId);
+
 const matches = (filters: FeedFilters, event: ActivityEvent) =>
   (filters.projectId === null || event.productId === filters.projectId) &&
   (filters.groupId == null || event.projectId === filters.groupId) &&
@@ -226,6 +239,66 @@ function ofType(
       .map((e) => e.id),
   );
   return events.filter((e) => kept.has(e.id));
+}
+
+/**
+ * The distinct product ids, in order, of the events that can change Working
+ * now among those a viewer of `visible` products sees: an item created in
+ * progress, a status change into or out of in_progress, any other update to
+ * an item in progress (each bumps its updatedAt, the strip's order), a product
+ * imported.
+ */
+function productsMovingWork(
+  db: Db,
+  events: ActivityEvent[],
+  visible: Set<string> | "all",
+): string[] {
+  const candidates = events.filter(
+    (e) => e.productId !== null && mayShow(db, e, visible),
+  );
+  const changesOf = (e: ActivityEvent) => e.payload as IssueChanges;
+  // an update with no status change carries no status: the item's row says whether it is in progress
+  const statusKept = candidates.filter(
+    (e) => e.action === "issue.updated" && changesOf(e).status == null,
+  );
+  const inProgress = new Set(
+    statusKept.length === 0
+      ? []
+      : db
+          .select({ id: issue.id })
+          .from(issue)
+          .where(
+            and(
+              inArray(
+                issue.id,
+                statusKept.map((e) => e.subjectId),
+              ),
+              eq(issue.status, "in_progress"),
+            ),
+          )
+          .all()
+          .map((r) => r.id),
+  );
+  const movesWork = (e: ActivityEvent) => {
+    switch (e.action) {
+      case "product.imported":
+        return true;
+      case "issue.created":
+        return e.payload.status === "in_progress";
+      case "issue.updated": {
+        const { status } = changesOf(e);
+        if (status != null) {
+          return status.from === "in_progress" || status.to === "in_progress";
+        }
+        return inProgress.has(e.subjectId);
+      }
+      default:
+        return false;
+    }
+  };
+  return [
+    ...new Set(candidates.filter(movesWork).map((e) => e.productId as string)),
+  ];
 }
 
 const newestSeq = (db: Db) =>
@@ -288,6 +361,13 @@ export function eventRoutes(
         actorUpdates.set(update.actorId, update);
         wake();
       });
+      // one flag however many changes queue: the client re-reads once
+      let accessChanged = false;
+      const unsubscribeAccess = bus.subscribeAccess((notice) => {
+        if (!isAccessOf(member, notice)) return;
+        accessChanged = true;
+        wake();
+      });
       let ended = false;
       const end = () => {
         ended = true;
@@ -333,6 +413,16 @@ export function eventRoutes(
               });
             }
           }
+          const workIn = productsMovingWork(db, fresh, visible);
+          if (workIn.length === 0) return;
+          const productOf = productRefs(db, workIn);
+          // without an id: not a feed entry, so Last-Event-ID stays the entries'
+          for (const productId of workIn) {
+            await stream.writeSSE({
+              event: "work",
+              data: JSON.stringify({ productKey: productOf(productId).key }),
+            });
+          }
         };
         if (resumeFrom !== undefined) {
           const missed = eventsAfter(
@@ -366,6 +456,14 @@ export function eventRoutes(
             await send(pending.splice(0));
             continue;
           }
+          if (accessChanged) {
+            accessChanged = false;
+            // without an id: not a feed entry, so Last-Event-ID stays the entries'
+            await stream.writeSSE({ event: "access", data: "{}" });
+            // a removed member's sessions are already gone: end now, not at the next heartbeat
+            if (!(await stillLetIn()) || ended) return;
+            continue;
+          }
           if (actorUpdates.size > 0) {
             const updates = [...actorUpdates.values()];
             actorUpdates.clear();
@@ -388,6 +486,7 @@ export function eventRoutes(
         clearTimeout(checkTimer);
         unsubscribe();
         unsubscribeActors();
+        unsubscribeAccess();
         shutdown.removeEventListener("abort", end);
       }
     };

@@ -49,7 +49,7 @@ export function signInEmail(
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Your trail sign-in link</title></head>
 <body style="margin:0;padding:0;background:#ffffff">
 <div style="max-width:480px;margin:0 auto;padding:40px 24px">
-<div style="font:600 18px/1.2 ${font};color:#0a0a0a;padding-bottom:24px">trail<span style="color:#2d54bc">.</span></div>
+<div style="font:600 18px/1.2 ${font};color:#0a0a0a;padding-bottom:24px">trail<span style="color:#006375">.</span></div>
 <div style="font:400 16px/1.5 ${font};color:#0a0a0a;padding-bottom:20px">Use this link to sign in to trail.</div>
 <div style="padding-bottom:24px"><a href="${href}" style="display:inline-block;background:#171717;color:#fafafa;font:500 15px/1 ${font};padding:13px 20px;border-radius:6px;text-decoration:none">Sign in to trail</a></div>
 <div style="font:400 13px/1.5 ${font};color:#636363;padding-bottom:4px">This link works once and expires in 15 minutes.</div>

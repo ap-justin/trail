@@ -74,16 +74,19 @@ export const visibleEvents = (db: Db, productIds: string[]): SQL =>
     ),
   ) as SQL;
 
+/** An actor's columns as the web shows them, its photo's hash and never its bytes: actor left-joined to actor_photo; map with `toWebActor`. */
+export const webActorColumns = {
+  id: actor.id,
+  name: actor.displayName,
+  kind: actor.kind,
+  title: actor.title,
+  photoHash: actorPhoto.hash,
+};
+
 /** Actors as the web shows them, each with its photo's hash and never its bytes; map rows with `toWebActor`. */
 export const selectWebActors = (db: Db) =>
   db
-    .select({
-      id: actor.id,
-      name: actor.displayName,
-      kind: actor.kind,
-      title: actor.title,
-      photoHash: actorPhoto.hash,
-    })
+    .select(webActorColumns)
     .from(actor)
     .leftJoin(actorPhoto, eq(actorPhoto.actorId, actor.id));
 
