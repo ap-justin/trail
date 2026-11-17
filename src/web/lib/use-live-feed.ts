@@ -10,7 +10,7 @@ import {
   withActorUpdate,
 } from "@/lib/actor-photos";
 import { api, type FeedFilter, isNotFound } from "@/lib/api";
-import type { EntryView } from "@/lib/api-types";
+import type { EntryView, FeedView } from "@/lib/api-types";
 import { holdFeedStream } from "@/lib/feed-stream-holds";
 import { statusOf } from "@/lib/loadable";
 import { keys } from "@/lib/queries";
@@ -129,6 +129,16 @@ export function useLiveFeed(
   const [connection, setConnection] = useState<LiveConnection>("connecting");
   const [attempt, setAttempt] = useState(0);
   const [atTop, setAtTop] = useState(true);
+  // the gone-check running for this filter (`readFeedGone`); while it runs, a failed read shows
+  // as loading, since a 404 is the filter on its way out and Retry would only 404 again
+  const [goneCheck, setGoneCheck] = useState<{ filterKey: string } | null>(
+    null,
+  );
+  // the last options `/feed` gave, so the chips still name the applied filter while a reset
+  // read is out
+  const [lastFilters, setLastFilters] = useState<FeedView["filters"] | null>(
+    null,
+  );
   const received = useRef(new Set<string>());
   // set by the first open under this filter; any later open follows a gap
   const opened = useRef(false);
@@ -149,6 +159,7 @@ export function useLiveFeed(
     setFreshIds(new Set());
     setConnection("connecting");
     setAttempt(0);
+    setGoneCheck(null);
     received.current = new Set();
     opened.current = false;
   }
@@ -169,6 +180,10 @@ export function useLiveFeed(
     }, ms);
     timers.current.add(timer);
   };
+
+  if (feed.data && feed.data.filters !== lastFilters) {
+    setLastFilters(feed.data.filters);
+  }
 
   const readIds = idsOf(read ?? []);
 
@@ -223,8 +238,9 @@ export function useLiveFeed(
   // what this person may see changed, from `/me`'s products to Working now and the feed, read
   // again; this read also serves a `work` event's waiting one. Every page off screen is dropped,
   // so none can paint a revoked product's content on return: an invalidate only marks those stale.
-  // The feed on screen starts over too, its rows and the stream's alike, since any of them may
-  // be from a revoked product; a 404 on the read again is a filter on one, cleared as on a close
+  // The feed and Working now on screen start over too, the feed's rows and the stream's alike,
+  // since any of them may be from a revoked product; a 404 on the read again is a filter on one,
+  // cleared as on a close
   const onAccess = useEffectEvent((live: () => boolean) => {
     clearWorkWait();
     dispatch({ type: "clear" });
@@ -235,6 +251,7 @@ export function useLiveFeed(
       queryKey: keys.feed(current),
       exact: true,
     });
+    void queryClient.resetQueries({ queryKey: keys.workingNow, exact: true });
     readEverything();
     void readFeedGone(live);
   });
@@ -245,12 +262,17 @@ export function useLiveFeed(
   const recheckSession = useEffectEvent(() => {
     void queryClient.invalidateQueries({ queryKey: keys.me });
   });
-  // the server closes a stream on a 4xx: a 404 is a filtered product or project this person lost,
-  // which only /feed can say, since EventSource never exposes the status
+  // whether /feed under this filter now 404s, meaning a filtered product or project this person
+  // lost: asked after the server closes the stream on a 4xx, since EventSource never exposes the
+  // status, and after an access event on a stream left open;
   // `live` turns false once the stream is torn down: a check answering after the viewer left
   // the feed, or moved its filter, must not pull them back
   const readFeedGone = useEffectEvent(async (live: () => boolean) => {
-    if (!(await feedGone(current)) || !live()) return;
+    const check = { filterKey };
+    setGoneCheck(check);
+    // a filter found gone keeps the check until the filter moves, so no error paints first
+    const settle = () => setGoneCheck((c) => (c === check ? null : c));
+    if (!(await feedGone(current)) || !live()) return settle();
     // with both set, the 404 doesn't say which: each alone answers for itself
     if (product !== null && project !== null) {
       const [productGone, projectGone] = await Promise.all([
@@ -262,13 +284,13 @@ export function useLiveFeed(
           ...(productGone && { product }),
           ...(projectGone && { project }),
         });
-      }
+      } else settle();
     } else if (product !== null || project !== null) {
       onFilterGone({
         product: product ?? undefined,
         project: project ?? undefined,
       });
-    }
+    } else settle();
   });
 
   useEffect(() => {
@@ -350,9 +372,18 @@ export function useLiveFeed(
   }, []);
 
   const shownIds = new Set(state.shown.map((e) => e.id));
+  const settled = statusOf(feed);
+  const filterLeaving =
+    settled === "error" && goneCheck?.filterKey === filterKey;
+  // only the applied values: the rest may name a product just taken away
+  const appliedOptions = lastFilters && {
+    actors: lastFilters.actors.filter((a) => a.id === actor),
+    products: lastFilters.products.filter((p) => p.key === product),
+    projects: lastFilters.projects.filter((p) => p.slug === project),
+  };
 
   return {
-    status: loading ? "loading" : statusOf(feed),
+    status: loading || filterLeaving ? "loading" : settled,
     entries: newestFirst([
       ...state.shown,
       ...(state.page ?? []).filter((e) => !shownIds.has(e.id)),
@@ -362,7 +393,8 @@ export function useLiveFeed(
     pendingCount: state.pending.length,
     showPending: () => dispatch({ type: "show_pending" }),
     setAtTop,
-    filters: feed.data?.filters ?? { actors: [], products: [], projects: [] },
+    filters: feed.data?.filters ??
+      appliedOptions ?? { actors: [], products: [], projects: [] },
     retry: () => void feed.refetch(),
   };
 }

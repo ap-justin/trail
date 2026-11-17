@@ -39,7 +39,7 @@ function FeedPage() {
     },
   });
   // no strip until the first read answers, nor if it fails; a later failed re-read keeps the
-  // last good one
+  // last good one, except after an access event, which drops it (`useLiveFeed`)
   const workingNow = useQuery(workingNowQuery).data;
   const noProducts = !session.viewer.isOwner && session.products.length === 0;
   return (

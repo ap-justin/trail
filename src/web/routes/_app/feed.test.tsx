@@ -9,6 +9,7 @@ import {
   notFound,
   renderApp,
   serveFeed,
+  serveInProgress,
   signedInAs,
 } from "@/test/app";
 import { FakeEventSource } from "@/test/event-source";
@@ -434,6 +435,214 @@ describe("a product taken away by an access event", () => {
       (o) => o.textContent,
     );
     expect(options).toEqual(["All products", "ALP alpha"]);
+  });
+
+  test("with a project filter too, only the product filter goes, and no error shows on the way", async () => {
+    signedInAs("member");
+    const a1 = entryIn("a1", 30, alphaProduct);
+    const b1 = entryIn("b1", 20, betaProduct);
+    const { at } = serveAccess([alphaProduct, betaProduct], [b1, a1]);
+    const { router } = renderApp("/?product=BET&project=launch");
+    await waitFor(() => expect(order()).toEqual(["b1"]));
+    const stream = FakeEventSource.current;
+    stream.open();
+
+    const failed = watchFor(reading("Couldn't load the feed"));
+    at.products = [alphaProduct];
+    sendAccess(stream);
+    await waitFor(() =>
+      expect(router.state.location.search).toEqual({ project: "launch" }),
+    );
+    await waitFor(() => expect(order()).toEqual(["a1"]));
+    expect(failed()).toBe(false);
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
+  test("a filter on a product still visible stays, and the read again brings its new rows", async () => {
+    signedInAs("member");
+    const b1 = entryIn("b1", 20, betaProduct);
+    const { at } = serveAccess([alphaProduct, betaProduct], [b1]);
+    const { router } = renderApp("/?product=BET");
+    await waitFor(() => expect(order()).toEqual(["b1"]));
+    const stream = FakeEventSource.current;
+    stream.open();
+
+    // a row only the read again has: proves the read ran, so the filter staying is its answer
+    at.rows = [entryIn("b2", 2, betaProduct), ...at.rows];
+    sendAccess(stream);
+    await waitFor(() => expect(order()).toEqual(["b2", "b1"]));
+    await act(() => Promise.resolve());
+    expect(router.state.location.search).toEqual({ product: "BET" });
+    expect(FakeEventSource.current).toBe(stream);
+  });
+
+  test("a row's highlight is gone after the read again", async () => {
+    signedInAs("member");
+    const a1 = entryIn("a1", 30, alphaProduct);
+    const { at, holdFeed } = serveAccess([alphaProduct], [a1]);
+    renderApp("/");
+    await waitFor(() => expect(order()).toEqual(["a1"]));
+    const stream = FakeEventSource.current;
+    stream.open();
+    const a2 = entryIn("a2", 1, alphaProduct);
+    at.rows = [a2, a1];
+    stream.send(a2);
+    expect(rowFor("a2")).toHaveClass("row-fresh");
+
+    const release = holdFeed();
+    sendAccess(stream);
+    release();
+    await waitFor(() => expect(order()).toEqual(["a2", "a1"]));
+    expect(rowFor("a2")).not.toHaveClass("row-fresh");
+  });
+
+  test("an entry the stream sends again after the access is shown, not dropped as received", async () => {
+    signedInAs("member");
+    const a1 = entryIn("a1", 30, alphaProduct);
+    const { at } = serveAccess([alphaProduct], [a1]);
+    renderApp("/");
+    await waitFor(() => expect(order()).toEqual(["a1"]));
+    const stream = FakeEventSource.current;
+    stream.open();
+    const a2 = entryIn("a2", 1, alphaProduct);
+    stream.send(a2);
+    expect(order()).toEqual(["a2", "a1"]);
+
+    // the read again does not list a2, so only the stream can bring it back
+    sendAccess(stream);
+    await waitFor(() => expect(order()).toEqual(["a1"]));
+    stream.send(a2);
+    expect(order()).toEqual(["a2", "a1"]);
+    expect(at.rows).toEqual([a1]);
+  });
+
+  test("a read already in flight when access lands paints none of its old rows", async () => {
+    signedInAs("member");
+    const a1 = entryIn("a1", 30, alphaProduct);
+    const b1 = entryIn("b1", 20, betaProduct);
+    const { at } = serveAccess([alphaProduct, betaProduct], [b1, a1]);
+    renderApp("/");
+    await waitFor(() => expect(order()).toEqual(["b1", "a1"]));
+    const stream = FakeEventSource.current;
+    stream.open();
+
+    // the first read after this answers late, from before the access; later ones from after
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let reads = 0;
+    server.use(
+      http.get("/api/web/feed", async () => {
+        reads += 1;
+        if (reads === 1) {
+          await held;
+          return HttpResponse.json(feedPage([b1, a1]));
+        }
+        return HttpResponse.json(feedPage([a1]));
+      }),
+    );
+    act(() => {
+      stream.dispatchEvent(new Event("reset"));
+    });
+    await waitFor(() => expect(reads).toBe(1));
+
+    const shown = watchFor(holding('[data-entry-id^="b"]'));
+    at.products = [alphaProduct];
+    sendAccess(stream);
+    await waitFor(() => expect(order()).toEqual(["a1"]));
+    release();
+    await act(() => Promise.resolve());
+    await act(() => Promise.resolve());
+    expect(order()).toEqual(["a1"]);
+    expect(shown()).toBe(false);
+  });
+
+  test("a project filter found gone after an access event is cleared", async () => {
+    signedInAs("member");
+    const a1 = entryIn("a1", 30, alphaProduct);
+    let projectVisible = true;
+    server.use(
+      http.get("/api/web/feed", ({ request }) =>
+        new URL(request.url).searchParams.has("project") && !projectVisible
+          ? notFound()
+          : HttpResponse.json(feedPage([a1])),
+      ),
+    );
+    const { router } = renderApp("/?project=launch");
+    await waitFor(() => expect(order()).toEqual(["a1"]));
+    const stream = FakeEventSource.current;
+    stream.open();
+
+    projectVisible = false;
+    sendAccess(stream);
+    await waitFor(() => expect(router.state.location.search).toEqual({}));
+    await waitFor(() => expect(order()).toEqual(["a1"]));
+    expect(FakeEventSource.current.url).toBe("/api/web/events");
+  });
+
+  test("the filter chips keep naming the filter that stays while the feed is read again", async () => {
+    signedInAs("member");
+    const a1 = entryIn("a1", 30, alphaProduct);
+    const b1 = entryIn("b1", 20, betaProduct);
+    const { at, holdFeed } = serveAccess([alphaProduct, betaProduct], [b1, a1]);
+    renderApp(`/?product=ALP&actor=${alpha.id}`);
+    await waitFor(() => expect(order()).toEqual(["a1"]));
+    const stream = FakeEventSource.current;
+    stream.open();
+    const productFilter = screen.getByRole("combobox", {
+      name: "Filter by product",
+    });
+    const botFilter = screen.getByRole("combobox", { name: "Filter by bot" });
+    expect(productFilter).toHaveTextContent("alpha");
+    expect(botFilter).toHaveTextContent("Alpha");
+
+    const release = holdFeed();
+    at.products = [alphaProduct];
+    sendAccess(stream);
+    expect(productFilter).toHaveTextContent("alpha");
+    expect(botFilter).toHaveTextContent("Alpha");
+    release();
+    await waitFor(() => expect(order()).toEqual(["a1"]));
+    expect(productFilter).toHaveTextContent("alpha");
+  });
+
+  test("Working now drops what it showed at once, and shows nothing if the read again fails", async () => {
+    signedInAs("member");
+    const b1 = entryIn("b1", 20, betaProduct);
+    serveAccess([alphaProduct, betaProduct], [b1]);
+    serveInProgress([
+      {
+        item: { key: "BET-1", title: "Read the queue" },
+        productKey: betaProduct.key,
+        bot: alpha,
+      },
+    ]);
+    const workingName = "Alpha BET-1, Read the queue, bot";
+    renderApp("/");
+    await waitFor(() => expect(order()).toEqual(["b1"]));
+    await screen.findByRole("link", { name: workingName });
+    const stream = FakeEventSource.current;
+    stream.open();
+
+    let answered = false;
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.get("/api/web/working-now", async () => {
+        await held;
+        answered = true;
+        return notFound();
+      }),
+    );
+    sendAccess(stream);
+    expect(screen.queryByRole("link", { name: workingName })).toBeNull();
+    release();
+    await waitFor(() => expect(answered).toBe(true));
+    await act(async () => {});
+    expect(screen.queryByRole("link", { name: workingName })).toBeNull();
   });
 });
 
