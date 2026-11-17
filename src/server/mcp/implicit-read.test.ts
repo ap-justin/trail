@@ -74,14 +74,15 @@ test("add_comment on recon's ATL item goes through, and update_item is refused n
   hidesItem(removed, "atl in");
 });
 
-test("list_labels on ATL is the not_found of a product the key does not reach; get_item keeps the item's labels", async () => {
+test("list_labels on ATL is a not_found naming recon, the grants and the owner, not the pointer to list_products; get_item keeps the item's labels", async () => {
   const wide = await connect(bot.key);
   await call(wide, "create_label", { product: "ATL", name: "bug" });
   await call(wide, "update_item", { item: atlIn, addLabels: ["bug"] });
-  const missing = await callError(beta, "list_labels", { product: "NOPE" });
-  expect(await callError(beta, "list_labels", { product: "ATL" })).toBe(
-    missing?.replace("NOPE", "ATL"),
+  const hidden = await callError(beta, "list_labels", { product: "ATL" });
+  expect(hidden).toBe(
+    "not_found: this key reads product ATL only through project recon, which shows ATL's name and key and not its labels: ATL's labels need a key that lists product ATL or project recon. Ask tester, the owner of ATL, for that grant.",
   );
+  expect(hidden).not.toContain("list_products");
   expect((await call(beta, "get_item", { item: atlIn })).labels).toEqual([
     "bug",
   ]);

@@ -366,16 +366,14 @@ describe("the readers around an item follow the implicit read", () => {
     expect(service.getProduct(beta, "BTA")).toHaveProperty("createdBy");
   });
 
-  test("ATL's labels are the 404 of a product it does not reach, and a key listing recon lists them", () => {
+  test("ATL's labels are a 404 naming recon, the grants and the owner, and a key listing recon lists them", () => {
     service.createLabel(alpha, { productId: "ATL", name: "bug" });
     const hidden = thrown(() => service.listLabels(beta, "ATL"));
     expect(hidden).toBeInstanceOf(NotFoundError);
     expect(hidden.message).toBe(
-      thrown(() => service.listLabels(beta, "NOPE")).message.replace(
-        "NOPE",
-        "ATL",
-      ),
+      "this key reads product ATL only through project recon, which shows ATL's name and key and not its labels: ATL's labels need a key that lists product ATL or project recon. Ask alpha, the owner of ATL, for that grant.",
     );
+    expect(hidden.message).not.toContain("list_products");
     const listing = keyed("label-lister", { projects: ["recon"] });
     expect(service.listLabels(listing, "ATL").items.map((l) => l.name)).toEqual(
       ["bug"],

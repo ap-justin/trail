@@ -1074,7 +1074,7 @@ export function registerTools(
   register(
     "list_webhooks",
     {
-      description: `List your webhooks, oldest first, each with the products and projects it follows, paused, lastSuccessAt, lastError and lastErrorAt: read it to see whether deliveries are healthy. The secret is never listed. A key without the read action lists only your inbox webhooks. ${ownWebhooks}`,
+      description: `List your webhooks, oldest first, each with the products and projects it follows, paused, lastSuccessAt, lastError and lastErrorAt: read it to see whether deliveries are healthy. lastError is the last failure: what a failed attempt got, like HTTP 500, or why a delivery was not sent, with no attempt made, like "not sent: this webhook's key is revoked". The secret is never listed. A key without the read action lists only your inbox webhooks. ${ownWebhooks}`,
       inputSchema: z.strictObject({}),
       annotations: read,
     },

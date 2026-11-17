@@ -91,16 +91,21 @@ test("a BTA-only key comments on recon's ATL item, and changing it is a 403 forb
   hidesItem(removed, "atl in");
 });
 
-test("GET /products/ATL/labels is the 404 of a product the key does not reach; the item keeps its own labels", async () => {
+test("GET /products/ATL/labels is a 404 naming recon, the grants and the owner, not the pointer to list_products; the item keeps its own labels", async () => {
   await seed("POST", "/api/v1/products/ATL/labels", { name: "bug" });
   await seed("PATCH", `/api/v1/items/${atlIn}`, { addLabels: ["bug"] });
   const hidden = await call("GET", "/products/ATL/labels", btaKey);
   const missing = await call("GET", "/products/NOPE/labels", btaKey);
   expect(hidden.status).toBe(404);
   expect(hidden.body.error).toEqual({
-    ...missing.body.error,
-    message: missing.body.error.message.replace("NOPE", "ATL"),
+    code: missing.body.error.code,
+    message:
+      "this key reads product ATL only through project recon, which shows ATL's name and key and not its labels: ATL's labels need a key that lists product ATL or project recon. Ask tester, the owner of ATL, for that grant.",
   });
+  expect(hidden.text).not.toContain("list_products");
+  const aliased = await call("GET", "/projects/ATL/labels", btaKey);
+  expect(aliased.status).toBe(404);
+  expect(aliased.body.error).toEqual(hidden.body.error);
   expect((await call("GET", `/items/${atlIn}`, btaKey)).body.labels).toEqual([
     "bug",
   ]);

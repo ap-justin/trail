@@ -1058,7 +1058,8 @@ export function createService({
 
   /**
    * `resolveNamedProduct` without the products named only through the implicit
-   * read, which shows their name and key and never their labels.
+   * read, which shows their name and key and never their labels: one of those
+   * is a 404 naming the projects that show it and the grants that would list its labels.
    */
   function resolveLabeledProduct(
     tx: Tx | Db,
@@ -1066,15 +1067,30 @@ export function createService({
     actor: ActingActor,
   ): Product {
     const reach = reachFor(actor);
-    return findProduct(
-      tx,
-      ref,
-      productsNamed(
-        db,
-        reach && { ...reach, implicitProjects: false },
-        product.id,
-      ),
-    );
+    try {
+      return findProduct(
+        tx,
+        ref,
+        productsNamed(
+          db,
+          reach && { ...reach, implicitProjects: false },
+          product.id,
+        ),
+      );
+    } catch (error) {
+      if (!(error instanceof NotFoundError)) throw error;
+      let named: Product;
+      try {
+        named = resolveNamedProduct(tx, ref, actor);
+      } catch (unnamed) {
+        throw unnamed instanceof NotFoundError ? error : unnamed;
+      }
+      const via = implicitProjectsOf(tx, actor, named.id).map((p) => p.slug);
+      if (via.length === 0) throw error;
+      throw new NotFoundError(
+        `this key reads product ${named.key} only through ${projectList(via)}, which shows ${named.key}'s name and key and not its labels: ${named.key}'s labels need a key that lists ${grantsFor(named.key, via)}. ${askForGrant(tx, named)}`,
+      );
+    }
   }
 
   function findProduct(
