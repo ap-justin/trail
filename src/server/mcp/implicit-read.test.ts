@@ -1,6 +1,7 @@
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { beforeAll, expect, test } from "vitest";
+import { afterEach, beforeAll, expect, test } from "vitest";
 import { createBot } from "../service/keys.js";
+import { setProductOwner } from "../service/product-admin.js";
 import { setupTestApp } from "../test-app.js";
 import { mcpClients } from "./test-client.js";
 
@@ -15,6 +16,18 @@ let btaOut = "";
 /** A refusal shows neither the item's title nor its description, which opens with the title. */
 const hidesItem = (refusal: string | undefined, title: string) =>
   expect(refusal).not.toContain(title);
+
+/** Items a test put into recon, taken out after it so no later test reads recon beyond what it seeds. */
+const joinedRecon: string[] = [];
+afterEach(async () => {
+  setProductOwner(db, "ATL", "tester");
+  if (joinedRecon.length === 0) return;
+  const wide = await connect(bot.key);
+  await call(wide, "remove_from_project", {
+    project: "recon",
+    items: joinedRecon.splice(0),
+  });
+});
 
 // products ATL and BTA; project recon draws from both, and each keeps items outside it
 beforeAll(async () => {
@@ -83,6 +96,14 @@ test("list_labels on ATL is a not_found naming recon, the grants and the owner, 
     "not_found: this key reads product ATL only through project recon, which shows ATL's name and key and not its labels: ATL's labels need a key that lists product ATL or project recon. Ask tester, the owner of ATL, for that grant.",
   );
   expect(hidden).not.toContain("list_products");
+  const listing = await connect(
+    createBot(db, "label-lister", { scope: { projects: ["recon"] } }).key,
+  );
+  expect(
+    (await call(listing, "list_labels", { product: "ATL" })).items.map(
+      (l: { name: string }) => l.name,
+    ),
+  ).toEqual(["bug"]);
   expect((await call(beta, "get_item", { item: atlIn })).labels).toEqual([
     "bug",
   ]);
@@ -135,6 +156,7 @@ test("add_to_project of an item whose product the project doesn't draw from is r
     await call(wide, "add_todo", { product: "ATL", title: "atl to draw" })
   ).key as string;
   await call(wide, "add_to_project", { project: "recon", items: [drawn] });
+  joinedRecon.push(drawn);
   const lister = await connect(
     createBot(db, "ctx-lister", { scope: { projects: ["recon", "context"] } })
       .key,
@@ -179,6 +201,7 @@ test("remove_from_project of a member is refused for a key reading the project o
   const both = await todo("atl in recon and atl-list");
   const outside = await todo("atl in atl-list only");
   await call(wide, "add_to_project", { project: "recon", items: [both] });
+  joinedRecon.push(both);
   await call(wide, "add_to_project", {
     project: "atl-list",
     items: [both, outside],
@@ -211,4 +234,138 @@ test("remove_from_project of a member is refused for a key reading the project o
       })
     ).removed,
   ).toEqual([both]);
+});
+
+/** A project drawing from `product` only, and a key listing it and recon. */
+async function target(slug: string, product: string, keyName: string) {
+  const wide = await connect(bot.key);
+  await call(wide, "create_project", { name: slug, slug, products: [product] });
+  return connect(
+    createBot(db, keyName, { scope: { projects: ["recon", slug] } }).key,
+  );
+}
+const slugsOf = async (ref: string) =>
+  (await call(await connect(bot.key), "get_item", { item: ref })).projects
+    .map((p: { slug: string }) => p.slug)
+    .sort();
+
+test("add_to_project of [permitted, refused] is refused and the permitted item is not added", async () => {
+  const wide = await connect(bot.key);
+  const lister = await target("batch", "BTA", "batch-lister");
+  const permitted = (
+    await call(wide, "add_todo", { product: "BTA", title: "bta batch" })
+  ).key as string;
+  await call(wide, "add_to_project", { project: "recon", items: [permitted] });
+  joinedRecon.push(permitted);
+
+  const refused = await callError(lister, "add_to_project", {
+    project: "batch",
+    items: [permitted, atlIn],
+  });
+  expect(refused).toMatch(
+    new RegExp(
+      `^forbidden_scope: adding ${atlIn} to project batch would draw batch from product ATL`,
+    ),
+  );
+  expect(await slugsOf(permitted)).toEqual(["recon"]);
+
+  // the permitted item alone goes through, so the refusal above is the other one's
+  const alone = await call(lister, "add_to_project", {
+    project: "batch",
+    items: [permitted],
+  });
+  expect(alone.added).toEqual([permitted]);
+  expect(await slugsOf(permitted)).toEqual(["batch", "recon"]);
+});
+
+test("remove_from_project of [permitted, refused] is refused and the permitted item stays", async () => {
+  const wide = await connect(bot.key);
+  await call(wide, "create_project", {
+    name: "ATL batch",
+    slug: "atl-batch",
+    products: ["ATL"],
+  });
+  const member = (
+    await call(wide, "add_todo", { product: "BTA", title: "bta member" })
+  ).key as string;
+  const both = (
+    await call(wide, "add_todo", { product: "ATL", title: "atl batch" })
+  ).key as string;
+  await call(wide, "add_to_project", {
+    project: "recon",
+    items: [member, both],
+  });
+  joinedRecon.push(member, both);
+  await call(wide, "add_to_project", { project: "atl-batch", items: [both] });
+  const mixed = await connect(
+    createBot(db, "batch-mixed", {
+      scope: { products: ["BTA"], projects: ["atl-batch"] },
+    }).key,
+  );
+
+  const refused = await callError(mixed, "remove_from_project", {
+    project: "recon",
+    items: [member, both],
+  });
+  expect(refused).toMatch(
+    new RegExp(`^forbidden_scope: ${both} is in project recon, `),
+  );
+  expect(await slugsOf(member)).toEqual(["recon"]);
+  expect(await slugsOf(both)).toEqual(["atl-batch", "recon"]);
+
+  // the permitted item alone goes through, so the refusal above is the other one's
+  const alone = await call(mixed, "remove_from_project", {
+    project: "recon",
+    items: [member],
+  });
+  expect(alone.removed).toEqual([member]);
+});
+
+test("add_to_project drawing a project from a product goes through for a key whose bot owns that product", async () => {
+  const wide = await connect(bot.key);
+  const lister = await target("owned", "BTA", "owned-lister");
+  const item = (await call(wide, "add_todo", { product: "ATL", title: "owned" }))
+    .key as string;
+  await call(wide, "add_to_project", { project: "recon", items: [item] });
+  joinedRecon.push(item);
+  const owner = await connect(
+    createBot(db, "atl-owner", { scope: { projects: ["recon", "owned"] } }).key,
+  );
+
+  expect(
+    await callError(lister, "add_to_project", {
+      project: "owned",
+      items: [item],
+    }),
+  ).toMatch(/^forbidden_scope: adding /);
+  setProductOwner(db, "ATL", "atl-owner");
+  const added = await call(owner, "add_to_project", {
+    project: "owned",
+    items: [item],
+  });
+  expect(added.added).toEqual([item]);
+  expect(await slugsOf(item)).toEqual(["owned", "recon"]);
+});
+
+test("add_to_project drawing a project from a product with no owner says to ask whoever minted the key", async () => {
+  const wide = await connect(bot.key);
+  const lister = await target("nobody", "BTA", "nobody-lister");
+  const item = (
+    await call(wide, "add_todo", { product: "ATL", title: "nobody" })
+  ).key as string;
+  await call(wide, "add_to_project", { project: "recon", items: [item] });
+  joinedRecon.push(item);
+  db.$client
+    .prepare("update product set owner_id = null where key = 'ATL'")
+    .run();
+
+  expect(
+    await callError(lister, "add_to_project", {
+      project: "nobody",
+      items: [item],
+    }),
+  ).toBe(
+    `forbidden_scope: adding ${item} to project nobody would draw nobody from product ATL: to add it, the bot needs a key that lists product ATL. Ask whoever minted the key for that grant.`,
+  );
+  expect(await slugsOf(item)).toEqual(["recon"]);
 });

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, test } from "vitest";
 import { migrate, openDatabase } from "../db/client.js";
-import { projectProduct } from "../db/schema.js";
+import { activityEvent, projectProduct } from "../db/schema.js";
 import { createEventBus } from "../events/bus.js";
 import { testWebhooks } from "../test-app.js";
 import {
@@ -68,6 +68,7 @@ function thrown(call: () => unknown): Error {
   throw new Error("expected the call to throw");
 }
 
+const eventCount = () => db.select().from(activityEvent).all().length;
 const itemCount = () => service.listItems(admin, { limit: 200 }).items.length;
 
 describe("a file_issue replay", () => {
@@ -123,9 +124,7 @@ describe("a file_issue replay", () => {
     const count = itemCount();
 
     const error = thrown(() => send("product-gone"));
-    expect(error.constructor).toBe(
-      thrown(() => send("product-fresh")).constructor,
-    );
+    expect(error).toBeInstanceOf(NotFoundError);
     expect(error.message).toBe(thrown(() => send("product-fresh")).message);
     expect(itemCount()).toBe(count);
   });
@@ -140,8 +139,10 @@ describe("a file_issue replay", () => {
       );
     const first = send();
     const count = itemCount();
+    const events = eventCount();
     expect(send()).toEqual(first);
     expect(itemCount()).toBe(count);
+    expect(eventCount()).toBe(events);
   });
 
   test("naming only a project replays once that project draws from another product too", () => {

@@ -2,7 +2,15 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { and, eq } from "drizzle-orm";
-import { afterAll, describe, expect, test } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "vitest";
 import { migrate, openDatabase } from "../db/client.js";
 import { projectProduct } from "../db/schema.js";
 import { createEventBus } from "../events/bus.js";
@@ -212,19 +220,37 @@ describe("on an item it reaches only through recon, a BTA-only key may comment a
 });
 
 describe("remove_from_project on a project the key reads only through its products", () => {
-  test("is a 403 for another product's item, naming the grants and the owner, and the item stays", () => {
+  let both = "";
+  let mixed: ReturnType<typeof keyed>;
+  beforeAll(() => {
     service.createProject(admin, {
       name: "ATL list",
       slug: "atl-list",
       products: ["ATL"],
     });
-    const both = service.addTodo(alpha, {
+    both = service.addTodo(alpha, {
       product: "ATL",
       title: "atl in recon and atl-list",
     }).key;
-    service.addToProject(admin, "recon", [both]);
+    mixed = keyed("mixed", { products: ["BTA"], projects: ["atl-list"] });
+  });
+  // each test starts with both in recon and atl-list, and leaves recon as the readers below expect it, whether or not it passed
+  beforeEach(() => {
+    service.addToProject(admin, "recon", [both, btaIn]);
     service.addToProject(admin, "atl-list", [both]);
-    const mixed = keyed("mixed", { products: ["BTA"], projects: ["atl-list"] });
+  });
+  afterEach(() => {
+    service.removeFromProject(admin, "recon", [both]);
+    service.addToProject(admin, "recon", [btaIn]);
+    setProductOwner(db, "ATL", "alpha");
+  });
+  const inRecon = (ref: string) =>
+    service
+      .getItem(admin, ref)
+      .projects.map((p) => p.slug)
+      .includes("recon");
+
+  test("is a 403 for another product's item, naming the grants and the owner, and the item stays", () => {
     const error = thrown(() =>
       service.removeFromProject(mixed, "recon", [both]),
     );
@@ -241,14 +267,54 @@ describe("remove_from_project on a project the key reads only through its produc
     expect(
       service.removeFromProject(mixed, "atl-list", [both]).removed,
     ).toEqual([both]);
-    service.removeFromProject(admin, "recon", [both]);
   });
 
   test("goes through for an item of the key's own product", () => {
     expect(service.removeFromProject(beta, "recon", [btaIn]).removed).toEqual([
       btaIn,
     ]);
-    service.addToProject(admin, "recon", [btaIn]);
+  });
+
+  test("a batch holding one item it may not remove is a 403 and removes none of them", () => {
+    const error = thrown(() =>
+      service.removeFromProject(mixed, "recon", [btaIn, both]),
+    );
+    expect(error).toBeInstanceOf(ForbiddenScopeError);
+    expect(error.message).toContain(`${both} is in project recon`);
+    expect([btaIn, both].map(inRecon)).toEqual([true, true]);
+    // the permitted item alone goes through, so the refusal above is the other one's
+    expect(service.removeFromProject(mixed, "recon", [btaIn]).removed).toEqual([
+      btaIn,
+    ]);
+  });
+
+  test("goes through for another product's item when the key's bot owns that product", () => {
+    const owner = keyed("atl-owner-key", {
+      products: ["BTA"],
+      projects: ["atl-list"],
+    });
+    expect(() => service.removeFromProject(owner, "recon", [both])).toThrow(
+      ForbiddenScopeError,
+    );
+    setProductOwner(db, "ATL", "atl-owner-key");
+    expect(service.removeFromProject(owner, "recon", [both]).removed).toEqual([
+      both,
+    ]);
+    expect(inRecon(both)).toBe(false);
+  });
+
+  test("with no owner on ATL, the refusal says to ask whoever minted the key", () => {
+    db.$client
+      .prepare("update product set owner_id = null where key = 'ATL'")
+      .run();
+    const error = thrown(() =>
+      service.removeFromProject(mixed, "recon", [both]),
+    );
+    expect(error).toBeInstanceOf(ForbiddenScopeError);
+    expect(error.message).toBe(
+      `${both} is in project recon, which this key reads only through its products: to remove it from recon, the bot needs a key that lists product ATL or project recon. Ask whoever minted the key for that grant.`,
+    );
+    expect(inRecon(both)).toBe(true);
   });
 
   test("lists another product's item that isn't in the project as unchanged", () => {

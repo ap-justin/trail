@@ -1,5 +1,6 @@
-import { beforeAll, expect, test } from "vitest";
+import { afterEach, beforeAll, expect, test } from "vitest";
 import { createBot } from "../service/keys.js";
+import { setProductOwner } from "../service/product-admin.js";
 import { setupTestApp } from "../test-app.js";
 
 const { db, request } = setupTestApp();
@@ -38,6 +39,15 @@ const todo = async (product: string, title: string) =>
       description: `${title}, described`,
     })
   ).key as string;
+
+/** Items a test put into recon, taken out after it so no later test reads recon beyond what it seeds. */
+const joinedRecon: string[] = [];
+afterEach(async () => {
+  setProductOwner(db, "ATL", "tester");
+  for (const key of joinedRecon.splice(0)) {
+    await seed("DELETE", `/api/v1/projects/recon/items/${key}`, undefined);
+  }
+});
 
 // products ATL and BTA; project recon draws from both, and each keeps items outside it
 beforeAll(async () => {
@@ -106,6 +116,17 @@ test("GET /products/ATL/labels is a 404 naming recon, the grants and the owner, 
   const aliased = await call("GET", "/projects/ATL/labels", btaKey);
   expect(aliased.status).toBe(404);
   expect(aliased.body.error).toEqual(hidden.body.error);
+  const listing = createBot(db, "label-lister", {
+    scope: { projects: ["recon"] },
+  }).key;
+  for (const path of ["/products/ATL/labels", "/projects/ATL/labels"]) {
+    const listed = await call("GET", path, listing);
+    expect(listed.status, path).toBe(200);
+    expect(
+      listed.body.items.map((l: Body) => l.name),
+      path,
+    ).toEqual(["bug"]);
+  }
   expect((await call("GET", `/items/${atlIn}`, btaKey)).body.labels).toEqual([
     "bug",
   ]);
@@ -163,6 +184,7 @@ test("add_to_project of an item whose product the project doesn't draw from is a
   });
   const drawn = await todo("ATL", "atl to draw");
   await seed("POST", "/api/v1/projects/recon/items", { items: [drawn] });
+  joinedRecon.push(drawn);
   const lister = createBot(db, "ctx-lister", {
     scope: { projects: ["recon", "context"] },
   }).key;
@@ -208,6 +230,7 @@ test("DELETE /projects/{slug}/items/{key} of a member is a 403 for a key reading
   const both = await todo("ATL", "atl in recon and atl-list");
   const outside = await todo("ATL", "atl in atl-list only");
   await seed("POST", "/api/v1/projects/recon/items", { items: [both] });
+  joinedRecon.push(both);
   await seed("POST", "/api/v1/projects/atl-list/items", {
     items: [both, outside],
   });
@@ -236,4 +259,88 @@ test("DELETE /projects/{slug}/items/{key} of a member is a 403 for a key reading
     mixed,
   );
   expect(removed.body.removed).toEqual([both]);
+});
+
+/** A project drawing from BTA only, and a key listing it and recon: ATL's recon items need an ATL grant to join it. */
+async function batchTarget(slug: string, keyName: string) {
+  await seed("POST", "/api/v1/projects", {
+    name: slug,
+    slug,
+    products: ["BTA"],
+  });
+  return createBot(db, keyName, { scope: { projects: ["recon", slug] } }).key;
+}
+const slugsOf = async (ref: string) =>
+  (
+    ((await (await request("GET", `/api/v1/items/${ref}`)).json()) as Body)
+      .projects as Body[]
+  )
+    .map((p) => p.slug)
+    .sort();
+
+test("POST /projects/{slug}/items of [permitted, refused] is a 403 and the permitted item is not added", async () => {
+  const lister = await batchTarget("batch", "batch-lister");
+  const permitted = await todo("BTA", "bta batch");
+  await seed("POST", "/api/v1/projects/recon/items", { items: [permitted] });
+  joinedRecon.push(permitted);
+
+  const refused = await call("POST", "/projects/batch/items", lister, {
+    items: [permitted, atlIn],
+  });
+  expect(refused.status).toBe(403);
+  expect(refused.body.error.code).toBe("forbidden_scope");
+  expect(refused.body.error.message).toContain(
+    `adding ${atlIn} to project batch would draw batch from product ATL`,
+  );
+  expect(await slugsOf(permitted)).toEqual(["recon"]);
+
+  // the permitted item alone goes through, so the refusal above is the other one's
+  const alone = await call("POST", "/projects/batch/items", lister, {
+    items: [permitted],
+  });
+  expect(alone.body.added).toEqual([permitted]);
+  expect(await slugsOf(permitted)).toEqual(["batch", "recon"]);
+});
+
+test("POST /projects/{slug}/items drawing a project from a product goes through for a key whose bot owns that product", async () => {
+  const lister = await batchTarget("owned", "owned-lister");
+  const item = await todo("ATL", "atl owned");
+  await seed("POST", "/api/v1/projects/recon/items", { items: [item] });
+  joinedRecon.push(item);
+  const owner = createBot(db, "atl-owner", {
+    scope: { projects: ["recon", "owned"] },
+  }).key;
+
+  const refused = await call("POST", "/projects/owned/items", lister, {
+    items: [item],
+  });
+  expect(refused.status).toBe(403);
+
+  setProductOwner(db, "ATL", "atl-owner");
+  const added = await call("POST", "/projects/owned/items", owner, {
+    items: [item],
+  });
+  expect(added.status).toBeLessThan(300);
+  expect(added.body.added).toEqual([item]);
+  expect(await slugsOf(item)).toEqual(["owned", "recon"]);
+});
+
+test("POST /projects/{slug}/items drawing a project from a product with no owner is a 403 saying to ask whoever minted the key", async () => {
+  const lister = await batchTarget("nobody", "nobody-lister");
+  const item = await todo("ATL", "atl nobody");
+  await seed("POST", "/api/v1/projects/recon/items", { items: [item] });
+  joinedRecon.push(item);
+  db.$client
+    .prepare("update product set owner_id = null where key = 'ATL'")
+    .run();
+
+  const refused = await call("POST", "/projects/nobody/items", lister, {
+    items: [item],
+  });
+  expect(refused.status).toBe(403);
+  expect(refused.body.error).toEqual({
+    code: "forbidden_scope",
+    message: `adding ${item} to project nobody would draw nobody from product ATL: to add it, the bot needs a key that lists product ATL. Ask whoever minted the key for that grant.`,
+  });
+  expect(await slugsOf(item)).toEqual(["recon"]);
 });

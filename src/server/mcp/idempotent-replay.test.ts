@@ -1,5 +1,6 @@
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { beforeAll, describe, expect, test } from "vitest";
+import { activityEvent } from "../db/schema.js";
 import {
   createBot,
   editKeyScope,
@@ -13,6 +14,8 @@ const { app, db, bot } = setupTestApp();
 const { connect, call, callError } = mcpClients(app);
 
 let wide: Client;
+
+const eventCount = () => db.select().from(activityEvent).all().length;
 
 /** A scoped bot's connected client and the prefix `editKeyScope` finds its key by. */
 async function keyed(name: string, scope: KeyScopeInput) {
@@ -53,14 +56,17 @@ describe("a replayed create over MCP", () => {
       idempotency_key,
     });
     const first = await call(owner, "add_todo", args("todo-once"));
+    const events = eventCount();
     expect((await call(owner, "add_todo", args("todo-once"))).id).toBe(
       first.id,
     );
+    expect(eventCount()).toBe(events);
     setProductOwner(db, "OWN", "tester");
 
     const replay = await callError(owner, "add_todo", args("todo-once"));
-    expect(replay).toMatch(/^forbidden/);
+    expect(replay).toMatch(/^forbidden: /);
     expect(replay).toBe(await callError(owner, "add_todo", args("todo-fresh")));
+    expect(eventCount()).toBe(events);
   });
 
   test("add_comment on an item that has left the key's one project is the error a new comment gets, without the title", async () => {
@@ -158,7 +164,7 @@ describe("a replayed create over MCP", () => {
     setProductOwner(db, "LBL", "tester");
 
     const replay = await callError(owner, "create_label", args("label-once"));
-    expect(replay).toMatch(/^forbidden/);
+    expect(replay).toMatch(/^forbidden: /);
     expect(replay).toBe(
       await callError(owner, "create_label", args("label-fresh")),
     );

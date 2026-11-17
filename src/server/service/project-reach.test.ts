@@ -555,6 +555,25 @@ describe("add_to_project draws a project from a new product only on a product gr
     ]);
   });
 
+  test("a batch holding one item it may not add is a 403 and adds none of them", () => {
+    const before = productsOf("other");
+    const error = thrown(() =>
+      service.addToProject(lister.actor, "other", [atlIn, btaIn]),
+    );
+    expect(error).toBeInstanceOf(ForbiddenScopeError);
+    expect(error.message).toContain(
+      `adding ${btaIn} to project other would draw other from product BTA`,
+    );
+    expect(service.getItem(admin, atlIn).projects.map((p) => p.slug)).toEqual([
+      "recon",
+    ]);
+    expect(productsOf("other")).toEqual(before);
+    // the permitted item alone goes through, so the refusal above is the other one's
+    expect(service.addToProject(lister.actor, "other", [atlIn]).added).toEqual([
+      atlIn,
+    ]);
+  });
+
   test("a key listing the product, or the product's owner, draws the project from it", () => {
     const withBta = keyed("iota", { products: ["BTA"], projects: ["context"] });
     expect(

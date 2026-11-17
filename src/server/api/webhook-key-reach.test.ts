@@ -393,6 +393,42 @@ test("a webhook with no recorded key goes out when any one of its bot's keys rea
   ]);
 });
 
+test("a project-following webhook with no recorded key goes out when any one of its bot's keys reaches the project, and is skipped naming the project when none does", async () => {
+  const older = createBot(db, `reach-${++bots}`, {
+    scope: { projects: ["solo"], actions: ["read"] },
+  });
+  const newer = createKey(db, older.actor.id, {
+    projects: ["solo"],
+    actions: ["read"],
+  }).key;
+  // key ages tie within a clock tick: pin which is the oldest
+  db.update(apiKey)
+    .set({ createdAt: new Date(Date.now() - 3_600_000) })
+    .where(eq(apiKey.prefix, prefixOf(older.key)))
+    .run();
+  const { id, url } = await follow({ projects: ["solo"] }, newer);
+  forgetKey(id);
+  editKeyScope(db, prefixOf(older.key), {
+    removeProjects: ["solo"],
+    addProjects: ["recon"],
+  });
+  await retitle(soloItem, "the newer key still reaches solo");
+  expect(await sentNowTo(url)).toBe(2);
+  editKeyScope(db, prefixOf(newer), {
+    removeProjects: ["solo"],
+    addProjects: ["recon"],
+  });
+  await retitle(soloItem, "neither key reaches solo");
+  expect(await sentNowTo(url)).toBe(0);
+  const lost = "not sent: this webhook's key no longer reaches solo";
+  expect(historyOf(id)).toEqual([
+    ["trail.issue.updated", "delivered", 1, null],
+    ["trail.item.updated", "delivered", 1, null],
+    ["trail.issue.updated", "failed", 0, lost],
+    ["trail.item.updated", "failed", 0, lost],
+  ]);
+});
+
 test("an inbox webhook with no recorded key gets its messages while its bot has a live key, and skips them once it has none", async () => {
   const receiver = createBot(db, "reach-inbox-unrecorded", {
     scope: { actions: ["read"] },

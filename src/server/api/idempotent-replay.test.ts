@@ -4,6 +4,7 @@ import {
   editKeyScope,
   type KeyScopeInput,
 } from "../service/keys.js";
+import { activityEvent } from "../db/schema.js";
 import { setProductOwner } from "../service/product-admin.js";
 import { setupTestApp } from "../test-app.js";
 
@@ -32,6 +33,8 @@ const create = (
     json,
     headers: { "idempotency-key": idempotency },
   });
+
+const eventCount = () => db.select().from(activityEvent).all().length;
 
 const read = async (res: Response) => ({
   status: res.status,
@@ -79,10 +82,12 @@ describe("a replayed create over REST", () => {
       await create("POST", "/items", owner, "todo-once", todo),
     );
     expect(first.status).toBe(201);
+    const events = eventCount();
     const again = await read(
       await create("POST", "/items", owner, "todo-once", todo),
     );
     expect(again.body.id).toBe(first.body.id);
+    expect(eventCount()).toBe(events);
     setProductOwner(db, "OWN", "tester");
 
     const replay = await read(
@@ -92,6 +97,7 @@ describe("a replayed create over REST", () => {
     expect(replay).toEqual(
       await read(await create("POST", "/items", owner, "todo-fresh", todo)),
     );
+    expect(eventCount()).toBe(events);
   });
 
   test("a comment on an item that has left the key's one project is the 404 a new comment gets, without the title", async () => {
