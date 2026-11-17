@@ -297,7 +297,7 @@ describe("product", () => {
     );
   }
 
-  test("a status update reads avatar and name, then the title before the date on its own row; the issue list's assignee never carries it", () => {
+  test("a status update reads avatar, name and title on one line, then health and date; the issue list's assignee never carries it", () => {
     renderProduct();
     // the issue table (1440), its rows (375) and both updates are all in the DOM
     const pills = screen.getAllByTitle("Release manager");
@@ -307,18 +307,19 @@ describe("product", () => {
     if (!update) throw new Error("no status update");
     const name = within(update).getByText("Beta");
     const health = within(update).getByText("On track");
-    // row 1: avatar, name, health; the name truncates rather than pushing the row wider
+    // line 1: avatar, then name and title together; the name truncates rather than pushing the row wider
+    expect(name.parentElement).toBe(pill.parentElement);
     expect(
-      within(update).getByRole("img", { name: "Beta, bot" }).parentElement,
+      within(update).getByRole("img", { name: "Beta, bot" }).nextElementSibling,
     ).toBe(name.parentElement);
     expect(within(update).queryByText("Bot")).toBeNull();
-    expect(health.closest("div")).toBe(name.parentElement);
     expect(name).toHaveClass("min-w-0", "truncate");
-    // row 2: the pill, then the date, in a row of their own after row 1
-    const row2 = pill.parentElement;
-    expect(row2).not.toBe(name.parentElement);
-    expect(row2?.previousElementSibling).toBe(name.parentElement);
-    expect(pill.nextElementSibling?.tagName).toBe("TIME");
+    // line 2 below lg: health, then the date; at lg the health ends line 1
+    expect(health.nextElementSibling?.tagName).toBe("TIME");
+    expect(health.parentElement?.previousElementSibling).toBe(
+      name.parentElement,
+    );
+    expect(health).toHaveClass("lg:col-start-3", "lg:row-start-1");
     expect(titlesIn(screen.getByRole("table"), "Release manager")).toHaveLength(
       0,
     );

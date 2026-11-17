@@ -456,11 +456,12 @@ function PersonRow({
     <li
       data-person={personId(person)}
       className={cn(
-        "flex flex-col gap-2 border-b border-rule px-4 py-3 lg:flex-row lg:flex-wrap lg:items-center lg:gap-3 lg:px-2",
+        "flex flex-col gap-2 border-b border-rule py-3 max-lg:mx-4 lg:flex-row lg:flex-wrap lg:items-center lg:gap-3 lg:px-2",
         editing && "lg:my-1.5 lg:rounded-xl lg:border lg:bg-muted",
       )}
     >
-      <div className="flex min-w-0 items-center gap-2 lg:w-58 lg:gap-3">
+      {/* below lg the lines under this one indent past the avatar: 28px and its 12px gap */}
+      <div className="flex min-w-0 items-center gap-3 lg:w-58">
         <PersonAvatar person={person} />
         <div className="flex min-w-0 flex-col">
           <span className="flex items-center gap-2">
@@ -470,26 +471,17 @@ function PersonRow({
             )}
           </span>
           <span className="truncate text-muted-foreground">
-            {person.pending ? (
-              "Invited · hasn't signed in"
-            ) : (
-              <>
-                {person.name && (
+            {person.pending
+              ? "Invited, hasn't signed in"
+              : person.name && (
                   <span className="font-mono text-xs">{handle}</span>
                 )}
-                {person.owner && (
-                  <span className="lg:hidden"> · All products</span>
-                )}
-              </>
-            )}
           </span>
         </div>
       </div>
 
       {person.owner ? (
-        <span className="text-muted-foreground max-lg:hidden">
-          All products
-        </span>
+        <span className="text-muted-foreground max-lg:pl-10">All products</span>
       ) : editing ? (
         <form
           className="flex flex-col gap-2 lg:basis-full lg:pl-60"
@@ -536,7 +528,7 @@ function PersonRow({
         </form>
       ) : (
         <>
-          <div className="flex min-w-0 flex-1 flex-wrap gap-1">
+          <div className="flex min-w-0 flex-1 flex-wrap gap-1 max-lg:pl-10">
             {person.products.map((product) => (
               <ProductChip key={product.key} product={product} />
             ))}
@@ -544,7 +536,7 @@ function PersonRow({
           {mode === "confirm" ? (
             <fieldset
               aria-label={`Remove ${handle}`}
-              className="flex min-w-0 flex-wrap items-center gap-2 lg:gap-3"
+              className="flex min-w-0 flex-wrap items-center gap-2 max-lg:pl-10 lg:gap-3"
               onKeyDown={cancelOnEscape}
             >
               <span className="text-muted-foreground max-lg:basis-full">
@@ -554,7 +546,6 @@ function PersonRow({
                 ref={keepRef}
                 variant="outline"
                 size="sm"
-                className="max-lg:flex-1"
                 onClick={() => changeMode("view")}
               >
                 Keep
@@ -564,7 +555,6 @@ function PersonRow({
                 size="sm"
                 aria-disabled={busy || undefined}
                 aria-busy={removing || undefined}
-                className="max-lg:flex-1"
                 onClick={() => {
                   if (busy) return;
                   setSent("remove");
@@ -576,14 +566,13 @@ function PersonRow({
               <RowStatus error={failure} className="basis-full" />
             </fieldset>
           ) : (
-            <div className="flex gap-2">
+            <div className="flex gap-2 max-lg:pl-10">
               <Button
                 ref={editRef}
                 data-row-action="edit"
                 variant="outline"
                 size="sm"
                 aria-label={`Edit products for ${handle}`}
-                className="max-lg:flex-1"
                 onClick={() => {
                   setDraft(person.products.map((p) => p.key));
                   changeMode("edit");
@@ -596,7 +585,7 @@ function PersonRow({
                 variant="outline"
                 size="sm"
                 aria-label={`Remove ${handle}`}
-                className="text-destructive max-lg:flex-1"
+                className="text-destructive"
                 onClick={() => changeMode("confirm")}
               >
                 <Trash2Icon data-icon="inline-start" aria-hidden="true" />
@@ -605,7 +594,10 @@ function PersonRow({
             </div>
           )}
           {mode === "view" && sent && (
-            <RowStatus error={failure} className="lg:basis-full lg:pl-60" />
+            <RowStatus
+              error={failure}
+              className="max-lg:pl-10 lg:basis-full lg:pl-60"
+            />
           )}
         </>
       )}

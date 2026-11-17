@@ -1,4 +1,4 @@
-import { BotIcon, FolderIcon, ShapesIcon } from "lucide-react";
+import { BotIcon, FolderIcon } from "lucide-react";
 import {
   type ReactNode,
   type Ref,
@@ -12,6 +12,7 @@ import {
   FilterSelect,
   FiltersSheet,
   ProductSelect,
+  TypeSelect,
 } from "@/components/filter-select";
 import { MarkdownText } from "@/components/markdown-text";
 import {
@@ -326,12 +327,8 @@ function FeedFilters({
         value={projectFilter}
         onChange={onProjectFilterChange}
       />
-      <FilterSelect
-        label="Filter by type"
+      <TypeSelect
         fieldLabel={inSheet ? "Type" : undefined}
-        allLabel="All types"
-        icon={ShapesIcon}
-        options={TYPE_OPTIONS}
         value={typeFilter}
         onChange={onTypeFilterChange}
       />
@@ -371,11 +368,6 @@ function showEventsLabel(count: number | null) {
   if (count === null) return "Show events";
   return `Show ${count} ${count === 1 ? "event" : "events"}`;
 }
-
-const TYPE_OPTIONS: { value: WebItemType; label: string }[] = [
-  { value: "issue", label: "Issues" },
-  { value: "todo", label: "Todos" },
-];
 
 function FeedSkeleton() {
   const widths = [

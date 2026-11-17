@@ -102,7 +102,7 @@ describe("people list", () => {
   test('a pending invite says "Invited · hasn\'t signed in"', () => {
     renderPeople();
     expect(
-      row("alpha-dev").getByText("Invited · hasn't signed in"),
+      row("alpha-dev").getByText("Invited, hasn't signed in"),
     ).toBeInTheDocument();
   });
 
@@ -462,7 +462,7 @@ describe("people invited by email", () => {
       row("sam@studio.example").getByText("sam@studio.example"),
     ).toBeInTheDocument();
     expect(
-      row("sam@studio.example").getByText("Invited · hasn't signed in"),
+      row("sam@studio.example").getByText("Invited, hasn't signed in"),
     ).toBeInTheDocument();
     const pending = document.querySelector(
       '[data-person="sam@studio.example"] .border-dashed',
@@ -716,9 +716,11 @@ describe("products", () => {
     ]);
   });
 
-  test("the owner's row reads All products", () => {
+  test("the owner's row reads All products once, on its own line under the name", () => {
     renderPeople();
-    expect(row("jordansmith").getAllByText(/All products/)).not.toEqual([]);
+    const all = row("jordansmith").getByText("All products");
+    expect(all.tagName).toBe("SPAN");
+    expect(all.closest("li")?.firstElementChild).not.toContainElement(all);
   });
 
   test("editing names the products the person can see", async () => {

@@ -117,25 +117,43 @@ function ItemType({ type }: { type: WebItemType }) {
   );
 }
 
+/**
+ * At lg the title, then one byline: type, key, who filed it and when. Below lg the
+ * byline dissolves into the header's flex row so type and key lead above the title,
+ * with the status at their right, and the rest follows under it.
+ */
 function Header({ issue }: { issue: WebItemView }) {
+  const lead = "max-lg:order-1";
+  const rest = "max-lg:order-3";
   return (
-    <header className="flex flex-col gap-2 px-4 pt-3.5 pb-3 lg:gap-1.5 lg:p-0">
-      <h1 className="text-lg leading-tight font-semibold lg:text-xl">
+    <header className="flex flex-wrap items-center gap-x-1.5 gap-y-2 px-4 pt-4 pb-3 text-muted-foreground lg:flex-col lg:items-stretch lg:gap-1.5 lg:p-0">
+      <h1 className="basis-full text-xl leading-tight font-semibold text-foreground max-lg:order-2">
         {issue.title}
       </h1>
-      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground">
-        <ItemType type={issue.type} />
-        <KeyText>{issue.key}</KeyText>
-        <span>{createdAs(issue) === "todo" ? "planned by" : "filed by"}</span>
-        <Actor actor={issue.creator} withTitle={false} />
-        <time dateTime={issue.createdAt}>
-          <span className="max-lg:hidden">on </span>
-          {formatDay(new Date(issue.createdAt), new Date())}
+      <p className="max-lg:contents lg:flex lg:flex-wrap lg:items-center lg:gap-x-2 lg:gap-y-1">
+        <span className={lead}>
+          <ItemType type={issue.type} />
+        </span>
+        <KeyText className={lead}>{issue.key}</KeyText>
+        <span className={rest}>
+          {createdAs(issue) === "todo" ? "planned by" : "filed by"}
+        </span>
+        <span className={cn("flex items-center gap-1.5", rest)}>
+          <Actor actor={issue.creator} withTitle={false} />
+        </span>
+        <time dateTime={issue.createdAt} className={rest}>
+          on {formatDay(new Date(issue.createdAt), new Date())}
         </time>
         {issue.sourceAuthor && (
-          <span className="text-2xs">originally by {issue.sourceAuthor}</span>
+          <span className={cn("text-2xs", rest)}>
+            originally by {issue.sourceAuthor}
+          </span>
         )}
       </p>
+      <StatusLabel
+        status={issue.status}
+        className="ml-auto text-sm lg:hidden max-lg:order-1"
+      />
     </header>
   );
 }
@@ -185,21 +203,21 @@ const noAssignee: Record<WebItemType, ReactNode> = {
 /**
  * Read-only on purpose: people never change status, priority, labels, assignee or
  * estimate, so nothing here is a control, has a hover state or carries a chevron.
- * Below lg: Status, Priority, Estimate and Product as a 4-column grid, then Labels,
- * Assignee and Projects as full rows; the byline carries the type.
+ * Below lg every property is a full 44px row; Type and Status sit in the header there
+ * and Created drops, so Priority leads.
  */
 function Properties({ issue }: { issue: WebItemView }) {
   const headingId = useId();
   return (
     <section aria-labelledby={headingId} className="max-lg:px-4 max-lg:py-3.5">
-      <h2 id={headingId} className="mb-2 font-medium lg:mb-3">
+      <h2 id={headingId} className="mb-1 font-medium lg:mb-3">
         Properties
       </h2>
-      <dl className="grid grid-cols-[auto_minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 lg:grid-cols-[--spacing(21)_minmax(0,1fr)]">
+      <dl className="grid auto-rows-[minmax(--spacing(11),auto)] grid-cols-[--spacing(24)_minmax(0,1fr)] items-center gap-x-2 lg:auto-rows-auto lg:grid-cols-[--spacing(21)_minmax(0,1fr)] lg:gap-y-2">
         <Property label="Type" className="max-lg:hidden">
           <ItemType type={issue.type} />
         </Property>
-        <Property label="Status">
+        <Property label="Status" className="max-lg:hidden">
           <StatusLabel status={issue.status} className="text-sm" />
         </Property>
         <Property label="Priority">
@@ -208,17 +226,12 @@ function Properties({ issue }: { issue: WebItemView }) {
         <Property label="Estimate">
           {issue.estimate === null ? none : `${issue.estimate} h`}
         </Property>
-        {/* below lg, Labels, Assignee then Projects take full-width rows after the pairs */}
-        <Property
-          label="Assignee"
-          // at lg the label stays on the name's row, above the title's
-          itemClassName="max-lg:order-2 lg:self-start"
-          valueClassName="max-lg:col-span-3"
-        >
+        {/* at lg the label stays on the name's row, above the title's */}
+        <Property label="Assignee" itemClassName="lg:self-start">
           {issue.assignee ? (
             // at lg a grid with the title on a second row, indented past the avatar;
             // below, one line that wraps the title under a long name
-            <span className="flex min-w-0 items-center gap-1.5 lg:grid lg:grid-cols-[auto_minmax(0,1fr)] lg:justify-items-start lg:gap-x-2 lg:gap-y-1">
+            <span className="flex min-w-0 items-center gap-2 lg:grid lg:grid-cols-[auto_minmax(0,1fr)] lg:justify-items-start lg:gap-x-2 lg:gap-y-1">
               <ActorAvatar actor={issue.assignee} size="xs" />
               <ActorName
                 actor={issue.assignee}
@@ -232,11 +245,7 @@ function Properties({ issue }: { issue: WebItemView }) {
             noAssignee[issue.type]
           )}
         </Property>
-        <Property
-          label="Labels"
-          itemClassName="max-lg:order-1"
-          valueClassName="max-lg:col-span-3"
-        >
+        <Property label="Labels">
           {issue.labels.length === 0
             ? none
             : issue.labels.map((label) => (
@@ -246,30 +255,30 @@ function Properties({ issue }: { issue: WebItemView }) {
         <Property label="Product">
           <AppLink
             href={paths.product(issue.product.key)}
-            className="flex items-center gap-1 hover:underline lg:gap-2"
+            className="flex items-center gap-2 hover:underline"
           >
             <KeyText className="text-foreground">{issue.product.key}</KeyText>{" "}
             {issue.product.name}
           </AppLink>
         </Property>
-        <Property
-          label="Projects"
-          itemClassName="max-lg:order-3 self-start"
-          valueClassName="max-lg:col-span-3"
-        >
+        <Property label="Projects" itemClassName="lg:self-start">
           {issue.projects.length === 0 ? (
             none
           ) : (
-            <ul className="flex flex-col gap-1">
+            // below lg one comma-separated line, without the folder glyphs
+            <ul className="flex flex-wrap gap-x-1 lg:flex-col lg:gap-1">
               {issue.projects.map((project) => (
-                <li key={project.slug}>
+                <li
+                  key={project.slug}
+                  className="flex max-lg:not-last:after:content-[',']"
+                >
                   <AppLink
                     href={paths.project(project.slug)}
-                    className="flex items-center gap-1.5 hover:underline lg:gap-2"
+                    className="flex items-center gap-2 hover:underline"
                   >
                     <FolderIcon
                       aria-hidden="true"
-                      className="size-3.5 shrink-0 text-muted-foreground"
+                      className="size-3.5 shrink-0 text-muted-foreground max-lg:hidden"
                     />
                     {project.name}
                   </AppLink>
@@ -281,9 +290,7 @@ function Properties({ issue }: { issue: WebItemView }) {
         <Property label="Created" className="max-lg:hidden">
           {formatAbsolute(issue.createdAt)}
         </Property>
-        <Property label="Updated" className="max-lg:hidden">
-          {formatAbsolute(issue.updatedAt)}
-        </Property>
+        <Property label="Updated">{formatAbsolute(issue.updatedAt)}</Property>
       </dl>
     </section>
   );
@@ -452,13 +459,10 @@ function CommentWell({
             originally by {entry.comment.sourceAuthor}
           </span>
         )}
-        <EntryTime iso={entry.createdAt} className="ml-auto max-lg:hidden" />
+        <EntryTime iso={entry.createdAt} className="ml-auto" />
       </div>
       {/* indented past the avatar at lg, so the body lines up with the name */}
-      <div className="flex flex-col gap-1.5 lg:pl-6">
-        <Markdown>{entry.comment.body}</Markdown>
-        <EntryTime iso={entry.createdAt} className="lg:hidden" />
-      </div>
+      <Markdown className="lg:pl-6">{entry.comment.body}</Markdown>
     </li>
   );
 }
@@ -472,11 +476,11 @@ function ChangeLine({ entry }: { entry: EntryView }) {
       className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 py-1.25 text-muted-foreground"
     >
       <Actor actor={entry.actor} />
-      {phrase}
-      <EntryTime
-        iso={entry.createdAt}
-        className="max-lg:basis-full lg:ml-auto"
-      />
+      {/* below lg the time ends the actor's line and the phrase drops under the name */}
+      <span className="max-lg:order-2 max-lg:flex max-lg:basis-full max-lg:flex-wrap max-lg:items-center max-lg:gap-x-1.5 max-lg:pl-6 lg:contents">
+        {phrase}
+      </span>
+      <EntryTime iso={entry.createdAt} className="ml-auto" />
     </li>
   );
 }
@@ -541,12 +545,13 @@ function CommentBox({
       <p id={errorId} role="status" className="mt-1 text-xs text-destructive">
         {error}
       </p>
-      <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-2">
-        <p className="min-w-0 flex-1 text-muted-foreground">
+      {/* below lg the reason runs on in the same sentence and the button takes its own row */}
+      <div className="mt-1 text-muted-foreground lg:flex lg:flex-wrap lg:items-center lg:gap-x-2.5 lg:gap-y-2">
+        <p className="min-w-0 flex-1 max-lg:inline">
           Commenting as {strong(viewer.name)}. Markdown works.
-        </p>
+        </p>{" "}
         {empty && (
-          <p id={reasonId} className="text-xs text-muted-foreground">
+          <p id={reasonId} className="max-lg:inline lg:text-xs">
             Write something to post it
           </p>
         )}
@@ -556,7 +561,7 @@ function CommentBox({
           aria-disabled={empty || undefined}
           aria-describedby={empty ? reasonId : undefined}
           aria-busy={pending || undefined}
-          className="max-lg:w-full"
+          className="max-lg:mt-3 max-lg:flex max-lg:w-full"
         >
           {pending ? "Commenting…" : "Comment"}
         </Button>
@@ -568,7 +573,7 @@ function CommentBox({
 /**
  * An item (issue or todo) as people see it: everything read-only except the comment box
  * at the end of the timeline. At 1440 a main column beside a 280px Properties and Links rail; below,
- * one column in the order title, properties, links, description, activity, comment box.
+ * one column in the order title, description, properties, links, activity, comment box.
  */
 export function IssueView(props: IssueViewProps) {
   const { issue } = props;
@@ -583,15 +588,15 @@ export function IssueView(props: IssueViewProps) {
   return (
     <div className="flex flex-col lg:grid lg:grid-cols-[minmax(0,--spacing(190))_--spacing(70)] lg:grid-rows-[auto_auto_auto_1fr] lg:gap-x-12 lg:px-8 lg:py-6">
       <Header issue={data} />
-      <aside className="lg:col-start-2 lg:row-span-4 lg:row-start-1">
-        <Properties issue={data} />
-        <Links links={data.links} />
-      </aside>
       {data.description.trim() !== "" && (
         <Markdown className="px-4 py-3.5 lg:mt-4 lg:p-0">
           {data.description}
         </Markdown>
       )}
+      <aside className="lg:col-start-2 lg:row-span-4 lg:row-start-1">
+        <Properties issue={data} />
+        <Links links={data.links} />
+      </aside>
       <section
         aria-labelledby={activityId}
         className="px-4 py-3.5 lg:mt-5.5 lg:p-0"

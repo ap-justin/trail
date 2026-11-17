@@ -92,7 +92,7 @@ const paneTab = (name: string) => within(panes()).getByRole("tab", { name });
 const pane = (name: string) => screen.getByRole("tabpanel", { name });
 
 describe("items", () => {
-  test("the columns read status, Key, Type, Title, Priority, Labels, Assignee, Updated", () => {
+  test("the columns read status, type, Key, Title, Priority, Labels, Assignee, Updated, the status and type headers for screen readers alone", () => {
     renderProduct();
     expect(
       within(table())
@@ -100,14 +100,17 @@ describe("items", () => {
         .map((th) => th.textContent),
     ).toEqual([
       "Status",
-      "Key",
       "Type",
+      "Key",
       "Title",
       "Priority",
       "Labels",
       "Assignee",
       "Updated",
     ]);
+    for (const name of ["Status", "Type"]) {
+      expect(within(table()).getByText(name)).toHaveClass("sr-only");
+    }
   });
 
   test("every row, in the table and below 1024px, carries a type glyph that follows its type", () => {

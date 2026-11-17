@@ -320,6 +320,26 @@ const propertyValue = (label: string) => {
   return dd;
 };
 
+describe("reading order", () => {
+  test("the description comes before Properties", () => {
+    renderIssue();
+    const description = screen.getByText("Invited people sign in with GitHub.");
+    expect(
+      description.compareDocumentPosition(propertiesRegion()) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  test("the header carries the item's status for the phone, where Properties drops it", () => {
+    renderIssue();
+    const header = screen.getByRole("banner");
+    expect(within(header).getByText("In progress")).toHaveClass("lg:hidden");
+    expect(
+      propertyValue("Status").parentElement?.className.split(" "),
+    ).toContain("max-lg:hidden");
+  });
+});
+
 describe("item type", () => {
   test("properties run Type, Status, Priority, Estimate, Assignee, Labels, Product, Projects, Created, Updated", () => {
     renderIssue();

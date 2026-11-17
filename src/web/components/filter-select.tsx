@@ -2,6 +2,7 @@ import { Select as SelectPrimitive } from "@base-ui/react/select";
 import {
   type LucideIcon,
   PackageIcon,
+  ShapesIcon,
   SlidersHorizontalIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -22,7 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { WebProductRefView } from "@/lib/api-types";
+import type { WebItemType, WebProductRefView } from "@/lib/api-types";
 
 /**
  * A single-choice filter menu, "All …" first with a check on the chosen row. As a chip
@@ -195,6 +196,35 @@ export function ProductSelect({
       }))}
       value={value}
       onChange={(key) => onChange(key)}
+    />
+  );
+}
+
+const TYPE_OPTIONS: { value: WebItemType; label: string }[] = [
+  { value: "issue", label: "Issues" },
+  { value: "todo", label: "Todos" },
+];
+
+/** "All types", Issues or Todos. */
+export function TypeSelect({
+  value,
+  onChange,
+  fieldLabel,
+}: {
+  value: WebItemType | null;
+  onChange: (type: WebItemType | null) => void;
+  /** Set inside the Filters sheet: the word above the trigger. */
+  fieldLabel?: string;
+}) {
+  return (
+    <FilterSelect
+      label="Filter by type"
+      fieldLabel={fieldLabel}
+      allLabel="All types"
+      icon={ShapesIcon}
+      options={TYPE_OPTIONS}
+      value={value}
+      onChange={onChange}
     />
   );
 }

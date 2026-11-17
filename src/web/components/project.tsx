@@ -1,5 +1,5 @@
 import { PackageIcon } from "lucide-react";
-import { type ReactNode, useId, useRef, useState } from "react";
+import { type ReactNode, useId, useRef } from "react";
 import { ActorAvatar, BotTitle } from "@/components/actor";
 import { AppLink } from "@/components/app-link";
 import { ProductSelect } from "@/components/filter-select";
@@ -14,7 +14,6 @@ import {
   statusFilterOf,
   statusTabValue,
 } from "@/components/item-list";
-import { Pane, PaneTabs } from "@/components/pane-tabs";
 import {
   EmptyState,
   ErrorState,
@@ -60,28 +59,35 @@ export type ProjectViewProps = {
   onRetryProject: () => void;
   onRetryItems: () => void;
   onRetryStatusUpdates: () => void;
-  /** Closes the Items pane, under the list; hidden with the pane below lg. */
+  /** Under the list, before Status updates below lg. */
   footer?: ReactNode;
   /** The clock relative times are read against; ticks each minute when omitted. */
   now?: Date;
 };
 
-/** The shell heading on a project page: `Projects / Human UI launch` at 1440, the name below. */
+/**
+ * The shell heading on a project page: `Projects / Human UI launch` at 1440; below, the
+ * Projects link over the name at 20px.
+ */
 export function ProjectHeading({ project }: { project: { name: string } }) {
   return (
-    <span className="flex min-w-0 items-center gap-2">
-      <span className="flex items-center gap-2 font-normal text-muted-foreground max-lg:hidden">
+    <span className="flex min-w-0 items-center gap-2 max-lg:flex-col max-lg:items-start max-lg:gap-1.5">
+      <span className="flex items-center gap-2 text-sm font-normal text-muted-foreground">
         <AppLink href={paths.projects} className="hover:text-foreground">
           Projects
         </AppLink>
-        <span aria-hidden="true">/</span>
+        <span aria-hidden="true" className="max-lg:hidden">
+          /
+        </span>
       </span>
-      <span className="lg:truncate">{project.name}</span>
+      <span className="max-lg:text-xl max-lg:leading-tight max-lg:font-semibold lg:truncate">
+        {project.name}
+      </span>
     </span>
   );
 }
 
-/** The heading's accessory: health beside the name's first line, only with a status update. */
+/** The heading's accessory: health at the right of the Projects line below lg, only with a status update. */
 export function ProjectHealth({ project }: { project: WebProjectView }) {
   return (
     <UpdateHealth
@@ -96,8 +102,8 @@ const HIDDEN_PRODUCTS = "Items from products you can't see are not shown.";
 /**
  * Lead, Target, Health and Products as a ledger. `aside` (1024px and up): a 72px label
  * column, the lead's title under the name, each product's key and name. `inline`
- * (below): a 56px column, the title in line, keys alone, and no Health, which rides the
- * heading there.
+ * (below): Lead and Target alone in 36px rows on an 80px column, the title in line;
+ * Health rides the heading there and the groups name the products.
  */
 function ProjectDetails({
   project,
@@ -113,10 +119,10 @@ function ProjectDetails({
   return (
     <dl
       className={cn(
-        "grid items-start gap-x-2",
+        "grid gap-x-2",
         aside
-          ? "grid-cols-[--spacing(18)_1fr] gap-y-2.5 pt-2.5"
-          : "grid-cols-[--spacing(14)_1fr] gap-y-2",
+          ? "grid-cols-[--spacing(18)_1fr] items-start gap-y-2.5 pt-2.5"
+          : "auto-rows-[minmax(--spacing(9),auto)] grid-cols-[--spacing(20)_1fr] items-center",
       )}
     >
       <dt className={label}>Lead</dt>
@@ -143,15 +149,19 @@ function ProjectDetails({
           </dd>
         </>
       )}
-      <dt className={label}>Products</dt>
-      <dd className={cn("flex", aside ? "flex-col gap-1.5" : "gap-2")}>
-        {project.products.map((product) => (
-          <span key={product.key} className="flex items-center gap-2">
-            <KeyText className="text-foreground">{product.key}</KeyText>
-            {aside && <> {product.name}</>}
-          </span>
-        ))}
-      </dd>
+      {aside && (
+        <>
+          <dt className={label}>Products</dt>
+          <dd className="flex flex-col gap-1.5">
+            {project.products.map((product) => (
+              <span key={product.key} className="flex items-center gap-2">
+                <KeyText className="text-foreground">{product.key}</KeyText>{" "}
+                {product.name}
+              </span>
+            ))}
+          </dd>
+        </>
+      )}
     </dl>
   );
 }
@@ -227,13 +237,6 @@ function NoItems() {
   );
 }
 
-type PaneName = "items" | "updates";
-
-const PANES = [
-  ["items", "Items"],
-  ["updates", "Status updates"],
-] as const;
-
 function ProjectBody(
   props: Omit<ProjectViewProps, "project" | "onRetryProject"> & {
     project: WebProjectDetailView;
@@ -241,7 +244,6 @@ function ProjectBody(
   },
 ) {
   const { project, items, filters, onFiltersChange, now } = props;
-  const [pane, setPane] = useState<PaneName>("items");
   const detailsHeading = useId();
   const updatesHeading = useId();
   const listRef = useRef<HTMLDivElement>(null);
@@ -252,25 +254,29 @@ function ProjectBody(
     items.data.counts.all.all === 0 &&
     filters.product === null;
   const counts = items.status === "ready" ? items.data.counts : null;
+  const productSelect = (fieldLabel?: string) => (
+    <ProductSelect
+      products={project.products}
+      fieldLabel={fieldLabel}
+      value={filters.product}
+      onChange={(product) => onFiltersChange({ ...filters, product })}
+    />
+  );
 
   return (
-    <Tabs
-      value={pane}
-      onValueChange={(next) => {
-        if (next === "items" || next === "updates") setPane(next);
-      }}
-      className="gap-0 lg:gap-8 lg:px-6 lg:py-4 lg:data-horizontal:flex-row"
-    >
+    <div className="flex flex-col lg:flex-row lg:gap-8 lg:px-6 lg:py-4">
       <div className="flex min-w-0 flex-1 flex-col">
         <div
           className={cn(
-            "flex flex-col gap-3 px-4 pt-1.5 pb-3.5 lg:gap-2 lg:px-2 lg:pt-0",
+            "flex flex-col gap-3 px-4 pt-2 pb-4 lg:gap-2 lg:px-2 lg:pt-0 lg:pb-3.5",
             empty && "lg:border-b",
           )}
         >
           <div>
             <p className="text-xs text-muted-foreground max-lg:sr-only">Goal</p>
-            <p className="max-w-155">{project.goal}</p>
+            <p className="max-w-155 max-lg:text-muted-foreground">
+              {project.goal}
+            </p>
           </div>
           <div className="lg:hidden">
             <ProjectDetails project={project} layout="inline" now={now} />
@@ -279,81 +285,72 @@ function ProjectBody(
             <p className="text-xs text-muted-foreground">{HIDDEN_PRODUCTS}</p>
           )}
         </div>
-        <PaneTabs panes={PANES} />
-        <Pane value="items">
-          {empty ? (
-            <NoItems />
-          ) : (
-            <Tabs
-              value={statusTabValue(filters)}
-              onValueChange={(value) => {
-                const status = statusFilterOf(String(value));
-                if (status !== filters.status)
-                  onFiltersChange({ ...filters, status });
+        {empty ? (
+          <NoItems />
+        ) : (
+          <Tabs
+            value={statusTabValue(filters)}
+            onValueChange={(value) => {
+              const status = statusFilterOf(String(value));
+              if (status !== filters.status)
+                onFiltersChange({ ...filters, status });
+            }}
+            className="gap-1"
+          >
+            <ItemFilterBar
+              filters={filters}
+              counts={counts}
+              onFiltersChange={(next) =>
+                onFiltersChange({ ...filters, ...next })
+              }
+              select={productSelect()}
+              sheet={{
+                select: productSelect("Product"),
+                active: filters.product !== null,
               }}
-              className="gap-1"
+            />
+            {/* one panel, keyed to whichever tab is current, so the list is that tab's panel */}
+            <TabsContent
+              ref={listRef}
+              value={statusTabValue(filters)}
+              className="outline-none"
             >
-              <ItemFilterBar
+              <ItemsBody
+                items={items}
                 filters={filters}
-                counts={counts}
-                onFiltersChange={(next) =>
-                  onFiltersChange({ ...filters, ...next })
-                }
-                select={
-                  <ProductSelect
-                    products={project.products}
-                    value={filters.product}
-                    onChange={(product) =>
-                      onFiltersChange({ ...filters, product })
-                    }
-                  />
-                }
+                onFiltersChange={onFiltersChange}
+                onRetryItems={props.onRetryItems}
+                focusList={() => listRef.current?.focus()}
+                now={now}
               />
-              {/* one panel, keyed to whichever tab is current, so the list is that tab's panel */}
-              <TabsContent
-                ref={listRef}
-                value={statusTabValue(filters)}
-                className="outline-none"
-              >
-                <ItemsBody
-                  items={items}
-                  filters={filters}
-                  onFiltersChange={onFiltersChange}
-                  onRetryItems={props.onRetryItems}
-                  focusList={() => listRef.current?.focus()}
-                  now={now}
-                />
-              </TabsContent>
-            </Tabs>
-          )}
-          {props.footer}
-        </Pane>
+            </TabsContent>
+          </Tabs>
+        )}
+        {props.footer}
       </div>
-      <aside className="flex flex-col gap-5 lg:w-70 lg:shrink-0">
+      <aside className="flex flex-col gap-5 max-lg:pt-5 max-lg:pb-6 lg:w-70 lg:shrink-0">
         <section aria-labelledby={detailsHeading} className="max-lg:hidden">
           <AsideHeading id={detailsHeading}>Details</AsideHeading>
           <ProjectDetails project={project} layout="aside" now={now} />
         </section>
-        <Pane value="updates">
-          <section aria-labelledby={updatesHeading}>
-            <AsideHeading
-              ref={updatesHeadingRef}
-              id={updatesHeading}
-              className="max-lg:sr-only"
-            >
-              Status updates
-            </AsideHeading>
-            <StatusUpdateList
-              updates={props.statusUpdates}
-              onRetry={() => {
-                updatesHeadingRef.current?.focus();
-                props.onRetryStatusUpdates();
-              }}
-            />
-          </section>
-        </Pane>
+        <section aria-labelledby={updatesHeading}>
+          <AsideHeading
+            ref={updatesHeadingRef}
+            id={updatesHeading}
+            className="max-lg:px-4"
+          >
+            Status updates
+          </AsideHeading>
+          <StatusUpdateList
+            updates={props.statusUpdates}
+            onRetry={() => {
+              updatesHeadingRef.current?.focus();
+              props.onRetryStatusUpdates();
+            }}
+          />
+        </section>
       </aside>
-    </Tabs>
+    </div>
   );
 }
 

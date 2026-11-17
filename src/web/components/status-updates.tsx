@@ -154,24 +154,34 @@ export function AsideHeading({
   );
 }
 
+/**
+ * The author and their title on one line, the body under them past the avatar. At lg the
+ * health ends the author's line and the time takes a line of its own; below, the health
+ * leads the time's line.
+ */
 function StatusUpdateItem({ update }: { update: WebStatusUpdateView }) {
   return (
-    <li className="flex flex-col gap-1 py-2.5 max-lg:px-4">
-      {/* not ActorName: here the title rides the date's row, under the name */}
-      <div className="flex min-w-0 items-center gap-2">
-        <ActorAvatar actor={update.author} size="xs" />
+    <li className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 py-2.5 max-lg:px-4">
+      <ActorAvatar actor={update.author} size="xs" />
+      <span className={actorNameGroup}>
         <span className="min-w-0 truncate font-medium">
           {update.author.name}
-        </span>
-        <HealthPill health={update.health} className="ml-auto" />
-      </div>
-      <div className="-mt-0.5 flex min-w-0 items-center gap-2 pl-6.5 text-xs text-muted-foreground">
+        </span>{" "}
         <BotTitle actor={update.author} />
-        <time dateTime={update.createdAt} className="shrink-0">
+      </span>
+      <div className="col-start-2 -mt-0.5 flex min-w-0 items-center gap-2 text-xs text-muted-foreground lg:contents">
+        <HealthPill
+          health={update.health}
+          className="lg:col-start-3 lg:row-start-1"
+        />
+        <time
+          dateTime={update.createdAt}
+          className="shrink-0 lg:col-start-2 lg:row-start-2 lg:-mt-0.5"
+        >
           {formatAbsolute(update.createdAt)}
         </time>
       </div>
-      <Markdown>{update.body}</Markdown>
+      <Markdown className="col-span-2 col-start-2">{update.body}</Markdown>
     </li>
   );
 }

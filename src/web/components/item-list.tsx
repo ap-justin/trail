@@ -2,6 +2,7 @@ import { SearchIcon } from "lucide-react";
 import { Fragment, type ReactNode, useId } from "react";
 import { ActorAvatar, kindNoun } from "@/components/actor";
 import { AppLink, RowLink } from "@/components/app-link";
+import { FiltersSheet, TypeSelect } from "@/components/filter-select";
 import { EmptyState } from "@/components/states";
 import {
   type IssueStatus,
@@ -148,24 +149,39 @@ function statusOptions(statuses: StatusFilter[], counts: StatusCounts | null) {
   ];
 }
 
-/** The 1024px status tabs; render inside the `Tabs` whose value is the status filter. */
-function StatusTabs({ counts }: { counts: StatusCounts | null }) {
+/**
+ * The status tabs; render inside the `Tabs` whose value is the status filter. At 1024px
+ * and up beside the type toggle. Below, only with `belowLg`: a full-bleed row on its own
+ * rule that scrolls sideways, its right edge masked so a tab cut there reads as more.
+ */
+function StatusTabs({
+  counts,
+  belowLg,
+}: {
+  counts: StatusCounts | null;
+  belowLg: boolean;
+}) {
   return (
     <TabsList
       variant="line"
       aria-label="Filter by status"
-      // the bar under the tabs and the type toggle draws the one rule
-      className="h-8 justify-start gap-3 rounded-none p-0 data-[variant=line]:border-b-0 max-lg:hidden"
+      className={cn(
+        // at lg the bar under the tabs and the type toggle draws the one rule
+        "rounded-none p-0 lg:h-8 lg:gap-3 lg:data-[variant=line]:border-b-0",
+        belowLg
+          ? "max-lg:scrollbar-none max-lg:overflow-x-auto max-lg:px-4 max-lg:mask-r-from-88%"
+          : "max-lg:hidden",
+      )}
     >
       {statusOptions(filterStatuses, counts).map((option) => (
         <TabsTrigger
           key={option.value}
           value={option.value}
-          className="h-8 flex-none px-1 font-normal text-muted-foreground data-active:text-foreground"
+          className="flex-none px-1 font-normal text-muted-foreground data-active:text-foreground max-lg:px-0 max-lg:data-active:font-medium lg:h-8"
         >
           {option.label}{" "}
           {option.count !== undefined && (
-            <span className="text-2xs text-muted-foreground">
+            <span className="text-muted-foreground lg:text-2xs">
               {option.count}
             </span>
           )}
@@ -173,6 +189,12 @@ function StatusTabs({ counts }: { counts: StatusCounts | null }) {
       ))}
     </TabsList>
   );
+}
+
+/** The Filters sheet's primary button; without a count while the list loads. */
+function showItemsLabel(count: number | undefined) {
+  if (count === undefined) return "Show items";
+  return `Show ${count} ${itemNoun(count)}`;
 }
 
 function StatusChips({
@@ -213,25 +235,36 @@ function StatusChips({
 }
 
 /**
- * Status tabs with the type toggle at their right at 1024px and up; below, the toggle
- * (after `select`, when given) on a row of its own over the status chips. The tab counts
- * follow the toggle. Render inside a `Tabs` whose value is `filters.status ?? "all"`.
+ * Status tabs with the type toggle at their right (after `select`, when given) at 1024px
+ * and up. Below, by default the toggle on a row of its own over the status chips; with
+ * `sheet`, the status tabs scroll in a row of their own over one Filters button, whose
+ * sheet holds `sheet.select` and the type. The tab counts follow the type. Render inside
+ * a `Tabs` whose value is `filters.status ?? "all"`.
  */
 export function ItemFilterBar({
   filters,
   counts,
   onFiltersChange,
   select,
+  sheet,
 }: {
   filters: ItemFilters;
   counts: WebItemCountsView | null;
   onFiltersChange: (filters: ItemFilters) => void;
   select?: ReactNode;
+  /** `select` as the sheet stacks it (with a `fieldLabel`), and whether it is in force. */
+  sheet?: { select: ReactNode; active: boolean };
 }) {
+  const typeCounts = counts?.[filters.type ?? "all"];
   return (
     <div className="flex flex-col lg:flex-row lg:items-end lg:border-b">
-      <StatusTabs counts={counts?.[filters.type ?? "all"] ?? null} />
-      <div className="flex items-center gap-2 max-lg:px-4 max-lg:pt-3 lg:mb-0.5 lg:ml-auto">
+      <StatusTabs counts={typeCounts ?? null} belowLg={sheet !== undefined} />
+      <div
+        className={cn(
+          "flex items-center gap-2 max-lg:px-4 max-lg:pt-3 lg:mb-0.5 lg:ml-auto",
+          sheet && "max-lg:hidden",
+        )}
+      >
         {select}
         <TypeToggle
           value={filters.type}
@@ -241,10 +274,27 @@ export function ItemFilterBar({
           className="max-lg:flex-1"
         />
       </div>
-      <StatusChips
-        value={filters.status}
-        onChange={(status) => onFiltersChange({ ...filters, status })}
-      />
+      {sheet ? (
+        <FiltersSheet
+          activeCount={
+            [sheet.active, filters.type !== null].filter(Boolean).length
+          }
+          doneLabel={showItemsLabel(typeCounts?.[filters.status ?? ALL])}
+          className="mx-4 mt-3 self-start lg:hidden"
+        >
+          {sheet.select}
+          <TypeSelect
+            fieldLabel="Type"
+            value={filters.type}
+            onChange={(type) => onFiltersChange({ ...filters, type })}
+          />
+        </FiltersSheet>
+      ) : (
+        <StatusChips
+          value={filters.status}
+          onChange={(status) => onFiltersChange({ ...filters, status })}
+        />
+      )}
     </div>
   );
 }
@@ -369,7 +419,7 @@ export type ItemGroup = {
 const head = "h-7.5 px-0";
 
 /**
- * The 1024px table: status, key, type, title, priority, (labels,) assignee, updated. A
+ * The 1024px table: status, type, key, title, priority, (labels,) assignee, updated. A
  * group with a product gets a heading row; groups after the first sit 12px apart.
  */
 export function ItemTable({
@@ -389,8 +439,10 @@ export function ItemTable({
           <TableHead className={cn(head, "w-8.5 pl-2")}>
             <span className="sr-only">Status</span>
           </TableHead>
-          <TableHead className={cn(head, "w-16.5")}>Key</TableHead>
-          <TableHead className={cn(head, "w-11")}>Type</TableHead>
+          <TableHead className={cn(head, "w-5.5")}>
+            <span className="sr-only">Type</span>
+          </TableHead>
+          <TableHead className={cn(head, "w-18")}>Key</TableHead>
           <TableHead className={head}>Title</TableHead>
           <TableHead className={cn(head, "w-21.5")}>Priority</TableHead>
           {labels && (
@@ -434,10 +486,10 @@ export function ItemTable({
                 <StatusIcon status={item.status} label />
               </TableCell>
               <TableCell className="px-0 py-2">
-                <KeyText>{item.key}</KeyText>
+                <TypeIcon type={item.type} />
               </TableCell>
               <TableCell className="px-0 py-2">
-                <TypeIcon type={item.type} />
+                <KeyText>{item.key}</KeyText>
               </TableCell>
               <TableCell className="truncate px-0 py-2 pr-2.5">
                 <RowLink
@@ -506,13 +558,13 @@ export function ItemRows({ groups, now }: { groups: ItemGroup[]; now: Date }) {
                 <li
                   key={item.key}
                   data-item-key={item.key}
-                  className="border-b border-rule"
+                  className="mx-4 border-b border-rule"
                 >
                   <AppLink
                     href={paths.issue(item.key)}
                     aria-label={`${item.key} ${item.title}`}
                     aria-describedby={`${typeId} ${metaId}`}
-                    className="flex gap-2.5 px-4 py-3 outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+                    className="flex gap-2.5 py-3 outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
                   >
                     <StatusIcon status={item.status} className="mt-0.75" />
                     <span className="flex min-w-0 flex-1 flex-col gap-0.5">

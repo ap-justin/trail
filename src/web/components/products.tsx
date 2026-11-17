@@ -1,4 +1,6 @@
+import { ActorAvatar, actorNameGroup, BotTitle } from "@/components/actor";
 import { RowLink } from "@/components/app-link";
+import { MarkdownText } from "@/components/markdown-text";
 import { RepoLink } from "@/components/product";
 import {
   ListSkeleton,
@@ -9,6 +11,7 @@ import {
   Age,
   LatestUpdate,
   NO_HEALTH,
+  NO_STATUS_UPDATE,
   UpdateHealth,
 } from "@/components/status-updates";
 import { KeyText } from "@/components/text";
@@ -37,25 +40,14 @@ export type ProductsViewProps = {
   now?: Date;
 };
 
-const plural = (count: number, one: string, many: string) =>
-  `${count} ${count === 1 ? one : many}`;
-
-function ProductName({
-  product,
-  size,
-}: {
-  product: WebProductView;
-  size: "table" | "card";
-}) {
+function ProductName({ product }: { product: WebProductView }) {
   return (
     <RowLink
       href={paths.product(product.key)}
       className="flex min-w-0 items-center gap-2"
     >
-      <KeyText className={cn("text-foreground", size === "card" && "text-sm")}>
-        {product.key}
-      </KeyText>{" "}
-      <span className="truncate font-semibold">{product.name}</span>
+      <KeyText className="text-foreground">{product.key}</KeyText>{" "}
+      <span className="truncate font-medium">{product.name}</span>
     </RowLink>
   );
 }
@@ -110,7 +102,7 @@ function ProductsTable({
             className="relative h-17"
           >
             <TableCell className={cell}>
-              <ProductName product={product} size="table" />
+              <ProductName product={product} />
               {product.repoUrl && <RepoLine url={product.repoUrl} />}
             </TableCell>
             <TableCell className={cell}>
@@ -136,6 +128,31 @@ function ProductsTable({
   );
 }
 
+/** A count in ink, its noun in grey: `6 issues`, with "open" for screen readers when it applies. */
+function Count({
+  count,
+  one,
+  many,
+  open = false,
+}: {
+  count: number;
+  one: string;
+  many: string;
+  open?: boolean;
+}) {
+  return (
+    <span>
+      <span className="font-medium text-foreground">{count}</span>{" "}
+      {open && <span className="sr-only">open </span>}
+      {count === 1 ? one : many}
+    </span>
+  );
+}
+
+/**
+ * Below lg, a card each: key, name and health; the latest update's author over two lines
+ * of it (or "No status update yet"); then the open counts and the product's age.
+ */
 function ProductCards({
   products,
   now,
@@ -145,31 +162,56 @@ function ProductCards({
 }) {
   return (
     <ul className="lg:hidden">
-      {products.map((product) => (
-        <li
-          key={product.key}
-          data-product-key={product.key}
-          className="relative flex flex-col gap-2 border-b border-rule px-4 py-3.5"
-        >
-          <div className="flex flex-col gap-0.5">
+      {products.map((product) => {
+        const update = product.latestStatusUpdate;
+        return (
+          <li
+            key={product.key}
+            data-product-key={product.key}
+            className="relative mx-4 flex flex-col gap-2 border-b border-rule py-3.5"
+          >
             <div className="flex items-center justify-between gap-2">
-              <ProductName product={product} size="card" />
+              <ProductName product={product} />
               <UpdateHealth of={product} />
             </div>
-            {product.repoUrl && <RepoLine url={product.repoUrl} />}
-          </div>
-          <LatestUpdate
-            update={product.latestStatusUpdate}
-            now={now}
-            layout="card"
-          />
-          <p className="text-muted-foreground">
-            {plural(product.openIssues, "issue", "issues")} ·{" "}
-            {plural(product.openTodos, "todo", "todos")} open ·{" "}
-            {plural(product.projectCount, "project", "projects")}
-          </p>
-        </li>
-      ))}
+            {update ? (
+              <div className="flex min-w-0 flex-col gap-0.5">
+                <div className="flex min-w-0 items-center gap-2">
+                  <ActorAvatar actor={update.author} size="xs" />
+                  <span className={actorNameGroup}>
+                    <span className="min-w-0 truncate font-medium">
+                      {update.author.name}
+                    </span>{" "}
+                    <BotTitle actor={update.author} />
+                  </span>
+                </div>
+                <p className="line-clamp-2 text-muted-foreground">
+                  <MarkdownText source={update.body} />
+                </p>
+              </div>
+            ) : (
+              <p className="text-muted-foreground">{NO_STATUS_UPDATE}</p>
+            )}
+            <p className="flex gap-3.5 text-xs text-muted-foreground">
+              <Count
+                count={product.openIssues}
+                one="issue"
+                many="issues"
+                open
+              />{" "}
+              <Count count={product.openTodos} one="todo" many="todos" open />{" "}
+              <Count
+                count={product.projectCount}
+                one="project"
+                many="projects"
+              />{" "}
+              <span className="ml-auto">
+                <Age iso={product.updatedAt} now={now} />
+              </span>
+            </p>
+          </li>
+        );
+      })}
     </ul>
   );
 }

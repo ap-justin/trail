@@ -70,7 +70,7 @@ describe("products", () => {
     }
   });
 
-  test("open issues, open todos and projects each get a column; the card says them in a line", () => {
+  test("open issues, open todos and projects each get a column; the card says them in a line, figures in ink", () => {
     renderProducts({
       products: [product({ openIssues: 6, openTodos: 1, projectCount: 2 })],
     });
@@ -78,9 +78,14 @@ describe("products", () => {
     expect(cells[3]).toHaveTextContent(/^6$/);
     expect(cells[4]).toHaveTextContent(/^1$/);
     expect(cells[5]).toHaveTextContent(/^2$/);
-    expect(
-      card().getByText("6 issues · 1 todo open · 2 projects"),
-    ).toBeInTheDocument();
+    const counts = card().getByText(/issues/).parentElement;
+    expect(counts).toHaveTextContent(/^6 open issues 1 open todo 2 projects/);
+    for (const figure of ["6", "1", "2"]) {
+      expect(within(counts as HTMLElement).getByText(figure)).toHaveClass(
+        "font-medium",
+        "text-foreground",
+      );
+    }
   });
 
   test("the repo line shows owner/name and opens GitHub, only for a product with a repo", () => {
@@ -91,8 +96,8 @@ describe("products", () => {
       ],
     });
     const repoLinks = screen.getAllByRole("link", { name: /example\/trail/ });
-    // one in the table, one on the card
-    expect(repoLinks).toHaveLength(2);
+    // the table's alone: the card has no repo line
+    expect(repoLinks).toHaveLength(1);
     for (const link of repoLinks) {
       expect(link).toHaveAttribute("href", "https://github.com/example/trail");
       expect(link).toHaveAttribute("target", "_blank");
@@ -103,15 +108,15 @@ describe("products", () => {
     expect(within(docRow).getAllByRole("link")).toHaveLength(1);
   });
 
-  test("a card reads name, the update, its author and age, then the counts", () => {
+  test("a card reads name, the update's author, the update, then the counts and the product's age", () => {
     renderProducts();
     const item = screen.getByRole("listitem");
     const order = [
       within(item).getByRole("link", { name: "TRL trail" }),
-      within(item).getByText(/^SSE feed shipped/),
       within(item).getByText("Beta"),
-      within(item).getByText("41m ago"),
-      within(item).getByText("7 issues · 2 todos open · 0 projects"),
+      within(item).getByText(/^SSE feed shipped/),
+      within(item).getByText(/issues/),
+      within(item).getByRole("time"),
     ];
     for (const [before, after] of order
       .slice(0, -1)

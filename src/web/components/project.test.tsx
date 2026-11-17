@@ -138,7 +138,7 @@ describe("goal and details", () => {
     expect(within(details()).queryByText("At risk")).toBeNull();
   });
 
-  test("the 375 ledger has Lead, Target and Products, keys alone", () => {
+  test("the 375 ledger has Lead and Target alone; the groups name the products", () => {
     renderProject();
     const inline = [...document.querySelectorAll("dl")].find(
       (dl) => !details().contains(dl),
@@ -148,10 +148,7 @@ describe("goal and details", () => {
       within(inline)
         .getAllByRole("term")
         .map((dt) => dt.textContent),
-    ).toEqual(["Lead", "Target", "Products"]);
-    expect(within(inline).getAllByRole("definition")[2]).toHaveTextContent(
-      /^DOC\s*TRL$/,
-    );
+    ).toEqual(["Lead", "Target"]);
   });
 });
 
@@ -236,8 +233,8 @@ describe("groups", () => {
         .map((th) => th.textContent),
     ).toEqual([
       "Status",
-      "Key",
       "Type",
+      "Key",
       "Title",
       "Priority",
       "Assignee",
@@ -283,69 +280,85 @@ describe("product select", () => {
   });
 });
 
-describe("375 panes", () => {
-  const panes = () => screen.getByRole("tablist", { name: "Show" });
-  const paneTab = (name: string) => within(panes()).getByRole("tab", { name });
-  const pane = (name: string) => screen.getByRole("tabpanel", { name });
+describe("375", () => {
+  const filtersButton = () => screen.getByRole("button", { name: /^Filters/ });
 
-  test("the tabs show Items or Status updates, each a panel named by its tab", async () => {
-    const user = userEvent.setup();
-    renderProject();
+  test("no pane tabs: the list, its footer, then Status updates, one page", () => {
+    renderProject({ footer: <p>Only the first 500 items are shown.</p> });
+    expect(screen.queryByRole("tablist", { name: "Show" })).toBeNull();
+    const footer = screen.getByText("Only the first 500 items are shown.");
+    const updates = screen.getByRole("region", { name: "Status updates" });
     expect(
-      within(panes())
+      table().compareDocumentPosition(footer) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      footer.compareDocumentPosition(updates) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      within(updates).getByRole("heading", { name: "Status updates" }),
+    ).not.toHaveClass("max-lg:sr-only");
+  });
+
+  test("the status tabs are the phone's row too, every status with its count, and no chips", () => {
+    renderProject();
+    const tabs = screen.getByRole("tablist", { name: "Filter by status" });
+    expect(tabs).not.toHaveClass("max-lg:hidden");
+    expect(
+      within(tabs)
         .getAllByRole("tab")
         .map((t) => t.textContent),
-    ).toEqual(["Items", "Status updates"]);
-    expect(paneTab("Items")).toHaveAttribute("aria-selected", "true");
-    expect(pane("Status updates")).toHaveAttribute("data-hidden");
-    await user.click(paneTab("Status updates"));
-    expect(paneTab("Status updates")).toHaveAttribute("aria-selected", "true");
-    expect(paneTab("Status updates")).toHaveAttribute(
-      "aria-controls",
-      pane("Status updates").id,
-    );
-    expect(pane("Status updates")).toContainElement(
-      screen.getByRole("region", { name: "Status updates" }),
-    );
-    expect(pane("Items")).toHaveAttribute("data-hidden");
-    expect(pane("Items")).toContainElement(table());
+    ).toEqual(["All 5", "Open 4", "In progress 1", "Done 0", "Canceled 0"]);
+    expect(
+      screen.queryByRole("group", { name: "Filter by status" }),
+    ).toBeNull();
   });
 
-  test("the footer sits at the end of the Items pane, so Status updates hides it", async () => {
-    const user = userEvent.setup();
-    renderProject({ footer: <p>Only the first 500 items are shown.</p> });
-    const footer = screen.getByText("Only the first 500 items are shown.");
-    expect(pane("Items")).toContainElement(footer);
-    await user.click(paneTab("Status updates"));
-    expect(pane("Items")).toHaveAttribute("data-hidden");
-    expect(pane("Status updates")).not.toContainElement(footer);
-  });
-
-  test("both panes stay rendered and reachable for 1024px, where the breakpoint alone hides one", () => {
+  test("one Filters button below lg in place of the product select and type toggle", () => {
     renderProject();
-    for (const name of ["Items", "Status updates"]) {
-      expect(pane(name)).not.toHaveAttribute("hidden");
-      expect(pane(name)).not.toHaveAttribute("inert");
-      expect(pane(name)).toHaveClass("max-lg:data-hidden:hidden");
+    expect(filtersButton()).toHaveClass("lg:hidden");
+    for (const control of [
+      screen.getByRole("combobox", { name: "Filter by product" }),
+      screen.getByRole("group", { name: "Filter by type" }),
+    ]) {
+      expect(control.closest(".max-lg\\:hidden")).not.toBeNull();
     }
   });
 
-  test("the tabs work from the keyboard", async () => {
+  test("the sheet holds Product and Type, applied as chosen, and says how many items show", async () => {
     const user = userEvent.setup();
-    renderProject();
-    paneTab("Items").focus();
-    await user.keyboard("{ArrowRight}");
-    expect(paneTab("Status updates")).toHaveFocus();
-    await user.keyboard("{Enter}");
-    expect(paneTab("Status updates")).toHaveAttribute("aria-selected", "true");
+    render(<FilteredProject />);
+    await user.click(filtersButton());
+    const sheet = await screen.findByRole("dialog", { name: "Filters" });
+    expect(
+      within(sheet).getByRole("combobox", { name: "Product" }),
+    ).toBeInTheDocument();
+    await user.click(within(sheet).getByRole("combobox", { name: "Type" }));
+    await user.click(await screen.findByRole("option", { name: "Todos" }));
+    await user.click(
+      within(sheet).getByRole("button", { name: "Show 2 items" }),
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(
+      [...table().querySelectorAll<HTMLElement>("[data-item-type]")].map(
+        (t) => t.dataset.itemType,
+      ),
+    ).toEqual(["todo", "todo"]);
+    expect(filtersButton()).toHaveAccessibleName("Filters 1 in use");
   });
 
-  test("a project with no items still switches to Status updates", async () => {
+  test("the button counts the product and type in force; while the list loads the sheet has no count", async () => {
     const user = userEvent.setup();
-    renderProject({ items: { status: "ready", data: projectItems([]) } });
-    expect(pane("Items")).toHaveTextContent("No items in this project yet");
-    await user.click(paneTab("Status updates"));
-    expect(pane("Status updates")).not.toHaveAttribute("data-hidden");
+    renderProject({
+      filters: { type: "issue", status: null, product: "TRL" },
+      items: { status: "loading" },
+    });
+    expect(filtersButton()).toHaveAccessibleName("Filters 2 in use");
+    await user.click(filtersButton());
+    expect(
+      await screen.findByRole("button", { name: "Show items" }),
+    ).toBeInTheDocument();
   });
 });
 

@@ -175,7 +175,7 @@ describe("managing people", () => {
     });
     // the server's answer drops her name: the row shows the re-read list
     await waitFor(() =>
-      expect(screen.getAllByText("Invited · hasn't signed in")).toHaveLength(2),
+      expect(screen.getAllByText("Invited, hasn't signed in")).toHaveLength(2),
     );
   });
 
