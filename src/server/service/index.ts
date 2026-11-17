@@ -8,6 +8,7 @@ import {
   inArray,
   isNotNull,
   lt,
+  notInArray,
   type SQL,
   sql,
 } from "drizzle-orm";
@@ -110,6 +111,7 @@ import {
   productsNamed,
   projectsReached,
   type Reach,
+  reachOfScope,
 } from "./visible.js";
 import {
   countOwn,
@@ -151,7 +153,11 @@ export type { Link, LinkInput } from "./validate.js";
  * Who a call acts as. A bot key's `scope` limits what it reaches; a person
  * carries none, and /api/web applies their visibility before calling.
  */
-export type ActingActor = Pick<Actor, "id" | "kind"> & { scope?: KeyScope };
+export type ActingActor = Pick<Actor, "id" | "kind"> & {
+  /** the key the call came with; none for a person */
+  keyId?: string;
+  scope?: KeyScope;
+};
 /** An actor with the URL of its photo, null without one. */
 export type ActorWithPhoto = Actor & { photoUrl: string | null };
 export type Product = typeof product.$inferSelect;
@@ -171,7 +177,17 @@ export type Issue = IssueRow & {
   links: Link[];
   assignee: ActorRef | null;
   projects: { slug: string; name: string }[];
+  /** On a bot's get_item: why its key reaches the item; see `ItemAccess`. */
+  access?: ItemAccess;
 };
+
+/**
+ * Why a bot key reaches an item, the strongest grant first: its product
+ * grant covers the item's product (an unrestricted key's too), a project it
+ * lists holds the item, or a project drawing from one of its products holds
+ * it, which lets the key read the item and comment on it and nothing else.
+ */
+export type ItemAccess = "product" | "project" | "via_project";
 
 /** An item the product's own bot creates is a todo; anyone else's is an issue. */
 const legacyTypeOf = (target: Product, creatorId: string): IssueType =>
@@ -390,6 +406,8 @@ export type ActivityEntry = ActivityEvent & {
 export type Whoami = ActorWithPhoto & {
   ownProducts: Product[];
   products: Product[];
+  /** The slugs of the projects its key reads through its products, A to Z; see `implicitProjectsOf`. */
+  impliedProjects: string[];
   unreadMessages: number;
 };
 
@@ -498,14 +516,8 @@ function changedFields<T extends object>(
 const isEmpty = (fields: object) => Object.keys(fields).length === 0;
 
 /** What the actor reaches: everything, unless its scope limits it to products, projects or both. */
-const reachFor = (actor: ActingActor): Reach => {
-  const scope = actor.scope;
-  if (scope?.products == null) return null;
-  return {
-    products: scope.products.map((p) => p.id),
-    projects: scope.projects.map((p) => p.id),
-  };
-};
+const reachFor = (actor: ActingActor): Reach =>
+  actor.scope ? reachOfScope(actor.scope, actor.kind === "bot") : null;
 
 /** The product ids the actor's own product grant covers, null for every one; a project grant adds none. */
 const productIdsOf = (actor: ActingActor): readonly string[] | null =>
@@ -522,6 +534,10 @@ const grantsProduct = (actor: ActingActor, productId: string) =>
 /** "project recon", "projects recon and solo" */
 const projectList = (slugs: readonly string[]) =>
   `project${plural(slugs.length)} ${andList(slugs)}`;
+
+/** "product ATL or project recon", "product ATL or one of projects recon, solo": the grants that would widen a key's implicit read. */
+const grantsFor = (productKey: string, slugs: readonly string[]) =>
+  `product ${productKey} or ${slugs.length === 1 ? `project ${slugs[0]}` : `one of projects ${slugs.join(", ")}`}`;
 
 /** `project: "recon"`, `project: "recon" or project: "solo"`: the argument to resend with. */
 const projectArgs = (slugs: readonly string[]) =>
@@ -614,9 +630,12 @@ export function createService({
         if (!(error instanceof NotFoundError)) throw error;
         const named = namedOnly(db, ref, actor);
         if (named) {
-          const slugs = projectsDrawingFrom(db, actor, named.id).map(
-            (p) => p.slug,
-          );
+          const slugs = [
+            ...projectsDrawingFrom(db, actor, named.id),
+            ...implicitProjectsOf(db, actor, named.id),
+          ]
+            .map((p) => p.slug)
+            .sort();
           throw new NotFoundError(
             `this key reaches product ${named.key} only through ${projectList(slugs)}: send projects: ${JSON.stringify(slugs)} in place of ${named.key}, for the events of the project's items; the rest of ${named.key} needs a key that lists ${named.key}`,
           );
@@ -652,7 +671,7 @@ export function createService({
       const found = db
         .select({ id: project.id })
         .from(project)
-        .where(and(eq(project.slug, ref.trim()), followableProjects(actor)))
+        .where(and(eq(project.slug, ref.trim()), reachableProjects(actor)))
         .get();
       if (found) {
         projectIds.push(found.id);
@@ -731,17 +750,7 @@ export function createService({
     }
   }
 
-  /**
-   * The projects a webhook of the actor may follow: those its key lists, every
-   * one for an unrestricted key. Not those reached through its products, whose
-   * other products' items the key can't read and the follow would deliver.
-   */
-  function followableProjects(actor: ActingActor): SQL | undefined {
-    const ids = projectIdsOf(actor);
-    return ids === null ? undefined : inArray(project.id, [...ids]);
-  }
-
-  /** True when every product the webhook follows is within the key's products, and every project it follows is one the key lists. */
+  /** True when every product the webhook follows is within the key's products, and every project it follows is one whose items the key reads. */
   function withinScope(actor: ActingActor, hook: Webhook): boolean {
     const scoped = actor.scope?.products;
     if (scoped == null) return true;
@@ -753,7 +762,7 @@ export function createService({
       .select({ n: sql<number>`count(*)` })
       .from(project)
       .where(
-        and(inArray(project.slug, hook.projects), followableProjects(actor)),
+        and(inArray(project.slug, hook.projects), reachableProjects(actor)),
       )
       .get()?.n;
     return reached === hook.projects.length;
@@ -896,6 +905,12 @@ export function createService({
       const named = namedOnly(tx, ref, actor);
       if (!named) throw error;
       const slugs = projectsDrawingFrom(tx, actor, named.id).map((p) => p.slug);
+      if (slugs.length === 0) {
+        const via = implicitProjectsOf(tx, actor, named.id).map((p) => p.slug);
+        throw new NotFoundError(
+          `this key reads product ${named.key} only through ${projectList(via)}, which reaches ${via.length === 1 ? `${via[0]}'s` : "their"} ${named.key} items to read and comment on: anything on ${named.key} itself needs a key that lists ${named.key}`,
+        );
+      }
       throw new NotFoundError(
         `this key reaches product ${named.key} only through ${projectList(slugs)}: send ${projectArgs(slugs)} in place of product (file_issue takes both, to file into ${named.key} within the project); anything else on ${named.key} itself needs a key that lists ${named.key}`,
       );
@@ -934,6 +949,86 @@ export function createService({
       )
       .orderBy(project.slug)
       .all();
+  }
+
+  /**
+   * The projects, A to Z by slug, whose items a bot reads without listing
+   * them: those drawing from one of its own products; with `productId`, only
+   * those drawing from that product too.
+   */
+  function implicitProjectsOf(
+    tx: Tx | Db,
+    actor: ActingActor,
+    productId?: string,
+  ): ProjectRow[] {
+    const reach = reachFor(actor);
+    if (reach === null || !reach.implicitProjects) return [];
+    return tx
+      .select()
+      .from(project)
+      .where(
+        and(
+          notInArray(project.id, [...reach.projects]),
+          projectsReached(db, { ...reach, projects: [] }),
+          productId === undefined
+            ? undefined
+            : inArray(
+                project.id,
+                tx
+                  .select({ id: projectProduct.projectId })
+                  .from(projectProduct)
+                  .where(eq(projectProduct.productId, productId)),
+              ),
+        ),
+      )
+      .orderBy(project.slug)
+      .all();
+  }
+
+  /** "Ask alpha, the owner of ATL, for that grant.", or the key's minter when the product has no owner. */
+  function askForGrant(tx: Tx | Db, named: Product): string {
+    const owner =
+      named.ownerId === null
+        ? undefined
+        : actorRefs(tx, [named.ownerId]).get(named.ownerId)?.name;
+    return owner === undefined
+      ? "Ask whoever minted the key for that grant."
+      : `Ask ${owner}, the owner of ${named.key}, for that grant.`;
+  }
+
+  /**
+   * Refuses filing on `named` when the actor reaches it only through
+   * projects drawing from its own products: that read gives no filing.
+   */
+  function requireFilingGrant(tx: Tx, actor: ActingActor, named: Product) {
+    if (grantsProduct(actor, named.id)) return;
+    if (projectsDrawingFrom(tx, actor, named.id).length > 0) return;
+    const via = implicitProjectsOf(tx, actor, named.id);
+    const slugs = via.map((p) => p.slug);
+    const own = tx
+      .selectDistinct({ key: product.key })
+      .from(product)
+      .innerJoin(projectProduct, eq(projectProduct.productId, product.id))
+      .where(
+        and(
+          inArray(
+            projectProduct.projectId,
+            via.map((p) => p.id),
+          ),
+          amongProducts(product.id, productIdsOf(actor)),
+        ),
+      )
+      .orderBy(product.key)
+      .all()
+      .map((p) => p.key);
+    const fileOn = own.length === 1 ? own[0] : `one of ${andList(own)}`;
+    const into =
+      slugs.length === 1
+        ? `with project: "${slugs[0]}" to put the issue in ${slugs[0]}`
+        : `with ${projectArgs(slugs)} to put the issue in that project`;
+    throw new ForbiddenScopeError(
+      `this key reads product ${named.key} only through ${projectList(slugs)}, which lets it read ${slugs.length === 1 ? `${slugs[0]}'s` : "their"} ${named.key} items and comment on them and file nothing on ${named.key}: file on ${fileOn} (${into}), or get a key that lists ${grantsFor(named.key, slugs)}. ${askForGrant(tx, named)}`,
+    );
   }
 
   /** `resolveProduct` among the products the actor may name, which adds those its projects draw from. */
@@ -1166,6 +1261,60 @@ export function createService({
   const hydrateOne = (tx: Tx | Db, row: IssueRow, actor: ActingActor) =>
     hydrate(tx, [row], actor)[0] as Issue;
 
+  /** Why the actor reaches `row`, an item it reaches; see `ItemAccess`. */
+  function accessOf(
+    tx: Tx | Db,
+    actor: ActingActor,
+    row: IssueRow,
+  ): ItemAccess {
+    if (grantsProduct(actor, row.productId)) return "product";
+    const listed = projectIdsOf(actor) ?? [];
+    const inListed =
+      listed.length > 0 &&
+      tx
+        .select({ one: sql`1` })
+        .from(projectItem)
+        .where(
+          and(
+            eq(projectItem.issueId, row.id),
+            inArray(projectItem.projectId, [...listed]),
+          ),
+        )
+        .get() !== undefined;
+    return inListed ? "project" : "via_project";
+  }
+
+  /**
+   * Refuses `doing` on `row` when the actor reaches it only through a project
+   * drawing from its products: such a key reads the item and comments on it,
+   * and the 403 names the projects, the grants that would allow it and whom
+   * to ask.
+   */
+  function requireItemWrite(
+    tx: Tx | Db,
+    actor: ActingActor,
+    row: IssueRow,
+    doing: string,
+  ): void {
+    if (accessOf(tx, actor, row) !== "via_project") return;
+    const target = tx
+      .select()
+      .from(product)
+      .where(eq(product.id, row.productId))
+      .get() as Product;
+    const slugs = tx
+      .select({ slug: project.slug })
+      .from(projectItem)
+      .innerJoin(project, eq(project.id, projectItem.projectId))
+      .where(and(eq(projectItem.issueId, row.id), reachableProjects(actor)))
+      .orderBy(asc(project.slug))
+      .all()
+      .map((p) => p.slug);
+    throw new ForbiddenScopeError(
+      `${target.key}-${row.number} is visible to this key only through ${projectList(slugs)}, which lets it read the item and comment on it (add_comment) and nothing else: to ${doing} it needs a key that lists ${grantsFor(target.key, slugs)}. ${askForGrant(tx, target)}`,
+    );
+  }
+
   /**
    * The actor `ref` names to assign: any actor by id, else the bot with this
    * name ignoring the case of A-Z. An unknown one is a bad field in the body,
@@ -1252,12 +1401,23 @@ export function createService({
       .all();
   }
 
-  /** The products the actor may name, A to Z by key: its own grant's, and those its projects draw from. */
-  function namedProducts(tx: Tx | Db, actor: ActingActor): Product[] {
+  /**
+   * The products the actor files issues on, A to Z by key: its own grant's,
+   * and those the projects it lists draw from; not those it names only
+   * through its implicit project read.
+   */
+  function fileableProducts(tx: Tx | Db, actor: ActingActor): Product[] {
+    const reach = reachFor(actor);
     return tx
       .select()
       .from(product)
-      .where(productsNamed(db, reachFor(actor), product.id))
+      .where(
+        productsNamed(
+          db,
+          reach && { ...reach, implicitProjects: false },
+          product.id,
+        ),
+      )
       .orderBy(asc(product.key))
       .all();
   }
@@ -2268,6 +2428,7 @@ export function createService({
   ): Placement {
     const named =
       ref === undefined ? undefined : resolveNamedProduct(tx, ref, actor);
+    if (named !== undefined) requireFilingGrant(tx, actor, named);
     const into =
       slug === undefined ? undefined : resolveProject(tx, slug, actor);
     return {
@@ -2775,6 +2936,12 @@ export function createService({
       requireAction(actor, "issues", "update an item", () =>
         resolveIssueRow(db, ref, actor),
       );
+      requireItemWrite(
+        db,
+        actor,
+        resolveIssueRow(db, ref, actor),
+        "update an item",
+      );
       const next = {
         title:
           patch.title === undefined
@@ -2826,6 +2993,7 @@ export function createService({
         patch.links === undefined ? undefined : validLinks(patch.links);
       return commit((tx) => {
         const row = resolveIssueRow(tx, ref, actor);
+        requireItemWrite(tx, actor, row, "update an item");
         const current = hydrateOne(tx, row, actor);
         const type = patch.type ?? row.type;
         if (type === "todo" && status === "triage") {
@@ -3506,7 +3674,10 @@ export function createService({
             ...new Map(
               itemRefs
                 .map((ref) => resolveIssueRow(tx, ref, actor))
-                .map((row) => [row.id, row]),
+                .map((row) => {
+                  requireItemWrite(tx, actor, row, "add it to a project");
+                  return [row.id, row] as const;
+                }),
             ).values(),
           ],
           actor,
@@ -3587,7 +3758,10 @@ export function createService({
             ...new Map(
               itemRefs
                 .map((ref) => resolveIssueRow(tx, ref, actor))
-                .map((row) => [row.id, row]),
+                .map((row) => {
+                  requireItemWrite(tx, actor, row, "remove it from a project");
+                  return [row.id, row] as const;
+                }),
             ).values(),
           ],
           actor,
@@ -3723,7 +3897,11 @@ export function createService({
       requireAction(actor, "read", "read an item", () =>
         resolveIssueRow(db, ref, actor),
       );
-      return hydrateOne(db, resolveIssueRow(db, ref, actor), actor);
+      const row = resolveIssueRow(db, ref, actor);
+      const item = hydrateOne(db, row, actor);
+      return actor.kind === "bot"
+        ? { ...item, access: accessOf(db, actor, row) }
+        : item;
     },
 
     /** The legacy list_issues: status open also lists issues waiting in triage, which did not exist when it was named. */
@@ -3897,8 +4075,9 @@ export function createService({
     },
 
     /**
-     * The calling actor, as stored, with its photo URL, the products it owns
-     * and every product it reaches; actors are never deleted, so the row is there.
+     * The calling actor, as stored, with its photo URL, the products it owns,
+     * those it files on and the projects it reads through its products;
+     * actors are never deleted, so the row is there.
      */
     whoami(actor: ActingActor): Whoami {
       return {
@@ -3908,7 +4087,8 @@ export function createService({
             .get() as ActorWithHash,
         ),
         ownProducts: ownProductsOf(db, actor),
-        products: namedProducts(db, actor),
+        products: fileableProducts(db, actor),
+        impliedProjects: implicitProjectsOf(db, actor).map((p) => p.slug),
         unreadMessages: messaging.unreadMessages(actor),
       };
     },
@@ -4148,6 +4328,7 @@ export function createService({
           const row = insertSubscription(tx, webhooks, {
             kind,
             actorId: actor.id,
+            apiKeyId: actor.keyId ?? null,
             url: url.href,
             secret: input.secret,
             productIds,

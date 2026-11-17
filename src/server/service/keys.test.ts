@@ -111,6 +111,7 @@ describe("a key's scope", () => {
     });
     expect(authenticateKey(db, key)).toEqual({
       ...actor,
+      keyId: expect.any(String),
       scope: {
         products: [
           { id: bta.id, key: "BTA" },

@@ -77,19 +77,27 @@ export const notFoundError = {
 /**
  * The 403 of an operation a key's actions gate: spread into every operation but
  * whoami. `scope` adds the refusal of a key limited to products, for the
- * operations that make one; `owner` the refusal of a write only the product's
- * owner bot makes. (The service's bot-only 403 can't reach /api/v1, whose
- * every caller is a bot.)
+ * operations that make one, worded by `scope` when it is a string; `owner`
+ * the refusal of a write only the product's owner bot makes. (The service's
+ * bot-only 403 can't reach /api/v1, whose every caller is a bot.)
  */
 export const forbiddenError = (
   action: ApiKeyAction,
-  { scope = false, owner }: { scope?: boolean; owner?: string } = {},
+  { scope = false, owner }: { scope?: boolean | string; owner?: string } = {},
 ) => ({
   403: jsonContent(
     errorSchema,
-    `The key lacks the ${action} action (code forbidden_action)${scope ? ", or reaches only some products (code forbidden_scope)" : ""}${owner === undefined ? "" : `, or ${owner} (code forbidden)`}`,
+    `The key lacks the ${action} action (code forbidden_action)${scope === false ? "" : `, or ${scope === true ? "reaches only some products" : scope} (code forbidden_scope)`}${owner === undefined ? "" : `, or ${owner} (code forbidden)`}`,
   ),
 });
+
+/** The forbidden_scope 403 of a change to an item the key reads only through a project drawing from its products. */
+export const VIA_PROJECT =
+  "the key reaches the item only through a project drawing from one of its products (access via_project), which lets it read the item and comment on it and nothing else; the message names the project, the grants that would allow the change and whom to ask";
+
+/** The forbidden_scope 403 of a filing on a product the key reads only through such a project. */
+export const VIA_PROJECT_FILING =
+  "the key reads the product only through a project drawing from one of its products, which files nothing on it; the message names the product to file on instead and the grants that would allow it";
 
 /** The 403 a write only a product's owner makes adds to `forbiddenError`. */
 export const OWNER_ONLY =

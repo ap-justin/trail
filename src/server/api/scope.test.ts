@@ -2,6 +2,7 @@ import { beforeAll, expect, test } from "vitest";
 import { activityEvent } from "../db/schema.js";
 import { createBot } from "../service/keys.js";
 import { projectKey, setupTestApp } from "../test-app.js";
+import { VIA_PROJECT, VIA_PROJECT_FILING } from "./routes.js";
 
 const { db, bot, request, addProject } = setupTestApp();
 
@@ -557,6 +558,8 @@ test("whoami reports the calling key's scope, null where it is unrestricted", as
     },
     ownProducts: [],
     products: [{ key: a.key, name: "A" }],
+    // the projects drawing from A that earlier tests made; implicit-read.test.ts covers the list
+    impliedProjects: expect.any(Array),
     unreadMessages: 0,
     photoUrl: null,
     title: null,
@@ -591,8 +594,12 @@ test("the spec documents each gated operation's 403 with the action it needs", a
     `The key lacks the ${action} action (code forbidden_action)`;
   const orScope = (action: string) =>
     `${needs(action)}, or reaches only some products (code forbidden_scope)`;
-  const orOwner = (action: string) =>
-    `${needs(action)}, or the product has an owner bot and the call is that bot's alone: adding a todo, moving an issue out of triage, canceling an item another bot filed, reopening a canceled issue another bot filed, or changing an item's type; the message names the owner and what to do instead (code forbidden)`;
+  const owner =
+    "the product has an owner bot and the call is that bot's alone: adding a todo, moving an issue out of triage, canceling an item another bot filed, reopening a canceled issue another bot filed, or changing an item's type; the message names the owner and what to do instead (code forbidden)";
+  const viaProject = (scope: string) => `, or ${scope} (code forbidden_scope)`;
+  const itemChange = viaProject(VIA_PROJECT);
+  const orOwner = (action: string, scope = "") =>
+    `${needs(action)}${scope}, or ${owner}`;
   const ownerLabels = `${needs("admin")}, or another bot owns the product: only its owner creates its labels (code forbidden)`;
   expect(forbidden).toEqual({
     "GET /activity": needs("read"),
@@ -617,13 +624,13 @@ test("the spec documents each gated operation's 403 with the action it needs", a
     "PUT /me/photo": null,
     "DELETE /me/title": null,
     "PUT /me/title": null,
-    "PATCH /items/{key}": orOwner("issues"),
-    "PATCH /issues/{id}": orOwner("issues"),
+    "PATCH /items/{key}": orOwner("issues", itemChange),
+    "PATCH /issues/{id}": orOwner("issues", itemChange),
     "PATCH /products/{key}": `${needs("admin")}, or owner changes the owner of a product another bot owns (code forbidden)`,
     "PATCH /projects/{ref}":
       "The key lacks the issues action, or for a product key the admin action (code forbidden_action)",
     "POST /import": `${orScope("admin")}, or the product exists and another bot owns it: only its owner imports into it (code forbidden)`,
-    "POST /items": orOwner("issues"),
+    "POST /items": orOwner("issues", viaProject(VIA_PROJECT_FILING)),
     "POST /items/{key}/comments": needs("comments"),
     "POST /issues": needs("issues"),
     "POST /issues/{id}/comments": needs("comments"),
@@ -634,8 +641,8 @@ test("the spec documents each gated operation's 403 with the action it needs", a
       "The key lacks the issues action, or with key the admin action (code forbidden_action), or with key reaches only some products (code forbidden_scope)",
     "POST /projects/{ref}/labels": ownerLabels,
     "POST /projects/{ref}/status-updates": needs("status_updates"),
-    "POST /projects/{slug}/items": needs("issues"),
-    "DELETE /projects/{slug}/items/{key}": needs("issues"),
+    "POST /projects/{slug}/items": `${needs("issues")}${itemChange}`,
+    "DELETE /projects/{slug}/items/{key}": `${needs("issues")}${itemChange}`,
     "GET /webhooks": null,
     "POST /webhooks": needs("read"),
     "GET /webhooks/{id}": needs("read"),

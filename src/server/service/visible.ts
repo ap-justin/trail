@@ -13,13 +13,35 @@ import { NotFoundError } from "./errors.js";
 /**
  * What a caller reaches, by id; null is everything. A person reaches their
  * invited products (/api/web) and no project of their own; a bot key its
- * products and projects. Project membership is read in each query, never
- * copied onto the key.
+ * products and projects, and with `implicitProjects` the items of every
+ * project drawing from its products too, to read and comment on. Project
+ * membership is read in each query, never copied onto the key.
  */
 export type Reach = {
   products: readonly string[];
   projects: readonly string[];
+  implicitProjects: boolean;
 } | null;
+
+/**
+ * The reach of a key with these products and projects: everything when
+ * `products` is null. A bot also reads the items of the projects drawing from
+ * its products; a person keeps the per-product view.
+ */
+export const reachOfScope = (
+  scope: {
+    products: readonly { id: string }[] | null;
+    projects: readonly { id: string }[];
+  },
+  bot: boolean,
+): Reach =>
+  scope.products === null
+    ? null
+    : {
+        products: scope.products.map((p) => p.id),
+        projects: scope.projects.map((p) => p.id),
+        implicitProjects: bot,
+      };
 
 /**
  * `column` holds the id of one of these products, checked inside the query so
@@ -31,16 +53,38 @@ export const amongProducts = (
   ids: readonly string[] | null,
 ): SQL | undefined => (ids === null ? undefined : inArray(column, [...ids]));
 
-/** The ids of the items in the reach's projects, as a subquery. */
-const itemsOfProjects = (db: Db, projects: readonly string[]) =>
+/** The ids of the projects drawing from one of these products, as a subquery. */
+const projectsDrawingFrom = (db: Db, products: readonly string[]) =>
   db
-    .select({ id: projectItem.issueId })
-    .from(projectItem)
-    .where(inArray(projectItem.projectId, [...projects]));
+    .select({ id: projectProduct.projectId })
+    .from(projectProduct)
+    .where(inArray(projectProduct.productId, [...products]));
+
+/**
+ * `column` holds the id of a project whose items the reach reaches: one it
+ * lists, or with `implicitProjects` one drawing from its products. Null when
+ * it reaches the items of no project.
+ */
+function itemProjects(
+  db: Db,
+  reach: NonNullable<Reach>,
+  column: SQLiteColumn,
+): SQL | null {
+  const listed =
+    reach.projects.length === 0
+      ? undefined
+      : inArray(column, [...reach.projects]);
+  const drawing =
+    reach.implicitProjects && reach.products.length > 0
+      ? inArray(column, projectsDrawingFrom(db, reach.products))
+      : undefined;
+  return or(listed, drawing) ?? null;
+}
 
 /**
  * The item in `issueId` (of product `productId`) is reached: its product is
- * one of the reach's, or it is in one of the reach's projects now.
+ * one of the reach's, or it is in one of the projects whose items it reaches
+ * now.
  */
 export function itemsReached(
   db: Db,
@@ -50,14 +94,22 @@ export function itemsReached(
 ): SQL | undefined {
   if (reach === null) return undefined;
   const byProduct = inArray(productId, [...reach.products]);
-  if (reach.projects.length === 0) return byProduct;
-  return or(byProduct, inArray(issueId, itemsOfProjects(db, reach.projects)));
+  const projects = itemProjects(db, reach, projectItem.projectId);
+  if (projects === null) return byProduct;
+  return or(
+    byProduct,
+    inArray(
+      issueId,
+      db.select({ id: projectItem.issueId }).from(projectItem).where(projects),
+    ),
+  );
 }
 
 /**
  * The product in `column` is one the caller may name, to read its name, key
- * and labels or to file into: one of the reach's products, or one a reached
- * project draws from. Naming a product reaches none of its items.
+ * and labels: one of the reach's products, or one a project whose items it
+ * reaches draws from. Naming a product reaches none of its items, and files
+ * on it only through a listed project.
  */
 export function productsNamed(
   db: Db,
@@ -66,7 +118,8 @@ export function productsNamed(
 ): SQL | undefined {
   if (reach === null) return undefined;
   const byProduct = inArray(column, [...reach.products]);
-  if (reach.projects.length === 0) return byProduct;
+  const projects = itemProjects(db, reach, projectProduct.projectId);
+  if (projects === null) return byProduct;
   return or(
     byProduct,
     inArray(
@@ -74,7 +127,7 @@ export function productsNamed(
       db
         .select({ id: projectProduct.productId })
         .from(projectProduct)
-        .where(inArray(projectProduct.projectId, [...reach.projects])),
+        .where(projects),
     ),
   );
 }
@@ -86,24 +139,19 @@ export function projectsReached(
   column: SQLiteColumn = project.id,
 ): SQL | undefined {
   if (reach === null) return undefined;
-  const byProduct = inArray(
-    column,
-    db
-      .select({ id: projectProduct.projectId })
-      .from(projectProduct)
-      .where(inArray(projectProduct.productId, [...reach.products])),
-  );
+  const byProduct = inArray(column, projectsDrawingFrom(db, reach.products));
   if (reach.projects.length === 0) return byProduct;
   return or(byProduct, inArray(column, [...reach.projects]));
 }
 
 /**
  * The events `reach` sees: every event of its products; a project's own
- * events (no product) when it reaches the project; and, through its projects,
- * every item joining or leaving one of them, the removal being the last event
- * of an item that left, as a webhook following the project gets it, and the
- * events of the items in them now and of their comments, an item's
- * membership event only when that event's project is reached too.
+ * events (no product) when it reaches the project; and, through the projects
+ * whose items it reaches, every item joining or leaving one of them, the
+ * removal being the last event of an item that left, as a webhook following
+ * the project gets it, and the events of the items in them now and of their
+ * comments, an item's membership event only when that event's project is
+ * reached too.
  */
 export function eventsReached(db: Db, reach: Reach): SQL | undefined {
   if (reach === null) return undefined;
@@ -112,14 +160,18 @@ export function eventsReached(db: Db, reach: Reach): SQL | undefined {
     isNull(activityEvent.productId),
     projectsReached(db, reach, activityEvent.projectId),
   );
-  if (reach.projects.length === 0) return or(byProduct, projectOwn);
-  const items = itemsOfProjects(db, reach.projects);
+  const projects = itemProjects(db, reach, projectItem.projectId);
+  if (projects === null) return or(byProduct, projectOwn);
+  const items = db
+    .select({ id: projectItem.issueId })
+    .from(projectItem)
+    .where(projects);
   return or(
     byProduct,
     projectOwn,
     and(
       eq(activityEvent.subjectType, "issue"),
-      inArray(activityEvent.projectId, [...reach.projects]),
+      itemProjects(db, reach, activityEvent.projectId) as SQL,
     ),
     and(
       eq(activityEvent.subjectType, "issue"),

@@ -35,7 +35,9 @@ import {
   type Transport,
 } from "../webhooks/send.js";
 import { ValidationError } from "./errors.js";
+import { liveKeyScope } from "./keys.js";
 import type { Tx } from "./tx.js";
+import { eventsReached, projectsReached, reachOfScope } from "./visible.js";
 
 /** What the service needs to store secrets and to send a test call. */
 export type WebhookSettings = SendDeps & {
@@ -188,6 +190,7 @@ export function insertSubscription(
   input: {
     kind: WebhookSubscriptionKind;
     actorId: string;
+    apiKeyId: string | null;
     url: string;
     secret: string;
     productIds: string[];
@@ -201,6 +204,7 @@ export function insertSubscription(
       id,
       kind: input.kind,
       actorId: input.actorId,
+      apiKeyId: input.apiKeyId,
       url: input.url,
       secretCipher: sealSecret(settings.key, id, input.secret),
     })
@@ -370,6 +374,77 @@ export function setFollows(
       ),
     )
     .run();
+}
+
+const KEY_REVOKED = "not sent: the key that made this webhook is revoked";
+const keyLost = (what: string) =>
+  `not sent: this webhook's key no longer reaches ${what}`;
+
+/**
+ * Why the key that made a subscription may not send it `event` now, as the
+ * delivery's lastError; null when it may. Read as the key stands: revoked, or
+ * its scope no longer reaching a product or project the subscription follows,
+ * or the event (by the reach rules every read uses). An unrestricted key only
+ * fails revoked. Bots alone hold keys, so the reach is a bot's.
+ */
+export function keyRefusal(
+  db: Db,
+  keyId: string,
+  subscriptionId: string,
+  event: typeof activityEvent.$inferSelect,
+): string | null {
+  const scope = liveKeyScope(db, keyId);
+  if (!scope) return KEY_REVOKED;
+  const reach = reachOfScope(scope, true);
+  if (reach === null) return null;
+  const lostProduct = db
+    .select({ key: product.key })
+    .from(webhookSubscriptionProduct)
+    .innerJoin(product, eq(product.id, webhookSubscriptionProduct.productId))
+    .where(
+      and(
+        eq(webhookSubscriptionProduct.subscriptionId, subscriptionId),
+        notInArray(webhookSubscriptionProduct.productId, [...reach.products]),
+      ),
+    )
+    .get();
+  if (lostProduct) return keyLost(lostProduct.key);
+  const lostProject = db
+    .select({ slug: project.slug })
+    .from(webhookSubscriptionProject)
+    .innerJoin(project, eq(project.id, webhookSubscriptionProject.projectId))
+    .where(
+      and(
+        eq(webhookSubscriptionProject.subscriptionId, subscriptionId),
+        not(projectsReached(db, reach, project.id) as SQL),
+      ),
+    )
+    .get();
+  if (lostProject) return keyLost(lostProject.slug);
+  const reached = db
+    .select({ one: sql`1` })
+    .from(activityEvent)
+    .where(and(eq(activityEvent.id, event.id), eventsReached(db, reach)))
+    .get();
+  if (reached) return null;
+  return keyLost(eventScopeName(db, event));
+}
+
+/** The key of the event's product, else the slug of its project. */
+function eventScopeName(
+  db: Db,
+  event: typeof activityEvent.$inferSelect,
+): string {
+  const row = db
+    .select({
+      name: sql<string | null>`coalesce(${product.key}, ${project.slug})`,
+    })
+    .from(activityEvent)
+    .leftJoin(product, eq(product.id, activityEvent.productId))
+    .leftJoin(project, eq(project.id, activityEvent.projectId))
+    .where(eq(activityEvent.id, event.id))
+    .get();
+  return row?.name ?? "this event";
 }
 
 /**

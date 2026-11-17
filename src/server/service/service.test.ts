@@ -567,7 +567,10 @@ describe("updatedAt", () => {
         service.updateItem(bot, created.id, { title: "same", status: "open" }),
     ])[0] as Issue;
     expect(result).toEqual(created);
-    expect(service.getItem(bot, created.id)).toEqual(created);
+    expect(service.getItem(bot, created.id)).toEqual({
+      ...created,
+      access: "product",
+    });
     expect(published).toEqual([]);
   });
 });
@@ -866,6 +869,7 @@ test("whoami is the calling actor's row, label included", () => {
     photoUrl: null,
     unreadMessages: 0,
     ownProducts: [],
+    impliedProjects: [],
     products: service
       .listProducts(labelled, { limit: 200 })
       .items.map(whole)

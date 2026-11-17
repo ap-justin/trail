@@ -10,6 +10,7 @@ import {
 import type { ActivityEvent, EventBus } from "../events/bus.js";
 import {
   isPending,
+  keyRefusal,
   leftFollowedProjects,
   type WebhookSettings,
 } from "../service/webhooks.js";
@@ -62,6 +63,7 @@ export type WebhookWorkerOptions = {
 };
 
 type Delivery = typeof webhookDelivery.$inferSelect;
+type Subscription = typeof webhookSubscription.$inferSelect;
 
 /** updated_at is the bot's own changes; a delivery attempt writes the subscription but isn't one, and the column's on-update default would stamp it. */
 const keepUpdatedAt = sql`${webhookSubscription.updatedAt}`;
@@ -299,36 +301,48 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
   }
 
   /**
-   * Marks failed, without an attempt, a delivery a project follow alone
-   * queued whose item has left the project since, so nothing about the item
-   * goes out after it left; true when it did. The webhook's health is left as
-   * it is, since the receiver had no part in it.
+   * Why an event's delivery mustn't go out now, or null: its item has left
+   * the project a follow alone queued it for, or the key that made an
+   * activity webhook can no longer send it (one made before keys were
+   * recorded has none to check).
    */
-  function dropLeftProject(delivery: Delivery): boolean {
-    if (delivery.eventId === null) return false;
+  function unsendable(delivery: Delivery, sub: Subscription): string | null {
+    if (delivery.eventId === null) return null;
     const event = db
       .select()
       .from(activityEvent)
       .where(eq(activityEvent.id, delivery.eventId))
       .get();
-    if (!event || !leftFollowedProjects(db, delivery.subscriptionId, event)) {
-      return false;
-    }
+    if (!event) return null;
+    if (leftFollowedProjects(db, sub.id, event)) return LEFT_PROJECT;
+    if (sub.kind !== "activity" || sub.apiKeyId === null) return null;
+    return keyRefusal(db, sub.apiKeyId, sub.id, event);
+  }
+
+  /**
+   * Marks the delivery failed with `reason`, without an attempt and keeping
+   * no body. The webhook's health is left as it is, since the receiver had no
+   * part in it.
+   */
+  function drop(delivery: Delivery, reason: string) {
     db.update(webhookDelivery)
-      .set({ status: "failed", body: null, lastError: LEFT_PROJECT })
+      .set({ status: "failed", body: null, lastError: reason })
       .where(and(eq(webhookDelivery.id, delivery.id), isPending))
       .run();
-    return true;
   }
 
   async function attempt(delivery: Delivery) {
-    if (dropLeftProject(delivery)) return;
     const sub = db
       .select()
       .from(webhookSubscription)
       .where(eq(webhookSubscription.id, delivery.subscriptionId))
       .get();
     if (!sub) return;
+    const reason = unsendable(delivery, sub);
+    if (reason !== null) {
+      drop(delivery, reason);
+      return;
+    }
     const secret = openSecret(settings.key, sub.id, sub.secretCipher);
     const body = secret === null ? null : bodyOf(delivery);
     let result: SendResult;

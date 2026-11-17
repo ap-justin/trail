@@ -21,6 +21,7 @@ import {
   notFoundError,
   OWNER_ONLY,
   readErrors,
+  VIA_PROJECT,
   writeErrors,
 } from "./routes.js";
 import {
@@ -106,7 +107,7 @@ const updateIssue = createRoute({
       legacyUpdatedItemSchema,
       "The updated item, with skippedLabels when labels another bot's product lacks were left off",
     ),
-    ...forbiddenError("issues", { owner: OWNER_ONLY }),
+    ...forbiddenError("issues", { owner: OWNER_ONLY, scope: VIA_PROJECT }),
     ...writeErrors,
     ...notFoundError,
   },

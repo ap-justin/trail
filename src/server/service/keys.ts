@@ -31,8 +31,8 @@ export type KeyScope = {
   actions: ApiKeyAction[] | null;
 };
 
-/** A bot as one of its keys authenticates it: the bot, and that key's scope. */
-export type KeyActor = Actor & { scope: KeyScope };
+/** A bot as one of its keys authenticates it: the bot, that key's id and its scope. */
+export type KeyActor = Actor & { keyId: string; scope: KeyScope };
 
 /** A key's scope as a person or bot reads it: products by key, projects by slug, both null on an unrestricted key. */
 export type KeyScopeView = {
@@ -441,6 +441,19 @@ function scopesOf(
   return scopes;
 }
 
+/** The products and projects of the key with this id, as they are now; undefined for a revoked or missing key. */
+export function liveKeyScope(
+  db: Db,
+  keyId: string,
+): Pick<KeyScope, "products" | "projects"> | undefined {
+  const live = db
+    .select({ id: apiKey.id })
+    .from(apiKey)
+    .where(and(eq(apiKey.id, keyId), isNull(apiKey.revokedAt)))
+    .get();
+  return live && scopesOf(db, [keyId]).get(keyId);
+}
+
 /** Every key, oldest first, with its scope and without its hash. */
 export function listKeys(db: Db): KeyListing[] {
   const rows = db
@@ -641,6 +654,7 @@ export function authenticateKey(db: Db, token: string): KeyActor | null {
   if (!row) return null;
   return {
     ...row.actor,
+    keyId: row.id,
     scope: {
       ...(scopesOf(db, [row.id]).get(row.id) as Pick<
         KeyScope,

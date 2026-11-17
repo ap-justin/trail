@@ -483,7 +483,7 @@ test("a scope edit takes a followed project from the key's reach, and the webhoo
   expect(await listed()).toEqual([wide.id]);
 });
 
-test("a key follows only the projects it lists: one reached through its products is the 404 a missing one is", async () => {
+test("a key follows the projects it lists and those drawing from its products; any other is the 404 a missing one is", async () => {
   const btaKey = createBot(db, "bta-reader", {
     scope: { products: ["BTA"], actions: ["read"] },
   }).key;
@@ -491,14 +491,48 @@ test("a key follows only the projects it lists: one reached through its products
     scope: { products: ["BTA"], projects: ["other"], actions: ["read"] },
   }).key;
   const missing = await hook({ projects: ["nowhere"] }, btaKey);
+  const refused = await hook({ projects: ["other"] }, btaKey);
+  expect(refused.status).toBe(404);
+  expect(refused.body.error.message).toBe(
+    missing.body.error.message.replace("nowhere", "other"),
+  );
   for (const key of [btaKey, mixedKey]) {
-    const refused = await hook({ projects: ["recon"] }, key);
-    expect(refused.status).toBe(404);
-    expect(refused.body.error.message).toBe(
-      missing.body.error.message.replace("nowhere", "recon"),
-    );
+    expect((await hook({ projects: ["recon"] }, key)).status).toBe(201);
   }
   expect((await hook({ projects: ["other"] }, mixedKey)).status).toBe(201);
+});
+
+test("a BTA-only key following recon gets the events of recon's ATL items while they are in it, and none of ATL's other items", async () => {
+  const btaKey = createBot(db, "bta-follower", {
+    scope: { products: ["BTA"], actions: ["read"] },
+  }).key;
+  const { url } = await follow({ projects: ["recon"] }, btaKey);
+  const inside = await item("ATL", true);
+  const outside = await item("ATL", false);
+  await retitle(inside, "inside, renamed");
+  await retitle(outside, "outside, renamed");
+  expect(await receivedBy(url)).toEqual([
+    `trail.project.item_added ${inside}`,
+    `trail.issue.updated ${inside}`,
+  ]);
+  await ok("DELETE", `/projects/recon/items/${inside}`);
+  await retitle(inside, "left recon");
+  expect(await receivedBy(url)).toEqual([
+    `trail.project.item_added ${inside}`,
+    `trail.issue.updated ${inside}`,
+    `trail.project.item_removed ${inside}`,
+  ]);
+});
+
+test("following ATL by product with a BTA-only key is refused, pointing to recon", async () => {
+  const btaKey = createBot(db, "bta-product-follower", {
+    scope: { products: ["BTA"], actions: ["read"] },
+  }).key;
+  const refused = await hook({ products: ["ATL"] }, btaKey);
+  expect(refused.status).toBe(404);
+  expect(refused.body.error.message).toBe(
+    'this key reaches product ATL only through project recon: send projects: ["recon"] in place of ATL, for the events of the project\'s items; the rest of ATL needs a key that lists ATL',
+  );
 });
 
 test("a projects value longer than a slug can be is a 422 before any lookup", async () => {
@@ -509,12 +543,14 @@ test("a projects value longer than a slug can be is a 422 before any lookup", as
   expect(JSON.stringify(over.body.error)).toContain("projects");
 });
 
-test("the bot's webhook following a project is out of reach of its key that reaches the project only through its products", async () => {
+test("the bot's webhook following a project is in reach of its key that reaches the project through its products", async () => {
   const owner = createBot(db, "bta-and-recon");
   const { id } = await follow({ projects: ["recon"] }, owner.key);
   const btaKey = createKey(db, owner.actor.id, { products: ["BTA"] }).key;
+  const ctxKey = createKey(db, owner.actor.id, { products: ["CTX"] }).key;
   expect((await call("GET", `/webhooks/${id}`, owner.key)).status).toBe(200);
-  expect((await call("GET", `/webhooks/${id}`, btaKey)).status).toBe(404);
+  expect((await call("GET", `/webhooks/${id}`, btaKey)).status).toBe(200);
+  expect((await call("GET", `/webhooks/${id}`, ctxKey)).status).toBe(404);
 });
 
 test("an update drops the queued events of a project no longer followed and keeps those of one still followed", async () => {

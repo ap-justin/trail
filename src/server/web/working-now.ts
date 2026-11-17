@@ -4,7 +4,7 @@ import { workingNowSchema } from "../../shared/schemas.js";
 import { jsonContent } from "../api/routes.js";
 import type { Db } from "../db/client.js";
 import { actor, actorPhoto, issue, product } from "../db/schema.js";
-import { amongVisible } from "../service/visible.js";
+import { amongProducts } from "../service/visible.js";
 import { createWebRouter } from "./env.js";
 import { toWebActor, visibleIds, webActorColumns } from "./visible.js";
 
@@ -42,7 +42,7 @@ export function workingNowRoutes(db: Db) {
       .leftJoin(actorPhoto, eq(actorPhoto.actorId, actor.id))
       .where(
         and(
-          amongVisible(issue.productId, visibleIds(c.var.member)),
+          amongProducts(issue.productId, visibleIds(c.var.member)),
           eq(issue.status, "in_progress"),
         ),
       )

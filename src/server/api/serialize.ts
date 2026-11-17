@@ -117,6 +117,7 @@ export function toIssue(row: Issue): IssueView {
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     completedAt: row.completedAt?.toISOString() ?? null,
+    ...(row.access && { access: row.access }),
   };
 }
 
@@ -214,6 +215,7 @@ export function toWhoami(row: Whoami, scope: KeyScope): WhoamiView {
     scope: scopeView(scope),
     ownProducts: row.ownProducts.map(ref),
     products: row.products.map(ref),
+    impliedProjects: row.impliedProjects,
     photoUrl: row.photoUrl,
     title: row.title,
     unreadMessages: row.unreadMessages,

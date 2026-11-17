@@ -19,6 +19,7 @@ test("GET /whoami answers the key's bot: id, kind, name, label, photoUrl and tit
     scope: { products: null, projects: null, actions: null },
     ownProducts: [],
     products: [],
+    impliedProjects: [],
     photoUrl: null,
     title: null,
     unreadMessages: 0,

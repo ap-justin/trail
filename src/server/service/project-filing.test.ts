@@ -7,6 +7,7 @@ import { createEventBus } from "../events/bus.js";
 import { testWebhooks } from "../test-app.js";
 import {
   ForbiddenError,
+  ForbiddenScopeError,
   IdempotencyKeyReusedError,
   NotFoundError,
   ValidationError,
@@ -204,7 +205,7 @@ describe("a key with a product grant", () => {
     expect(filed.projects.map((p) => p.slug)).toEqual(["recon"]);
   });
 
-  test("files nothing on a product of that project it has no grant on", () => {
+  test("files nothing on a product of that project it has no grant on, which it reads only through the project", () => {
     const before = itemCount();
     expect(() =>
       service.fileIssue(gamma, {
@@ -213,8 +214,8 @@ describe("a key with a product grant", () => {
         title: "no",
       }),
     ).toThrow(
-      new NotFoundError(
-        "no product ATL: pass the key (like TRL) of a product this key reaches; list_products (GET /api/v1/products) lists them",
+      new ForbiddenScopeError(
+        'this key reads product ATL only through project recon, which lets it read recon\'s ATL items and comment on them and file nothing on ATL: file on BTA (with project: "recon" to put the issue in recon), or get a key that lists product ATL or project recon. Ask admin, the owner of ATL, for that grant.',
       ),
     );
     expect(itemCount()).toBe(before);

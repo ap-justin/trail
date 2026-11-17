@@ -904,6 +904,9 @@ export const webhookSubscription = sqliteTable(
     lastSuccessAt: integer("last_success_at", { mode: "timestamp_ms" }),
     lastError: text("last_error"),
     lastErrorAt: integer("last_error_at", { mode: "timestamp_ms" }),
+    // the key that created it, whose reach the worker checks before each activity delivery;
+    // null on one created before keys were recorded, which isn't checked. No cascade: keys are revoked, not deleted
+    apiKeyId: text("api_key_id").references(() => apiKey.id),
   },
   (t) => [
     check("webhook_subscription_url_check", sql`length(${c(t.url)}) > 0`),

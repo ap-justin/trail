@@ -34,7 +34,7 @@ import { deprecated, toPage, toWebhook } from "./serialize.js";
 
 const tags = ["webhooks"];
 const own =
-  "Acts on the calling bot's own webhooks only; a webhook of another bot, or one that follows a product outside the key's products or a project the key doesn't list, is a 404.";
+  "Acts on the calling bot's own webhooks only; a webhook of another bot, or one that follows a product outside the key's products or a project the key neither lists nor reaches through its products, is a 404.";
 
 const URL_TAKEN = "This bot already has a webhook to that URL";
 const urlTaken = { 409: jsonContent(errorSchema, URL_TAKEN) };

@@ -141,6 +141,7 @@ test("POST /issues sets estimate, priority, labels, links and externalRef", asyn
   const { deprecated: _created, ...fields } = issue;
   expect((await send("GET", `/issues/${issue.key}`)).body).toEqual({
     ...fields,
+    access: "product",
     deprecated: expect.stringMatching(/use get_item/),
   });
   expect(published.at(-1)).toMatchObject({

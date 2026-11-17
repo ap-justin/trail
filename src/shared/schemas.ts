@@ -181,6 +181,11 @@ export const issueSchema = z
       description:
         "When the item moved to done or canceled; null while it is in triage, open or in progress.",
     }),
+    access: z.enum(["product", "project", "via_project"]).optional().meta({
+      description:
+        "On get_item (GET /items/{key}) for a bot: why this key reaches the item, the strongest grant first. product: its products cover the item's product (an unrestricted key too). project: a project the key lists holds the item, and the key works it as any non-owner bot. via_project: a project drawing from one of the key's products holds it, and the key may read it and comment on it (add_comment) and nothing else; any change is forbidden_scope until the key lists the item's product or project.",
+      example: "product",
+    }),
   })
   .openapi("Item");
 
@@ -435,6 +440,11 @@ export const whoamiSchema = actorSchema
       description:
         "Every product this key files issues on, A to Z: those it reaches, and those its projects draw from, which it files on with project (file_issue, or POST /items with type issue).",
     }),
+    impliedProjects: z.array(z.string()).meta({
+      description:
+        "The slugs of the projects drawing from one of this key's products that scope.projects doesn't list, A to Z. The key reads their items, whichever product they are in, and comments on them; changing an item of another product needs a key that lists that product or project. Empty for a key without a products list.",
+      example: ["launch-q4"],
+    }),
     photoUrl,
     title: actorTitle,
     unreadMessages: z.int().meta({
@@ -552,7 +562,7 @@ const webhookProjects = z
   .max(WEBHOOK_PRODUCTS_MAX)
   .meta({
     description:
-      "Slugs (like launch-q4) of the projects to follow: you get the project's own events (updates, status updates, items joining and leaving) and the events of its items and their comments while they are in it, whichever product they are in. A product's key (like TRL) here is the deprecated alias of products and follows that product. A value that is neither, or a project the key doesn't list (a key limited to products follows no project; an unrestricted key follows any), is a 404, as a missing project is.",
+      "Slugs (like launch-q4) of the projects to follow: you get the project's own events (updates, status updates, items joining and leaving) and the events of its items and their comments while they are in it, whichever product they are in. A product's key (like TRL) here is the deprecated alias of products and follows that product. A value that is neither, or a project the key neither lists nor reaches through its products (a key limited to products follows the projects drawing from them; an unrestricted key follows any), is a 404, as a missing project is.",
     example: ["launch-q4"],
   });
 

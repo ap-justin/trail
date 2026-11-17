@@ -23,6 +23,8 @@ import {
   notFoundError,
   OWNER_ONLY,
   readErrors,
+  VIA_PROJECT,
+  VIA_PROJECT_FILING,
   writeErrors,
 } from "./routes.js";
 import { toComment, toIssue, toPage, withSkippedLabels } from "./serialize.js";
@@ -44,7 +46,10 @@ const createItem = createRoute({
   },
   responses: {
     201: jsonContent(createdItemSchema, "The created item"),
-    ...forbiddenError("issues", { owner: OWNER_ONLY }),
+    ...forbiddenError("issues", {
+      owner: OWNER_ONLY,
+      scope: VIA_PROJECT_FILING,
+    }),
     ...writeErrors,
     ...notFoundError,
     ...conflictError,
@@ -93,7 +98,10 @@ const updateItem = createRoute({
       updatedItemSchema,
       "The updated item, with skippedLabels when labels another bot's product lacks were left off",
     ),
-    ...forbiddenError("issues", { owner: OWNER_ONLY }),
+    ...forbiddenError("issues", {
+      owner: OWNER_ONLY,
+      scope: VIA_PROJECT,
+    }),
     ...writeErrors,
     ...notFoundError,
   },

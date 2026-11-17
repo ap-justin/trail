@@ -37,6 +37,7 @@ import {
   projectParam,
   projectSlugParam,
   readErrors,
+  VIA_PROJECT,
   writeErrors,
 } from "./routes.js";
 import {
@@ -162,7 +163,7 @@ const addItems = createRoute({
   request: { params: projectSlugParam, body: jsonBody(projectItemsSchema) },
   responses: {
     200: jsonContent(projectItemsAddedSchema, "The project and what changed"),
-    ...forbiddenError("issues"),
+    ...forbiddenError("issues", { scope: VIA_PROJECT }),
     ...writeErrors,
     ...notFoundError,
   },
@@ -177,7 +178,7 @@ const removeItem = createRoute({
   request: { params: projectItemParam },
   responses: {
     200: jsonContent(projectItemsRemovedSchema, "The project and what changed"),
-    ...forbiddenError("issues"),
+    ...forbiddenError("issues", { scope: VIA_PROJECT }),
     ...readErrors,
     ...notFoundError,
   },
