@@ -469,7 +469,7 @@ describe("aside", () => {
     expect(aside("Status updates")).toHaveTextContent("No status update yet");
   });
 
-  test("a status update's bot name never truncates; its title gives way first", () => {
+  test("a status update's bot name truncates only once its title has given way", () => {
     renderProduct({
       statusUpdates: {
         status: "ready",
@@ -478,11 +478,11 @@ describe("aside", () => {
     });
     const section = aside("Status updates");
     const name = within(section).getByText("Beta");
-    expect(name).toHaveClass("shrink-0");
-    expect(name).not.toHaveClass("truncate");
+    expect(name).toHaveClass("min-w-0", "truncate");
+    expect(name).not.toHaveClass("shrink-0");
     expect(
       within(section).getByText("Release manager for the web client"),
-    ).toHaveClass("min-w-0", "truncate");
+    ).toHaveClass("min-w-0", "truncate", "shrink-4");
   });
 
   test("Try again on status updates leaves focus on their heading", async () => {

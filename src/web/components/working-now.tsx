@@ -49,7 +49,7 @@ export function WorkingNow({
           >
             <AppLink
               href={paths.issue(item.key)}
-              aria-label={`${item.key} ${item.title}, worked on by ${bot.name}, bot`}
+              aria-label={`${bot.name} ${item.key}, ${item.title}, worked on by ${bot.name}, bot`}
               className={cn(
                 textLinkFocus,
                 "flex min-h-11 min-w-0 items-center gap-1.5 pr-2 pl-1 hover:bg-accent lg:min-h-7",

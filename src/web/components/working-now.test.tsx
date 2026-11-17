@@ -42,7 +42,9 @@ describe("WorkingNow", () => {
       within(strip()).getByRole("heading", { name: "Working now" }),
     ).toBeInTheDocument();
     const [link] = entryLinks();
-    expect(link).toHaveAccessibleName("TRL-1 Item 1, worked on by bot-1, bot");
+    expect(link).toHaveAccessibleName(
+      "bot-1 TRL-1, Item 1, worked on by bot-1, bot",
+    );
     expect(link).toHaveAttribute("href", "/products/TRL/1");
     expect(link).toHaveTextContent("bot-1TRL-1");
     const avatar = within(link as HTMLElement).getByRole("img", {
@@ -50,6 +52,21 @@ describe("WorkingNow", () => {
     });
     expect(avatar).toHaveClass("rounded-md", "bg-bot-muted", "text-bot");
     expect(moreCounts()).toEqual([]);
+  });
+
+  test("the link's name starts with its visible text, name then key (label in name)", () => {
+    render(<WorkingNow workingNow={view(1)} />);
+    const [link] = entryLinks();
+    const visible = [
+      within(link as HTMLElement).getByText("bot-1"),
+      within(link as HTMLElement).getByText("TRL-1"),
+    ]
+      .map((part) => part.textContent)
+      .join(" ");
+    expect(visible).toBe("bot-1 TRL-1");
+    expect(link).toHaveAccessibleName(
+      expect.stringMatching(/^bot-1 TRL-1, Item 1, worked on by bot-1/),
+    );
   });
 
   test("the name truncates and the key does not", () => {

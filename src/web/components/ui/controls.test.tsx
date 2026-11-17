@@ -236,6 +236,17 @@ describe("ToggleGroup", () => {
     expect(all).toHaveClass("h-11", "lg:h-7");
     expect(all).not.toHaveClass("h-10");
   });
+
+  test("the track pads only from lg, so below lg the whole control is the segments' 44px", () => {
+    render(
+      <ToggleGroup variant="segmented" aria-label="Type" defaultValue={["all"]}>
+        <ToggleGroupItem value="all">All</ToggleGroupItem>
+      </ToggleGroup>,
+    );
+    const track = screen.getByRole("group", { name: "Type" });
+    expect(track).toHaveClass("lg:data-[variant=segmented]:p-0.5");
+    expect(track.className).not.toMatch(/(?:^| )data-\[variant=segmented\]:p-/);
+  });
 });
 
 describe("Badge", () => {

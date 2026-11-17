@@ -934,7 +934,7 @@ const todo = async (productKey: string, title: string) => {
 const patchItem = (key: string, json: Record<string, unknown>) =>
   request("PATCH", `/api/v1/items/${key}`, { json });
 
-test("a work event, with no id, follows an item moving into and out of in progress and a new assignee on an in-progress item", async () => {
+test("a work event, with no id, follows an item moving into and out of in progress, and a new assignee or title on an in-progress item", async () => {
   const alpha = addProject("alpha");
   const other = addBot("other-bot");
   const stream = await openStream(await addMember("work-alpha", [alpha.id]));
@@ -942,6 +942,8 @@ test("a work event, with no id, follows an item moving into and out of in progre
   await patchItem(key, { status: "in_progress" });
   expect(await untilWork(stream)).toStrictEqual([workMessage(alpha.key)]);
   await patchItem(key, { assignee: other.actor.id });
+  expect(await untilWork(stream)).toStrictEqual([workMessage(alpha.key)]);
+  await patchItem(key, { title: "alpha work, renamed" });
   expect(await untilWork(stream)).toStrictEqual([workMessage(alpha.key)]);
   await patchItem(key, { status: "done" });
   expect(await untilWork(stream)).toStrictEqual([workMessage(alpha.key)]);
@@ -973,7 +975,7 @@ test("an item created in progress sends a work event", async () => {
   await stream.cancel();
 });
 
-test("no work event for a title edit, a comment, a todo done from open, a new assignee on an open item, an issue filed in triage, or a product the member can't see", async () => {
+test("no work event for a title edit on an open item, a comment, a todo done from open, a new assignee on an open item, an issue filed in triage, or a product the member can't see", async () => {
   const alpha = addProject("alpha");
   const beta = addProject("beta");
   const hidden = addProject("hidden");
@@ -1010,5 +1012,69 @@ test("a stream whose filter shows the entry gets the work event after it", async
     item: { key },
   });
   expect(await nextMessage(stream)).toStrictEqual(workMessage(alpha.key));
+  await stream.cancel();
+});
+
+test("an import into a visible product sends a work event, since its issues may arrive in progress", async () => {
+  const importOf = (title: string) =>
+    request("POST", "/api/v1/import", {
+      json: {
+        externalRef: "LIN-WORK",
+        key: "IMPWORK",
+        name: "Imported for work",
+        issues: [
+          {
+            externalRef: "lin-1",
+            title,
+            status: "Todo",
+            createdAt: "2026-01-02T03:04:05.000Z",
+            comments: [],
+          },
+        ],
+      },
+    });
+  const first = await importOf("carried over");
+  expect(first.status).toBe(200);
+  const imported = ((await first.json()) as { project: { id: string } }).project
+    .id;
+  const stream = await openStream(await addMember("work-import", [imported]));
+  // a retitle on re-import is an import event, and no issue event
+  expect((await importOf("carried over, renamed")).status).toBe(200);
+  expect(await untilWork(stream)).toStrictEqual([workMessage("IMPWORK")]);
+  await stream.cancel();
+});
+
+test("one work event per product per batch, however many of its events the batch holds", async () => {
+  const alpha = addProject("alpha");
+  const beta = addProject("beta");
+  await todo(alpha.key, "alpha work");
+  await todo(beta.key, "beta work");
+  const newestOf = (productId: string) => {
+    const event = db
+      .select()
+      .from(activityEvent)
+      .where(eq(activityEvent.productId, productId))
+      .orderBy(desc(activityEvent.seq))
+      .get();
+    if (!event) throw new Error("no event");
+    return event;
+  };
+  const inProgress = (event: ReturnType<typeof newestOf>, seq: number) => ({
+    ...event,
+    seq,
+    payload: { ...event.payload, status: "in_progress" },
+  });
+  const [forAlpha, forBeta] = [newestOf(alpha.id), newestOf(beta.id)];
+  const stream = await openStream(
+    await addMember("work-batch", [alpha.id, beta.id]),
+  );
+  // published together, so the stream drains all three as one batch
+  const top = newestSeq();
+  bus.publish(inProgress(forAlpha, top + 1));
+  bus.publish(inProgress(forAlpha, top + 2));
+  bus.publish(inProgress(forBeta, top + 3));
+  expect(await untilWork(stream)).toStrictEqual([workMessage(alpha.key)]);
+  // a second alpha event would come before beta's
+  expect(await untilWork(stream)).toStrictEqual([workMessage(beta.key)]);
   await stream.cancel();
 });

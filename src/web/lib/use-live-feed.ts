@@ -250,7 +250,10 @@ export function useLiveFeed(
       // a new stream starts from now: read what the gap missed, photos and titles included,
       // since `actor` events are never replayed
       if (opened.current) readEverything();
-      else if (attempt > 0) refetch();
+      else if (attempt > 0) {
+        refetch();
+        readWorkingNow();
+      }
       opened.current = true;
     });
     source.addEventListener("error", () => {

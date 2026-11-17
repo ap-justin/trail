@@ -1,12 +1,19 @@
 import { focusManager } from "@tanstack/react-query";
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
 import { type HttpHandler, HttpResponse, http } from "msw";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { WebActorView, WebWorkingNowView } from "@/lib/api-types";
 import { RECONNECT_MS, WORK_SETTLE_MS } from "@/lib/use-live-feed";
-import { renderApp, serveFeed, serveInProgress, signedInAs } from "@/test/app";
+import {
+  meView,
+  renderApp,
+  serveFeed,
+  serveInProgress,
+  signedInAs,
+} from "@/test/app";
 import { FakeEventSource } from "@/test/event-source";
 import {
+  allProducts,
   alpha,
   beta,
   commentEntry,
@@ -73,6 +80,12 @@ async function openStream(at: { entries: WorkingNowEntry[] }) {
 const fakeTimers = () =>
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 
+/** Lets in-flight requests land without moving the faked timeouts: setImmediate is left real. */
+const flushRequests = () =>
+  act(async () => {
+    for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
+  });
+
 const work = (productKey: string) => JSON.stringify({ productKey });
 
 afterEach(() => {
@@ -103,7 +116,11 @@ describe("working now", () => {
     act(() => vi.advanceTimersByTime(200));
     at.entries = [working("TRL-5", alpha), working("TRL-6", beta)];
     stream.work(work("TRL"));
-    act(() => vi.advanceTimersByTime(WORK_SETTLE_MS - 1));
+    // a literal second: the settle is the product's promise, not a value to track
+    act(() => vi.advanceTimersByTime(999));
+    // a read fires the moment the timer does; the request lands after the flush
+    expect(queryClient.isFetching()).toBe(0);
+    await flushRequests();
     expect(reads.count).toBe(0);
     act(() => vi.advanceTimersByTime(1));
     vi.useRealTimers();
@@ -142,6 +159,32 @@ describe("working now", () => {
     expect(reads.count).toBe(1);
   });
 
+  test("a reset clears a read that waits: one read, not a second at the settle", async () => {
+    const at = { entries: [] as WorkingNowEntry[] };
+    const { stream, reads } = await openStream(at);
+    fakeTimers();
+    at.entries = [working("TRL-5", alpha)];
+    stream.work(work("TRL"));
+    stream.reset();
+    await flushRequests();
+    expect(reads.count).toBe(1);
+    act(() => vi.advanceTimersByTime(WORK_SETTLE_MS));
+    await flushRequests();
+    expect(reads.count).toBe(1);
+  });
+
+  test("leaving the feed drops a read that waits, and closes the stream", async () => {
+    const { queryClient, stream } = await openStream({ entries: [] });
+    fakeTimers();
+    const invalidated = vi.spyOn(queryClient, "invalidateQueries");
+    stream.work(work("TRL"));
+    cleanup();
+    expect(stream.readyState).toBe(FakeEventSource.CLOSED);
+    act(() => vi.advanceTimersByTime(WORK_SETTLE_MS));
+    await flushRequests();
+    expect(invalidated).not.toHaveBeenCalled();
+  });
+
   test("a stream reopened after a drop reads again, since work events are never replayed", async () => {
     const at = { entries: [] as WorkingNowEntry[] };
     const { stream, reads } = await openStream(at);
@@ -152,6 +195,43 @@ describe("working now", () => {
     at.entries = [working("TRL-5", alpha)];
     FakeEventSource.current.open();
     expect(await stripKey("TRL-5")).toBeInTheDocument();
+    expect(reads.count).toBe(1);
+  });
+
+  test("a first stream that closes before opening reads again on the retry", async () => {
+    const at = { entries: [] as WorkingNowEntry[] };
+    const { queryClient } = await openFeed(at.entries);
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    const reads = serveChanging(at);
+    fakeTimers();
+    FakeEventSource.current.fail({ closed: true });
+    act(() => vi.advanceTimersByTime(RECONNECT_MS));
+    vi.useRealTimers();
+    at.entries = [working("TRL-5", alpha)];
+    FakeEventSource.current.open();
+    expect(await stripKey("TRL-5")).toBeInTheDocument();
+    expect(reads.count).toBe(1);
+  });
+
+  test("a product granted while the feed is open reads again, once", async () => {
+    const at = { entries: [] as WorkingNowEntry[] };
+    const { queryClient, reads } = await openStream(at);
+    server.use(
+      http.get("/api/web/me", () =>
+        HttpResponse.json({
+          ...meView("member"),
+          products: [...allProducts, { key: "ATL", name: "Atlas" }],
+        }),
+      ),
+    );
+    at.entries = [working("ATL-1", alpha)];
+    await act(async () => {
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+    });
+    focusManager.setFocused(undefined);
+    expect(await stripKey("ATL-1")).toBeInTheDocument();
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
     expect(reads.count).toBe(1);
   });
 

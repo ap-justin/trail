@@ -281,7 +281,7 @@ function Properties({ issue }: { issue: WebItemView }) {
               {issue.projects.map((project) => (
                 <li
                   key={project.slug}
-                  className="flex max-lg:not-last:after:content-[',']"
+                  className="flex items-center max-lg:not-last:after:content-[',']"
                 >
                   <AppLink
                     href={paths.project(project.slug)}

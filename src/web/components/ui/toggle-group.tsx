@@ -41,8 +41,9 @@ function ToggleGroup({
       data-spacing={spacing}
       data-orientation={orientation}
       style={{ "--gap": spacing } as React.CSSProperties}
+      // the segmented track pads only from lg: below, its 44px segments are the whole 44px control
       className={cn(
-        "group/toggle-group flex w-fit flex-row items-center gap-[--spacing(var(--gap))] rounded-lg data-[size=sm]:rounded-md data-vertical:flex-col data-vertical:items-stretch data-[variant=segmented]:gap-0 data-[variant=segmented]:rounded-md data-[variant=segmented]:bg-muted data-[variant=segmented]:p-0.5",
+        "group/toggle-group flex w-fit flex-row items-center gap-[--spacing(var(--gap))] rounded-lg data-[size=sm]:rounded-md data-vertical:flex-col data-vertical:items-stretch data-[variant=segmented]:gap-0 data-[variant=segmented]:rounded-md data-[variant=segmented]:bg-muted lg:data-[variant=segmented]:p-0.5",
         className,
       )}
       {...props}
@@ -77,8 +78,8 @@ function ToggleGroupItem({
           variant: context.variant || variant,
           size: context.size || size,
         }),
-        // the segment is the tap target, so it is 44px below lg; from lg it sits inside the track's
-        // 2px padding, making the track the 32px control
+        // the segment is the tap target, so it is 44px below lg, flush in an unpadded track; from lg
+        // it sits inside the track's 2px padding, making the track the 32px control
         (context.variant || variant) === "segmented" &&
           "h-11 min-w-0 lg:h-7 lg:min-w-0",
         className,

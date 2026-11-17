@@ -196,8 +196,9 @@ export function createQueryClient(config: QueryClientConfig = {}) {
       void client.invalidateQueries({ queryKey: keys.me });
     }
   };
-  // the feed never refetches on focus, so when `/me` grants or takes away a project, this
-  // re-reads the feed: its rows and its filter options both come from `/feed`
+  // the feed and Working now never refetch on focus, so when `/me` grants or takes away a
+  // project, this re-reads both: the feed's rows and filter options come from `/feed`, and
+  // no `work` event follows a membership change
   let projectsSeen: string | undefined;
   const followProjects = () => {
     const me = client.getQueryData(meQuery.queryKey);
@@ -208,6 +209,7 @@ export function createQueryClient(config: QueryClientConfig = {}) {
       .join("\u0000");
     if (projectsSeen !== undefined && projects !== projectsSeen) {
       void client.invalidateQueries({ queryKey: ["feed"] });
+      void client.invalidateQueries({ queryKey: keys.workingNow });
     }
     projectsSeen = projects;
   };

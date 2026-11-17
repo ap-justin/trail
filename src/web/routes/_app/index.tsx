@@ -38,7 +38,8 @@ function FeedPage() {
       }));
     },
   });
-  // nothing while it loads or fails: the strip just isn't shown
+  // no strip until the first read answers, nor if it fails; a later failed re-read keeps the
+  // last good one
   const workingNow = useQuery(workingNowQuery).data;
   const noProducts = !session.viewer.isOwner && session.products.length === 0;
   return (

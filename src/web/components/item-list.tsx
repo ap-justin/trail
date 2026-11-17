@@ -81,8 +81,8 @@ const typeOptions = [
 
 /**
  * All, Issues or Todos, each with its count, on a segmented track: 32px beside the status
- * tabs at 1024px and up; 44px and as wide as it's let below. `countsBelowLg={false}`
- * drops the counts there, where the toggle shares its row with the product select.
+ * tabs at 1024px and up; 44px below, like the product select it can share a row with, and
+ * as wide as it's let. `countsBelowLg={false}` drops the counts there, on that shared row.
  */
 export function TypeToggle({
   value,

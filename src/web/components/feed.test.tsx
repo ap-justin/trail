@@ -849,7 +849,7 @@ describe("Working now", () => {
     });
     const strip = screen.getByRole("region", { name: "Working now" });
     const link = within(strip).getByRole("link", {
-      name: "TRL-15 Back up the volume, worked on by Beta, bot",
+      name: "Beta TRL-15, Back up the volume, worked on by Beta, bot",
     });
     expect(link).toHaveAttribute("href", "/products/TRL/15");
     expect(within(link).getByText("Beta")).toBeVisible();

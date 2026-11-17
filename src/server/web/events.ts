@@ -95,7 +95,7 @@ const streamEvents = createRoute({
     200: {
       content: { "text/event-stream": { schema: z.string() } },
       description:
-        "Feed entries as they happen, each event's seq its id; Last-Event-ID resumes after that seq. A `reset` event means the client is too far behind: refetch /feed. An `actor` event, `{actorId, photoUrl, title}` with no id, says an actor's photo or a bot's title was set, replaced or removed, and carries both as they are now (each null when unset; title always null on a person), so the latest event for an actor is its whole state: sent whatever the stream's filters, but only to a viewer who can see that actor (the person who runs this trail sees all; a member sees themselves, bots acting in their products and people who share a product with them), and it is not a feed entry, so Last-Event-ID never replays it. A `work` event, `{productKey}` with no id, says what /working-now shows for that product may have changed: an item was created in progress, moved into or out of in_progress, or got a new assignee while in progress, or the product was imported. Sent whatever the stream's filters, after any entry the batch carries (one per product per batch), only for a product the viewer sees, so a client can re-read /working-now; it is never replayed. With only=actors the stream carries `actor` events and heartbeats alone.",
+        "Feed entries as they happen, each event's seq its id; Last-Event-ID resumes after that seq. A `reset` event means the client is too far behind: refetch /feed. An `actor` event, `{actorId, photoUrl, title}` with no id, says an actor's photo or a bot's title was set, replaced or removed, and carries both as they are now (each null when unset; title always null on a person), so the latest event for an actor is its whole state: sent whatever the stream's filters, but only to a viewer who can see that actor (the person who runs this trail sees all; a member sees themselves, bots acting in their products and people who share a product with them), and it is not a feed entry, so Last-Event-ID never replays it. A `work` event, `{productKey}` with no id, says what /working-now shows for that product may have changed: an item was created in progress, moved into or out of in_progress, or otherwise updated (a new title or assignee, say) while in progress, or the product was imported. Sent whatever the stream's filters, after any entry the batch carries (one per product per batch), only for a product the viewer sees, so a client can re-read /working-now; it is never replayed. With only=actors the stream carries `actor` events and heartbeats alone.",
     },
     404: jsonContent(errorSchema, "No such product or project to filter by"),
     429: jsonContent(
@@ -232,8 +232,9 @@ function ofType(
 /**
  * The distinct product ids, in order, of the events that can change Working
  * now among those a viewer of `visible` products sees: an item created in
- * progress, a status change into or out of in_progress, a new assignee on an
- * item in progress, a product imported.
+ * progress, a status change into or out of in_progress, any other update to
+ * an item in progress (each bumps its updatedAt, the strip's order), a product
+ * imported.
  */
 function productsMovingWork(
   db: Db,
@@ -244,15 +245,12 @@ function productsMovingWork(
     (e) => e.productId !== null && mayShow(db, e, visible),
   );
   const changesOf = (e: ActivityEvent) => e.payload as IssueChanges;
-  // an assignee change alone carries no status: the item's row says whether it is in progress
-  const assigneeOnly = candidates.filter(
-    (e) =>
-      e.action === "issue.updated" &&
-      changesOf(e).assigneeId != null &&
-      changesOf(e).status == null,
+  // an update with no status change carries no status: the item's row says whether it is in progress
+  const statusKept = candidates.filter(
+    (e) => e.action === "issue.updated" && changesOf(e).status == null,
   );
   const inProgress = new Set(
-    assigneeOnly.length === 0
+    statusKept.length === 0
       ? []
       : db
           .select({ id: issue.id })
@@ -261,7 +259,7 @@ function productsMovingWork(
             and(
               inArray(
                 issue.id,
-                assigneeOnly.map((e) => e.subjectId),
+                statusKept.map((e) => e.subjectId),
               ),
               eq(issue.status, "in_progress"),
             ),

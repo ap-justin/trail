@@ -507,6 +507,24 @@ describe("projects property", () => {
     expect(within(link).getByText("TRL")).toHaveClass("font-mono");
   });
 
+  test("below lg each project's trailing comma sits centred beside its 44px link", () => {
+    renderIssue({
+      issue: {
+        status: "ready",
+        data: issue({ projects: [teamAccess, humanUi] }),
+      },
+    });
+    for (const row of within(propertyValue("Projects")).getAllByRole(
+      "listitem",
+    )) {
+      expect(row).toHaveClass(
+        "flex",
+        "items-center",
+        "max-lg:not-last:after:content-[',']",
+      );
+    }
+  });
+
   test("the Product and Projects links are 44px tap targets below lg", () => {
     renderIssue({
       issue: { status: "ready", data: issue({ projects: [humanUi] }) },

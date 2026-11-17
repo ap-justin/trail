@@ -453,7 +453,7 @@ describe("empty and failed", () => {
     );
   });
 
-  test("a status update's bot name never truncates; its title gives way first", () => {
+  test("a status update's bot name truncates only once its title has given way", () => {
     render(
       <ProjectView
         {...props({
@@ -476,11 +476,11 @@ describe("empty and failed", () => {
     );
     const section = screen.getByRole("region", { name: "Status updates" });
     const name = within(section).getByText("Beta");
-    expect(name).toHaveClass("shrink-0");
-    expect(name).not.toHaveClass("truncate");
+    expect(name).toHaveClass("min-w-0", "truncate");
+    expect(name).not.toHaveClass("shrink-0");
     expect(
       within(section).getByText("Release manager for the web client"),
-    ).toHaveClass("min-w-0", "truncate");
+    ).toHaveClass("min-w-0", "truncate", "shrink-4");
   });
 
   test("Try again on status updates leaves focus on their heading", async () => {

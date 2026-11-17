@@ -59,7 +59,7 @@ describe("products", () => {
     expect(within(table()).getByText("41m ago")).toBeInTheDocument();
   });
 
-  test("the latest update's bot name never truncates; its title gives way first", () => {
+  test("the latest update's bot name truncates only once its title has given way", () => {
     renderProducts({
       products: [
         product({
@@ -70,11 +70,11 @@ describe("products", () => {
       ],
     });
     const name = within(table()).getByText("Beta");
-    expect(name).toHaveClass("shrink-0");
-    expect(name).not.toHaveClass("truncate");
+    expect(name).toHaveClass("min-w-0", "truncate");
+    expect(name).not.toHaveClass("shrink-0");
     expect(
       within(table()).getByText("Release manager for the web client"),
-    ).toHaveClass("min-w-0", "truncate");
+    ).toHaveClass("min-w-0", "truncate", "shrink-4");
   });
 
   test('"No status update yet" shows no health, even with a health on file; the Health column reads "No update yet"', () => {
