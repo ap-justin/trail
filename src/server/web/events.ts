@@ -15,7 +15,12 @@ import {
   productMember,
   projectProduct,
 } from "../db/schema.js";
-import type { ActivityEvent, ActorUpdate, EventBus } from "../events/bus.js";
+import type {
+  AccessNotice,
+  ActivityEvent,
+  ActorUpdate,
+  EventBus,
+} from "../events/bus.js";
 import type { FeedFilters } from "../service/paging.js";
 import { entriesByEvent, type IssueChanges, productRefs } from "./entries.js";
 import { createWebRouter, type Member } from "./env.js";
@@ -95,7 +100,7 @@ const streamEvents = createRoute({
     200: {
       content: { "text/event-stream": { schema: z.string() } },
       description:
-        "Feed entries as they happen, each event's seq its id; Last-Event-ID resumes after that seq. A `reset` event means the client is too far behind: refetch /feed. An `actor` event, `{actorId, photoUrl, title}` with no id, says an actor's photo or a bot's title was set, replaced or removed, and carries both as they are now (each null when unset; title always null on a person), so the latest event for an actor is its whole state: sent whatever the stream's filters, but only to a viewer who can see that actor (the person who runs this trail sees all; a member sees themselves, bots acting in their products and people who share a product with them), and it is not a feed entry, so Last-Event-ID never replays it. A `work` event, `{productKey}` with no id, says what /working-now shows for that product may have changed: an item was created in progress, moved into or out of in_progress, or otherwise updated (a new title or assignee, say) while in progress, or the product was imported. Sent whatever the stream's filters, after any entry the batch carries (one per product per batch), only for a product the viewer sees, so a client can re-read /working-now; it is never replayed. With only=actors the stream carries `actor` events and heartbeats alone.",
+        "Feed entries as they happen, each event's seq its id; Last-Event-ID resumes after that seq. A `reset` event means the client is too far behind: refetch /feed. An `actor` event, `{actorId, photoUrl, title}` with no id, says an actor's photo or a bot's title was set, replaced or removed, and carries both as they are now (each null when unset; title always null on a person), so the latest event for an actor is its whole state: sent whatever the stream's filters, but only to a viewer who can see that actor (the person who runs this trail sees all; a member sees themselves, bots acting in their products and people who share a product with them), and it is not a feed entry, so Last-Event-ID never replays it. A `work` event, `{productKey}` with no id, says what /working-now shows for that product may have changed: an item was created in progress, moved into or out of in_progress, or otherwise updated (a new title or assignee, say) while in progress, or the product was imported. Sent whatever the stream's filters, after any entry the batch carries (one per product per batch), only for a product the viewer sees, so a client can re-read /working-now; it is never replayed. An `access` event, `{}` with no id, says the products the viewer's invite lists were changed or the invite was removed, so a client can re-read /me and /working-now: sent only to that member's own streams, whatever their filters, never to the owner or anyone else, and never replayed. With only=actors the stream carries `actor` and `access` events and heartbeats alone.",
     },
     404: jsonContent(errorSchema, "No such product or project to filter by"),
     429: jsonContent(
@@ -197,6 +202,13 @@ function mayHearOf(db: Db, member: Member, actorId: string): boolean {
     .all();
   return theirs.some((r) => visible.has(r.productId));
 }
+
+/** Whether the notice names the invite `member` is let in through, as `inviteOf` matches it; never the owner, who has none. */
+const isAccessOf = (member: Member, notice: AccessNotice) =>
+  member.kind === "member" &&
+  (member.actor.githubId === null
+    ? notice.email === member.actor.email
+    : notice.githubId === member.actor.githubId);
 
 const matches = (filters: FeedFilters, event: ActivityEvent) =>
   (filters.projectId === null || event.productId === filters.projectId) &&
@@ -349,6 +361,13 @@ export function eventRoutes(
         actorUpdates.set(update.actorId, update);
         wake();
       });
+      // one flag however many changes queue: the client re-reads once
+      let accessChanged = false;
+      const unsubscribeAccess = bus.subscribeAccess((notice) => {
+        if (!isAccessOf(member, notice)) return;
+        accessChanged = true;
+        wake();
+      });
       let ended = false;
       const end = () => {
         ended = true;
@@ -437,6 +456,12 @@ export function eventRoutes(
             await send(pending.splice(0));
             continue;
           }
+          if (accessChanged) {
+            accessChanged = false;
+            // without an id: not a feed entry, so Last-Event-ID stays the entries'
+            await stream.writeSSE({ event: "access", data: "{}" });
+            continue;
+          }
           if (actorUpdates.size > 0) {
             const updates = [...actorUpdates.values()];
             actorUpdates.clear();
@@ -459,6 +484,7 @@ export function eventRoutes(
         clearTimeout(checkTimer);
         unsubscribe();
         unsubscribeActors();
+        unsubscribeAccess();
         shutdown.removeEventListener("abort", end);
       }
     };

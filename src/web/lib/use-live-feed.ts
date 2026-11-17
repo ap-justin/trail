@@ -21,9 +21,15 @@ export const FRESH_MS = 2000;
 export const RECONNECT_MS = 5000;
 /**
  * How long Working now waits after a `work` event before reading again, restarted by each
- * one: a claim or a run of quick writes is one read, made after the last of them landed.
+ * one up to `WORK_WAIT_MAX_MS`: a claim or a short run of quick writes is one read, made
+ * after the last of them landed.
  */
 export const WORK_SETTLE_MS = 1000;
+/**
+ * The longest Working now waits from the first `work` event its last read didn't cover, so
+ * a product writing more often than the settle still has its strip read.
+ */
+export const WORK_WAIT_MAX_MS = 3000;
 
 /**
  * The feed filter values found naming something the viewer can no longer see. The filter
@@ -129,6 +135,8 @@ export function useLiveFeed(
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
   // per hook, not per stream: a filter change mid-wait still owes Working now its read
   const workSettling = useRef<ReturnType<typeof setTimeout>>(undefined);
+  // set by the first `work` event since the last read
+  const workDue = useRef<ReturnType<typeof setTimeout>>(undefined);
   // once anything is held, later entries wait behind it so the order holds
   const hold = !atTop || state.pending.length > 0;
 
@@ -195,16 +203,28 @@ export function useLiveFeed(
   const refetch = useEffectEvent(() => {
     void queryClient.invalidateQueries({ queryKey: keys.feed(current) });
   });
-  const readWorkingNow = useEffectEvent(() => {
+  const clearWorkWait = () => {
     clearTimeout(workSettling.current);
+    clearTimeout(workDue.current);
+    workDue.current = undefined;
+  };
+  const readWorkingNow = useEffectEvent(() => {
+    clearWorkWait();
     void queryClient.invalidateQueries({ queryKey: keys.workingNow });
   });
   const onWork = useEffectEvent(() => {
     clearTimeout(workSettling.current);
     workSettling.current = setTimeout(() => readWorkingNow(), WORK_SETTLE_MS);
+    workDue.current ??= setTimeout(() => readWorkingNow(), WORK_WAIT_MAX_MS);
   });
   const readEverything = useEffectEvent(() => {
     void queryClient.invalidateQueries();
+  });
+  // what this person may see changed, from `/me`'s products to Working now, the feed and any
+  // product or project page cached; this read also serves a `work` event's waiting one
+  const onAccess = useEffectEvent(() => {
+    clearWorkWait();
+    readEverything();
   });
   const onActor = useEffectEvent((update: ActorUpdate) => {
     dispatch({ type: "actor", update });
@@ -273,6 +293,7 @@ export function useLiveFeed(
     });
     // bot work started or stopped in a visible product, whatever this stream's filter
     source.addEventListener("work", () => onWork());
+    source.addEventListener("access", () => onAccess());
     // the server fell too far behind to replay what this stream missed
     source.addEventListener("reset", () => {
       refetch();
@@ -308,9 +329,11 @@ export function useLiveFeed(
   useEffect(() => {
     const scheduled = timers.current;
     const settling = workSettling;
+    const due = workDue;
     return () => {
       for (const timer of scheduled) clearTimeout(timer);
       clearTimeout(settling.current);
+      clearTimeout(due.current);
     };
   }, []);
 

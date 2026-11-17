@@ -26,6 +26,15 @@ export function useActorStream() {
   const readEverything = useEffectEvent(() => {
     void queryClient.invalidateQueries();
   });
+  // what this person may see changed: `/me`'s products and any page on screen, and Working now
+  // though off the feed, so a strip cached there can't paint a revoked product's bot on return
+  const onAccess = useEffectEvent(() => {
+    void queryClient.refetchQueries({
+      queryKey: keys.workingNow,
+      type: "inactive",
+    });
+    readEverything();
+  });
   const recheckSession = useEffectEvent(() => {
     void queryClient.invalidateQueries({ queryKey: keys.me });
   });
@@ -59,6 +68,7 @@ export function useActorStream() {
     source.addEventListener("actor", (event) => {
       onActor(JSON.parse((event as MessageEvent<string>).data) as ActorUpdate);
     });
+    source.addEventListener("access", () => onAccess());
     return () => {
       source.close();
       clearTimeout(retry);

@@ -399,6 +399,12 @@ function ShellHeading({
   );
 }
 
+/**
+ * The heading in the top bar never clips, as a link in it draws its focus ring outside its
+ * box: a plain title truncates in its own span, a composed heading truncates its parts.
+ */
+const barHeadingClass = "flex min-w-0 font-medium";
+
 function TabBar({
   viewer,
   section,
@@ -472,11 +478,12 @@ export function AppShell({
     }
   };
 
-  // a breadcrumb never clips: its links' focus rings sit outside them; its crumbs truncate
-  const barHeadingClass =
-    headingKind === "breadcrumb"
-      ? "flex min-w-0 font-medium"
-      : "truncate font-medium";
+  const barHeading =
+    typeof heading === "string" ? (
+      <span className="truncate">{heading}</span>
+    ) : (
+      heading
+    );
 
   return (
     <div className="flex min-h-dvh bg-frame">
@@ -501,7 +508,7 @@ export function AppShell({
                 </AppLink>
                 {heading != null && (
                   <ShellHeading kind={headingKind} className={barHeadingClass}>
-                    {heading}
+                    {barHeading}
                   </ShellHeading>
                 )}
               </div>
@@ -511,7 +518,7 @@ export function AppShell({
             <div className="hidden min-w-0 flex-1 items-center gap-2 lg:flex">
               {heading != null && (
                 <ShellHeading kind={headingKind} className={barHeadingClass}>
-                  {heading}
+                  {barHeading}
                 </ShellHeading>
               )}
               {headingAccessory}

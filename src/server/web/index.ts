@@ -47,7 +47,7 @@ export function createWeb({
   web.route("/", feedRoutes(db));
   web.route("/", workingNowRoutes(db));
   web.route("/", searchRoutes(db));
-  web.route("/", peopleRoutes(db));
+  web.route("/", peopleRoutes(db, bus));
   web.route("/", messageRoutes(db, service));
   web.route("/", eventRoutes(db, bus, auth, streams));
   return web;

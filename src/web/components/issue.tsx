@@ -43,7 +43,8 @@ export type IssueViewProps = {
 
 /**
  * The shell heading on an item page, as `headingKind="breadcrumb"` (the title is the h1):
- * `Products / trail / TRL-14` at 1440, the key below.
+ * `Products / trail / TRL-14` from xl, `trail / TRL-14` at lg, the key below. In a
+ * narrow bar column the product name truncates and the key never does.
  */
 export function IssueBreadcrumb({
   issueKey,
@@ -58,16 +59,21 @@ export function IssueBreadcrumb({
       <span className="flex min-w-0 items-center gap-2 font-normal text-muted-foreground max-lg:hidden">
         <AppLink
           href={paths.products}
-          className={cn(textLinkFocus, "hover:text-foreground")}
+          className={cn(textLinkFocus, "hover:text-foreground max-xl:hidden")}
         >
           Products
         </AppLink>
-        <span aria-hidden="true">/</span>
+        <span aria-hidden="true" className="max-xl:hidden">
+          /
+        </span>
         {product && (
           <>
             <AppLink
               href={paths.product(product.key)}
-              className={cn(textLinkFocus, "truncate hover:text-foreground")}
+              className={cn(
+                textLinkFocus,
+                "min-w-0 truncate hover:text-foreground",
+              )}
             >
               {product.name}
             </AppLink>
@@ -75,7 +81,7 @@ export function IssueBreadcrumb({
           </>
         )}
       </span>
-      <KeyText className="text-sm text-foreground">{issueKey}</KeyText>
+      <KeyText className="shrink-0 text-sm text-foreground">{issueKey}</KeyText>
     </span>
   );
 }

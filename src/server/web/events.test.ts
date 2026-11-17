@@ -16,6 +16,8 @@ const {
   bus,
   bot,
   request,
+  inviteEmail,
+  signInWithEmail,
   signIn,
   owner,
   addMember,
@@ -389,14 +391,14 @@ test.each([
     "the member signs out",
     async () => {
       const cookie = await addMember("signs-out", []);
-      return { cookie, revoke: () => signOut(cookie) };
+      return { cookie, revoke: () => signOut(cookie), told: [] };
     },
   ],
   [
     "the owner signs out",
     async () => {
       const cookie = await signIn(owner);
-      return { cookie, revoke: () => signOut(cookie) };
+      return { cookie, revoke: () => signOut(cookie), told: [] };
     },
   ],
   [
@@ -408,16 +410,18 @@ test.each([
           key: null,
           cookie: ownerCookie,
         });
-      return { cookie, revoke };
+      return { cookie, revoke, told: [accessMessage] };
     },
   ],
 ])("the stream ends at the next heartbeat once %s", async (_, setup) => {
-  const { cookie, revoke } = await setup();
+  const { cookie, revoke, told } = await setup();
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   const stream = await openStream(cookie);
   await vi.advanceTimersByTimeAsync(15_000);
   expect(await stream.next()).toEqual({ comment: "heartbeat" });
   expect((await revoke()).status).toBeLessThan(300);
+  for (const message of told)
+    expect(await stream.next()).toStrictEqual(message);
   await vi.advanceTimersByTimeAsync(15_000);
   expect(await stream.next()).toBeNull();
 });
@@ -1076,5 +1080,86 @@ test("one work event per product per batch, however many of its events the batch
   expect(await untilWork(stream)).toStrictEqual([workMessage(alpha.key)]);
   // a second alpha event would come before beta's
   expect(await untilWork(stream)).toStrictEqual([workMessage(beta.key)]);
+  await stream.cancel();
+});
+
+const accessMessage = { event: "access", data: "{}" };
+
+const putProducts = (login: string, products: string[]) =>
+  request("PUT", `/api/web/people/${login}`, {
+    key: null,
+    cookie: ownerCookie,
+    json: { products },
+  });
+
+/** Publishes an update to `actorId` and returns its message: a stream hearing of that actor sends anything already queued first. */
+function closeBatch(actorId: string) {
+  bus.publishActor({ actorId, photoUrl: "/closer", title: null });
+  return actorMessage(actorId, "/closer");
+}
+
+test("a revoked product sends an access event, with no id, to each of that member's streams and to no other member's or the owner's", async () => {
+  const alpha = addProject("alpha");
+  const beta = addProject("beta");
+  const memberCookie = await addMember("access-revoked", [alpha.id, beta.id]);
+  const feed = await openStream(memberCookie);
+  const shell = await openStream(memberCookie, { query: "?only=actors" });
+  const otherStream = await openStream(
+    await addMember("access-bystander", [alpha.id]),
+  );
+  const ownerStream = await openStream(ownerCookie);
+
+  expect((await putProducts("access-revoked", [alpha.key])).status).toBe(200);
+
+  for (const stream of [feed, shell]) {
+    expect(await stream.next()).toStrictEqual(accessMessage);
+    await stream.cancel();
+  }
+  // the owner hears of everyone, so the bystander's own update closes both
+  const closer = closeBatch(actorIdOf("access-bystander"));
+  for (const stream of [otherStream, ownerStream]) {
+    expect(await stream.next()).toStrictEqual(closer);
+    await stream.cancel();
+  }
+});
+
+test("a granted product sends an access event to the email member it was granted to, and another member's change sends them none", async () => {
+  const alpha = addProject("alpha");
+  const beta = addProject("beta");
+  inviteEmail("access-granted@example.com", [alpha.id]);
+  const granted = await openStream(
+    await signInWithEmail("access-granted@example.com"),
+  );
+  await addMember("access-elsewhere", [alpha.id]);
+
+  expect(
+    (await putProducts("access-granted@example.com", [alpha.key, beta.key]))
+      .status,
+  ).toBe(200);
+  expect(await granted.next()).toStrictEqual(accessMessage);
+
+  expect((await putProducts("access-elsewhere", [beta.key])).status).toBe(200);
+  const own =
+    db
+      .select()
+      .from(actor)
+      .where(eq(actor.email, "access-granted@example.com"))
+      .get()?.id ?? "";
+  const closer = closeBatch(own);
+  expect(await granted.next()).toStrictEqual(closer);
+  await granted.cancel();
+});
+
+test("removing a member sends their open stream an access event, so the page re-reads /me at once", async () => {
+  const alpha = addProject("alpha");
+  const stream = await openStream(
+    await addMember("access-removed", [alpha.id]),
+  );
+  const res = await request("DELETE", "/api/web/people/access-removed", {
+    key: null,
+    cookie: ownerCookie,
+  });
+  expect(res.status).toBe(204);
+  expect(await stream.next()).toStrictEqual(accessMessage);
   await stream.cancel();
 });

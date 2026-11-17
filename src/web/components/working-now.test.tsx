@@ -4,16 +4,23 @@ import { WorkingNow } from "@/components/working-now";
 import type { WebActorView, WebWorkingNowView } from "@/lib/api-types";
 import { alpha } from "@/test/fixtures";
 
-const bot = (n: number): WebActorView => ({
+const bot = (n: number, name = `bot-${n}`): WebActorView => ({
   ...alpha,
   id: `a-bot-${n}`,
-  name: `bot-${n}`,
+  name,
 });
-/** `count` entries, as the server sends them; `total` defaults to that count. */
-const view = (count: number, total = count): WebWorkingNowView => ({
+/**
+ * `count` entries, as the server sends them; `total` defaults to that count. `names`
+ * replaces the first bots' names.
+ */
+const view = (
+  count: number,
+  total = count,
+  names: string[] = [],
+): WebWorkingNowView => ({
   total,
   entries: Array.from({ length: count }, (_, i) => ({
-    bot: bot(i + 1),
+    bot: bot(i + 1, names[i]),
     item: { key: `TRL-${i + 1}`, title: `Item ${i + 1}` },
     productKey: "TRL",
   })),
@@ -42,9 +49,7 @@ describe("WorkingNow", () => {
       within(strip()).getByRole("heading", { name: "Working now" }),
     ).toBeInTheDocument();
     const [link] = entryLinks();
-    expect(link).toHaveAccessibleName(
-      "bot-1 TRL-1, Item 1, worked on by bot-1, bot",
-    );
+    expect(link).toHaveAccessibleName("bot-1 TRL-1, Item 1, bot");
     expect(link).toHaveAttribute("href", "/products/TRL/1");
     expect(link).toHaveTextContent("bot-1TRL-1");
     const avatar = within(link as HTMLElement).getByRole("img", {
@@ -65,7 +70,7 @@ describe("WorkingNow", () => {
       .join(" ");
     expect(visible).toBe("bot-1 TRL-1");
     expect(link).toHaveAccessibleName(
-      expect.stringMatching(/^bot-1 TRL-1, Item 1, worked on by bot-1/),
+      expect.stringMatching(/^bot-1 TRL-1, Item 1, bot$/),
     );
   });
 
@@ -79,6 +84,15 @@ describe("WorkingNow", () => {
     );
     expect(link).toHaveClass("min-w-0");
     expect(link?.closest("li")).toHaveClass("min-w-0");
+  });
+
+  test("below lg a name of up to 8 characters keeps every letter; a longer one truncates", () => {
+    render(<WorkingNow workingNow={view(2, 2, ["olivetta", "beta-relay"])} />);
+    const short = within(strip()).getByText("olivetta");
+    expect(short).toHaveClass("max-lg:shrink-0", "truncate");
+    const long = within(strip()).getByText("beta-relay");
+    expect(long).toHaveClass("min-w-0", "truncate");
+    expect(long).not.toHaveClass("max-lg:shrink-0");
   });
 
   test("the link draws a focus outline", () => {
@@ -115,6 +129,50 @@ describe("WorkingNow", () => {
     expect(moreCounts()).toEqual([
       ["+4 more", expect.stringMatching(/(?:^| )lg:hidden/)],
       ["+2 more", expect.stringContaining("max-lg:hidden")],
+    ]);
+  });
+
+  test("below lg, two 8-character names show both, with +N from total; four from lg", () => {
+    render(<WorkingNow workingNow={view(5, 7, ["alpha-01", "beta-002"])} />);
+    const items = entryLinks().map((link) => link.closest("li"));
+    expect(items).toHaveLength(4);
+    expect(items[0]?.className).not.toMatch(/hidden/);
+    expect(items[1]?.className).not.toMatch(/hidden/);
+    expect(items[2]).toHaveClass("max-lg:hidden");
+    expect(items[3]).toHaveClass("max-lg:hidden");
+    expect(moreCounts()).toEqual([
+      ["+5 more", expect.stringMatching(/(?:^| )lg:hidden/)],
+      ["+3 more", expect.stringContaining("max-lg:hidden")],
+    ]);
+  });
+
+  test.each([
+    ["the first", ["alpha-relay", "beta"]],
+    ["the second", ["alpha", "beta-relay"]],
+  ])(
+    "below lg, a 9+ character name as %s entry leaves one shown, with +N for the rest; four from lg",
+    (_, names) => {
+      render(<WorkingNow workingNow={view(5, 7, names)} />);
+      const items = entryLinks().map((link) => link.closest("li"));
+      expect(items).toHaveLength(4);
+      expect(items[0]?.className).not.toMatch(/hidden/);
+      for (const item of items.slice(1)) {
+        expect(item).toHaveClass("max-lg:hidden");
+      }
+      expect(moreCounts()).toEqual([
+        ["+6 more", expect.stringMatching(/(?:^| )lg:hidden/)],
+        ["+3 more", expect.stringContaining("max-lg:hidden")],
+      ]);
+    },
+  );
+
+  test("two bots with a 9+ character name: one below lg and +1, both from lg", () => {
+    render(<WorkingNow workingNow={view(2, 2, ["alpha", "beta-relay"])} />);
+    const items = entryLinks().map((link) => link.closest("li"));
+    expect(items[0]?.className).not.toMatch(/hidden/);
+    expect(items[1]).toHaveClass("max-lg:hidden");
+    expect(moreCounts()).toEqual([
+      ["+1 more", expect.stringMatching(/(?:^| )lg:hidden/)],
     ]);
   });
 

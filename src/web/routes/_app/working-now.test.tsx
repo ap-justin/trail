@@ -2,8 +2,16 @@ import { focusManager } from "@tanstack/react-query";
 import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
 import { type HttpHandler, HttpResponse, http } from "msw";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import type { WebActorView, WebWorkingNowView } from "@/lib/api-types";
-import { RECONNECT_MS, WORK_SETTLE_MS } from "@/lib/use-live-feed";
+import type {
+  WebActorView,
+  WebProductRefView,
+  WebWorkingNowView,
+} from "@/lib/api-types";
+import {
+  RECONNECT_MS,
+  WORK_SETTLE_MS,
+  WORK_WAIT_MAX_MS,
+} from "@/lib/use-live-feed";
 import {
   meView,
   renderApp,
@@ -88,6 +96,15 @@ const flushRequests = () =>
 
 const work = (productKey: string) => JSON.stringify({ productKey });
 
+/**
+ * Query hands results to the screen on a zero-delay timeout, which a faked clock holds and
+ * `useRealTimers` drops: run those before going back to real time.
+ */
+const landFakedNotifications = () => {
+  act(() => vi.advanceTimersByTime(0));
+  vi.useRealTimers();
+};
+
 afterEach(() => {
   vi.useRealTimers();
 });
@@ -129,6 +146,52 @@ describe("working now", () => {
     expect(await stripKey("TRL-6")).toBeInTheDocument();
   });
 
+  test("work events every half second read every 3 s from the first unserved one, then once a second after the last", async () => {
+    const { stream, reads } = await openStream({ entries: [] });
+    fakeTimers();
+    // the clock in ms, and the reads in by then
+    const readsAt = new Map<number, number>();
+    for (let at = 0; at < 10_000; at += 500) {
+      stream.work(work("TRL"));
+      act(() => vi.advanceTimersByTime(500));
+      await flushRequests();
+      readsAt.set(at + 500, reads.count);
+    }
+    // literal seconds: the settle and the cap are the product's promise
+    expect(readsAt.get(2500)).toBe(0);
+    expect(readsAt.get(3000)).toBe(1);
+    expect(readsAt.get(5500)).toBe(1);
+    expect(readsAt.get(6000)).toBe(2);
+    expect(readsAt.get(8500)).toBe(2);
+    expect(readsAt.get(9000)).toBe(3);
+    expect(readsAt.get(10_000)).toBe(3);
+    // the last event went out at 9.5 s
+    act(() => vi.advanceTimersByTime(499));
+    await flushRequests();
+    expect(reads.count).toBe(3);
+    act(() => vi.advanceTimersByTime(1));
+    await flushRequests();
+    expect(reads.count).toBe(4);
+    act(() => vi.advanceTimersByTime(5000));
+    await flushRequests();
+    expect(reads.count).toBe(4);
+  });
+
+  test("a single work event reads once, a second later", async () => {
+    const { stream, reads } = await openStream({ entries: [] });
+    fakeTimers();
+    stream.work(work("TRL"));
+    act(() => vi.advanceTimersByTime(999));
+    await flushRequests();
+    expect(reads.count).toBe(0);
+    act(() => vi.advanceTimersByTime(1));
+    await flushRequests();
+    expect(reads.count).toBe(1);
+    act(() => vi.advanceTimersByTime(5000));
+    await flushRequests();
+    expect(reads.count).toBe(1);
+  });
+
   test("nothing shows while no bot has an item in progress", async () => {
     const { queryClient } = await openFeed();
     await waitFor(() => expect(queryClient.isFetching()).toBe(0));
@@ -159,7 +222,7 @@ describe("working now", () => {
     expect(reads.count).toBe(1);
   });
 
-  test("a reset clears a read that waits: one read, not a second at the settle", async () => {
+  test("a reset clears a read that waits: one read, not a second at the settle or the cap", async () => {
     const at = { entries: [] as WorkingNowEntry[] };
     const { stream, reads } = await openStream(at);
     fakeTimers();
@@ -168,7 +231,7 @@ describe("working now", () => {
     stream.reset();
     await flushRequests();
     expect(reads.count).toBe(1);
-    act(() => vi.advanceTimersByTime(WORK_SETTLE_MS));
+    act(() => vi.advanceTimersByTime(WORK_WAIT_MAX_MS));
     await flushRequests();
     expect(reads.count).toBe(1);
   });
@@ -180,7 +243,7 @@ describe("working now", () => {
     stream.work(work("TRL"));
     cleanup();
     expect(stream.readyState).toBe(FakeEventSource.CLOSED);
-    act(() => vi.advanceTimersByTime(WORK_SETTLE_MS));
+    act(() => vi.advanceTimersByTime(WORK_WAIT_MAX_MS));
     await flushRequests();
     expect(invalidated).not.toHaveBeenCalled();
   });
@@ -270,5 +333,93 @@ describe("working now", () => {
     focusManager.setFocused(undefined);
     await waitFor(() => expect(queryClient.isFetching()).toBe(0));
     expect(reads.count).toBe(0);
+  });
+});
+
+const alphaProduct = { key: "ALP", name: "alpha" };
+const betaProduct = { key: "BET", name: "beta" };
+
+/** What the server answers for the viewer's access, read when each request lands. */
+type Access = { products: WebProductRefView[]; entries: WorkingNowEntry[] };
+
+/** The server's `access` event: the viewer's product access changed. No id, never replayed. */
+const sendAccess = (stream: FakeEventSource) =>
+  act(() => {
+    stream.dispatchEvent(new MessageEvent("access", { data: "{}" }));
+  });
+
+/** The feed with its stream open, `/me` and Working now answering from `at`, each read counted. */
+async function openWithAccess(at: Access) {
+  const reads = { me: 0, workingNow: 0 };
+  const { queryClient } = await openFeed(
+    at.entries,
+    http.get("/api/web/me", () => {
+      reads.me += 1;
+      return HttpResponse.json({
+        ...meView("member"),
+        products: at.products,
+        ownerName: "Olive Owner",
+      });
+    }),
+    http.get("/api/web/working-now", () => {
+      reads.workingNow += 1;
+      return HttpResponse.json({
+        total: at.entries.length,
+        entries: at.entries,
+      } satisfies WebWorkingNowView);
+    }),
+  );
+  await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+  FakeEventSource.current.open();
+  return { queryClient, reads, stream: FakeEventSource.current };
+}
+
+const productLink = (name: RegExp) =>
+  within(screen.getByRole("navigation", { name: "Products" })).queryByRole(
+    "link",
+    { name },
+  );
+
+describe("an access event", () => {
+  test("a product granted: /me and Working now read at once, and both show it", async () => {
+    const at: Access = { products: [alphaProduct], entries: [] };
+    const { queryClient, reads, stream } = await openWithAccess(at);
+    expect(productLink(/beta/)).toBeNull();
+    const before = { ...reads };
+    fakeTimers();
+    at.products = [alphaProduct, betaProduct];
+    at.entries = [working("BET-1", beta)];
+    sendAccess(stream);
+    // no timer moved: neither read waits on a settle
+    await flushRequests();
+    expect(reads.me).toBeGreaterThan(before.me);
+    expect(reads.workingNow).toBeGreaterThan(before.workingNow);
+    landFakedNotifications();
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    expect(await stripKey("BET-1")).toBeInTheDocument();
+    expect(productLink(/beta/)).toBeInTheDocument();
+  });
+
+  test("a product revoked: /me and Working now read at once, and neither shows it", async () => {
+    const at: Access = {
+      products: [alphaProduct, betaProduct],
+      entries: [working("BET-1", beta)],
+    };
+    const { queryClient, reads, stream } = await openWithAccess(at);
+    expect(await stripKey("BET-1")).toBeInTheDocument();
+    expect(productLink(/beta/)).toBeInTheDocument();
+    const before = { ...reads };
+    fakeTimers();
+    at.products = [alphaProduct];
+    at.entries = [];
+    sendAccess(stream);
+    await flushRequests();
+    expect(reads.me).toBeGreaterThan(before.me);
+    expect(reads.workingNow).toBeGreaterThan(before.workingNow);
+    landFakedNotifications();
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    expect(strip()).toBeNull();
+    expect(productLink(/beta/)).toBeNull();
+    expect(productLink(/alpha/)).toBeInTheDocument();
   });
 });
