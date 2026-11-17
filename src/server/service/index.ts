@@ -634,7 +634,7 @@ export function createService({
   /**
    * `projects` as sent, value by value: a project's slug follows the project,
    * and a product's key in any case (upper-cased, which no slug matches) is
-   * the deprecated alias of `products`, as before projects. One the key can name
+   * the deprecated alias of `products`. One the key can name
    * neither way is the 404 a missing project is.
    */
   function splitProjectRefs(
