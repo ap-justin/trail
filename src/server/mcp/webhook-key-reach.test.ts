@@ -51,7 +51,8 @@ test("revoking the key that made a webhook over MCP stops its deliveries, each m
   await call(wide, "update_item", { item, title: "after the revoke" });
   expect(await sentNow()).toBe(0);
 
-  const revoked = "not sent: this webhook's key is revoked";
+  const revoked =
+    "not sent: this webhook's key is revoked: update the webhook (update_webhook) or rotate its secret with a live key to get deliveries again";
   expect(
     db
       .select()
@@ -120,7 +121,13 @@ test("a webhook made over MCP before keys were recorded is delivered while its b
   ).toEqual([
     ["delivered", null],
     ["delivered", null],
-    ["failed", "not sent: this bot has no live key"],
-    ["failed", "not sent: this bot has no live key"],
+    [
+      "failed",
+      "not sent: this bot has no live key: update the webhook (update_webhook) or rotate its secret with a live key to get deliveries again",
+    ],
+    [
+      "failed",
+      "not sent: this bot has no live key: update the webhook (update_webhook) or rotate its secret with a live key to get deliveries again",
+    ],
   ]);
 });

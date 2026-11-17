@@ -10,6 +10,8 @@ import {
   apiKeyProject,
   product,
   project,
+  type WebhookSubscriptionKind,
+  webhookSubscription,
 } from "../db/schema.js";
 import { ConflictError, NotFoundError, ValidationError } from "./errors.js";
 import type { Tx } from "./tx.js";
@@ -51,6 +53,10 @@ export type KeyScopeInput = {
   projects?: string[];
   actions?: string[];
 };
+
+/** True when a key with these actions has the read action; null actions is every action. */
+export const canRead = (key: { actions: ApiKeyAction[] | null }) =>
+  key.actions?.includes("read") ?? true;
 
 export const scopeView = (scope: KeyScope): KeyScopeView =>
   scope.products === null
@@ -499,11 +505,29 @@ export function createHuman(
     .get();
 }
 
-/** Revokes the key with this prefix; revoking a revoked key keeps its first `revokedAt`. */
+export type StoppedWebhook = {
+  id: string;
+  kind: WebhookSubscriptionKind;
+  url: string;
+};
+
+/**
+ * Revokes the key with this prefix; revoking a revoked key keeps its first
+ * `revokedAt` and stops nothing. `stopped` is the bot's webhooks, oldest first,
+ * that no key sends once this one is revoked: those recording it, and those
+ * recording none when the bot is left with no live key or, on an activity
+ * webhook, none with the read action. Its webhooks recording another key, and
+ * a live key's reach, are not weighed.
+ */
 export function revokeKey(
   db: Db,
   prefix: string,
-): { prefix: string; actorId: string; revokedAt: Date } {
+): {
+  prefix: string;
+  actorId: string;
+  revokedAt: Date;
+  stopped: StoppedWebhook[];
+} {
   return db.transaction(
     (tx) => {
       const key = tx
@@ -512,11 +536,47 @@ export function revokeKey(
         .where(eq(apiKey.prefix, prefix))
         .get();
       if (!key) throw new NotFoundError(`no key with prefix ${prefix}`);
-      const revokedAt = key.revokedAt ?? new Date();
-      if (!key.revokedAt) {
-        tx.update(apiKey).set({ revokedAt }).where(eq(apiKey.id, key.id)).run();
+      if (key.revokedAt) {
+        return {
+          prefix,
+          actorId: key.actorId,
+          revokedAt: key.revokedAt,
+          stopped: [],
+        };
       }
-      return { prefix, actorId: key.actorId, revokedAt };
+      const revokedAt = new Date();
+      tx.update(apiKey).set({ revokedAt }).where(eq(apiKey.id, key.id)).run();
+      const left = tx
+        .select({ actions: apiKey.actions })
+        .from(apiKey)
+        .where(and(eq(apiKey.actorId, key.actorId), isNull(apiKey.revokedAt)))
+        .all();
+      const unrecorded = isNull(webhookSubscription.apiKeyId);
+      const unrecordedStopped =
+        left.length === 0
+          ? unrecorded
+          : left.some(canRead)
+            ? undefined
+            : and(unrecorded, eq(webhookSubscription.kind, "activity"));
+      const stopped = tx
+        .select({
+          id: webhookSubscription.id,
+          kind: webhookSubscription.kind,
+          url: webhookSubscription.url,
+        })
+        .from(webhookSubscription)
+        .where(
+          and(
+            eq(webhookSubscription.actorId, key.actorId),
+            or(eq(webhookSubscription.apiKeyId, key.id), unrecordedStopped),
+          ),
+        )
+        .orderBy(
+          asc(webhookSubscription.createdAt),
+          asc(webhookSubscription.id),
+        )
+        .all();
+      return { prefix, actorId: key.actorId, revokedAt, stopped };
     },
     { behavior: "immediate" },
   );

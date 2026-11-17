@@ -36,7 +36,7 @@ import {
   type Transport,
 } from "../webhooks/send.js";
 import { ValidationError } from "./errors.js";
-import { liveKeyScope } from "./keys.js";
+import { canRead, liveKeyScope } from "./keys.js";
 import type { Tx } from "./tx.js";
 import { eventsReached, projectsReached, reachOfScope } from "./visible.js";
 
@@ -377,7 +377,9 @@ export function setFollows(
     .run();
 }
 
-const KEY_REVOKED = "not sent: this webhook's key is revoked";
+const TO_RESUME =
+  "update the webhook (update_webhook) or rotate its secret with a live key to get deliveries again";
+const KEY_REVOKED = `not sent: this webhook's key is revoked: ${TO_RESUME}`;
 const keyLost = (what: string) =>
   `not sent: this webhook's key no longer reaches ${what}`;
 
@@ -433,11 +435,12 @@ function keyRefusal(
 
 /**
  * Why `sub` may not be sent this delivery now, as its lastError; null when it
- * may. An activity delivery carries its `event` and is held to `keyRefusal`;
+ * may. An activity delivery carries its `event`, needs a key with the read
+ * action (as managing an activity webhook does) and is held to `keyRefusal`;
  * an inbox delivery has none and needs only its key live. A webhook with no
  * recorded key, made before keys were recorded and unchanged since, stands on
- * its bot's live keys: an activity delivery goes when any one of them may send
- * it, and is refused with the oldest's reason when none may.
+ * its bot's live keys: an activity delivery goes when any one of them with the
+ * read action may send it, and is refused with the oldest's reason when none may.
  */
 export function deliveryKeyRefusal(
   db: Db,
@@ -445,39 +448,39 @@ export function deliveryKeyRefusal(
   event: typeof activityEvent.$inferSelect | null,
 ): string | null {
   if (sub.apiKeyId !== null) {
-    if (event !== null) return keyRefusal(db, sub.apiKeyId, sub.id, event);
-    return isLive(db, sub.apiKeyId) ? null : KEY_REVOKED;
+    const key = liveKeysWhere(db, eq(apiKey.id, sub.apiKeyId))[0];
+    if (!key) return KEY_REVOKED;
+    if (event === null) return null;
+    if (!canRead(key)) return KEY_CANNOT_READ;
+    return keyRefusal(db, key.id, sub.id, event);
   }
-  const keys = liveKeysOf(db, sub.actorId);
+  const keys = liveKeysWhere(db, eq(apiKey.actorId, sub.actorId));
   if (keys.length === 0) return NO_LIVE_KEY;
   if (event === null) return null;
+  const readers = keys.filter(canRead);
+  if (readers.length === 0) return NO_KEY_CAN_READ;
   let first: string | null = null;
-  for (const keyId of keys) {
-    const refusal = keyRefusal(db, keyId, sub.id, event);
+  for (const { id } of readers) {
+    const refusal = keyRefusal(db, id, sub.id, event);
     if (refusal === null) return null;
     first ??= refusal;
   }
   return first;
 }
 
-const NO_LIVE_KEY = "not sent: this bot has no live key";
+const NO_LIVE_KEY = `not sent: this bot has no live key: ${TO_RESUME}`;
+const KEY_CANNOT_READ = "not sent: this webhook's key lacks the read action";
+const NO_KEY_CAN_READ =
+  "not sent: none of this bot's live keys has the read action";
 
-const isLive = (db: Db, keyId: string) =>
+/** The unrevoked keys matching `where`, oldest first, with their actions. */
+const liveKeysWhere = (db: Db, where: SQL) =>
   db
-    .select({ one: sql`1` })
+    .select({ id: apiKey.id, actions: apiKey.actions })
     .from(apiKey)
-    .where(and(eq(apiKey.id, keyId), isNull(apiKey.revokedAt)))
-    .get() !== undefined;
-
-/** The bot's unrevoked keys, oldest first. */
-const liveKeysOf = (db: Db, botId: string) =>
-  db
-    .select({ id: apiKey.id })
-    .from(apiKey)
-    .where(and(eq(apiKey.actorId, botId), isNull(apiKey.revokedAt)))
+    .where(and(where, isNull(apiKey.revokedAt)))
     .orderBy(apiKey.createdAt, apiKey.id)
-    .all()
-    .map((k) => k.id);
+    .all();
 
 /** The key of the event's product, else the slug of its project. */
 function eventScopeName(

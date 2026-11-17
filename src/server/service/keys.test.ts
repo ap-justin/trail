@@ -2,9 +2,16 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { migrate, openDatabase } from "../db/client.js";
-import { actor, apiKey, product, project } from "../db/schema.js";
+import {
+  actor,
+  apiKey,
+  product,
+  project,
+  webhookSubscription,
+} from "../db/schema.js";
 import { NotFoundError, ValidationError } from "./errors.js";
 import {
   authenticateKey,
@@ -68,6 +75,78 @@ test("revoking one bot's key leaves another bot's key resolving", () => {
   revokeKey(db, lose.key.slice(6, 14));
   expect(resolveKey(db, lose.key)).toBeNull();
   expect(resolveKey(db, keep.key)).toEqual(keep.actor);
+});
+
+describe("the webhooks a revoke stops", () => {
+  const prefixOf = (key: string) => key.slice(6, 14);
+  let hooks = 0;
+  /** A webhook row of `actorId`'s, recorded to `apiKeyId` or to none. */
+  const webhook = (
+    actorId: string,
+    apiKeyId: string | null,
+    kind: "activity" | "inbox" = "activity",
+  ) => {
+    const url = `https://bot.example.com/stopped/${++hooks}?token=s3cret`;
+    const { id } = db
+      .insert(webhookSubscription)
+      .values({ actorId, url, kind, secretCipher: "sealed", apiKeyId })
+      .returning({ id: webhookSubscription.id })
+      .get();
+    return { id, kind, url };
+  };
+  const keyIdOf = (key: string) =>
+    db
+      .select({ id: apiKey.id })
+      .from(apiKey)
+      .where(eq(apiKey.prefix, prefixOf(key)))
+      .get()?.id as string;
+  // webhooks made in one millisecond tie on age: compare in id order
+  const byId = (hooks: { id: string }[]) =>
+    hooks.toSorted((a, b) => a.id.localeCompare(b.id));
+  const stoppedBy = (key: string) => byId(revokeKey(db, prefixOf(key)).stopped);
+
+  test("revoking a key lists the webhooks it recorded", () => {
+    const { actor, key } = createBot(db, "stops-recorded");
+    createKey(db, actor.id);
+    const activity = webhook(actor.id, keyIdOf(key));
+    const inbox = webhook(actor.id, keyIdOf(key), "inbox");
+    expect(stoppedBy(key)).toEqual(byId([activity, inbox]));
+  });
+
+  test("revoking one of two live keys lists only that key's webhooks, not those recording no key", () => {
+    const { actor, key } = createBot(db, "stops-one-of-two");
+    const other = createKey(db, actor.id).key;
+    const own = webhook(actor.id, keyIdOf(key));
+    webhook(actor.id, keyIdOf(other));
+    webhook(actor.id, null);
+    webhook(actor.id, null, "inbox");
+    expect(stoppedBy(key)).toEqual([own]);
+  });
+
+  test("revoking a bot's last live key lists its webhooks recording no key", () => {
+    const { actor, key } = createBot(db, "stops-last");
+    const activity = webhook(actor.id, null);
+    const inbox = webhook(actor.id, null, "inbox");
+    expect(stoppedBy(key)).toEqual(byId([activity, inbox]));
+  });
+
+  test("revoking leaves activity webhooks recording no key stopped when no live key left has the read action", () => {
+    const { actor, key } = createBot(db, "stops-unread");
+    createKey(db, actor.id, { actions: ["issues"] });
+    const activity = webhook(actor.id, null);
+    webhook(actor.id, null, "inbox");
+    expect(stoppedBy(key)).toEqual([activity]);
+  });
+
+  test("a revoke that stops nothing, or of a revoked key, lists nothing", () => {
+    const { actor, key } = createBot(db, "stops-nothing");
+    const other = createKey(db, actor.id).key;
+    webhook(actor.id, keyIdOf(other));
+    webhook(actor.id, null);
+    expect(stoppedBy(key)).toEqual([]);
+    webhook(actor.id, keyIdOf(key));
+    expect(stoppedBy(key)).toEqual([]);
+  });
 });
 
 test("revoking an unknown prefix is a NotFoundError", () => {

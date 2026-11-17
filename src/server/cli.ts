@@ -57,6 +57,7 @@ const usage = `Usage:
                                    each flag repeats, and one is required
   trail key list                   list every key's prefix, bot, times and scope
   trail key revoke <prefix>        revoke a key by its prefix or the full key
+                                   and list the webhooks no live key now sends
   trail products owners            list each product's current owner bot, or none
   trail products set-owner <key> <bot-id-label-or-name>
                                    make a bot the product's owner: it adds
@@ -414,9 +415,25 @@ const keyRevoke: Command<string> = {
   flags: [],
   parse: prefixArg,
   run(db, prefix, io) {
-    const { actorId, revokedAt } = revokeKey(db, prefix);
+    const { actorId, revokedAt, stopped } = revokeKey(db, prefix);
     io.stdout.write(
       `revoked trail_${prefix} (actor ${actorId}) at ${revokedAt.toISOString()}\n`,
+    );
+    if (stopped.length === 0) return;
+    // the origin only: a webhook URL's path or query may carry the receiver's secret
+    for (const hook of stopped) {
+      io.stdout.write(
+        `stopped webhook ${hook.id} (${hook.kind}) to ${new URL(hook.url).origin}\n`,
+      );
+    }
+    const keys = listKeys(db).filter((k) => k.actorId === actorId);
+    if (keys.every((k) => k.revokedAt !== null)) {
+      io.stderr.write(
+        `trail: this bot has no live key left: mint one first with \`trail key create ${keys[0]?.label ?? actorId}\`\n`,
+      );
+    }
+    io.stderr.write(
+      "trail: to move a webhook to another key, call update_webhook (PATCH /api/v1/webhooks/{id}) or rotate_webhook_secret with that key (the key checked becomes the one that last changed the webhook)\n",
     );
   },
 };

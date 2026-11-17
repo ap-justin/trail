@@ -6,7 +6,14 @@ import { eq } from "drizzle-orm";
 import { afterAll, expect, test } from "vitest";
 import { runCli } from "./cli.js";
 import { migrate, openDatabase } from "./db/client.js";
-import { actor, product, project, projectProduct } from "./db/schema.js";
+import {
+  actor,
+  apiKey,
+  product,
+  project,
+  projectProduct,
+  webhookSubscription,
+} from "./db/schema.js";
 import {
   createBot,
   createHuman,
@@ -69,6 +76,97 @@ test.each([
   expect(code).toBe(0);
   expect(stdout).toContain(`revoked trail_${key.slice(6, 14)}`);
   expect(withDb((db) => resolveKey(db, key))).toBeNull();
+});
+
+/** A webhook row of the bot's, recording the key with `recorded`'s prefix or none. */
+function webhookOf(
+  actorId: string,
+  recorded: string | null,
+  kind: "activity" | "inbox",
+  url: string,
+) {
+  return withDb((db) => {
+    const apiKeyId =
+      recorded === null
+        ? null
+        : db
+            .select({ id: apiKey.id })
+            .from(apiKey)
+            .where(eq(apiKey.prefix, recorded.slice(6, 14)))
+            .get()?.id;
+    return db
+      .insert(webhookSubscription)
+      .values({ actorId, url, kind, secretCipher: "sealed", apiKeyId })
+      .returning({ id: webhookSubscription.id })
+      .get().id;
+  });
+}
+
+const actorOf = (stdout: string) =>
+  /^actor\s+(\S+)$/m.exec(stdout)?.[1] as string;
+
+const moveHint =
+  "trail: to move a webhook to another key, call update_webhook (PATCH /api/v1/webhooks/{id}) or rotate_webhook_secret with that key (the key checked becomes the one that last changed the webhook)\n";
+
+test("key revoke prints a line per webhook the key recorded, by URL origin, and on stderr how to move them", () => {
+  const made = run("bot", "create", "revoke lists", "--label", "lister");
+  const key = createdKey(made.stdout);
+  const bot = actorOf(made.stdout);
+  run("key", "create", "lister");
+  const activity = webhookOf(
+    bot,
+    key,
+    "activity",
+    "https://hooks.example.com/a?token=s3cret",
+  );
+  const inbox = webhookOf(
+    bot,
+    key,
+    "inbox",
+    "https://inbox.example.com:8443/b/c",
+  );
+  const { code, stdout, stderr } = run("key", "revoke", key.slice(6, 14));
+  expect(code).toBe(0);
+  const lines = stdout.split("\n");
+  expect(lines[0]).toMatch(
+    new RegExp(`^revoked trail_${key.slice(6, 14)} \\(actor ${bot}\\) at `),
+  );
+  expect(lines.slice(1).toSorted()).toEqual(
+    [
+      "",
+      `stopped webhook ${activity} (activity) to https://hooks.example.com`,
+      `stopped webhook ${inbox} (inbox) to https://inbox.example.com:8443`,
+    ].toSorted(),
+  );
+  expect(stderr).toBe(moveHint);
+});
+
+test("key revoke of a bot's last live key lists its webhooks recording no key and says to mint a key first", () => {
+  const made = run("bot", "create", "revoke last", "--label", "last-one");
+  const key = createdKey(made.stdout);
+  const bot = actorOf(made.stdout);
+  const hook = webhookOf(bot, null, "activity", "https://last.example.com/x");
+  const { code, stdout, stderr } = run("key", "revoke", key.slice(6, 14));
+  expect(code).toBe(0);
+  expect(stdout.split("\n").slice(1)).toEqual([
+    `stopped webhook ${hook} (activity) to https://last.example.com`,
+    "",
+  ]);
+  expect(stderr).toBe(
+    "trail: this bot has no live key left: mint one first with `trail key create last-one`\n" +
+      moveHint,
+  );
+});
+
+test("key revoke that stops no webhook prints only the revoked line", () => {
+  const made = run("bot", "create", "revoke quiet");
+  const key = createdKey(made.stdout);
+  webhookOf(actorOf(made.stdout), null, "activity", "https://q.example.com");
+  run("key", "create", actorOf(made.stdout));
+  const { code, stdout, stderr } = run("key", "revoke", key.slice(6, 14));
+  expect(code).toBe(0);
+  expect(stdout).toMatch(/^revoked trail_[0-9a-f]{8} \(actor \S+\) at \S+\n$/);
+  expect(stderr).toBe("");
 });
 
 test("bot create --key-only prints only the key on stdout, the rest on stderr", () => {
