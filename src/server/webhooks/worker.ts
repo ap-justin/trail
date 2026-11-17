@@ -9,8 +9,8 @@ import {
 } from "../db/schema.js";
 import type { ActivityEvent, EventBus } from "../events/bus.js";
 import {
+  deliveryKeyRefusal,
   isPending,
-  keyRefusal,
   leftFollowedProjects,
   type WebhookSettings,
 } from "../service/webhooks.js";
@@ -301,13 +301,12 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
   }
 
   /**
-   * Why an event's delivery mustn't go out now, or null: its item has left
-   * the project a follow alone queued it for, or the key that last created
-   * or changed an activity webhook can no longer send it (one made before
-   * keys were recorded and unchanged since has none to check).
+   * Why a delivery mustn't go out now, or null: its event's item has left
+   * the project a follow alone queued it for, or the webhook's key can no
+   * longer send it (`deliveryKeyRefusal`).
    */
   function unsendable(delivery: Delivery, sub: Subscription): string | null {
-    if (delivery.eventId === null) return null;
+    if (delivery.eventId === null) return deliveryKeyRefusal(db, sub, null);
     const event = db
       .select()
       .from(activityEvent)
@@ -315,8 +314,7 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
       .get();
     if (!event) return null;
     if (leftFollowedProjects(db, sub.id, event)) return LEFT_PROJECT;
-    if (sub.kind !== "activity" || sub.apiKeyId === null) return null;
-    return keyRefusal(db, sub.apiKeyId, sub.id, event);
+    return deliveryKeyRefusal(db, sub, event);
   }
 
   /**

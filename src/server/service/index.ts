@@ -775,15 +775,12 @@ export function createService({
   }
 
   /**
-   * The `apiKeyId` a write records on an activity webhook: the key making it,
-   * whose reach deliveries are checked against from then on. It passed
-   * `canManage`, so it reaches what the webhook follows. Inbox webhooks are
-   * never checked and record nothing.
+   * The `apiKeyId` a write records on a webhook: the key making it, which
+   * deliveries are checked against from then on (an inbox webhook's only for
+   * being live). It passed `canManage`, so it reaches what the webhook follows.
    */
-  function managingKey(actor: ActingActor, hook: Webhook) {
-    return hook.kind === "activity" && actor.keyId
-      ? { apiKeyId: actor.keyId }
-      : {};
+  function managingKey(actor: ActingActor) {
+    return actor.keyId ? { apiKeyId: actor.keyId } : {};
   }
 
   /** The 409 for a URL the bot already uses: names the webhook only when this key can manage it. */
@@ -4538,7 +4535,7 @@ export function createService({
           if (follows !== undefined) setFollows(tx, id, follows);
           resume(tx, id, webhooks.now());
           tx.update(webhookSubscription)
-            .set({ updatedAt: new Date(), ...managingKey(actor, current) })
+            .set({ updatedAt: new Date(), ...managingKey(actor) })
             .where(eq(webhookSubscription.id, id))
             .run();
           return {
@@ -4557,11 +4554,7 @@ export function createService({
       secret: string,
     ): Webhook {
       requireBot(actor, "rotate a webhook's secret");
-      const current = requireWebhookAction(
-        actor,
-        id,
-        "rotate a webhook's secret",
-      ).view;
+      requireWebhookAction(actor, id, "rotate a webhook's secret");
       validSecret(secret);
       return db.transaction(
         (tx) => {
@@ -4569,7 +4562,7 @@ export function createService({
             .set({
               secretCipher: sealSecret(webhooks.key, id, secret),
               updatedAt: new Date(),
-              ...managingKey(actor, current),
+              ...managingKey(actor),
             })
             .where(eq(webhookSubscription.id, id))
             .run();

@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, expect, test } from "vitest";
-import { webhookSubscription } from "../db/schema.js";
+import { apiKey, webhookSubscription } from "../db/schema.js";
 import { createBot, createKey, revokeKey } from "../service/keys.js";
 import { setupTestApp, testWebhookSettings } from "../test-app.js";
 import { createWebhookWorker } from "../webhooks/worker.js";
@@ -145,11 +145,20 @@ test("a refused update leaves the recorded key as it was", async () => {
   expect(keyIdOf(id)).toBe(before);
 });
 
-test("an inbox webhook records no key when another key updates or rotates it", async () => {
-  const { first, second } = botWithTwoKeys();
+const keyIdByPrefix = (key: string) =>
+  db
+    .select({ id: apiKey.id })
+    .from(apiKey)
+    .where(eq(apiKey.prefix, prefixOf(key)))
+    .get()?.id;
+
+test("an inbox webhook records the key that creates, updates or rotates it", async () => {
+  const { bot, first, second } = botWithTwoKeys();
   const { id } = await follow({ kind: "inbox" }, first);
-  const before = keyIdOf(id);
+  expect(keyIdOf(id)).toBe(keyIdByPrefix(first));
   await ok("PATCH", `/webhooks/${id}`, {}, second);
-  await ok("PUT", `/webhooks/${id}/secret`, { secret }, second);
-  expect(keyIdOf(id)).toBe(before);
+  expect(keyIdOf(id)).toBe(keyIdByPrefix(second));
+  const rotator = createKey(db, bot, { actions: ["read"] }).key;
+  await ok("PUT", `/webhooks/${id}/secret`, { secret }, rotator);
+  expect(keyIdOf(id)).toBe(keyIdByPrefix(rotator));
 });

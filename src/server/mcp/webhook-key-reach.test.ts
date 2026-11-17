@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { expect, test } from "vitest";
-import { webhookDelivery } from "../db/schema.js";
+import { webhookDelivery, webhookSubscription } from "../db/schema.js";
 import { createBot, revokeKey } from "../service/keys.js";
 import { setupTestApp, testWebhookSettings } from "../test-app.js";
 import { createWebhookWorker } from "../webhooks/worker.js";
@@ -67,5 +67,48 @@ test("revoking the key that made a webhook over MCP stops its deliveries, each m
     ["failed", revoked],
     ["failed", revoked],
     ["failed", revoked],
+  ]);
+});
+
+test("a webhook made over MCP before keys were recorded is delivered while its bot has a live key, and skipped once it has none", async () => {
+  const wide = await connect(bot.key);
+  await call(wide, "create_product", { key: "OLD", name: "Old" });
+  const item = (await call(wide, "add_todo", { product: "OLD", title: "t" }))
+    .key as string;
+  await worker.tick();
+
+  const made = createBot(db, "mcp-unrecorded", {
+    scope: { products: ["OLD"], actions: ["read"] },
+  });
+  const webhook = await call(await connect(made.key), "create_webhook", {
+    url: "https://bot.example.com/mcp-unrecorded",
+    secret: "whsec_mcp_unrecorded_0123456789",
+    products: ["OLD"],
+  });
+  // as on a webhook made before keys were recorded
+  db.update(webhookSubscription)
+    .set({ apiKeyId: null })
+    .where(eq(webhookSubscription.id, webhook.id))
+    .run();
+
+  await call(wide, "update_item", { item, title: "a live key reaches it" });
+  expect(await sentNow()).toBe(2);
+
+  revokeKey(db, made.key.slice(6, 14));
+  await call(wide, "update_item", { item, title: "no live key" });
+  expect(await sentNow()).toBe(0);
+  expect(
+    db
+      .select()
+      .from(webhookDelivery)
+      .where(eq(webhookDelivery.subscriptionId, webhook.id))
+      .orderBy(webhookDelivery.seq)
+      .all()
+      .map((d) => [d.status, d.lastError]),
+  ).toEqual([
+    ["delivered", null],
+    ["delivered", null],
+    ["failed", "not sent: this bot has no live key"],
+    ["failed", "not sent: this bot has no live key"],
   ]);
 });

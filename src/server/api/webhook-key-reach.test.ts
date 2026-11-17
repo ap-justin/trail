@@ -8,7 +8,12 @@ import {
   webhookDelivery,
   webhookSubscription,
 } from "../db/schema.js";
-import { createBot, editKeyScope, revokeKey } from "../service/keys.js";
+import {
+  createBot,
+  createKey,
+  editKeyScope,
+  revokeKey,
+} from "../service/keys.js";
 import { setupTestApp, testWebhookSettings } from "../test-app.js";
 import { createWebhookWorker } from "../webhooks/worker.js";
 
@@ -248,35 +253,146 @@ test("an unrestricted key's webhook is delivered until the key is revoked", asyn
   expect(await sentNowTo(url)).toBe(0);
 });
 
-test("a webhook with no recorded key, as one made before keys were recorded, is delivered after its bot's key is revoked", async () => {
+/** Clears the recorded key, as on a webhook made before keys were recorded. */
+const forgetKey = (subscriptionId: string) =>
+  db
+    .update(webhookSubscription)
+    .set({ apiKeyId: null })
+    .where(eq(webhookSubscription.id, subscriptionId))
+    .run();
+
+const NO_LIVE_KEY = "not sent: this bot has no live key";
+
+test("a webhook with no recorded key is delivered while its bot's live key reaches it, and skipped once every key is revoked", async () => {
   const key = botWith({ products: ["ATL"] });
   const { id, url } = await follow({ products: ["ATL"] }, key);
-  db.update(webhookSubscription)
-    .set({ apiKeyId: null })
-    .where(eq(webhookSubscription.id, id))
-    .run();
-  revokeKey(db, prefixOf(key));
-  await retitle(atl, "no key to check");
+  forgetKey(id);
+  await retitle(atl, "checked against the bot's live key");
   expect(await sentNowTo(url)).toBe(2);
+  revokeKey(db, prefixOf(key));
+  await retitle(atl, "no live key");
+  expect(await sentNowTo(url)).toBe(0);
+  expect(historyOf(id).slice(2)).toEqual([
+    ["trail.issue.updated", "failed", 0, NO_LIVE_KEY],
+    ["trail.item.updated", "failed", 0, NO_LIVE_KEY],
+  ]);
+  expect(
+    db
+      .select()
+      .from(webhookSubscription)
+      .where(eq(webhookSubscription.id, id))
+      .get(),
+  ).toMatchObject({ consecutiveFailures: 0, lastError: null, pausedAt: null });
 });
 
-test("an inbox webhook gets its messages after the key that made it is revoked", async () => {
-  const receiver = createBot(db, "reach-inbox");
-  const sender = createBot(db, "reach-sender");
-  const made = await call("POST", "/webhooks", receiver.key, {
-    kind: "inbox",
-    url: "https://bot.example.com/key-reach/inbox",
-    secret: "whsec_key_reach_0123456789abcdef",
-  });
-  expect(made.status, JSON.stringify(made.body)).toBe(201);
-  revokeKey(db, prefixOf(receiver.key));
-  const message = await call("POST", "/messages", sender.key, {
-    to: receiver.actor.displayName,
-    text: "still delivered",
+const sender = createBot(db, "reach-sender").key;
+/** Sends `to` a direct message from another bot. */
+async function message(to: string, text: string) {
+  const sent = await call("POST", "/messages", sender, {
+    to,
+    text,
     expectsReply: false,
   });
-  expect(message.status, JSON.stringify(message.body)).toBe(201);
-  expect(await sentNowTo(made.body.url)).toBe(1);
+  expect(sent.status, JSON.stringify(sent.body)).toBe(201);
+}
+
+test("an inbox webhook gets its messages while the key that made it lives, and skips them once it is revoked", async () => {
+  const receiver = createBot(db, "reach-inbox", {
+    scope: { products: ["ATL"], actions: ["read"] },
+  });
+  const { id, url } = await follow({ kind: "inbox" }, receiver.key);
+  await message(receiver.actor.displayName, "delivered");
+  expect(await sentNowTo(url)).toBe(1);
+  revokeKey(db, prefixOf(receiver.key));
+  await message(receiver.actor.displayName, "after the revoke");
+  expect(await sentNowTo(url)).toBe(0);
+  expect(historyOf(id)).toEqual([
+    ["trail.message.received", "delivered", 1, null],
+    [
+      "trail.message.received",
+      "failed",
+      0,
+      "not sent: this webhook's key is revoked",
+    ],
+  ]);
+  expect(
+    db
+      .select()
+      .from(webhookSubscription)
+      .where(eq(webhookSubscription.id, id))
+      .get(),
+  ).toMatchObject({ consecutiveFailures: 0, lastError: null, pausedAt: null });
+});
+
+test("an inbox webhook made by one key is still delivered after the bot's other key is revoked", async () => {
+  const receiver = createBot(db, "reach-inbox-two", {
+    scope: { actions: ["read"] },
+  });
+  const other = createKey(db, receiver.actor.id, { actions: ["read"] }).key;
+  const { url } = await follow({ kind: "inbox" }, receiver.key);
+  revokeKey(db, prefixOf(other));
+  await message(receiver.actor.displayName, "maker still live");
+  expect(await sentNowTo(url)).toBe(1);
+});
+
+test("a webhook with no recorded key is delivered while a second live key reaches it after the first is revoked", async () => {
+  const first = createBot(db, `reach-${++bots}`, {
+    scope: { products: ["ATL"], actions: ["read"] },
+  });
+  const second = createKey(db, first.actor.id, {
+    products: ["ATL"],
+    actions: ["read"],
+  }).key;
+  const { id, url } = await follow({ products: ["ATL"] }, first.key);
+  forgetKey(id);
+  revokeKey(db, prefixOf(first.key));
+  await retitle(atl, "the second key still reaches ATL");
+  expect(await sentNowTo(url)).toBe(2);
+  revokeKey(db, prefixOf(second));
+  await retitle(atl, "both revoked");
+  expect(await sentNowTo(url)).toBe(0);
+});
+
+test("a webhook with no recorded key goes out when any one of its bot's keys reaches it, and is skipped with the oldest key's reason when none does", async () => {
+  const older = createBot(db, `reach-${++bots}`, {
+    scope: { products: ["BTA"], actions: ["read"] },
+  });
+  const newer = createKey(db, older.actor.id, {
+    products: ["ATL"],
+    actions: ["read"],
+  }).key;
+  const { id, url } = await follow({ products: ["ATL"] }, newer);
+  forgetKey(id);
+  await retitle(atl, "the newer key reaches ATL");
+  expect(await sentNowTo(url)).toBe(2);
+  editKeyScope(db, prefixOf(newer), {
+    removeProducts: ["ATL"],
+    addProducts: ["BTA"],
+  });
+  await retitle(atl, "neither key reaches ATL");
+  expect(await sentNowTo(url)).toBe(0);
+  const lost = "not sent: this webhook's key no longer reaches ATL";
+  expect(historyOf(id).slice(2)).toEqual([
+    ["trail.issue.updated", "failed", 0, lost],
+    ["trail.item.updated", "failed", 0, lost],
+  ]);
+});
+
+test("an inbox webhook with no recorded key gets its messages while its bot has a live key, and skips them once it has none", async () => {
+  const receiver = createBot(db, "reach-inbox-unrecorded", {
+    scope: { actions: ["read"] },
+  });
+  const { id, url } = await follow({ kind: "inbox" }, receiver.key);
+  forgetKey(id);
+  await message(receiver.actor.displayName, "a live key");
+  expect(await sentNowTo(url)).toBe(1);
+  revokeKey(db, prefixOf(receiver.key));
+  await message(receiver.actor.displayName, "no live key");
+  expect(await sentNowTo(url)).toBe(0);
+  expect(historyOf(id)).toEqual([
+    ["trail.message.received", "delivered", 1, null],
+    ["trail.message.received", "failed", 0, NO_LIVE_KEY],
+  ]);
 });
 
 test("a delivery of an event outside the key's reach is skipped naming its product while the followed product's is sent", async () => {
