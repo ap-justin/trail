@@ -610,8 +610,8 @@ export function createService({
   /**
    * Product keys or ids as the product ids a webhook follows. One the key
    * can't see is a 404, as everywhere, one it reaches only through its
-   * projects a 404 saying to follow those, and a project's slug a 422 saying to
-   * send it in `projects`.
+   * projects a 404 saying to follow those, for the events of their items, and
+   * a project's slug a 422 saying to send it in `projects`.
    */
   function webhookProductIds(actor: ActingActor, refs: string[]): string[] {
     if (refs.length > WEBHOOK_PRODUCTS_MAX) {
@@ -1052,6 +1052,27 @@ export function createService({
     return findProduct(tx, ref, productsNamed(db, reachFor(actor), product.id));
   }
 
+  /**
+   * `resolveNamedProduct` without the products named only through the implicit
+   * read, which shows their name and key and never their labels.
+   */
+  function resolveLabeledProduct(
+    tx: Tx | Db,
+    ref: string,
+    actor: ActingActor,
+  ): Product {
+    const reach = reachFor(actor);
+    return findProduct(
+      tx,
+      ref,
+      productsNamed(
+        db,
+        reach && { ...reach, implicitProjects: false },
+        product.id,
+      ),
+    );
+  }
+
   function findProduct(
     tx: Tx | Db,
     ref: string,
@@ -1297,6 +1318,28 @@ export function createService({
   }
 
   /**
+   * Refuses, with `refusal` of the product's key and whom to ask, an actor
+   * whose key neither lists the product nor belongs to its owner.
+   */
+  function requireProductGrant(
+    tx: Tx | Db,
+    actor: ActingActor,
+    productId: string,
+    refusal: (productKey: string) => string,
+  ): void {
+    if (grantsProduct(actor, productId)) return;
+    const target = tx
+      .select()
+      .from(product)
+      .where(eq(product.id, productId))
+      .get() as Product;
+    if (target.ownerId === actor.id) return;
+    throw new ForbiddenScopeError(
+      `${refusal(target.key)} ${askForGrant(tx, target)}`,
+    );
+  }
+
+  /**
    * Refuses `doing` on `row` when the actor reaches it only through a project
    * drawing from its products: such a key reads the item and comments on it,
    * and the 403 names the projects, the grants that would allow it and whom
@@ -1323,7 +1366,7 @@ export function createService({
       .all()
       .map((p) => p.slug);
     throw new ForbiddenScopeError(
-      `${target.key}-${row.number} is visible to this key only through ${projectList(slugs)}, which lets it read the item and comment on it (add_comment) and nothing else: to ${doing} it needs a key that lists ${grantsFor(target.key, slugs)}. ${askForGrant(tx, target)}`,
+      `${target.key}-${row.number} is visible to this key only through ${projectList(slugs)}, which lets it read the item and comment on it (add_comment) and nothing else: to ${doing}, the bot needs a key that lists ${grantsFor(target.key, slugs)}. ${askForGrant(tx, target)}`,
     );
   }
 
@@ -2856,7 +2899,7 @@ export function createService({
     ): WrittenItem {
       if (input.project !== undefined) {
         throw new ValidationError(
-          "add_todo takes no project: add the todo without it, then add it to the project with add_to_project (POST /projects/{slug}/items); file_issue (type issue) is what takes project",
+          "add_todo takes no project: add the todo without it, then add it to the project with add_to_project (POST /projects/{slug}/items); file_issue (POST /items) is what takes project",
         );
       }
       requireAction(actor, "issues", "add a todo", () =>
@@ -3722,6 +3765,17 @@ export function createService({
         const added: string[] = [];
         const unchanged: string[] = [];
         for (const item of items) {
+          if (!inProject.has(item.id) && !products.has(item.productId)) {
+            requireProductGrant(
+              tx,
+              actor,
+              item.productId,
+              (key) =>
+                `adding ${item.key} to project ${target.slug} would draw ${target.slug} from product ${key}: to add it, the bot needs a key that lists product ${key}.`,
+            );
+          }
+        }
+        for (const item of items) {
           if (inProject.has(item.id)) {
             unchanged.push(item.key);
             continue;
@@ -3772,6 +3826,15 @@ export function createService({
                 .map((ref) => resolveIssueRow(tx, ref, actor))
                 .map((row) => {
                   requireItemWrite(tx, actor, row, "remove it from a project");
+                  if (!projectIdsOf(actor)?.includes(target.id)) {
+                    requireProductGrant(
+                      tx,
+                      actor,
+                      row.productId,
+                      (key) =>
+                        `${key}-${row.number} is in project ${target.slug}, which this key reads only through its products: to remove it from ${target.slug}, the bot needs a key that lists ${grantsFor(key, [target.slug])}.`,
+                    );
+                  }
                   return [row.id, row] as const;
                 }),
             ).values(),
@@ -4067,9 +4130,9 @@ export function createService({
       query: PageQuery = {},
     ): Page<Label> {
       requireAction(actor, "read", "list labels", () =>
-        resolveNamedProduct(db, productRef, actor),
+        resolveLabeledProduct(db, productRef, actor),
       );
-      const target = resolveNamedProduct(db, productRef, actor);
+      const target = resolveLabeledProduct(db, productRef, actor);
       return page(
         label,
         "asc",
@@ -4531,7 +4594,7 @@ export function createService({
         data: {
           webhookId: id,
           products: view.products,
-          projects: view.products,
+          projects: view.projects,
           ...(webhooks.publicUrl !== undefined && { url: webhooks.publicUrl }),
           message: "A test call from trail: your webhook is set up.",
         },

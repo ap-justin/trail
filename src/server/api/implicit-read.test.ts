@@ -16,8 +16,13 @@ async function seed(method: string, path: string, json: unknown) {
 
 async function call(method: string, path: string, key: string, json?: Body) {
   const res = await request(method, `/api/v1${path}`, { json, key });
-  return { status: res.status, body: (await res.json()) as Body };
+  const text = await res.text();
+  return { status: res.status, text, body: JSON.parse(text) as Body };
 }
+
+/** A refusal's body shows neither the item's title nor its description, which opens with the title. */
+const hidesItem = (refused: { text: string }, title: string) =>
+  expect(refused.text).not.toContain(title);
 
 let btaKey = "";
 let atlIn = "";
@@ -25,8 +30,14 @@ let atlOut = "";
 let btaOut = "";
 
 const todo = async (product: string, title: string) =>
-  (await seed("POST", "/api/v1/items", { type: "todo", product, title }))
-    .key as string;
+  (
+    await seed("POST", "/api/v1/items", {
+      type: "todo",
+      product,
+      title,
+      description: `${title}, described`,
+    })
+  ).key as string;
 
 // products ATL and BTA; project recon draws from both, and each keeps items outside it
 beforeAll(async () => {
@@ -51,7 +62,9 @@ test("GET /items/{key} carries access: product for BTA's items, via_project for 
   const atl = await call("GET", `/items/${atlIn}`, btaKey);
   expect(atl.status).toBe(200);
   expect(atl.body.access).toBe("via_project");
-  expect((await call("GET", `/items/${atlOut}`, btaKey)).status).toBe(404);
+  const hidden = await call("GET", `/items/${atlOut}`, btaKey);
+  expect(hidden.status).toBe(404);
+  hidesItem(hidden, "atl out");
 });
 
 test("a BTA-only key comments on recon's ATL item, and changing it is a 403 forbidden_scope naming recon, the grants and the owner", async () => {
@@ -63,9 +76,10 @@ test("a BTA-only key comments on recon's ATL item, and changing it is a 403 forb
     status: "in_progress",
   });
   expect(refused.status).toBe(403);
+  hidesItem(refused, "atl in");
   expect(refused.body.error).toEqual({
     code: "forbidden_scope",
-    message: `${atlIn} is visible to this key only through project recon, which lets it read the item and comment on it (add_comment) and nothing else: to update an item it needs a key that lists product ATL or project recon. Ask tester, the owner of ATL, for that grant.`,
+    message: `${atlIn} is visible to this key only through project recon, which lets it read the item and comment on it (add_comment) and nothing else: to update an item, the bot needs a key that lists product ATL or project recon. Ask tester, the owner of ATL, for that grant.`,
   });
   const removed = await call(
     "DELETE",
@@ -74,6 +88,22 @@ test("a BTA-only key comments on recon's ATL item, and changing it is a 403 forb
   );
   expect(removed.status).toBe(403);
   expect(removed.body.error.code).toBe("forbidden_scope");
+  hidesItem(removed, "atl in");
+});
+
+test("GET /products/ATL/labels is the 404 of a product the key does not reach; the item keeps its own labels", async () => {
+  await seed("POST", "/api/v1/products/ATL/labels", { name: "bug" });
+  await seed("PATCH", `/api/v1/items/${atlIn}`, { addLabels: ["bug"] });
+  const hidden = await call("GET", "/products/ATL/labels", btaKey);
+  const missing = await call("GET", "/products/NOPE/labels", btaKey);
+  expect(hidden.status).toBe(404);
+  expect(hidden.body.error).toEqual({
+    ...missing.body.error,
+    message: missing.body.error.message.replace("NOPE", "ATL"),
+  });
+  expect((await call("GET", `/items/${atlIn}`, btaKey)).body.labels).toEqual([
+    "bug",
+  ]);
 });
 
 test("GET /whoami lists impliedProjects beside a scope of explicit grants", async () => {
@@ -92,9 +122,10 @@ test("a BTA-only key can't add recon's ATL item to a project, nor file on ATL, w
     items: [atlIn],
   });
   expect(added.status).toBe(403);
+  hidesItem(added, "atl in");
   expect(added.body.error).toEqual({
     code: "forbidden_scope",
-    message: `${atlIn} is visible to this key only through project recon, which lets it read the item and comment on it (add_comment) and nothing else: to add it to a project it needs a key that lists product ATL or project recon. Ask tester, the owner of ATL, for that grant.`,
+    message: `${atlIn} is visible to this key only through project recon, which lets it read the item and comment on it (add_comment) and nothing else: to add it to a project, the bot needs a key that lists product ATL or project recon. Ask tester, the owner of ATL, for that grant.`,
   });
   const stored = await request("GET", `/api/v1/items/${atlIn}`);
   expect(

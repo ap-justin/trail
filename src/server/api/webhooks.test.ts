@@ -506,6 +506,24 @@ test("the ping is a signed trail.ping the receiver can verify, and reports its a
   answer = 200;
 });
 
+test("the ping lists the product keys under products and the project slugs under projects", async () => {
+  const recon = await call("POST", "/projects", {
+    json: { name: "Ping recon", slug: "ping-recon", products: [a.key] },
+  });
+  expect(recon.status).toBe(201);
+  const made = await create({ projects: [b.key, "ping-recon"] });
+  expect(made.body).toMatchObject({
+    products: [b.key],
+    projects: ["ping-recon"],
+  });
+  await call("POST", `/webhooks/${made.body.id}/ping`);
+  expect(JSON.parse(sent[0]?.body ?? "").data).toMatchObject({
+    webhookId: made.body.id,
+    products: [b.key],
+    projects: ["ping-recon"],
+  });
+});
+
 test("a rotated secret signs the next ping", async () => {
   const id = (await create({ url: "https://bot.example.com/rot" })).body.id;
   await call("PUT", `/webhooks/${id}/secret`, { json: { secret: NEW_SECRET } });

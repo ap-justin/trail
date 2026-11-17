@@ -348,7 +348,7 @@ export function registerTools(
   register(
     "file_issue",
     {
-      description: `File an issue: a bug report or request to a product's bot, on any product list_products lists. With project (a slug list_projects lists) the issue joins that project in the same call; product must be one the project draws from, and left out it is the project's one product. A key that reaches a product only through a project files there with project, which defaults to the key's project when it names exactly one. ${TODO_OR_ISSUE} Use add_todo instead for planned work in your own product. Leave assignee out: the product's bot assigns it when it accepts the issue (status open with assignee). On a product another bot owns, labels attach only the product's existing labels (list_labels lists them) and create none; the result lists the names it left off in skippedLabels. Returns the item with its key, like TRL-12, in status triage.`,
+      description: `File an issue: a bug report or request to a product's bot, on any product list_products lists. With project (a slug list_projects lists) the issue joins that project in the same call; product must be one the project draws from, and left out it is the project's one product. A key reaching a product only through projects sends \`project\` when it names more than one; with exactly one, that one is the default. ${TODO_OR_ISSUE} Use add_todo instead for planned work in your own product. Leave assignee out: the product's bot assigns it when it accepts the issue (status open with assignee). On a product another bot owns, labels attach only the product's existing labels (list_labels lists them) and create none; the result lists the names it left off in skippedLabels. Returns the item with its key, like TRL-12, in status triage.`,
       inputSchema: issueFileSchema.extend(idempotencyKey),
       annotations: create,
     },
@@ -565,7 +565,7 @@ export function registerTools(
     "add_to_project",
     {
       description:
-        "Add items to a project by key, up to 100 a call, from any products this key reaches: an item's product joins the project's products by itself. An item already in the project is left as it is and listed in unchanged, so a retry is safe. Needs the issues action on a key reaching one of the project's products; an item the key reads only through a project (access via_project) is refused. Returns the project with added and unchanged keys.",
+        "Add items to a project by key, up to 100 a call, from any products this key reaches: an item's product joins the project's products by itself, when the key lists that product or is its owner, and is refused (forbidden_scope) otherwise. An item already in the project is left as it is and listed in unchanged, so a retry is safe. Needs the issues action on a key reaching one of the project's products; an item the key reads only through a project (access via_project) is refused. Returns the project with added and unchanged keys.",
       inputSchema: projectItemsSchema.extend({ project: projectSlug }),
       annotations: additive,
     },
@@ -580,7 +580,7 @@ export function registerTools(
     "remove_from_project",
     {
       description:
-        "Take items out of a project by key, up to 100 a call; the items themselves stay as they are, and the project keeps its products. An item not in the project is listed in unchanged, so a retry is safe. Needs the issues action on a key reaching one of the project's products; an item the key reads only through a project (access via_project) is refused.",
+        "Take items out of a project by key, up to 100 a call; the items themselves stay as they are, and the project keeps its products. From a project the key doesn't list, it removes only items of the products it lists, and refuses the rest (forbidden_scope). An item not in the project is listed in unchanged, so a retry is safe. Needs the issues action on a key reaching one of the project's products; an item the key reads only through a project (access via_project) is refused.",
       inputSchema: projectItemsSchema.extend({ project: projectSlug }),
       annotations: update,
     },
@@ -595,7 +595,7 @@ export function registerTools(
     "list_products",
     {
       description:
-        "List the products this key can name, newest first, a page at a time: pass nextCursor back as cursor until it is null. A product owns items (keys like TRL-12); its owner is its own bot, who adds its todos and accepts issues filed to it. Listed are the products this key reaches and those its projects, and the projects drawing from its products, draw from; of a product it reaches only through a project it reads only the id, key and name (list_labels lists its labels), and files issues on it with file_issue with project when it lists that project, and not at all otherwise. A product carries no item counts.",
+        "List the products this key can name, newest first, a page at a time: pass nextCursor back as cursor until it is null. A product owns items (keys like TRL-12); its owner is its own bot, who adds its todos and accepts issues filed to it. It lists the products this key reaches, plus every product its projects, or the projects drawing from its products, draw from; of a product it reaches only through a project it reads only the id, key and name. When the key lists that project, list_labels lists the product's labels and file_issue with project files issues on it; through a project drawing from its products, it reads no labels and files nothing. A product carries no item counts.",
       inputSchema: z.strictObject(page),
       annotations: read,
     },
@@ -609,7 +609,7 @@ export function registerTools(
     "get_product",
     {
       description:
-        "Get a product by key, like TRL: name, description, repoUrl and owner (its own bot), and no item counts. A product this key reaches only through a project reads as its id, key and name only (list_labels lists its labels), and the key files issues on it with file_issue with project when it lists that project, and not at all otherwise.",
+        "Get a product by key, like TRL: name, description, repoUrl and owner (its own bot), and no item counts. A product this key reaches only through a project reads as its id, key and name only. When the key lists that project, list_labels lists the product's labels and file_issue with project files issues on it; through a project drawing from its products, it reads no labels and files nothing.",
       inputSchema: z.strictObject({ product }),
       annotations: read,
     },
@@ -770,7 +770,7 @@ export function registerTools(
     "list_labels",
     {
       description:
-        "List a product's labels, oldest first, a page at a time: pass nextCursor back as cursor until it is null.",
+        "List a product's labels, oldest first, a page at a time: pass nextCursor back as cursor until it is null. A product this key names only through a project drawing from its products is not found here, as a product it doesn't reach is; through a project the key lists, its labels are listed.",
       inputSchema: z.strictObject({
         product: aliasedProduct,
         projectId: projectIdAlias,
@@ -905,7 +905,7 @@ export function registerTools(
     "whoami",
     {
       description:
-        "Get the bot this key acts as: its id (the createdBy, authorId and actorId your writes carry), name, label, photoUrl (null until set_my_photo sets one), title (null until set_my_title sets one), unreadMessages (messages other bots sent you, unread: list_inbox lists them), ownProducts (the products whose own bot you are: add_todo goes there), products (every product this key files issues on: those it reaches, and those its projects draw from, which it files on with file_issue with project), and the key's scope: products (the keys of the products whose every item it reaches), projects (the slugs of the projects whose items it reaches, whichever product they are in) and actions (read, issues, comments, status_updates, admin), each null when unrestricted; and impliedProjects (the slugs of the projects drawing from one of the key's products that scope doesn't list: it reads and comments on their items in other products, and changes none of them). Call it first to learn where your todos go.",
+        "Get the bot this key acts as: its id (the createdBy, authorId and actorId your writes carry), name, label, photoUrl (null until set_my_photo sets one), title (null until set_my_title sets one), unreadMessages (messages other bots sent you, unread: list_inbox lists them), ownProducts (the products whose own bot you are: add_todo goes there), products (every product this key files issues on: those it reaches, and those its projects draw from, which it files on with file_issue with project), and the key's scope: products (the keys of the products whose every item it reaches), projects (the slugs of the projects whose items it reaches, whichever product they are in) and actions (read, issues, comments, status_updates, admin), each null when unrestricted; and impliedProjects (the slugs of the projects drawing from one of the key's products that scope doesn't list: it reads and comments on their items in other products, and changes none of them; their other products show their name and key only, never their labels). Call it first to learn where your todos go.",
       inputSchema: z.strictObject({}),
       annotations: read,
     },

@@ -1,10 +1,10 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { eq } from "drizzle-orm";
-import { afterAll, describe, expect, test } from "vitest";
+import { and, eq } from "drizzle-orm";
+import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { migrate, openDatabase } from "../db/client.js";
-import { issue } from "../db/schema.js";
+import { issue, projectProduct } from "../db/schema.js";
 import { createEventBus } from "../events/bus.js";
 import { testWebhooks } from "../test-app.js";
 import { ForbiddenScopeError, NotFoundError } from "./errors.js";
@@ -15,6 +15,7 @@ import {
   editKeyScope,
   type KeyScopeInput,
 } from "./keys.js";
+import { setProductOwner } from "./product-admin.js";
 
 const dir = mkdtempSync(join(tmpdir(), "trail-project-reach-"));
 const db = openDatabase(join(dir, "trail.db"));
@@ -39,6 +40,15 @@ function keyed(name: string, scope: KeyScopeInput) {
   const actor = authenticateKey(db, key);
   if (!actor) throw new Error("minted key did not authenticate");
   return { actor, prefix: key.slice(6, 14), token: key };
+}
+/** The error `fn` throws. */
+function thrown(fn: () => unknown): Error {
+  try {
+    fn();
+  } catch (error) {
+    return error as Error;
+  }
+  throw new Error("expected a throw");
 }
 /** The key's actor as it authenticates now, after a scope edit. */
 const fresh = (token: string) => {
@@ -481,5 +491,81 @@ describe("a project-only bot works items as any non-owner bot does", () => {
     expect(() => service.listItems(eta.actor, { project: "BTA" })).toThrow(
       'no project BTA: that is a product key, send it as product (product: "BTA")',
     );
+  });
+});
+
+describe("add_to_project draws a project from a new product only on a product grant", () => {
+  let lister: ReturnType<typeof keyed>;
+  beforeAll(() => {
+    service.createProject(admin, {
+      name: "Context",
+      slug: "context",
+      products: ["CTX"],
+    });
+    lister = keyed("theta", { projects: ["recon", "other", "context"] });
+  });
+  const productsOf = (slug: string) =>
+    service
+      .getProject(admin, slug)
+      .products.map((p) => p.key)
+      .sort();
+  const refusal = (owner: string) =>
+    `adding ${btaIn} to project context would draw context from product BTA: to add it, the bot needs a key that lists product BTA. ${owner}`;
+
+  test("a key listing both projects adds an item to one already drawing from its product", () => {
+    expect(service.addToProject(lister.actor, "other", [atlIn]).added).toEqual([
+      atlIn,
+    ]);
+    service.removeFromProject(admin, "other", [atlIn]);
+  });
+
+  test("into a project not drawing from the item's product, it is a 403 naming whom to ask, and the project's products stay", () => {
+    db.$client
+      .prepare("update product set owner_id = null where key = 'BTA'")
+      .run();
+    const unowned = thrown(() =>
+      service.addToProject(lister.actor, "context", [btaIn]),
+    );
+    expect(unowned).toBeInstanceOf(ForbiddenScopeError);
+    expect(unowned.message).toBe(
+      refusal("Ask whoever minted the key for that grant."),
+    );
+    createBot(db, "bta-owner");
+    setProductOwner(db, "BTA", "bta-owner");
+    expect(
+      thrown(() => service.addToProject(lister.actor, "context", [btaIn]))
+        .message,
+    ).toBe(refusal("Ask bta-owner, the owner of BTA, for that grant."));
+    expect(productsOf("context")).toEqual(["CTX"]);
+    expect(service.getItem(admin, btaIn).projects.map((p) => p.slug)).toEqual([
+      "recon",
+    ]);
+  });
+
+  test("a key listing the product, or the product's owner, draws the project from it", () => {
+    const withBta = keyed("iota", { products: ["BTA"], projects: ["context"] });
+    expect(
+      service.addToProject(withBta.actor, "context", [btaOut]).added,
+    ).toEqual([btaOut]);
+    expect(productsOf("context")).toEqual(["BTA", "CTX"]);
+    service.removeFromProject(admin, "context", [btaOut]);
+    db.delete(projectProduct)
+      .where(
+        and(
+          eq(projectProduct.projectId, service.getProject(admin, "context").id),
+          eq(projectProduct.productId, service.getProduct(admin, "BTA").id),
+        ),
+      )
+      .run();
+    const { key } = createBot(db, "atl-owner", {
+      scope: { projects: ["recon", "context"] },
+    });
+    setProductOwner(db, "ATL", "atl-owner");
+    const owner = authenticateKey(db, key);
+    if (!owner) throw new Error("minted key did not authenticate");
+    expect(service.addToProject(owner, "context", [atlIn]).added).toEqual([
+      atlIn,
+    ]);
+    service.removeFromProject(admin, "context", [atlIn]);
   });
 });

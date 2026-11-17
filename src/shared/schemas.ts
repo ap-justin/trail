@@ -108,7 +108,7 @@ export const namedProductSchema = productSchema
   .pick({ id: true, key: true, name: true })
   .meta({
     description:
-      "A product the key reaches only through a project drawing from it: its id, key and name; its labels are read with list_labels (GET /products/{key}/labels).",
+      "A product the key reaches only through a project drawing from it: its id, key and name. Through a project the key lists, its labels are read with list_labels (GET /products/{key}/labels); through a project drawing from the key's products, it shows its name and key only, and its labels are not found.",
   })
   .openapi("NamedProduct");
 
@@ -294,11 +294,11 @@ export const projectSchema = z
     }),
     products: z.array(productRefSchema).meta({
       description:
-        "The products it draws items from that this key reaches, A to Z.",
+        "The products it draws items from that this key reaches or can name, A to Z.",
     }),
     hiddenProducts: z.boolean().meta({
       description:
-        "True when it also draws from products this key can't reach: their items are left out of counts and lists, and nothing names them.",
+        "True when it also draws from products this key can't name: their items are left out of counts and lists, and nothing names them.",
     }),
     counts: countsSchema.meta({
       description: "Its items per status, of the products listed only.",
@@ -442,7 +442,7 @@ export const whoamiSchema = actorSchema
     }),
     impliedProjects: z.array(z.string()).meta({
       description:
-        "The slugs of the projects drawing from one of this key's products that scope.projects doesn't list, A to Z. The key reads their items, whichever product they are in, and comments on them; changing an item of another product needs a key that lists that product or project. Empty for a key without a products list.",
+        "The slugs of the projects drawing from one of this key's products that scope.projects doesn't list, A to Z. The key reads their items, whichever product they are in, and comments on them; changing an item of another product needs a key that lists that product or project. Their other products show their name and key only, never their labels. Empty for a key without a products list.",
       example: ["launch-q4"],
     }),
     photoUrl,
@@ -771,7 +771,7 @@ const projectSlug = z.string().min(1).max(SLUG_MAX).meta({
   example: "launch-q4",
 });
 const ISSUE_PROJECT =
-  "A project's slug, like launch-q4: the issue joins that project as it is filed, and product must be one the project draws from (left out, the project's one product). A key that reaches the product only through projects must send it, and with exactly one project that one is the default. list_projects lists them with their products.";
+  "A project's slug, like launch-q4: the issue joins that project as it is filed, and product must be one the project draws from (left out, the project's one product). A key reaching a product only through projects sends `project` when it names more than one; with exactly one, that one is the default. list_projects lists them with their products.";
 const botRef = z.string().min(1).max(200);
 const LABEL_NAMES =
   "A name matches the product's label ignoring the case of A-Z. Only the product's owner creates labels: from the owner, or on a product with no owner, a new name creates the label; from anyone else, the names the product lacks come back in skippedLabels.";

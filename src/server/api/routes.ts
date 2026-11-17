@@ -95,9 +95,15 @@ export const forbiddenError = (
 export const VIA_PROJECT =
   "the key reaches the item only through a project drawing from one of its products (access via_project), which lets it read the item and comment on it and nothing else; the message names the project, the grants that would allow the change and whom to ask";
 
+/** The forbidden_scope 403 of adding items to a project. */
+export const PROJECT_ADD_SCOPE = `${VIA_PROJECT}; or the project doesn't draw from an item's product yet and the key doesn't list that product`;
+
+/** The forbidden_scope 403 of taking items out of a project. */
+export const PROJECT_REMOVE_SCOPE = `${VIA_PROJECT}; or the key reads the project only through its products and doesn't list the item's product`;
+
 /** The forbidden_scope 403 of a filing on a product the key reads only through such a project. */
 export const VIA_PROJECT_FILING =
-  "the key reads the product only through a project drawing from one of its products, which files nothing on it; the message names the product to file on instead and the grants that would allow it";
+  "the key reads the product only through a project drawing from one of its products, so it files nothing on it; the message names the product to file on instead and the grants that would allow it";
 
 /** The 403 a write only a product's owner makes adds to `forbiddenError`. */
 export const OWNER_ONLY =

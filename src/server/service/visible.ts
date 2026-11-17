@@ -106,10 +106,10 @@ export function itemsReached(
 }
 
 /**
- * The product in `column` is one the caller may name, to read its name, key
- * and labels: one of the reach's products, or one a project whose items it
- * reaches draws from. Naming a product reaches none of its items, and files
- * on it only through a listed project.
+ * The product in `column` is one the caller may name, to read its name and
+ * key: one of the reach's products, or one a project whose items it reaches
+ * draws from. Naming a product reaches none of its items, and reads its labels
+ * and files on it only through a listed project.
  */
 export function productsNamed(
   db: Db,

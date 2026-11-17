@@ -2,7 +2,12 @@ import { beforeAll, expect, test } from "vitest";
 import { activityEvent } from "../db/schema.js";
 import { createBot } from "../service/keys.js";
 import { projectKey, setupTestApp } from "../test-app.js";
-import { VIA_PROJECT, VIA_PROJECT_FILING } from "./routes.js";
+import {
+  PROJECT_ADD_SCOPE,
+  PROJECT_REMOVE_SCOPE,
+  VIA_PROJECT,
+  VIA_PROJECT_FILING,
+} from "./routes.js";
 
 const { db, bot, request, addProject } = setupTestApp();
 
@@ -641,8 +646,8 @@ test("the spec documents each gated operation's 403 with the action it needs", a
       "The key lacks the issues action, or with key the admin action (code forbidden_action), or with key reaches only some products (code forbidden_scope)",
     "POST /projects/{ref}/labels": ownerLabels,
     "POST /projects/{ref}/status-updates": needs("status_updates"),
-    "POST /projects/{slug}/items": `${needs("issues")}${itemChange}`,
-    "DELETE /projects/{slug}/items/{key}": `${needs("issues")}${itemChange}`,
+    "POST /projects/{slug}/items": `${needs("issues")}${viaProject(PROJECT_ADD_SCOPE)}`,
+    "DELETE /projects/{slug}/items/{key}": `${needs("issues")}${viaProject(PROJECT_REMOVE_SCOPE)}`,
     "GET /webhooks": null,
     "POST /webhooks": needs("read"),
     "GET /webhooks/{id}": needs("read"),

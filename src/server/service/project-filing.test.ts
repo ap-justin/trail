@@ -349,7 +349,7 @@ describe("a project-only bot is a non-owner bot on the products it files into", 
       service.addTodo(alpha, { product: "BTA", project: "recon", title: "t" }),
     ).toThrow(
       new ValidationError(
-        "add_todo takes no project: add the todo without it, then add it to the project with add_to_project (POST /projects/{slug}/items); file_issue (type issue) is what takes project",
+        "add_todo takes no project: add the todo without it, then add it to the project with add_to_project (POST /projects/{slug}/items); file_issue (POST /items) is what takes project",
       ),
     );
     expect(itemCount()).toBe(before);

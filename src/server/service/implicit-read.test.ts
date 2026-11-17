@@ -120,7 +120,7 @@ function thrown(fn: () => unknown): Error {
 
 describe("on an item it reaches only through recon, a BTA-only key may comment and nothing else", () => {
   const refusal = (doing: string) =>
-    `${atlIn} is visible to this key only through project recon, which lets it read the item and comment on it (add_comment) and nothing else: to ${doing} it needs a key that lists product ATL or project recon. Ask alpha, the owner of ATL, for that grant.`;
+    `${atlIn} is visible to this key only through project recon, which lets it read the item and comment on it (add_comment) and nothing else: to ${doing}, the bot needs a key that lists product ATL or project recon. Ask alpha, the owner of ATL, for that grant.`;
 
   test("update_item is a 403 naming the project, the grants and the owner, whatever it changes", () => {
     const patches: IssuePatch[] = [
@@ -167,6 +167,21 @@ describe("on an item it reaches only through recon, a BTA-only key may comment a
     ]);
   });
 
+  test("assigned to the key's own bot, the item is still comment-only: a status change is the same 403", () => {
+    const assignee = service.getItem(admin, atlIn).assignee?.id ?? null;
+    service.updateItem(alpha, atlIn, { assigneeId: beta.id });
+    try {
+      const error = thrown(() =>
+        service.updateItem(beta, atlIn, { status: "in_progress" }),
+      );
+      expect(error).toBeInstanceOf(ForbiddenScopeError);
+      expect(error.message).toBe(refusal("update an item"));
+      expect(service.getItem(admin, atlIn).status).toBe("open");
+    } finally {
+      service.updateItem(alpha, atlIn, { assigneeId: assignee });
+    }
+  });
+
   test("with no owner on ATL, the refusal says to ask whoever minted the key", () => {
     db.$client
       .prepare("update product set owner_id = null where key = 'ATL'")
@@ -193,6 +208,47 @@ describe("on an item it reaches only through recon, a BTA-only key may comment a
     expect(
       service.updateItem(atl, atlIn, { description: "from ATL" }).description,
     ).toBe("from ATL");
+  });
+});
+
+describe("remove_from_project on a project the key reads only through its products", () => {
+  test("is a 403 for another product's item, naming the grants and the owner, and the item stays", () => {
+    service.createProject(admin, {
+      name: "ATL list",
+      slug: "atl-list",
+      products: ["ATL"],
+    });
+    const both = service.addTodo(alpha, {
+      product: "ATL",
+      title: "atl in recon and atl-list",
+    }).key;
+    service.addToProject(admin, "recon", [both]);
+    service.addToProject(admin, "atl-list", [both]);
+    const mixed = keyed("mixed", { products: ["BTA"], projects: ["atl-list"] });
+    const error = thrown(() =>
+      service.removeFromProject(mixed, "recon", [both]),
+    );
+    expect(error).toBeInstanceOf(ForbiddenScopeError);
+    expect(error.message).toBe(
+      `${both} is in project recon, which this key reads only through its products: to remove it from recon, the bot needs a key that lists product ATL or project recon. Ask alpha, the owner of ATL, for that grant.`,
+    );
+    expect(
+      service
+        .getItem(admin, both)
+        .projects.map((p) => p.slug)
+        .sort(),
+    ).toEqual(["atl-list", "recon"]);
+    expect(
+      service.removeFromProject(mixed, "atl-list", [both]).removed,
+    ).toEqual([both]);
+    service.removeFromProject(admin, "recon", [both]);
+  });
+
+  test("goes through for an item of the key's own product", () => {
+    expect(service.removeFromProject(beta, "recon", [btaIn]).removed).toEqual([
+      btaIn,
+    ]);
+    service.addToProject(admin, "recon", [btaIn]);
   });
 });
 
@@ -280,8 +336,7 @@ describe("the readers around an item follow the implicit read", () => {
     ).toEqual([{ slug: "recon", name: "Recon" }]);
   });
 
-  test("names ATL by id, key and name, lists its labels, and keeps BTA whole", () => {
-    service.createLabel(alpha, { productId: "ATL", name: "bug" });
+  test("names ATL by id, key and name, and keeps BTA whole", () => {
     const atl = service.getProduct(admin, "ATL");
     expect(service.getProduct(beta, "ATL")).toEqual({
       id: atl.id,
@@ -289,9 +344,22 @@ describe("the readers around an item follow the implicit read", () => {
       name: "Product ATL",
     });
     expect(service.getProduct(beta, "BTA")).toHaveProperty("createdBy");
-    expect(service.listLabels(beta, "ATL").items.map((l) => l.name)).toEqual([
-      "bug",
-    ]);
+  });
+
+  test("ATL's labels are the 404 of a product it does not reach, and a key listing recon lists them", () => {
+    service.createLabel(alpha, { productId: "ATL", name: "bug" });
+    const hidden = thrown(() => service.listLabels(beta, "ATL"));
+    expect(hidden).toBeInstanceOf(NotFoundError);
+    expect(hidden.message).toBe(
+      thrown(() => service.listLabels(beta, "NOPE")).message.replace(
+        "NOPE",
+        "ATL",
+      ),
+    );
+    const listing = keyed("label-lister", { projects: ["recon"] });
+    expect(service.listLabels(listing, "ATL").items.map((l) => l.name)).toEqual(
+      ["bug"],
+    );
   });
 
   test("recon's counts include its ATL items, as an unrestricted key counts them", () => {

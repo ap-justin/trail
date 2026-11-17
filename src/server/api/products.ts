@@ -160,6 +160,8 @@ const listLabels = createRoute({
   method: "get",
   path: "/products/{key}/labels",
   summary: "List a product's labels, oldest first",
+  description:
+    "A product the key names only through a project drawing from its products is not found here, as a product it doesn't reach is; through a project the key lists, its labels are listed.",
   tags,
   request: { params: productParam, query: pageQuerySchema },
   responses: {
