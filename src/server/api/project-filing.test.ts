@@ -102,6 +102,25 @@ describe("POST /items with type issue from a key scoped to project recon", () =>
     const items = ((await listed.json()) as Body).items as Body[];
     expect(items.filter((i) => i.title === "once")).toHaveLength(1);
   });
+
+  test("a retry once the issue has left the project is the 404 a read of it is, without its title", async () => {
+    const send = () =>
+      file(
+        { product: "ATL", project: "recon", title: "gone quiet" },
+        { "idempotency-key": "rest-left" },
+      );
+    const first = (await (await send()).json()) as Body;
+    await request("DELETE", `/api/v1/projects/recon/items/${first.key}`);
+
+    const again = await send();
+    expect(again.status).toBe(404);
+    const text = await again.text();
+    expect(text).not.toContain("gone quiet");
+    const read = await request("GET", `/api/v1/items/${first.id}`, {
+      key: alphaKey,
+    });
+    expect(JSON.parse(text)).toEqual(await read.json());
+  });
 });
 
 describe("GET /products from a key scoped to project recon", () => {

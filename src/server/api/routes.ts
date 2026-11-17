@@ -129,7 +129,7 @@ export const conflictError = {
 export const idempotencyHeaders = z.object({
   "idempotency-key": z.string().min(1).max(255).optional().openapi({
     description:
-      "Makes the create safe to retry: a repeat with the same key and request returns the first response and writes nothing. Reusing a key for a different request is a 422 (code idempotency_key_reused).",
+      "Makes the create safe to retry: a repeat with the same key and request returns the first response and writes nothing, while the calling API key may still make that create and read what it made; otherwise the repeat gets the error a new create or a read would. Reusing a key for a different request is a 422 (code idempotency_key_reused).",
     example: "3f6c1e0a-run-42-issue-7",
   }),
 });

@@ -97,7 +97,7 @@ const idempotencyKey = {
     .max(255)
     .optional()
     .describe(
-      "Makes the create safe to retry: a repeat with the same key and arguments returns the first result and saves nothing.",
+      "Makes the create safe to retry: a repeat with the same key and arguments returns the first result and saves nothing, while this key may still make that create and read what it made; otherwise the repeat gets the error a new create or a read would.",
     ),
 };
 const page = {

@@ -869,7 +869,10 @@ export function createService({
    * `commit` for a create. `prepare` resolves the input inside the transaction
    * and returns it normalised as `request`, which an idempotency key is checked
    * against before `write` runs; a replay writes nothing and returns the first
-   * result.
+   * result once `replay` passes it: the access checks `write` runs, then the
+   * 404 a read gives when the caller no longer reaches what the result is on.
+   * `replay` is left out where `prepare` already resolved that among what the
+   * caller reaches.
    */
   function create<T>(
     actor: ActingActor,
@@ -879,6 +882,7 @@ export function createService({
       request: unknown;
       legacyRequest?: unknown;
       write: () => Write<T>;
+      replay?: (stored: T) => void;
     },
   ): T {
     const key =
@@ -886,11 +890,14 @@ export function createService({
         ? undefined
         : validIdempotencyKey(options.idempotencyKey);
     return commit((tx) => {
-      const { request, legacyRequest, write } = prepare(tx);
+      const { request, legacyRequest, write, replay: check } = prepare(tx);
       if (key === undefined) return write();
       const idem: IdempotentRequest = { key, scope, request, legacyRequest };
       const replay = replayOf<T>(tx, actor.id, idem);
-      if (replay !== undefined) return { result: replay, event: null };
+      if (replay !== undefined) {
+        check?.(replay);
+        return { result: replay, event: null };
+      }
       const written = write();
       storeResult(tx, actor.id, idem, written.result);
       return written;
@@ -2237,12 +2244,20 @@ export function createService({
   /** A created or updated item, with the label names a bot outside its product sent that the product has no label for. */
   type WrittenItem = Issue & { skippedLabels?: string[] };
 
-  /** A create's product and project as the call named them, and `place`, which settles both for the write. */
+  /**
+   * A create's product and project as the call named them, and `place`, which
+   * settles both for the write. A replay passes `settled`, the product its
+   * stored item is on, for the product the call left out, so no default read
+   * from current data refuses it.
+   */
   type Placement = {
     product?: Product;
     project?: ProjectRow;
-    place: () => { product: Product; project?: ProjectRow };
+    place: (settled?: Product) => { product: Product; project?: ProjectRow };
   };
+
+  const storedProductId = (item: WrittenItem | LegacyStoredItem) =>
+    "productId" in item ? item.productId : item.projectId;
 
   /**
    * The product's labels by these names; an `outsider` attaches only those the
@@ -2336,6 +2351,26 @@ export function createService({
           priority: priority ?? 0,
           externalRef,
         };
+        // who may put an item where: run by the write and by a replay
+        const authorize = (settled?: Product) => {
+          const { product, project } = placed.place(settled);
+          const type = typeOf(product);
+          if (type === "todo" && actor.kind === "human") {
+            throw new ForbiddenError(
+              "a person files issues, not todos: file it as an issue, and the product's bot accepts it from triage",
+            );
+          }
+          if (type === "todo") {
+            requireOwner(
+              tx,
+              actor,
+              product.id,
+              (owner, key) =>
+                `${key} is owned by ${owner}, so only ${owner} adds its todos: file the work as an issue with file_issue (POST /items with type issue), and ${owner} accepts it from triage`,
+            );
+          }
+          return { product, project, type };
+        };
         return {
           request: {
             type: asked,
@@ -2355,23 +2390,12 @@ export function createService({
               labels: labelNames,
               links,
             },
+          replay: (stored: WrittenItem | LegacyStoredItem) => {
+            authorize(findProduct(tx, storedProductId(stored), undefined));
+            resolveIssueRow(tx, stored.id, actor);
+          },
           write: () => {
-            const { product, project: into } = placed.place();
-            const type = typeOf(product);
-            if (type === "todo" && actor.kind === "human") {
-              throw new ForbiddenError(
-                "a person files issues, not todos: file it as an issue, and the product's bot accepts it from triage",
-              );
-            }
-            if (type === "todo") {
-              requireOwner(
-                tx,
-                actor,
-                product.id,
-                (owner, key) =>
-                  `${key} is owned by ${owner}, so only ${owner} adds its todos: file the work as an issue with file_issue (POST /items with type issue), and ${owner} accepts it from triage`,
-              );
-            }
+            const { product, project: into, type } = authorize();
             if (type === "todo" && assignee === null) {
               throw new ValidationError(
                 "a todo always has an assignee: leave assignee out to assign it to the product's owner, or name a bot",
@@ -2463,8 +2487,8 @@ export function createService({
           : resolveProduct(tx, input.product, actor);
       return {
         product: named,
-        place: () => ({
-          product: named ?? (fallback as (tx: Tx) => Product)(tx),
+        place: (settled) => ({
+          product: named ?? settled ?? (fallback as (tx: Tx) => Product)(tx),
         }),
       };
     }
@@ -2489,10 +2513,10 @@ export function createService({
     return {
       product: named,
       project: into,
-      place: () => {
+      place: (settled) => {
         if (into !== undefined) {
           return {
-            product: drawnProduct(tx, actor, into, named),
+            product: drawnProduct(tx, actor, into, named ?? settled),
             project: into,
           };
         }
@@ -3384,17 +3408,20 @@ export function createService({
       const name = nonBlank(input.name, "name");
       return create(actor, options, "label.create", (tx) => {
         const target = resolveProduct(tx, input.productId, actor);
+        const authorize = () =>
+          requireOwner(
+            tx,
+            actor,
+            target.id,
+            (owner, key) =>
+              `${key} is owned by ${owner}, so only ${owner} creates its labels: ask ${owner} to create the label "${name}", or file or update the item without it, and a label ${key} lacks comes back in skippedLabels`,
+          );
         return {
           // projectId, as requests were stored before products were named
           request: { projectId: target.id, name },
+          replay: authorize,
           write: () => {
-            requireOwner(
-              tx,
-              actor,
-              target.id,
-              (owner, key) =>
-                `${key} is owned by ${owner}, so only ${owner} creates its labels: ask ${owner} to create the label "${name}", or file or update the item without it, and a label ${key} lacks comes back in skippedLabels`,
-            );
+            authorize();
             const twin = findLabel(tx, target.id, name);
             if (twin) {
               throw new ConflictError(
@@ -3464,6 +3491,9 @@ export function createService({
             leadId: lead,
             slug: slug ?? null,
             productIds: named && [...new Set(named)].sort(),
+          },
+          replay: (stored: ProjectRow) => {
+            resolveProject(tx, stored.slug, actor);
           },
           write: () => {
             const productIds = [

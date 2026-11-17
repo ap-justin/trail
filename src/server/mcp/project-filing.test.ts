@@ -111,6 +111,24 @@ describe("file_issue from a key scoped to projects", () => {
       1,
     );
   });
+
+  test("a retry once the issue has left the project is the error a read of it is, without its title", async () => {
+    const args = {
+      product: "ATL",
+      project: "recon",
+      title: "gone quiet",
+      idempotency_key: "mcp-left",
+    };
+    const first = await call(alpha, "file_issue", args);
+    await call(wide, "remove_from_project", {
+      project: "recon",
+      items: [first.key],
+    });
+
+    const error = await callError(alpha, "file_issue", args);
+    expect(error).not.toContain("gone quiet");
+    expect(error).toBe(await callError(alpha, "get_item", { item: first.id }));
+  });
 });
 
 describe("reads from a key scoped to project recon", () => {
