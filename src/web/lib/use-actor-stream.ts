@@ -26,9 +26,9 @@ export function useActorStream() {
   const readEverything = useEffectEvent(() => {
     void queryClient.invalidateQueries();
   });
-  // what this person may see changed: `/me`'s products and any page on screen read again, Working
-  // now too though off the feed, and every other page off screen dropped, so none can paint a
-  // revoked product's content on return: an invalidate only marks those stale
+  // what this person may see changed: `/me`, the pages on screen and Working now (even off the
+  // feed) are read again. Pages off screen are dropped, not invalidated, since an invalidated
+  // page still paints its stale content, a revoked product's, on return
   const onAccess = useEffectEvent(() => {
     void queryClient.refetchQueries({
       queryKey: keys.workingNow,
