@@ -1343,7 +1343,7 @@ export function createService({
 
   /**
    * Refuses, with `refusal` of the product's key and whom to ask, an actor
-   * whose key neither lists the product nor belongs to its owner.
+   * whose key doesn't list the product and who isn't the product's owner.
    */
   function requireProductGrant(
     tx: Tx | Db,

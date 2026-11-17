@@ -532,7 +532,7 @@ export const webhookSchema = z
     lastSuccessAt: timestamp.nullable(),
     lastError: z.string().nullable().meta({
       description:
-        "The last failure: what a failed attempt got, like HTTP 500, or why a delivery was not sent, with no attempt made, like \"not sent: this webhook's key is revoked\".",
+        'The last failure: what a failed attempt got, like HTTP 500, or why a delivery was not sent, with no attempt made, like "not sent: this webhook\'s key is revoked".',
     }),
     lastErrorAt: timestamp.nullable(),
     createdAt: timestamp,

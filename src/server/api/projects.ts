@@ -159,7 +159,7 @@ const addItems = createRoute({
   method: "post",
   path: "/projects/{slug}/items",
   summary: "Add items, from any products, to a project",
-  description: `${WHO_CHANGES} Each item must be one this key reaches; its product joins the project's products when it isn't one yet, which only a key listing that product, or its owner's, does. An item already in the project is left as it is and listed in unchanged, so a retry is safe. At most 100 items a call.`,
+  description: `${WHO_CHANGES} Each item must be one this key reaches; its product joins the project's products when it isn't one yet, which only a key listing that product, or the product's owner, may do. An item already in the project is left as it is and listed in unchanged, so a retry is safe. At most 100 items a call.`,
   tags,
   request: { params: projectSlugParam, body: jsonBody(projectItemsSchema) },
   responses: {

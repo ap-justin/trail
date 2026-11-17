@@ -96,10 +96,10 @@ export const VIA_PROJECT =
   "the key reaches the item only through a project drawing from one of its products (access via_project), which lets it read the item and comment on it and nothing else; the message names the project, the grants that would allow the change and whom to ask";
 
 /** The forbidden_scope 403 of adding items to a project. */
-export const PROJECT_ADD_SCOPE = `${VIA_PROJECT}; or the project doesn't draw from an item's product yet and the key neither lists that product nor is its owner's`;
+export const PROJECT_ADD_SCOPE = `${VIA_PROJECT}; or the project doesn't draw from an item's product yet and the key doesn't list that product (a key listing the product, or the product's owner, may add it)`;
 
 /** The forbidden_scope 403 of taking items out of a project. */
-export const PROJECT_REMOVE_SCOPE = `${VIA_PROJECT}; or the key reads the project only through its products and neither lists the item's product nor is its owner's`;
+export const PROJECT_REMOVE_SCOPE = `${VIA_PROJECT}; or the key reads the project only through its products and doesn't list the item's product (a key listing the item's product, a key listing the project, or the product's owner may remove it)`;
 
 /** The forbidden_scope 403 of a filing on a product the key reads only through such a project. */
 export const VIA_PROJECT_FILING =

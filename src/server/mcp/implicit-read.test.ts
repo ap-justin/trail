@@ -324,8 +324,9 @@ test("remove_from_project of [permitted, refused] is refused and the permitted i
 test("add_to_project drawing a project from a product goes through for a key whose bot owns that product", async () => {
   const wide = await connect(bot.key);
   const lister = await target("owned", "BTA", "owned-lister");
-  const item = (await call(wide, "add_todo", { product: "ATL", title: "owned" }))
-    .key as string;
+  const item = (
+    await call(wide, "add_todo", { product: "ATL", title: "owned" })
+  ).key as string;
   await call(wide, "add_to_project", { project: "recon", items: [item] });
   joinedRecon.push(item);
   const owner = await connect(

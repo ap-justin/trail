@@ -8,6 +8,7 @@ import { createEventBus } from "../events/bus.js";
 import { testWebhooks } from "../test-app.js";
 import {
   ForbiddenError,
+  ForbiddenScopeError,
   IdempotencyKeyReusedError,
   NotFoundError,
   ValidationError,
@@ -123,8 +124,9 @@ describe("a file_issue replay", () => {
     editKeyScope(db, bot.prefix, { removeProducts: ["ATL"] });
     const count = itemCount();
 
+    // ATL is still read through project recon, so a new filing on it is a 403, not a 404
     const error = thrown(() => send("product-gone"));
-    expect(error).toBeInstanceOf(NotFoundError);
+    expect(error).toBeInstanceOf(ForbiddenScopeError);
     expect(error.message).toBe(thrown(() => send("product-fresh")).message);
     expect(itemCount()).toBe(count);
   });

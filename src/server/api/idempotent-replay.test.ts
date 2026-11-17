@@ -1,10 +1,10 @@
 import { beforeAll, describe, expect, test } from "vitest";
+import { activityEvent } from "../db/schema.js";
 import {
   createBot,
   editKeyScope,
   type KeyScopeInput,
 } from "../service/keys.js";
-import { activityEvent } from "../db/schema.js";
 import { setProductOwner } from "../service/product-admin.js";
 import { setupTestApp } from "../test-app.js";
 
