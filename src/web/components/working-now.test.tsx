@@ -1,6 +1,9 @@
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, test } from "vitest";
-import { WorkingNow } from "@/components/working-now";
+import {
+  WORKING_NOW_PHONE_ENTRIES_MAX,
+  WorkingNow,
+} from "@/components/working-now";
 import type { WebActorView, WebWorkingNowView } from "@/lib/api-types";
 import { alpha } from "@/test/fixtures";
 
@@ -11,17 +14,18 @@ const bot = (n: number, name = `bot-${n}`): WebActorView => ({
 });
 /**
  * `count` entries, as the server sends them; `total` defaults to that count. `names`
- * replaces the first bots' names.
+ * and `keys` replace the first bots' names and item keys.
  */
 const view = (
   count: number,
   total = count,
   names: string[] = [],
+  keys: string[] = [],
 ): WebWorkingNowView => ({
   total,
   entries: Array.from({ length: count }, (_, i) => ({
     bot: bot(i + 1, names[i]),
-    item: { key: `TRL-${i + 1}`, title: `Item ${i + 1}` },
+    item: { key: keys[i] ?? `TRL-${i + 1}`, title: `Item ${i + 1}` },
     productKey: "TRL",
   })),
 });
@@ -133,7 +137,11 @@ describe("WorkingNow", () => {
   });
 
   test("below lg, two 8-character names show both, with +N from total; four from lg", () => {
-    render(<WorkingNow workingNow={view(5, 7, ["alpha-01", "beta-002"])} />);
+    render(
+      <WorkingNow
+        workingNow={view(5, 7, ["alpha-01", "beta-002"], ["AB-1", "AB-2"])}
+      />,
+    );
     const items = entryLinks().map((link) => link.closest("li"));
     expect(items).toHaveLength(4);
     expect(items[0]?.className).not.toMatch(/hidden/);
@@ -167,7 +175,11 @@ describe("WorkingNow", () => {
   );
 
   test("a 9-character name is the first that no longer fits below lg", () => {
-    render(<WorkingNow workingNow={view(2, 2, ["alpha-001", "beta-002"])} />);
+    render(
+      <WorkingNow
+        workingNow={view(2, 2, ["alpha-001", "beta-002"], ["A-1", "B-2"])}
+      />,
+    );
     const items = entryLinks().map((link) => link.closest("li"));
     expect(items[1]).toHaveClass("max-lg:hidden");
     expect(within(strip()).getByText("alpha-001")).not.toHaveClass(
@@ -189,6 +201,62 @@ describe("WorkingNow", () => {
     rerender(<WorkingNow workingNow={view(2, 2, [nine, "beta"])} />);
     expect(entryLinks()[1]?.closest("li")).toHaveClass("max-lg:hidden");
     expect(within(strip()).getByText(nine)).not.toHaveClass("max-lg:shrink-0");
+  });
+
+  test("below lg, a long key leaves one shown even when both names fit, with +N from total; four from lg", () => {
+    render(
+      <WorkingNow
+        workingNow={view(
+          4,
+          6,
+          ["delta", "gamma"],
+          ["DLT-1", "PLATFORMXX-1234"],
+        )}
+      />,
+    );
+    const items = entryLinks().map((link) => link.closest("li"));
+    expect(items).toHaveLength(4);
+    expect(items[0]?.className).not.toMatch(/hidden/);
+    for (const item of items.slice(1)) {
+      expect(item).toHaveClass("max-lg:hidden");
+    }
+    expect(moreCounts()).toEqual([
+      ["+5 more", expect.stringMatching(/(?:^| )lg:hidden/)],
+      ["+2 more", expect.stringContaining("max-lg:hidden")],
+    ]);
+  });
+
+  test("below lg, short names and short keys still show two", () => {
+    render(
+      <WorkingNow
+        workingNow={view(2, 2, ["delta", "beta"], ["DLT-1", "BCN-1"])}
+      />,
+    );
+    for (const link of entryLinks()) {
+      expect(link.closest("li")?.className ?? "").not.toMatch(/hidden/);
+    }
+    expect(moreCounts()).toEqual([]);
+  });
+
+  test(`two entries fit below lg up to ${WORKING_NOW_PHONE_ENTRIES_MAX} characters of names and keys together, not one more`, () => {
+    // 5 + 4 + 8 + 7 = 24
+    const { rerender } = render(
+      <WorkingNow
+        workingNow={view(2, 2, ["delta", "beta"], ["DLT-1234", "BCN-123"])}
+      />,
+    );
+    expect(entryLinks()[1]?.closest("li")).not.toHaveClass("max-lg:hidden");
+    expect(moreCounts()).toEqual([]);
+    // 5 + 4 + 8 + 8 = 25
+    rerender(
+      <WorkingNow
+        workingNow={view(2, 2, ["delta", "beta"], ["DLT-1234", "BCN-1234"])}
+      />,
+    );
+    expect(entryLinks()[1]?.closest("li")).toHaveClass("max-lg:hidden");
+    expect(moreCounts()).toEqual([
+      ["+1 more", expect.stringMatching(/(?:^| )lg:hidden/)],
+    ]);
   });
 
   test.each([
