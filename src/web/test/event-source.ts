@@ -69,6 +69,11 @@ export class FakeEventSource extends EventTarget {
     );
   }
 
+  /** The server's `work` event: bot work moved in a product the stream's filter kept out. It carries no id; `data` is sent as given. */
+  work(data: string) {
+    this.deliver(new MessageEvent("work", { data }));
+  }
+
   reset() {
     this.deliver(new MessageEvent("reset", { data: "{}" }));
   }

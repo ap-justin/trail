@@ -54,6 +54,21 @@ type ArrivalAction =
 
 const noArrivals: Arrivals = { page: null, shown: [], pending: [] };
 
+/** The product key a `work` event names, or null for anything else. */
+function workProductKey(data: string): string | null {
+  try {
+    const parsed: unknown = JSON.parse(data);
+    return typeof parsed === "object" &&
+      parsed !== null &&
+      "productKey" in parsed &&
+      typeof parsed.productKey === "string"
+      ? parsed.productKey
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 // a refetch after a gap brings rows newer than ones the stream already delivered;
 // stable, so equal timestamps keep the order they came in
 const newestFirst = (entries: EntryView[]) =>
@@ -169,10 +184,7 @@ export function useLiveFeed(
     if (received.current.has(entry.id) || readIds.has(entry.id)) return;
     received.current.add(entry.id);
     if (entry.product !== null && movesBotWork.has(entry.kind)) {
-      void queryClient.invalidateQueries({
-        queryKey: keys.productItems(entry.product.key, IN_PROGRESS),
-        exact: true,
-      });
+      readWorkingNow(entry.product.key);
     }
     dispatch({ type: "received", entry, hold });
     setFreshIds((ids) => new Set(ids).add(entry.id));
@@ -199,8 +211,29 @@ export function useLiveFeed(
     }
   };
 
+  /** Reads Working now again: `product`'s in-progress items, or every product's. */
+  const readWorkingNow = (product?: string) =>
+    void queryClient.invalidateQueries(
+      product === undefined
+        ? {
+            predicate: ({ queryKey: [root, , items, type, status] }) =>
+              root === "product" &&
+              items === "items" &&
+              type === IN_PROGRESS.type &&
+              status === IN_PROGRESS.status,
+          }
+        : { queryKey: keys.productItems(product, IN_PROGRESS), exact: true },
+      // one item update arrives as several entries: a read already under way answers for them all
+      { cancelRefetch: false },
+    );
+
   const refetch = useEffectEvent(() => {
     void queryClient.invalidateQueries({ queryKey: keys.feed(current) });
+  });
+  const readAllWorkingNow = useEffectEvent(() => readWorkingNow());
+  const onWork = useEffectEvent((data: string) => {
+    const product = workProductKey(data);
+    if (product !== null) readWorkingNow(product);
   });
   const readEverything = useEffectEvent(() => {
     void queryClient.invalidateQueries();
@@ -267,9 +300,14 @@ export function useLiveFeed(
     source.addEventListener("actor", (event) => {
       onActor(JSON.parse((event as MessageEvent<string>).data) as ActorUpdate);
     });
+    // bot work moved in a product this stream's filter keeps out; an unfiltered stream never sends it
+    source.addEventListener("work", (event) => {
+      onWork((event as MessageEvent<string>).data);
+    });
     // the server fell too far behind to replay what this stream missed
     source.addEventListener("reset", () => {
       refetch();
+      readAllWorkingNow();
       recheckSession();
     });
     return () => {
