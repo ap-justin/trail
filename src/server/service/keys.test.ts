@@ -85,11 +85,20 @@ describe("the webhooks a revoke stops", () => {
     actorId: string,
     apiKeyId: string | null,
     kind: "activity" | "inbox" = "activity",
+    /** an explicit id or age, to pin the order a revoke lists webhooks in */
+    extra: { id?: string; createdAt?: Date } = {},
   ) => {
     const url = `https://bot.example.com/stopped/${++hooks}?token=s3cret`;
     const { id } = db
       .insert(webhookSubscription)
-      .values({ actorId, url, kind, secretCipher: "sealed", apiKeyId })
+      .values({
+        actorId,
+        url,
+        kind,
+        secretCipher: "sealed",
+        apiKeyId,
+        ...extra,
+      })
       .returning({ id: webhookSubscription.id })
       .get();
     return { id, kind, url };
@@ -123,19 +132,67 @@ describe("the webhooks a revoke stops", () => {
     expect(stoppedBy(key)).toEqual([own]);
   });
 
-  test("revoking a bot's last live key lists its webhooks recording no key", () => {
+  test("revoking a bot's last live key lists its webhooks recording no key, and not another bot's", () => {
     const { actor, key } = createBot(db, "stops-last");
     const activity = webhook(actor.id, null);
     const inbox = webhook(actor.id, null, "inbox");
+    const neighbour = createBot(db, "stops-last-neighbour");
+    webhook(neighbour.actor.id, null);
+    webhook(neighbour.actor.id, null, "inbox");
     expect(stoppedBy(key)).toEqual(byId([activity, inbox]));
   });
 
-  test("revoking leaves activity webhooks recording no key stopped when no live key left has the read action", () => {
+  test("revoking leaves activity webhooks recording no key stopped when no live key left has the read action, and not another bot's", () => {
     const { actor, key } = createBot(db, "stops-unread");
     createKey(db, actor.id, { actions: ["issues"] });
     const activity = webhook(actor.id, null);
     webhook(actor.id, null, "inbox");
+    const neighbour = createBot(db, "stops-unread-neighbour");
+    webhook(neighbour.actor.id, null);
     expect(stoppedBy(key)).toEqual([activity]);
+  });
+
+  test("a live key with the read action beside one without keeps the webhooks recording no key sending; with none that reads, the activity ones stop", () => {
+    const { actor, key } = createBot(db, "stops-mixed");
+    createKey(db, actor.id, { actions: ["issues"] });
+    const reader = createKey(db, actor.id, { actions: ["read"] }).key;
+    const activity = webhook(actor.id, null);
+    webhook(actor.id, null, "inbox");
+    const withReader = revokeKey(db, prefixOf(key));
+    expect(withReader.stopped).toEqual([]);
+    expect(withReader).toMatchObject({
+      liveKeysLeft: true,
+      liveKeyCanRead: true,
+    });
+    const withoutReader = revokeKey(db, prefixOf(reader));
+    expect(withoutReader.stopped).toEqual([activity]);
+    expect(withoutReader).toMatchObject({
+      liveKeysLeft: true,
+      liveKeyCanRead: false,
+    });
+  });
+
+  test("a revoke lists the webhooks oldest first, whatever their ids and the order they were inserted in", () => {
+    const { actor, key } = createBot(db, "stops-ordered");
+    const at = (year: number) => new Date(Date.UTC(year, 0, 1));
+    // the oldest has the largest id and the newest the smallest; one records the key, two record none
+    const newest = webhook(actor.id, null, "activity", {
+      id: "ordered-a",
+      createdAt: at(2022),
+    });
+    const oldest = webhook(actor.id, keyIdOf(key), "inbox", {
+      id: "ordered-z",
+      createdAt: at(2020),
+    });
+    const middle = webhook(actor.id, null, "activity", {
+      id: "ordered-m",
+      createdAt: at(2021),
+    });
+    expect(revokeKey(db, prefixOf(key)).stopped).toEqual([
+      oldest,
+      middle,
+      newest,
+    ]);
   });
 
   test("a revoke returns the revoked key's scope, the bot's label and whether a live key, and one that reads, is left", () => {

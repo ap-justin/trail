@@ -78,6 +78,21 @@ async function sentNowTo(url: string) {
 
 const prefixOf = (key: string) => key.slice(6, 14);
 
+/** A skip is not the receiver's failure: it names itself on the webhook but counts toward no pause. */
+const expectSkippedNotFailed = (subscriptionId: string, lastError: string) =>
+  expect(
+    db
+      .select()
+      .from(webhookSubscription)
+      .where(eq(webhookSubscription.id, subscriptionId))
+      .get(),
+  ).toMatchObject({
+    consecutiveFailures: 0,
+    lastError,
+    lastErrorAt: expect.any(Date),
+    pausedAt: null,
+  });
+
 // the lastError of each delivery refused for its key, as a bot reads it
 const KEY_REVOKED =
   "not sent: this webhook's key is revoked: update the webhook (update_webhook) or rotate its secret (rotate_webhook_secret) with a live key (with the read action, on an activity webhook) to get deliveries again";
@@ -462,9 +477,30 @@ test("an activity webhook with no recorded key is skipped while none of its bot'
     ["trail.issue.updated", "failed", 0, NO_KEY_CAN_READ],
     ["trail.item.updated", "failed", 0, NO_KEY_CAN_READ],
   ]);
+  expectSkippedNotFailed(id, NO_KEY_CAN_READ);
   createKey(db, a.actor.id, { products: ["ATL"], actions: ["read"] });
   await retitle(atl, "a live key reads");
   expect(await sentNowTo(url)).toBe(2);
+});
+
+test("an activity webhook with no recorded key is skipped when the only key that reaches the event cannot read, naming what the key that can read lost", async () => {
+  const maker = createBot(db, `reach-${++bots}`, {
+    scope: { products: ["ATL"], actions: ["read"] },
+  });
+  // reaches ATL but cannot read; the reader's scope is another product's
+  createKey(db, maker.actor.id, { products: ["ATL"], actions: ["issues"] });
+  createKey(db, maker.actor.id, { products: ["BTA"], actions: ["read"] });
+  const { id, url } = await follow({ products: ["ATL"] }, maker.key);
+  forgetKey(id);
+  revokeKey(db, prefixOf(maker.key));
+  await retitle(atl, "only a key that cannot read reaches it");
+  expect(await sentNowTo(url)).toBe(0);
+  const lost = "not sent: this webhook's key no longer reaches ATL";
+  expect(historyOf(id)).toEqual([
+    ["trail.issue.updated", "failed", 0, lost],
+    ["trail.item.updated", "failed", 0, lost],
+  ]);
+  expectSkippedNotFailed(id, lost);
 });
 
 test("an activity webhook whose recorded key lacks the read action is skipped naming that", async () => {
@@ -492,6 +528,7 @@ test("an activity webhook whose recorded key lacks the read action is skipped na
     ["trail.issue.updated", "failed", 0, KEY_CANNOT_READ],
     ["trail.item.updated", "failed", 0, KEY_CANNOT_READ],
   ]);
+  expectSkippedNotFailed(id, KEY_CANNOT_READ);
 });
 
 test("an inbox webhook with no recorded key gets its messages while its bot's only live key lacks the read action", async () => {

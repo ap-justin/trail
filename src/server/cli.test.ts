@@ -84,6 +84,8 @@ function webhookOf(
   recorded: string | null,
   kind: "activity" | "inbox",
   url: string,
+  /** an explicit id or age, to pin the order a revoke lists webhooks in */
+  extra: { id?: string; createdAt?: Date } = {},
 ) {
   return withDb((db) => {
     const apiKeyId =
@@ -96,7 +98,14 @@ function webhookOf(
             .get()?.id;
     return db
       .insert(webhookSubscription)
-      .values({ actorId, url, kind, secretCipher: "sealed", apiKeyId })
+      .values({
+        actorId,
+        url,
+        kind,
+        secretCipher: "sealed",
+        apiKeyId,
+        ...extra,
+      })
       .returning({ id: webhookSubscription.id })
       .get().id;
   });
@@ -221,6 +230,108 @@ test("key revoke that stops no webhook prints only the revoked line", () => {
   expect(code).toBe(0);
   expect(stdout).toMatch(/^revoked trail_[0-9a-f]{8} \(actor \S+\) at \S+\n$/);
   expect(stderr).toBe("");
+});
+
+test("key revoke lists the stopped webhooks oldest first, whatever their ids and the order they were inserted in", () => {
+  const made = run("bot", "create", "revoke order", "--label", "orderly");
+  const key = createdKey(made.stdout);
+  const bot = actorOf(made.stdout);
+  const at = (year: number) => new Date(Date.UTC(year, 0, 1));
+  // the oldest has the largest id and the newest the smallest; one records the key, two record none
+  webhookOf(bot, null, "activity", "https://new.example.com", {
+    id: "order-a",
+    createdAt: at(2022),
+  });
+  webhookOf(bot, key, "inbox", "https://old.example.com", {
+    id: "order-z",
+    createdAt: at(2020),
+  });
+  webhookOf(bot, null, "activity", "https://mid.example.com", {
+    id: "order-m",
+    createdAt: at(2021),
+  });
+  const { stdout } = run("key", "revoke", key.slice(6, 14));
+  expect(stdout.split("\n").slice(1)).toEqual([
+    "stopped webhook order-z (inbox) to https://old.example.com",
+    "stopped webhook order-m (activity) to https://mid.example.com",
+    "stopped webhook order-a (activity) to https://new.example.com",
+    "",
+  ]);
+});
+
+test("key revoke prints a webhook's origin without the credentials in its URL", () => {
+  const made = run("bot", "create", "revoke userinfo", "--label", "userinfo");
+  const key = createdKey(made.stdout);
+  const hook = webhookOf(
+    actorOf(made.stdout),
+    key,
+    "inbox",
+    "https://hookuser:hookpass@creds.example.com/c?token=s3cret",
+  );
+  run("key", "create", "userinfo");
+  const { stdout, stderr } = run("key", "revoke", key.slice(6, 14));
+  expect(stdout.split("\n").slice(1)).toEqual([
+    `stopped webhook ${hook} (inbox) to https://creds.example.com`,
+    "",
+  ]);
+  expect(stdout + stderr).not.toMatch(/hookuser|hookpass|s3cret/);
+});
+
+test("key revoke of a bot's last key, with no webhook to stop, prints only the revoked line", () => {
+  const made = run("bot", "create", "revoke bare", "--label", "bare-last");
+  const key = createdKey(made.stdout);
+  const { code, stdout, stderr } = run("key", "revoke", key.slice(6, 14));
+  expect(code).toBe(0);
+  expect(stdout).toMatch(/^revoked trail_[0-9a-f]{8} \(actor \S+\) at \S+\n$/);
+  expect(stderr).toBe("");
+});
+
+test("key revoke of a key already revoked prints the first revoke's time and stops nothing more", () => {
+  const made = run("bot", "create", "revoke twice", "--label", "twice");
+  const key = createdKey(made.stdout);
+  webhookOf(actorOf(made.stdout), key, "activity", "https://twice.example.com");
+  const first = run("key", "revoke", key.slice(6, 14));
+  expect(first.stdout.split("\n")).toHaveLength(3);
+  expect(first.stderr).not.toBe("");
+  const again = run("key", "revoke", key.slice(6, 14));
+  expect(again.code).toBe(0);
+  expect(again.stdout).toBe(`${first.stdout.split("\n")[0]}\n`);
+  expect(again.stderr).toBe("");
+});
+
+test("key revoke of the last of several keys mints the hint from that key's scope and the bot's label, not the first key's", () => {
+  const made = run("bot", "create", "revoke several", "--label", "several");
+  const first = createdKey(made.stdout);
+  const second = createdKey(
+    run("key", "create", "several", "--actions", "issues,read").stdout,
+  );
+  const hook = webhookOf(
+    actorOf(made.stdout),
+    null,
+    "activity",
+    "https://several.example.com",
+  );
+  // the other key can read, so the webhook recording no key still has a sender
+  const early = run("key", "revoke", first.slice(6, 14));
+  expect(early.stdout.split("\n")).toHaveLength(2);
+  expect(early.stderr).toBe("");
+  const last = run("key", "revoke", second.slice(6, 14));
+  expect(last.stdout.split("\n").slice(1)).toEqual([
+    `stopped webhook ${hook} (activity) to https://several.example.com`,
+    "",
+  ]);
+  expect(last.stderr).toBe(
+    mintFirst("trail key create several --actions read,issues") + moveHint(true),
+  );
+});
+
+test("key revoke of the last key of a bot with no label names the bot by its actor id", () => {
+  const made = run("bot", "create", "revoke unlabelled");
+  const key = createdKey(made.stdout);
+  const bot = actorOf(made.stdout);
+  webhookOf(bot, null, "activity", "https://unlabelled.example.com");
+  const { stderr } = run("key", "revoke", key.slice(6, 14));
+  expect(stderr).toBe(mintFirst(`trail key create ${bot}`) + moveHint(true));
 });
 
 test("bot create --key-only prints only the key on stdout, the rest on stderr", () => {

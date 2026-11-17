@@ -168,6 +168,27 @@ describe("a replayed create over REST", () => {
     );
   });
 
+  test("a filing on a product taken off the key, which it still reads through a project, is the 403 a new filing gets, and writes nothing", async () => {
+    const bot = keyed("narrowed-filer", { products: ["ATL", "BTA"] });
+    const file = (idempotency: string) =>
+      create("POST", "/items", bot.key, idempotency, {
+        type: "issue",
+        product: "ATL",
+        title: "before the edit",
+      });
+    const first = await read(await file("filing-once"));
+    expect(first.status).toBe(201);
+    expect((await read(await file("filing-once"))).body.id).toBe(first.body.id);
+    editKeyScope(db, bot.prefix, { removeProducts: ["ATL"] });
+    const events = eventCount();
+
+    // ATL is still read through project recon, so a new filing on it is a 403, not a 404
+    const replay = await read(await file("filing-once"));
+    expect(replay.status).toBe(403);
+    expect(replay).toEqual(await read(await file("filing-fresh")));
+    expect(eventCount()).toBe(events);
+  });
+
   test("create_label, once the caller no longer owns the product, is the 403 a new label gets", async () => {
     const owner = await ownerOf("LBL");
     const label = (idempotency: string) =>
