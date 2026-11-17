@@ -349,7 +349,7 @@ function InviteForm({
         )}
         <p
           id={ids.hint}
-          className="text-xs text-muted-foreground max-lg:order-6 lg:col-span-3"
+          className="text-xs text-muted-foreground max-lg:order-6 lg:col-span-3 lg:mt-0.5 lg:max-w-160 lg:text-sm"
         >
           GitHub invitees sign in with GitHub; email invitees get a sign-in link
           by email. They see only the products you pick; a project shows them
@@ -456,8 +456,8 @@ function PersonRow({
     <li
       data-person={personId(person)}
       className={cn(
-        "flex flex-col gap-2 border-b border-rule py-3 max-lg:mx-4 lg:flex-row lg:flex-wrap lg:items-center lg:gap-3 lg:px-2",
-        editing && "lg:my-1.5 lg:rounded-xl lg:border lg:bg-muted",
+        "flex flex-col gap-2 border-b border-rule py-3 max-lg:mx-4 lg:min-h-14 lg:flex-row lg:flex-wrap lg:items-center lg:gap-3 lg:px-2 lg:py-2",
+        editing && "lg:my-1.5 lg:rounded-xl lg:border lg:bg-muted lg:py-3",
       )}
     >
       {/* below lg the lines under this one indent past the avatar: 28px and its 12px gap */}
@@ -545,14 +545,12 @@ function PersonRow({
               <Button
                 ref={keepRef}
                 variant="outline"
-                size="sm"
                 onClick={() => changeMode("view")}
               >
                 Keep
               </Button>
               <Button
                 variant="destructive"
-                size="sm"
                 aria-disabled={busy || undefined}
                 aria-busy={removing || undefined}
                 onClick={() => {
@@ -571,7 +569,6 @@ function PersonRow({
                 ref={editRef}
                 data-row-action="edit"
                 variant="outline"
-                size="sm"
                 aria-label={`Edit products for ${handle}`}
                 onClick={() => {
                   setDraft(person.products.map((p) => p.key));
@@ -583,12 +580,15 @@ function PersonRow({
               <Button
                 ref={removeRef}
                 variant="outline"
-                size="sm"
                 aria-label={`Remove ${handle}`}
                 className="text-destructive"
                 onClick={() => changeMode("confirm")}
               >
-                <Trash2Icon data-icon="inline-start" aria-hidden="true" />
+                <Trash2Icon
+                  data-icon="inline-start"
+                  aria-hidden="true"
+                  className="size-3.5"
+                />
                 Remove
               </Button>
             </div>

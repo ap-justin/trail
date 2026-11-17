@@ -338,6 +338,15 @@ describe("reading order", () => {
       propertyValue("Status").parentElement?.className.split(" "),
     ).toContain("max-lg:hidden");
   });
+
+  test("at lg the header is one unwrapped column, so the byline sits under the full-width title", () => {
+    renderIssue();
+    // a wrapping column breaks the basis-full title and the byline into side-by-side columns
+    expect(screen.getByRole("banner")).toHaveClass(
+      "lg:flex-col",
+      "lg:flex-nowrap",
+    );
+  });
 });
 
 describe("item type", () => {

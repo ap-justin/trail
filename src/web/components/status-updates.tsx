@@ -162,8 +162,9 @@ export function AsideHeading({
 function StatusUpdateItem({ update }: { update: WebStatusUpdateView }) {
   return (
     <li className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 py-2.5 max-lg:px-4">
-      <ActorAvatar actor={update.author} size="xs" />
-      <span className={actorNameGroup}>
+      <ActorAvatar actor={update.author} size="xs" className="lg:size-5" />
+      {/* at lg one line beside the health, a long title truncating rather than wrapping */}
+      <span className={cn(actorNameGroup, "lg:flex-nowrap")}>
         <span className="min-w-0 truncate font-medium">
           {update.author.name}
         </span>{" "}

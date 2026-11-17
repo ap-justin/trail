@@ -228,10 +228,15 @@ function NewIssueForm({
           </p>
         </div>
       </div>
-      <p id={ids.status} role="status" className="text-xs text-destructive">
+      <p
+        id={ids.status}
+        role="status"
+        // empty, it leaves the flow: an empty item would still take a gap
+        className="text-xs text-destructive empty:absolute"
+      >
         {error}
       </p>
-      <div className="flex flex-1 flex-col gap-4 lg:flex-row lg:items-center lg:gap-2">
+      <div className="flex flex-1 flex-col gap-4 lg:mt-1 lg:flex-row lg:items-center lg:gap-2">
         <p className="flex flex-wrap items-center gap-2 text-muted-foreground">
           Filing as{" "}
           {/* the name beside it says who; the avatar adds nothing to read aloud */}
@@ -247,7 +252,10 @@ function NewIssueForm({
         <div className="flex gap-2 max-lg:mt-auto lg:ml-auto">
           <DialogClose
             render={
-              <Button variant="outline" className="max-lg:flex-1 lg:px-3" />
+              <Button
+                variant="outline"
+                className="max-lg:flex-1 lg:h-9 lg:px-3.5"
+              />
             }
           >
             Cancel
@@ -257,7 +265,7 @@ function NewIssueForm({
             aria-disabled={pending || undefined}
             aria-busy={pending || undefined}
             aria-describedby={ids.status}
-            className="max-lg:flex-1 lg:px-3"
+            className="max-lg:flex-1 lg:h-9 lg:px-3.5"
           >
             {pending ? "Creating…" : "Create issue"}
           </Button>
@@ -291,7 +299,7 @@ export function NewIssueDialog({
         initialFocus={titleRef}
         className="flex max-w-none flex-col gap-0 overflow-y-auto p-0 ring-0 sm:max-w-none max-lg:inset-0 max-lg:h-dvh max-lg:translate-none max-lg:rounded-none lg:w-140 lg:gap-4 lg:rounded-2xl lg:border lg:p-5 lg:shadow-xl"
       >
-        <div className="flex items-center max-lg:h-12 max-lg:border-b max-lg:pr-2 max-lg:pl-4">
+        <div className="flex items-center max-lg:h-12 max-lg:pr-2 max-lg:pl-4">
           <DialogTitle className="flex-1 text-base font-medium">
             New issue
           </DialogTitle>
@@ -301,7 +309,8 @@ export function NewIssueDialog({
                 variant="ghost"
                 size="icon"
                 aria-label="Close"
-                className="text-muted-foreground"
+                // the row is the title's height, as in the frame; the 32px target overhangs it
+                className="text-muted-foreground lg:-my-1"
               />
             }
           >

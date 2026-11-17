@@ -328,7 +328,7 @@ function ProjectBody(
         )}
         {props.footer}
       </div>
-      <aside className="flex flex-col gap-5 max-lg:pt-5 max-lg:pb-6 lg:w-70 lg:shrink-0">
+      <aside className="flex flex-col gap-5 max-lg:pt-5 max-lg:pb-6 lg:w-75 lg:shrink-0">
         <section aria-labelledby={detailsHeading} className="max-lg:hidden">
           <AsideHeading id={detailsHeading}>Details</AsideHeading>
           <ProjectDetails project={project} layout="aside" now={now} />

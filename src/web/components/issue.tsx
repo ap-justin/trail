@@ -87,7 +87,7 @@ function Actor({
 }) {
   return (
     <>
-      <ActorAvatar actor={actor} size="xs" />
+      <ActorAvatar actor={actor} size="xs" className="lg:size-5" />
       <ActorName
         actor={actor}
         nameClassName="font-medium text-foreground"
@@ -126,7 +126,7 @@ function Header({ issue }: { issue: WebItemView }) {
   const lead = "max-lg:order-1";
   const rest = "max-lg:order-3";
   return (
-    <header className="flex flex-wrap items-center gap-x-1.5 gap-y-2 px-4 pt-4 pb-3 text-muted-foreground lg:flex-col lg:items-stretch lg:gap-1.5 lg:p-0">
+    <header className="flex flex-wrap items-center gap-x-1.5 gap-y-2 px-4 pt-4 pb-3 text-muted-foreground lg:flex-col lg:flex-nowrap lg:items-stretch lg:gap-2 lg:p-0">
       <h1 className="basis-full text-xl leading-tight font-semibold text-foreground max-lg:order-2">
         {issue.title}
       </h1>
@@ -232,7 +232,11 @@ function Properties({ issue }: { issue: WebItemView }) {
             // at lg a grid with the title on a second row, indented past the avatar;
             // below, one line that wraps the title under a long name
             <span className="flex min-w-0 items-center gap-2 lg:grid lg:grid-cols-[auto_minmax(0,1fr)] lg:justify-items-start lg:gap-x-2 lg:gap-y-1">
-              <ActorAvatar actor={issue.assignee} size="xs" />
+              <ActorAvatar
+                actor={issue.assignee}
+                size="xs"
+                className="lg:size-5"
+              />
               <ActorName
                 actor={issue.assignee}
                 className="lg:contents"
@@ -462,7 +466,7 @@ function CommentWell({
         <EntryTime iso={entry.createdAt} className="ml-auto" />
       </div>
       {/* indented past the avatar at lg, so the body lines up with the name */}
-      <Markdown className="lg:pl-6">{entry.comment.body}</Markdown>
+      <Markdown className="lg:pl-7">{entry.comment.body}</Markdown>
     </li>
   );
 }
@@ -473,7 +477,7 @@ function ChangeLine({ entry }: { entry: EntryView }) {
   return (
     <li
       data-entry-id={entry.id}
-      className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 py-1.25 text-muted-foreground"
+      className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 py-1.25 text-muted-foreground lg:min-h-8 lg:gap-x-2"
     >
       <Actor actor={entry.actor} />
       {/* below lg the time ends the actor's line and the phrase drops under the name */}

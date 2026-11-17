@@ -169,7 +169,8 @@ function StatusTabs({
         // at lg the bar under the tabs and the type toggle draws the one rule
         "rounded-none p-0 lg:h-8 lg:gap-3 lg:data-[variant=line]:border-b-0",
         belowLg
-          ? "max-lg:scrollbar-none max-lg:overflow-x-auto max-lg:px-4 max-lg:mask-r-from-88%"
+          ? // the stock line variant's p-0 is an attribute selector, so the inset needs one too
+            "max-lg:scrollbar-none max-lg:overflow-x-auto max-lg:mask-r-from-88% max-lg:data-[variant=line]:px-4"
           : "max-lg:hidden",
       )}
     >
