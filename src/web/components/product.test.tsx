@@ -110,15 +110,18 @@ describe("items", () => {
     ]);
   });
 
-  test("every row, in the table and below 1024px, carries a type badge that follows its type", () => {
+  test("every row, in the table and below 1024px, carries a type glyph that follows its type", () => {
     renderProduct();
     const rendered = document.querySelectorAll<HTMLElement>("[data-item-key]");
     expect(rendered).toHaveLength(rows.length * 2);
     for (const row of rendered) {
       const item = rows.find((r) => r.key === row.dataset.itemKey);
-      const badge = row.querySelector<HTMLElement>("[data-item-type]");
-      expect(badge?.dataset.itemType).toBe(item?.type);
-      expect(badge).toHaveTextContent(item?.type === "todo" ? "Todo" : "Issue");
+      const glyph = row.querySelector<HTMLElement>("[data-item-type]");
+      expect(glyph?.dataset.itemType).toBe(item?.type);
+      // named in the table; below 1024px the row's description says the type
+      const word = item?.type === "todo" ? "Todo" : "Issue";
+      if (row.tagName === "TR") expect(glyph).toHaveAccessibleName(word);
+      else expect(row).toHaveTextContent(word);
     }
   });
 
@@ -154,7 +157,7 @@ describe("items", () => {
       name: "TRL-17 Human UI: feed, projects, issue page",
     });
     expect(link).toHaveAccessibleDescription(
-      /^Issue Open .*ui design Assigned to Beta, Bot$/,
+      /^Issue Open .*ui design Assigned to Beta, bot$/,
     );
   });
 

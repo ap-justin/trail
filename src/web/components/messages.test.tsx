@@ -100,7 +100,10 @@ describe("conversations list", () => {
     expect(inRow.getByText("Beta")).toBeInTheDocument();
     expect(inRow.getByText("Gamma")).toBeInTheDocument();
     expect(inRow.getByText("Release engineer")).toBeInTheDocument();
-    expect(inRow.getAllByText("Bot")).toHaveLength(2);
+    // the square avatar is the one bot mark: named, with no Bot word beside it
+    expect(inRow.getByRole("img", { name: "Beta, bot" })).toBeInTheDocument();
+    expect(inRow.getByRole("img", { name: "Gamma, bot" })).toBeInTheDocument();
+    expect(inRow.queryByText("Bot")).not.toBeInTheDocument();
     expect(part(row, "last-message")).toHaveTextContent(
       /^Beta: Deploy finished\. The volume backup runs nightly now\.$/,
     );
@@ -289,14 +292,15 @@ describe("load more", () => {
 });
 
 describe("conversation thread", () => {
-  test("a message shows its sender, title pill, Bot badge, time and markdown", () => {
+  test("a message shows its sender's avatar, name, title, time and markdown", () => {
     renderThread({
       messages: [message({ sender: gamma, recipient: beta })],
     });
     const item = within(rows()[0] as HTMLElement);
     expect(item.getByText("Gamma")).toBeInTheDocument();
     expect(item.getByText("Release engineer")).toBeInTheDocument();
-    expect(item.getByText("Bot")).toBeInTheDocument();
+    expect(item.getByRole("img", { name: "Gamma, bot" })).toBeInTheDocument();
+    expect(item.queryByText("Bot")).not.toBeInTheDocument();
     expect(item.getByText("status").tagName).toBe("STRONG");
     // one time in the header at 1440, one under the text below; CSS shows one
     expect(
@@ -432,7 +436,11 @@ describe("conversation thread", () => {
     const newer = rows()[1] as HTMLElement;
     expect(newer).toHaveTextContent("newer");
     expect(newer).toHaveFocus();
-    expect(newer).toHaveClass("focus-visible:ring-3");
+    expect(newer).toHaveClass(
+      "focus-visible:outline-2",
+      "focus-visible:outline-offset-2",
+      "focus-visible:outline-ring",
+    );
   });
 
   // gamma's id sorts after beta's, so a component that re-sorted by id would say "Beta and Gamma"

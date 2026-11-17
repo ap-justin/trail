@@ -1,6 +1,6 @@
 import { SearchIcon } from "lucide-react";
 import { Fragment, type ReactNode, useId } from "react";
-import { ActorAvatar, ActorBadge } from "@/components/actor";
+import { ActorAvatar, kindNoun } from "@/components/actor";
 import { AppLink, RowLink } from "@/components/app-link";
 import { EmptyState } from "@/components/states";
 import {
@@ -10,7 +10,8 @@ import {
   StatusIcon,
   StatusLabel,
   statusLabel,
-  TypeBadge,
+  TypeIcon,
+  typeLabel,
 } from "@/components/status";
 import { Age } from "@/components/status-updates";
 import { KeyText, LabelChip } from "@/components/text";
@@ -78,9 +79,9 @@ const typeOptions = [
 ] as const;
 
 /**
- * All, Issues or Todos, each with its count. 28px beside the status tabs at 1024px and up;
- * 40px and as wide as it's let below. `countsBelowLg={false}` drops the counts there,
- * where the toggle shares its row with the product select.
+ * All, Issues or Todos, each with its count, on a segmented track: 32px beside the status
+ * tabs at 1024px and up; 44px and as wide as it's let below. `countsBelowLg={false}`
+ * drops the counts there, where the toggle shares its row with the product select.
  */
 export function TypeToggle({
   value,
@@ -107,17 +108,14 @@ export function TypeToggle({
         const type = picked === "issue" || picked === "todo" ? picked : null;
         if (type !== value) onChange(type);
       }}
-      spacing={0}
-      className={cn(
-        "h-7 overflow-hidden rounded-md border max-lg:h-10 max-lg:w-full",
-        className,
-      )}
+      variant="segmented"
+      className={cn("max-lg:w-full", className)}
     >
       {typeOptions.map((option) => (
         <ToggleGroupItem
           key={option.value}
           value={option.value}
-          className="h-full gap-1.25 rounded-none border-l px-2.5 text-xs font-normal text-muted-foreground first:border-l-0 aria-pressed:bg-muted aria-pressed:font-medium aria-pressed:text-foreground max-lg:flex-1 max-lg:text-sm"
+          className="gap-1.25 text-xs max-lg:flex-1 max-lg:text-sm"
         >
           {option.label}
           {counts && (
@@ -156,7 +154,8 @@ function StatusTabs({ counts }: { counts: StatusCounts | null }) {
     <TabsList
       variant="line"
       aria-label="Filter by status"
-      className="h-8 justify-start gap-3 rounded-none p-0 max-lg:hidden"
+      // the bar under the tabs and the type toggle draws the one rule
+      className="h-8 justify-start gap-3 rounded-none p-0 data-[variant=line]:border-b-0 max-lg:hidden"
     >
       {statusOptions(filterStatuses, counts).map((option) => (
         <TabsTrigger
@@ -204,7 +203,7 @@ function StatusChips({
           key={option.value}
           value={option.value}
           variant="outline"
-          className="h-10 rounded-4xl border-border px-3.5 font-normal text-muted-foreground aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background"
+          className="h-11 rounded-4xl px-3.5 font-normal text-muted-foreground aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background"
         >
           {option.label}
         </ToggleGroupItem>
@@ -278,12 +277,7 @@ export function FilterEmpty({
       }
       description="Try another filter."
       action={
-        <Button
-          variant="outline"
-          size="sm"
-          className="max-lg:h-10 max-lg:px-3.5"
-          onClick={onShowAll}
-        >
+        <Button variant="outline" size="sm" onClick={onShowAll}>
           Show all
         </Button>
       }
@@ -302,7 +296,6 @@ function Assignee({ item }: { item: WebItemRowView }) {
     <span className="flex min-w-0 items-center gap-2">
       <ActorAvatar actor={item.assignee} size="xs" />
       <span className="truncate">{item.assignee.name}</span>
-      <ActorBadge kind={item.assignee.kind} />
     </span>
   );
 }
@@ -360,7 +353,7 @@ export type ItemGroup = {
   items: WebItemRowView[];
 };
 
-const head = "h-7.5 px-0 text-2xs text-muted-foreground";
+const head = "h-7.5 px-0";
 
 /**
  * The 1024px table: status, key, type, title, priority, (labels,) assignee, updated. A
@@ -384,7 +377,7 @@ export function ItemTable({
             <span className="sr-only">Status</span>
           </TableHead>
           <TableHead className={cn(head, "w-16.5")}>Key</TableHead>
-          <TableHead className={cn(head, "w-17.5")}>Type</TableHead>
+          <TableHead className={cn(head, "w-11")}>Type</TableHead>
           <TableHead className={head}>Title</TableHead>
           <TableHead className={cn(head, "w-21.5")}>Priority</TableHead>
           {labels && (
@@ -403,7 +396,7 @@ export function ItemTable({
         >
           {group.product && (
             <TableRow className="hover:bg-transparent">
-              {/* the band is the inner div, so the cell's top padding parts it from the group above: a tbody takes no margin */}
+              {/* the heading is the inner div, so the cell's top padding parts it from the group above: a tbody takes no margin */}
               <TableHead
                 colSpan={columns}
                 scope="colgroup"
@@ -412,7 +405,7 @@ export function ItemTable({
                   index > 0 && "pt-3",
                 )}
               >
-                <div className="flex h-8.5 items-center bg-muted px-2">
+                <div className="flex h-8.5 items-center px-2">
                   <GroupHeading product={group.product} count={group.count} />
                 </div>
               </TableHead>
@@ -431,7 +424,7 @@ export function ItemTable({
                 <KeyText>{item.key}</KeyText>
               </TableCell>
               <TableCell className="px-0 py-2">
-                <TypeBadge type={item.type} />
+                <TypeIcon type={item.type} />
               </TableCell>
               <TableCell className="truncate px-0 py-2 pr-2.5">
                 <RowLink
@@ -467,7 +460,7 @@ export function ItemTable({
 }
 
 /**
- * Below 1024px, three lines a row: key, type badge and age; the title; status, priority
+ * Below 1024px, three lines a row: key, type glyph and age; the title; status, priority
  * glyph, labels and the assignee's avatar. The whole row is the link, named by key and
  * title and described by its type and the last line. A group with a product gets a 36px
  * heading.
@@ -487,7 +480,7 @@ export function ItemRows({ groups, now }: { groups: ItemGroup[]; now: Date }) {
           {group.product && (
             <h3
               id={`${id}-${group.product.key}`}
-              className="flex h-9 items-center border-b bg-muted px-4 font-normal"
+              className="flex h-9 items-center px-4 font-normal"
             >
               <GroupHeading product={group.product} count={group.count} />
             </h3>
@@ -500,18 +493,19 @@ export function ItemRows({ groups, now }: { groups: ItemGroup[]; now: Date }) {
                 <li
                   key={item.key}
                   data-item-key={item.key}
-                  className="border-b"
+                  className="border-b border-rule"
                 >
                   <AppLink
                     href={paths.issue(item.key)}
                     aria-label={`${item.key} ${item.title}`}
                     aria-describedby={`${typeId} ${metaId}`}
-                    className="flex flex-col px-4 py-3 outline-none focus-visible:ring-3 focus-visible:ring-ring/25 focus-visible:ring-inset"
+                    className="flex flex-col px-4 py-3 outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
                   >
                     <span className="flex items-center gap-2">
                       <KeyText>{item.key}</KeyText>
-                      <span id={typeId}>
-                        <TypeBadge type={item.type} />
+                      <TypeIcon type={item.type} decorative />
+                      <span id={typeId} className="sr-only">
+                        {typeLabel(item.type)}
                       </span>
                       <span className="ml-auto text-muted-foreground">
                         <Age iso={item.updatedAt} now={now} />
@@ -525,21 +519,24 @@ export function ItemRows({ groups, now }: { groups: ItemGroup[]; now: Date }) {
                     >
                       {item.title}
                     </span>
-                    <span
-                      id={metaId}
-                      className="flex items-center gap-2 text-xs"
-                    >
-                      <StatusLabel status={item.status} />{" "}
-                      <PriorityLabel priority={item.priority} iconOnly />{" "}
-                      <Labels labels={item.labels} />{" "}
-                      {item.assignee && (
-                        <span className="ml-auto">
-                          <ActorAvatar actor={item.assignee} size="xs" />
+                    <span className="flex items-center gap-2 text-xs">
+                      <span id={metaId} className="contents">
+                        <StatusLabel status={item.status} />{" "}
+                        <PriorityLabel priority={item.priority} iconOnly />{" "}
+                        <Labels labels={item.labels} />{" "}
+                        {item.assignee && (
                           <span className="sr-only">
                             Assigned to {item.assignee.name},{" "}
-                            {item.assignee.kind === "bot" ? "Bot" : "Human"}
+                            {kindNoun(item.assignee.kind)}
                           </span>
-                        </span>
+                        )}
+                      </span>
+                      {item.assignee && (
+                        <ActorAvatar
+                          actor={item.assignee}
+                          size="xs"
+                          className="ml-auto"
+                        />
                       )}
                     </span>
                   </AppLink>

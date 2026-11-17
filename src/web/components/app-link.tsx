@@ -63,7 +63,7 @@ export function RowLink({
       href={href}
       aria-label={label}
       className={cn(
-        "outline-none after:absolute after:inset-0 focus-visible:after:ring-3 focus-visible:after:ring-ring/25 focus-visible:after:ring-inset",
+        "outline-none after:absolute after:inset-0 focus-visible:after:outline-2 focus-visible:after:-outline-offset-2 focus-visible:after:outline-ring",
         className,
       )}
     >

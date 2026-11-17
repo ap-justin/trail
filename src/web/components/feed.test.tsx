@@ -6,6 +6,7 @@ import { FeedView, type FeedViewProps, LiveIndicator } from "@/components/feed";
 import {
   alpha,
   alphaWithPhoto,
+  beta,
   commentEntry,
   humanUi,
   itemCreatedEntry,
@@ -438,7 +439,7 @@ test("a comment's quote shows its words, not its Markdown", () => {
 });
 
 describe("item events", () => {
-  test("carry the type badge before the key, its word and glyph following the type", () => {
+  test("carry one grey type glyph, named for the type, before the key", () => {
     renderFeed({
       entries: [
         commentEntry("e1", minutesAgo(1)),
@@ -447,18 +448,18 @@ describe("item events", () => {
         }),
       ],
     });
-    const issueBadge = within(rowFor("e1")).getByText("Issue");
-    expect(issueBadge).toHaveAttribute("data-item-type", "issue");
-    expect(issueBadge.querySelector("svg")).toHaveClass("lucide-inbox");
-    const todoBadge = within(rowFor("e2")).getByText("Todo");
-    expect(todoBadge).toHaveAttribute("data-item-type", "todo");
-    expect(todoBadge.querySelector("svg")).toHaveClass("lucide-list-todo");
-    // the badge sits before the key link
+    const issueIcon = within(rowFor("e1")).getByRole("img", { name: "Issue" });
+    expect(issueIcon).toHaveClass("lucide-inbox", "text-muted-foreground");
+    const todoIcon = within(rowFor("e2")).getByRole("img", { name: "Todo" });
+    expect(todoIcon).toHaveClass("lucide-list-todo");
+    // a glyph alone: no boxed chip, no word
+    expect(within(rowFor("e2")).queryByText("Todo")).toBeNull();
+    // the glyph sits before the key link
     const key = within(rowFor("e2")).getByRole("link", {
       name: "TRL-15 Back up the volume",
     });
     expect(
-      todoBadge.compareDocumentPosition(key) & Node.DOCUMENT_POSITION_FOLLOWING,
+      todoIcon.compareDocumentPosition(key) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });
 
@@ -514,7 +515,7 @@ describe("item events", () => {
   test("a type change names the new type", () => {
     renderFeed({ entries: [typeChangedEntry("e1", minutesAgo(1))] });
     const row = rowFor("e1");
-    expect(row).toHaveTextContent(/changed type of\s*Todo\s*TRL-14/);
+    expect(row).toHaveTextContent(/changed type of\s*TRL-14/);
     expect(row).toHaveTextContent(/to\s*Todo/);
   });
 
@@ -526,10 +527,10 @@ describe("item events", () => {
       ],
     });
     expect(rowFor("add")).toHaveTextContent(
-      /added\s*Issue\s*TRL-14.*to project\s*Human UI launch/,
+      /added\s*TRL-14.*to project\s*Human UI launch/,
     );
     expect(rowFor("remove")).toHaveTextContent(
-      /removed\s*Issue\s*TRL-14.*from project\s*Human UI launch/,
+      /removed\s*TRL-14.*from project\s*Human UI launch/,
     );
     // the item is the row's one link
     expect(within(rowFor("add")).getAllByRole("link")).toHaveLength(1);
@@ -670,3 +671,142 @@ describe("filters", () => {
     );
   });
 });
+
+describe("row marks", () => {
+  test("no Bot or Human word in any row: the avatar shape is the one kind mark", () => {
+    renderFeed({
+      entries: [
+        commentEntry("bot", minutesAgo(1)),
+        itemCreatedEntry("person", minutesAgo(2), { actor: maya }),
+      ],
+    });
+    for (const id of ["bot", "person"]) {
+      expect(within(rowFor(id)).queryByText(/^(?:Bot|Human)$/)).toBeNull();
+    }
+  });
+
+  test("every avatar and type glyph in a row has an accessible name", () => {
+    renderFeed({
+      entries: [
+        commentEntry("bot", minutesAgo(1)),
+        itemCreatedEntry("person", minutesAgo(2), { actor: maya }),
+      ],
+    });
+    expect(
+      within(rowFor("bot")).getByRole("img", { name: "Alpha, bot" }),
+    ).toHaveAttribute("data-actor-kind", "bot");
+    expect(
+      within(rowFor("person")).getByRole("img", { name: "Maya Chen, person" }),
+    ).toHaveAttribute("data-actor-kind", "human");
+    for (const img of document.querySelectorAll(
+      "[data-entry-id] [data-actor-kind], [data-entry-id] [data-item-type]",
+    )) {
+      expect(img).toHaveAttribute("role", "img");
+      expect(img).toHaveAccessibleName();
+    }
+  });
+
+  test("rows part by pitch alone, and a quote has no bar", () => {
+    renderFeed();
+    const row = rowFor("e1");
+    expect(row.className).not.toMatch(/\bborder/);
+    const quote = within(row).getByText("Owner-only invite is right.");
+    expect(quote.closest("p")?.className).not.toMatch(/\bborder/);
+  });
+});
+
+describe("Filters on the phone", () => {
+  const filtersButton = () => screen.getByRole("button", { name: /^Filters/ });
+
+  test("one Filters button below lg in place of the chips, which show from lg", () => {
+    renderFeed();
+    expect(filtersButton()).toHaveClass("lg:hidden");
+    expect(filtersButton().querySelector("svg")).toHaveClass(
+      "lucide-sliders-horizontal",
+    );
+    const chip = screen.getByRole("combobox", { name: "Filter by bot" });
+    expect(chip.closest(".max-lg\\:hidden")).not.toBeNull();
+    expect(filtersButton().closest(".max-lg\\:hidden")).toBeNull();
+  });
+
+  test("opens a sheet titled Filters with a labelled select per filter, applied as chosen", async () => {
+    const user = userEvent.setup();
+    const props = renderFeed();
+    await user.click(filtersButton());
+    const sheet = await screen.findByRole("dialog", { name: "Filters" });
+    for (const label of ["Bot", "Product", "Project", "Type"]) {
+      expect(
+        within(sheet).getByRole("combobox", { name: label }),
+      ).toBeInTheDocument();
+    }
+    await user.click(within(sheet).getByRole("combobox", { name: "Type" }));
+    await user.click(await screen.findByRole("option", { name: "Todos" }));
+    expect(props.onTypeFilterChange).toHaveBeenCalledWith(
+      "todo",
+      expect.anything(),
+    );
+  });
+
+  test("the sheet's primary button says how many events show, and closes it", async () => {
+    const user = userEvent.setup();
+    renderFeed();
+    await user.click(filtersButton());
+    const sheet = await screen.findByRole("dialog", { name: "Filters" });
+    await user.click(
+      within(sheet).getByRole("button", { name: "Show 2 events" }),
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  test("one event is singular; while the feed loads there is no count", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <FeedView
+        {...feedProps({ entries: [commentEntry("e1", minutesAgo(1))] })}
+      />,
+    );
+    await user.click(filtersButton());
+    expect(
+      await screen.findByRole("button", { name: "Show 1 event" }),
+    ).toBeInTheDocument();
+    rerender(<FeedView {...feedProps({ status: "loading" })} />);
+    expect(
+      screen.getByRole("button", { name: "Show events" }),
+    ).toBeInTheDocument();
+  });
+
+  test("the button counts the filters in force", () => {
+    renderFeed({ actorFilter: alpha.id, typeFilter: "issue" });
+    expect(filtersButton()).toHaveAccessibleName("Filters 2 in use");
+  });
+});
+
+describe("Working now", () => {
+  test("shows above the filters when a bot has an item in progress", () => {
+    renderFeed({
+      workingNow: [
+        { bot: beta, item: { key: "TRL-15", title: "Back up the volume" } },
+      ],
+    });
+    const strip = screen.getByRole("region", { name: "Working now" });
+    expect(
+      within(strip).getByRole("link", {
+        name: "Beta is working on TRL-15 Back up the volume",
+      }),
+    ).toHaveAttribute("href", "/products/TRL/15");
+    expect(
+      strip.compareDocumentPosition(filtersButtonOrGroup()) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  test("is absent while no bot has an item in progress", () => {
+    renderFeed({ workingNow: [] });
+    expect(
+      screen.queryByRole("region", { name: "Working now" }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+const filtersButtonOrGroup = () =>
+  screen.getByRole("group", { name: "Filter the feed" });

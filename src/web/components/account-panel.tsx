@@ -1,6 +1,6 @@
 import { LogOutIcon } from "lucide-react";
 import { useId } from "react";
-import { ActorAvatar, ActorBadge } from "@/components/actor";
+import { ActorAvatar } from "@/components/actor";
 import type { ShellViewer } from "@/components/app-shell";
 import { KeyText } from "@/components/text";
 import { useTheme } from "@/components/theme-provider";
@@ -34,7 +34,6 @@ export function AccountPanel({
           <span className="truncate font-medium">{viewer.name}</span>
           <KeyText className="truncate font-normal">{viewer.handle}</KeyText>
         </div>
-        <ActorBadge kind="human" />
       </div>
       <h2 id={themeHeading} className="mt-6 mb-2 font-medium">
         Theme

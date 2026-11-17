@@ -8,7 +8,11 @@ import {
 } from "react";
 import { ActorAvatar, ActorName, BotTitle } from "@/components/actor";
 import { RowLink } from "@/components/app-link";
-import { FilterSelect, ProductSelect } from "@/components/filter-select";
+import {
+  FilterSelect,
+  FiltersSheet,
+  ProductSelect,
+} from "@/components/filter-select";
 import { MarkdownText } from "@/components/markdown-text";
 import {
   FeedEmpty,
@@ -22,11 +26,13 @@ import {
   HealthPill,
   PriorityLabel,
   StatusLabel,
-  TypeBadge,
+  TypeIcon,
+  typeLabel,
 } from "@/components/status";
 import { KeyText, LabelChip } from "@/components/text";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { WorkingNow, type WorkingNowEntry } from "@/components/working-now";
 import type {
   EntryView,
   FeedView as FeedPage,
@@ -75,6 +81,8 @@ export type FeedViewProps = {
   onProjectFilterChange: (projectSlug: string | null) => void;
   onTypeFilterChange: (type: WebItemType | null) => void;
   onRetry: () => void;
+  /** Bots with an item in progress (`workingNowEntries`), for the Working now strip; it hides while empty. */
+  workingNow?: WorkingNowEntry[];
   /** The viewer is a member with no product, so an empty feed is about access, not quiet. */
   noProducts?: boolean;
   /** The clock relative times are read against; ticks each minute when omitted. */
@@ -143,13 +151,17 @@ export function FeedView(props: FeedViewProps) {
     <div className="isolate w-full lg:px-6 lg:py-4">
       <div className="mx-auto flex max-w-220 flex-col">
         <div ref={topRef} />
+        <WorkingNow
+          entries={props.workingNow ?? []}
+          className="px-4 pt-2 lg:px-3 lg:pt-0 lg:pb-2"
+        />
         {!nothingToFollow && <FeedFilters {...props} ref={filtersRef} />}
         {props.pendingCount > 0 && (
           // zero height so the pill floats over the rows instead of pushing them down
           <div className="sticky top-15 z-10 flex h-0 justify-center">
             <Button
               size="sm"
-              className="rounded-4xl shadow-md max-lg:h-10"
+              className="rounded-4xl shadow-md"
               onClick={showPending}
             >
               {props.pendingCount} new
@@ -222,7 +234,7 @@ function FeedBody({
         <section key={day.key}>
           <h2
             {...(index === 0 && { ref: firstDayRef, tabIndex: -1 })}
-            className="px-4 pt-3.5 pb-1.5 text-2xs font-medium text-muted-foreground outline-none lg:px-3 lg:pt-4"
+            className="px-4 pt-3.5 pb-1.5 text-xs font-medium text-muted-foreground outline-none lg:px-3 lg:pt-4"
           >
             {formatDayHeader(day.iso, now)}
           </h2>
@@ -265,6 +277,8 @@ function groupByDay(rows: Row[]) {
 }
 
 function FeedFilters({
+  status,
+  entries,
   filters,
   actorFilter,
   productFilter,
@@ -276,54 +290,86 @@ function FeedFilters({
   onTypeFilterChange,
   ref,
 }: FeedViewProps & { ref: Ref<HTMLFieldSetElement> }) {
-  return (
-    // one row that scrolls sideways below lg; the bottom padding keeps focus rings inside the clip
-    // min-w-0: a fieldset's min-content minimum would stop the row scrolling
-    <fieldset
-      ref={ref}
-      aria-label="Filter the feed"
-      tabIndex={-1}
-      className="flex min-w-0 items-center gap-2 overflow-x-auto px-4 pt-2.5 pb-1 outline-none lg:flex-wrap lg:overflow-visible lg:px-3 lg:pt-0"
-    >
+  const actorOptions = filters.actors.map((a) => ({
+    value: a.id,
+    label: a.name,
+    after: <BotTitle actor={a} className="shrink-0" />,
+  }));
+  const projectOptions = filters.projects.map((p) => ({
+    value: p.slug,
+    label: p.name,
+  }));
+  // the chips from lg; below, the same four stacked in the Filters sheet
+  const selects = (inSheet: boolean) => (
+    <>
       <FilterSelect
         label="Filter by bot"
+        fieldLabel={inSheet ? "Bot" : undefined}
         allLabel="All bots"
         icon={BotIcon}
-        options={filters.actors.map((a) => ({
-          value: a.id,
-          label: a.name,
-          // on the background: the highlighted row's bg-accent is bg-muted's fill in light theme
-          after: <BotTitle actor={a} surface="card" className="shrink-0" />,
-        }))}
+        options={actorOptions}
         value={actorFilter}
         onChange={onActorFilterChange}
       />
       <ProductSelect
+        fieldLabel={inSheet ? "Product" : undefined}
         products={filters.products}
         value={productFilter}
         onChange={onProductFilterChange}
       />
       <FilterSelect
         label="Filter by project"
+        fieldLabel={inSheet ? "Project" : undefined}
         allLabel="All projects"
         icon={FolderIcon}
-        options={filters.projects.map((p) => ({
-          value: p.slug,
-          label: p.name,
-        }))}
+        options={projectOptions}
         value={projectFilter}
         onChange={onProjectFilterChange}
       />
       <FilterSelect
         label="Filter by type"
+        fieldLabel={inSheet ? "Type" : undefined}
         allLabel="All types"
         icon={ShapesIcon}
         options={TYPE_OPTIONS}
         value={typeFilter}
         onChange={onTypeFilterChange}
       />
+    </>
+  );
+  const activeCount = [
+    actorFilter,
+    productFilter,
+    projectFilter,
+    typeFilter,
+  ].filter((filter) => filter !== null).length;
+  return (
+    <fieldset
+      ref={ref}
+      aria-label="Filter the feed"
+      tabIndex={-1}
+      className="flex items-center gap-2 px-4 pt-2 outline-none lg:px-3 lg:pt-0"
+    >
+      <FiltersSheet
+        activeCount={activeCount}
+        doneLabel={showEventsLabel(
+          status === "ready" ? shownRows(entries).length : null,
+        )}
+        className="lg:hidden"
+      >
+        {selects(true)}
+      </FiltersSheet>
+      <div className="flex flex-wrap items-center gap-2 max-lg:hidden">
+        {selects(false)}
+      </div>
     </fieldset>
   );
+}
+
+/** The Filters sheet's primary button; without a count while the feed loads or failed. */
+function showEventsLabel(count: number | null) {
+  if (count === null) return "Show events";
+  return `Show ${count} ${count === 1 ? "event" : "events"}`;
 }
 
 const TYPE_OPTIONS: { value: WebItemType; label: string }[] = [
@@ -365,11 +411,11 @@ type Sentence = {
   sourceAuthor?: string | null;
 };
 
-/** The item's type badge, then its key as the row's link. */
+/** The item's type glyph, then its key as the row's link. */
 function itemSubject(item: WebItemRefView) {
   return (
     <>
-      <TypeBadge type={item.type} />
+      <TypeIcon type={item.type} />
       <RowLink href={paths.issue(item.key)} label={`${item.key} ${item.title}`}>
         <KeyText>{item.key}</KeyText>
       </RowLink>
@@ -439,7 +485,7 @@ function sentenceFor(entry: EntryView): Sentence | null {
         tail: (
           <>
             {muted("to")}
-            <TypeBadge type={entry.to} />
+            <span>{typeLabel(entry.to)}</span>
           </>
         ),
       };
@@ -634,7 +680,7 @@ function FeedRow({
     <li
       data-entry-id={entry.id}
       className={cn(
-        "relative flex items-start gap-2.5 border-b px-4 py-3 lg:px-3 lg:py-2.5",
+        "relative flex items-start gap-2.5 px-4 py-3 lg:rounded-xl lg:px-3 lg:py-2.5",
         fresh && "row-fresh",
       )}
     >
@@ -667,7 +713,7 @@ function FeedRow({
           </div>
         )}
         {sentence.quote && (
-          <p className="mt-0.5 line-clamp-2 border-l-2 pl-2 text-muted-foreground lg:mt-1 lg:basis-full">
+          <p className="mt-0.5 line-clamp-2 text-muted-foreground lg:basis-full">
             <MarkdownText source={sentence.quote} />
           </p>
         )}

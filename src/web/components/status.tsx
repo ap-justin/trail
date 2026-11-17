@@ -49,6 +49,36 @@ export function TypeBadge({
     </span>
   );
 }
+
+export function typeLabel(type: WebItemType): string {
+  return types[type].label;
+}
+
+/**
+ * Issue or Todo as one grey glyph, an image named for the type; `decorative` where
+ * the type is said in words beside it.
+ */
+export function TypeIcon({
+  type,
+  decorative = false,
+  className,
+}: {
+  type: WebItemType;
+  decorative?: boolean;
+  className?: string;
+}) {
+  const { icon: Icon, label } = types[type];
+  return (
+    <Icon
+      {...(decorative
+        ? { "aria-hidden": true }
+        : { role: "img", "aria-label": label })}
+      data-item-type={type}
+      className={cn("size-3.5 shrink-0 text-muted-foreground", className)}
+    />
+  );
+}
+
 export type ProjectHealth = NonNullable<WebProductView["health"]>;
 
 const statuses: Record<
