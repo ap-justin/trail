@@ -196,6 +196,9 @@ export type StatusUpdate = {
 /** A product with its owner bot. */
 export type ProductView = Product & { owner: ActorRef | null };
 
+/** A product the actor reaches only through a project: what it may name, and no more. */
+export type NamedProduct = Pick<Product, "id" | "key" | "name">;
+
 export type ItemCounts = Record<IssueStatus, number>;
 
 /**
@@ -504,6 +507,10 @@ const reachFor = (actor: ActingActor): Reach => {
 const productIdsOf = (actor: ActingActor): readonly string[] | null =>
   reachFor(actor)?.products ?? null;
 
+/** The project ids the actor's own project grant lists, null for every one; a product grant adds none. */
+const projectIdsOf = (actor: ActingActor): readonly string[] | null =>
+  reachFor(actor)?.projects ?? null;
+
 /** The actor's product grant covers the product: every one of its items is reached. */
 const grantsProduct = (actor: ActingActor, productId: string) =>
   productIdsOf(actor)?.includes(productId) ?? true;
@@ -638,7 +645,11 @@ export function createService({
     const projectIds: string[] = [];
     const productKeys: string[] = [];
     for (const ref of refs) {
-      const found = findProject(db, ref, actor);
+      const found = db
+        .select({ id: project.id })
+        .from(project)
+        .where(and(eq(project.slug, ref.trim()), followableProjects(actor)))
+        .get();
       if (found) {
         projectIds.push(found.id);
         continue;
@@ -716,7 +727,17 @@ export function createService({
     }
   }
 
-  /** True when every product the webhook follows is within the key's products, and every project it follows is one the key reaches. */
+  /**
+   * The projects a webhook of the actor may follow: those its key lists, every
+   * one for an unrestricted key. Not those reached through its products, whose
+   * other products' items the key can't read and the follow would deliver.
+   */
+  function followableProjects(actor: ActingActor): SQL | undefined {
+    const ids = projectIdsOf(actor);
+    return ids === null ? undefined : inArray(project.id, [...ids]);
+  }
+
+  /** True when every product the webhook follows is within the key's products, and every project it follows is one the key lists. */
   function withinScope(actor: ActingActor, hook: Webhook): boolean {
     const scoped = actor.scope?.products;
     if (scoped == null) return true;
@@ -728,7 +749,7 @@ export function createService({
       .select({ n: sql<number>`count(*)` })
       .from(project)
       .where(
-        and(inArray(project.slug, hook.projects), reachableProjects(actor)),
+        and(inArray(project.slug, hook.projects), followableProjects(actor)),
       )
       .get()?.n;
     return reached === hook.projects.length;
@@ -1309,6 +1330,23 @@ export function createService({
       ...row,
       owner: row.ownerId === null ? null : (owners.get(row.ownerId) ?? null),
     }));
+  }
+
+  /** Each row as the actor reads it, in order: whole where its product grant covers it, else named only. */
+  function productReads(
+    actor: ActingActor,
+    rows: Product[],
+  ): (ProductView | NamedProduct)[] {
+    const granted = new Map(
+      productViews(
+        db,
+        rows.filter((r) => grantsProduct(actor, r.id)),
+      ).map((v) => [v.id, v]),
+    );
+    return rows.map(
+      (row) =>
+        granted.get(row.id) ?? { id: row.id, key: row.key, name: row.name },
+    );
   }
 
   function statusUpdateViews(
@@ -2233,7 +2271,10 @@ export function createService({
       project: into,
       place: () => {
         if (into !== undefined) {
-          return { product: drawnProduct(tx, into, named), project: into };
+          return {
+            product: drawnProduct(tx, actor, into, named),
+            project: into,
+          };
         }
         const product = named as Product;
         if (grantsProduct(actor, product.id)) return { product };
@@ -2242,9 +2283,16 @@ export function createService({
     };
   }
 
-  /** The product of `into` the issue goes to: `named` when the project draws from it, else the project's one product. */
+  /**
+   * The product of `into` the issue goes to: `named` when the project draws
+   * from it, else the project's one product. Of `into`'s products the actor
+   * files on those its product grant covers, or on all of them when `into` is
+   * one of its own projects, so the item stays one it reaches; a refusal names
+   * those and only counts the rest.
+   */
   function drawnProduct(
     tx: Tx,
+    actor: ActingActor,
     into: ProjectRow,
     named: Product | undefined,
   ): Product {
@@ -2255,20 +2303,40 @@ export function createService({
       .where(eq(projectProduct.projectId, into.id))
       .orderBy(product.key)
       .all();
-    const keys = drawn.map((p) => p.key);
+    const ownProject = projectIdsOf(actor)?.includes(into.id) ?? true;
+    const fileable = ownProject
+      ? drawn
+      : drawn.filter((p) => grantsProduct(actor, p.id));
+    const keys = fileable.map((p) => p.key);
+    const others = drawn.length - fileable.length;
+    const drawsFrom = andList(
+      others === 0
+        ? keys
+        : [...keys, `${others} other product${others === 1 ? "" : "s"}`],
+    );
+    const sendOne = keys.length === 1 ? keys[0] : `one of ${andList(keys)}`;
     if (named !== undefined) {
-      if (drawn.some((p) => p.id === named.id)) return named;
+      if (fileable.some((p) => p.id === named.id)) return named;
+      if (drawn.some((p) => p.id === named.id)) {
+        const slugs = projectsDrawingFrom(tx, actor, named.id).map(
+          (p) => p.slug,
+        );
+        throw new ValidationError(
+          `this key files on product ${named.key} only through ${projectList(slugs)}, not project ${into.slug}: send ${projectArgs(slugs)} with product ${named.key}, or send product with ${sendOne} and project ${into.slug}`,
+        );
+      }
       throw new ValidationError(
         drawn.length === 0
           ? `project ${into.slug} draws from no product yet, so nothing is filed into it: file the issue on ${named.key} without project, then add it with add_to_project (POST /projects/{slug}/items)`
-          : `project ${into.slug} draws from ${andList(keys)}, not ${named.key}: send product with ${drawn.length === 1 ? keys[0] : `one of ${andList(keys)}`}, or a project that draws from ${named.key} (list_projects shows each one's products)`,
+          : `project ${into.slug} draws from ${drawsFrom}, not ${named.key}: send product with ${sendOne}, or a project that draws from ${named.key} (list_projects shows each one's products)`,
       );
     }
-    if (drawn.length === 1) return drawn[0] as Product;
+    // a project the actor reaches but doesn't list draws from a product its grant covers
+    if (drawn.length === 1) return fileable[0] as Product;
     throw new ValidationError(
       drawn.length === 0
         ? `project ${into.slug} draws from no product yet, so file_issue needs product: send the key (like TRL) of the product the issue is for, without project, then add the issue with add_to_project (POST /projects/{slug}/items)`
-        : `project ${into.slug} draws from ${andList(keys)}, so file_issue needs product: send product with one of them`,
+        : `project ${into.slug} draws from ${drawsFrom}, so file_issue needs product: send product with ${others === 0 ? "one of them" : sendOne}`,
     );
   }
 
@@ -2566,15 +2634,20 @@ export function createService({
     },
 
     /** A product the actor may name: one its products or projects reach. */
-    getProduct(actor: ActingActor, ref: string): ProductView {
+    getProduct(actor: ActingActor, ref: string): ProductView | NamedProduct {
       requireAction(actor, "read", "read a product", () =>
         resolveNamedProduct(db, ref, actor),
       );
-      return productView(db, resolveNamedProduct(db, ref, actor));
+      return productReads(actor, [resolveNamedProduct(db, ref, actor)])[0] as
+        | ProductView
+        | NamedProduct;
     },
 
     /** Newest first; the products the actor may name, with those its projects draw from. */
-    listProducts(actor: ActingActor, query: PageQuery = {}): Page<ProductView> {
+    listProducts(
+      actor: ActingActor,
+      query: PageQuery = {},
+    ): Page<ProductView | NamedProduct> {
       requireAction(actor, "read", "list products");
       const visible = [productsNamed(db, reachFor(actor), product.id)];
       const found = page(
@@ -2591,7 +2664,7 @@ export function createService({
             .limit(limit)
             .all(),
       );
-      return { ...found, items: productViews(db, found.items) };
+      return { ...found, items: productReads(actor, found.items) };
     },
 
     /**

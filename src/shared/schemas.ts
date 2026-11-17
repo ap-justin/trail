@@ -104,6 +104,19 @@ export const productSchema = z
   })
   .openapi("Product");
 
+export const namedProductSchema = productSchema
+  .pick({ id: true, key: true, name: true })
+  .meta({
+    description:
+      "A product the key reaches only through a project drawing from it: its id, key and name; its labels are read with list_labels (GET /products/{key}/labels).",
+  })
+  .openapi("NamedProduct");
+
+/** A product as a key reads it: whole when its products include it, named when it reaches it only through a project. */
+export const productReadSchema = z
+  .union([productSchema, namedProductSchema])
+  .openapi("ProductRead");
+
 export const legacyProductSchema = productSchema
   .extend({ deprecated: deprecatedNote })
   .openapi("LegacyProduct");
@@ -531,11 +544,11 @@ const webhookProducts = z
   .max(WEBHOOK_PRODUCTS_MAX)
   .meta({ description: webhookProductsDescription, example: ["ATL"] });
 const webhookProjects = z
-  .array(z.string().min(1))
+  .array(z.string().min(1).max(SLUG_MAX))
   .max(WEBHOOK_PRODUCTS_MAX)
   .meta({
     description:
-      "Slugs (like launch-q4) of the projects to follow: you get the project's own events (updates, status updates, items joining and leaving) and the events of its items and their comments while they are in it, whichever product they are in. A product's key (like TRL) here is the deprecated alias of products and follows that product. A value that is neither, or a project the key doesn't reach, is a 404, as a missing project is.",
+      "Slugs (like launch-q4) of the projects to follow: you get the project's own events (updates, status updates, items joining and leaving) and the events of its items and their comments while they are in it, whichever product they are in. A product's key (like TRL) here is the deprecated alias of products and follows that product. A value that is neither, or a project the key doesn't list (a key limited to products follows no project; an unrestricted key follows any), is a 404, as a missing project is.",
     example: ["launch-q4"],
   });
 
@@ -1375,6 +1388,7 @@ export const activityListQuerySchema = pageQuerySchema.extend({
 
 export type ApiError = z.infer<typeof errorSchema>;
 export type ProductView = z.infer<typeof productSchema>;
+export type NamedProductView = z.infer<typeof namedProductSchema>;
 export type ProjectView = z.infer<typeof projectSchema>;
 export type IssueView = z.infer<typeof issueSchema>;
 export type CommentView = z.infer<typeof commentSchema>;

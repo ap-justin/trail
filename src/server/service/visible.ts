@@ -100,7 +100,9 @@ export function projectsReached(
 /**
  * The events `reach` sees: every event of its products; a project's own
  * events (no product) when it reaches the project; and, through its projects,
- * the events of the items in them now and of their comments, an item's
+ * every item joining or leaving one of them, the removal being the last event
+ * of an item that left, as a webhook following the project gets it, and the
+ * events of the items in them now and of their comments, an item's
  * membership event only when that event's project is reached too.
  */
 export function eventsReached(db: Db, reach: Reach): SQL | undefined {
@@ -115,6 +117,10 @@ export function eventsReached(db: Db, reach: Reach): SQL | undefined {
   return or(
     byProduct,
     projectOwn,
+    and(
+      eq(activityEvent.subjectType, "issue"),
+      inArray(activityEvent.projectId, [...reach.projects]),
+    ),
     and(
       eq(activityEvent.subjectType, "issue"),
       inArray(activityEvent.subjectId, items),

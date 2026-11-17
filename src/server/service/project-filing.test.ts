@@ -231,6 +231,58 @@ describe("a key with a product grant", () => {
       service.fileIssue(delta, { product: "ATL", title: "own" }).projects,
     ).toEqual([]);
   });
+
+  test("with a project as well, files a product reached only through that project into it alone, not into another project drawing from it", () => {
+    const epsilon = keyed("epsilon", {
+      products: ["ATL"],
+      projects: ["solo"],
+    });
+    const before = service.listItems(admin, { limit: 200 }).items.length;
+    let refusal: unknown;
+    try {
+      service.fileIssue(epsilon, {
+        product: "BTA",
+        project: "recon",
+        title: "through someone else's project",
+      });
+    } catch (error) {
+      refusal = error;
+    }
+    expect(refusal).toBeInstanceOf(ValidationError);
+    expect((refusal as Error).message).toBe(
+      'this key files on product BTA only through project solo, not project recon: send project: "solo" with product BTA, or send product with ATL and project recon',
+    );
+    expect(service.listItems(admin, { limit: 200 }).items).toHaveLength(before);
+    expect(
+      service.fileIssue(epsilon, {
+        product: "ATL",
+        project: "recon",
+        title: "own product, their project",
+      }).projects,
+    ).toMatchObject([{ slug: "recon" }]);
+  });
+
+  test("asked for a product, names only the products of the project it may file on, and counts the rest", () => {
+    expect(() =>
+      service.fileIssue(gamma, { project: "recon", title: "which" }),
+    ).toThrow(
+      new ValidationError(
+        "project recon draws from BTA and 1 other product, so file_issue needs product: send product with BTA",
+      ),
+    );
+    const zeta = keyed("zeta", { products: ["BTA", "CTX"] });
+    expect(() =>
+      service.fileIssue(zeta, {
+        product: "CTX",
+        project: "recon",
+        title: "not drawn",
+      }),
+    ).toThrow(
+      new ValidationError(
+        "project recon draws from BTA and 1 other product, not CTX: send product with BTA, or a project that draws from CTX (list_projects shows each one's products)",
+      ),
+    );
+  });
 });
 
 describe("an unrestricted key", () => {

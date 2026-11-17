@@ -9,6 +9,7 @@ import type {
   LabelView,
   MarkReadResultView,
   MessageView,
+  NamedProductView,
   PageView,
   ProductView,
   ProjectView,
@@ -27,6 +28,7 @@ import type {
   Label,
   MarkReadResult,
   Message,
+  NamedProduct,
   Page,
   ProductView as Product,
   ProjectView as Project,
@@ -53,6 +55,15 @@ export function toProduct(row: Product): ProductView {
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+/** A product as a key reads it: `toProduct`, or for one named only through a project its id, key and name. */
+export function toProductRead(
+  row: Product | NamedProduct,
+): ProductView | NamedProductView {
+  return "createdBy" in row
+    ? toProduct(row)
+    : { id: row.id, key: row.key, name: row.name };
 }
 
 export function toProject(row: Project): ProjectView {

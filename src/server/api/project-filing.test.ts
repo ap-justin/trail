@@ -102,6 +102,23 @@ describe("POST /items with type issue from a key scoped to project recon", () =>
   });
 });
 
+describe("GET /products from a key scoped to project recon", () => {
+  test("reads a product its project draws from as its id, key and name, and an unrestricted key reads it whole", async () => {
+    const whole = (await seed(
+      "GET",
+      "/api/v1/products/BTA",
+      undefined,
+    )) as Body;
+    expect(whole).toHaveProperty("description");
+    const named = { id: whole.id, key: "BTA", name: "Product BTA" };
+    const got = await request("GET", "/api/v1/products/BTA", { key: alphaKey });
+    expect(await got.json()).toEqual(named);
+    const listed = await request("GET", "/api/v1/products", { key: alphaKey });
+    const items = ((await listed.json()) as Body).items as Body[];
+    expect(items.find((p) => p.key === "BTA")).toEqual(named);
+  });
+});
+
 describe("POST /items from other keys", () => {
   test("an unrestricted key files without project as before, and into a project with it", async () => {
     const plain = await seed("POST", "/api/v1/items", {

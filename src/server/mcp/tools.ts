@@ -46,6 +46,7 @@ import {
   toMessage,
   toPage,
   toProduct,
+  toProductRead,
   toProject,
   toSentMessage,
   toStatusUpdate,
@@ -589,13 +590,13 @@ export function registerTools(
     "list_products",
     {
       description:
-        "List the products this key can name, newest first, a page at a time: pass nextCursor back as cursor until it is null. A product owns items (keys like TRL-12); its owner is its own bot, who adds its todos and accepts issues filed to it. Listed are the products this key reaches and those its projects draw from; of a product it reaches only through a project it reads the name, key, owner and labels, and files issues on it with file_issue with project. A product carries no item counts.",
+        "List the products this key can name, newest first, a page at a time: pass nextCursor back as cursor until it is null. A product owns items (keys like TRL-12); its owner is its own bot, who adds its todos and accepts issues filed to it. Listed are the products this key reaches and those its projects draw from; of a product it reaches only through a project it reads only the id, key and name (list_labels lists its labels), and files issues on it with file_issue with project. A product carries no item counts.",
       inputSchema: z.strictObject(page),
       annotations: read,
     },
     (query) =>
       run("list_products", () =>
-        toPage(service.listProducts(actor, query), toProduct),
+        toPage(service.listProducts(actor, query), toProductRead),
       ),
   );
 
@@ -603,12 +604,14 @@ export function registerTools(
     "get_product",
     {
       description:
-        "Get a product by key, like TRL: name, description, repoUrl and owner (its own bot), and no item counts. A product this key reaches only through a project reads the same, and the key files issues on it with file_issue with project.",
+        "Get a product by key, like TRL: name, description, repoUrl and owner (its own bot), and no item counts. A product this key reaches only through a project reads as its id, key and name only (list_labels lists its labels), and the key files issues on it with file_issue with project.",
       inputSchema: z.strictObject({ product }),
       annotations: read,
     },
     ({ product }) =>
-      run("get_product", () => toProduct(service.getProduct(actor, product))),
+      run("get_product", () =>
+        toProductRead(service.getProduct(actor, product)),
+      ),
   );
 
   register(
@@ -1048,12 +1051,12 @@ export function registerTools(
       hook.productAlias ? deprecations.webhookProjects : undefined,
     );
   const ownWebhooks =
-    "Acts on your own webhooks only; another bot's, or one following a product outside this key's products or a project this key doesn't reach, is not found.";
+    "Acts on your own webhooks only; another bot's, or one following a product outside this key's products or a project this key doesn't list, is not found.";
 
   register(
     "create_webhook",
     {
-      description: `Get signed webhook calls, of one of two kinds. kind inbox (no products): wake on each message another bot sends you, instead of polling list_inbox; it is always your own inbox. kind activity (the default): every event in the products you follow (products: their keys), and in every project drawing from one of them, so you hear of an issue filed to your product without polling list_activity; and the events of the projects you follow (projects: their slugs, which list_projects lists) and of the items in them while they are in them; a product key in projects (like TRL) still follows that product, as the deprecated alias of products did, and the result carries deprecated. It needs the read action and at least one product or project; a key that reaches exactly one project and no product follows that project when both are left out. ${WEBHOOK_INBOX} ${WEBHOOK_SETUP} ${WEBHOOK_DELIVERY} Returns the webhook (never its secret); a product outside this key's products or a project it doesn't reach is not found.`,
+      description: `Get signed webhook calls, of one of two kinds. kind inbox (no products): wake on each message another bot sends you, instead of polling list_inbox; it is always your own inbox. kind activity (the default): every event in the products you follow (products: their keys), and in every project drawing from one of them, so you hear of an issue filed to your product without polling list_activity; and the events of the projects you follow (projects: the slugs of projects this key lists, or any project on an unrestricted key) and of the items in them while they are in them; a product key in projects (like TRL) still follows that product, as the deprecated alias of products did, and the result carries deprecated. It needs the read action and at least one product or project; a key that reaches exactly one project and no product follows that project when both are left out. ${WEBHOOK_INBOX} ${WEBHOOK_SETUP} ${WEBHOOK_DELIVERY} Returns the webhook (never its secret); a product outside this key's products or a project it doesn't list is not found.`,
       inputSchema: webhookCreateSchema,
       annotations: create,
     },

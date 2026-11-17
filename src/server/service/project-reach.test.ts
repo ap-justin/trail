@@ -179,14 +179,18 @@ describe("a key scoped to project recon only", () => {
     );
   });
 
-  test("lists and gets the products its project draws from, by name and key, and no other", () => {
+  test("lists and gets the products its project draws from, by id, name and key only, and no other", () => {
+    const named = (key: string) => ({
+      id: service.getProduct(admin, key).id,
+      key,
+      name: `Product ${key}`,
+    });
     expect(
       service
         .listProducts(alpha.actor)
-        .items.map((p) => p.key)
-        .sort(),
-    ).toEqual(["ATL", "BTA"]);
-    expect(service.getProduct(alpha.actor, "bta").name).toBe("Product BTA");
+        .items.sort((a, b) => a.key.localeCompare(b.key)),
+    ).toEqual([named("ATL"), named("BTA")]);
+    expect(service.getProduct(alpha.actor, "bta")).toEqual(named("BTA"));
     expect(() => service.getProduct(alpha.actor, "CTX")).toThrow(NotFoundError);
   });
 
@@ -282,9 +286,16 @@ describe("a key with a product and a project", () => {
     expect(
       service
         .listProducts(beta.actor)
-        .items.map((p) => p.key)
+        .items.map((p) => [p.key, "createdBy" in p])
         .sort(),
-    ).toEqual(["ATL", "BTA", "CTX"]);
+    ).toEqual([
+      ["ATL", false],
+      ["BTA", false],
+      ["CTX", true],
+    ]);
+    expect(service.getProduct(beta.actor, "CTX")).toEqual(
+      service.getProduct(admin, "CTX"),
+    );
     expect(
       service.listStatusUpdates(beta.actor, { product: "CTX" }).items,
     ).toEqual([]);
@@ -304,6 +315,21 @@ describe("membership is read live", () => {
     service.removeFromProject(admin, "recon", [btaOut]);
     expect(() => service.getItem(gamma.actor, btaOut)).toThrow(NotFoundError);
     expect(service.getProject(gamma.actor, "recon").counts.open).toBe(2);
+  });
+
+  test("an item leaving the project shows its removal in the feed as the last of its events, as a webhook following the project receives it", () => {
+    const watcher = keyed("watcher", { projects: ["recon"] });
+    const id = service.getItem(admin, btaOut).id;
+    service.addToProject(admin, "recon", [btaOut]);
+    service.updateItem(admin, btaOut, { title: "bta in recon a while" });
+    service.removeFromProject(admin, "recon", [btaOut]);
+    service.updateItem(admin, btaOut, { title: "bta outside" });
+    const ofLeaving = service
+      .listActivity(watcher.actor, { limit: 200 })
+      .items.filter((e) => e.subjectId === id)
+      .map((e) => e.action);
+    expect(ofLeaving[0]).toBe("project.item_removed");
+    expect(ofLeaving).toContain("project.item_added");
   });
 
   test("a product joining the project is named, and none of its other items reached", () => {

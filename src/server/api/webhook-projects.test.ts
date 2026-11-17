@@ -357,12 +357,38 @@ test("adding a project the key doesn't reach on update is the 404 it is on creat
   );
 });
 
-test("a key reaching a product reaches the projects drawing from it, and follows them", async () => {
+test("a key follows only the projects it lists: one reached through its products is the 404 a missing one is", async () => {
   const btaKey = createBot(db, "bta-reader", {
     scope: { products: ["BTA"], actions: ["read"] },
   }).key;
-  expect((await hook({ projects: ["recon"] }, btaKey)).status).toBe(201);
-  expect((await hook({ projects: ["other"] }, btaKey)).status).toBe(404);
+  const mixedKey = createBot(db, "bta-and-other", {
+    scope: { products: ["BTA"], projects: ["other"], actions: ["read"] },
+  }).key;
+  const missing = await hook({ projects: ["nowhere"] }, btaKey);
+  for (const key of [btaKey, mixedKey]) {
+    const refused = await hook({ projects: ["recon"] }, key);
+    expect(refused.status).toBe(404);
+    expect(refused.body.error.message).toBe(
+      missing.body.error.message.replace("nowhere", "recon"),
+    );
+  }
+  expect((await hook({ projects: ["other"] }, mixedKey)).status).toBe(201);
+});
+
+test("a projects value longer than a slug can be is a 422 before any lookup", async () => {
+  const atMost = await hook({ projects: ["a".repeat(39)] });
+  expect(atMost.status).toBe(404);
+  const over = await hook({ projects: ["a".repeat(40)] });
+  expect(over.status).toBe(422);
+  expect(JSON.stringify(over.body.error)).toContain("projects");
+});
+
+test("the bot's webhook following a project is out of reach of its key that reaches the project only through its products", async () => {
+  const owner = createBot(db, "bta-and-recon");
+  const { id } = await follow({ projects: ["recon"] }, owner.key);
+  const btaKey = createKey(db, owner.actor.id, { products: ["BTA"] }).key;
+  expect((await call("GET", `/webhooks/${id}`, owner.key)).status).toBe(200);
+  expect((await call("GET", `/webhooks/${id}`, btaKey)).status).toBe(404);
 });
 
 test("an update drops the queued events of a project no longer followed and keeps those of one still followed", async () => {
