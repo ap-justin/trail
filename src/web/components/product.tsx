@@ -107,7 +107,7 @@ export function RepoLink({
       target="_blank"
       rel="noreferrer"
       className={cn(
-        "inline-flex max-w-full min-w-0 items-center gap-2 rounded-sm outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+        "inline-flex max-w-full min-w-0 items-center gap-2 rounded-sm hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
         className,
       )}
     >
@@ -244,7 +244,10 @@ export function ProductView(props: ProductViewProps) {
       className="gap-0 lg:gap-8 lg:px-6 lg:py-4 lg:data-horizontal:flex-row"
     >
       {detail?.repoUrl && (
-        <RepoLink url={detail.repoUrl} className="mx-4 mt-0.5 lg:hidden" />
+        <RepoLink
+          url={detail.repoUrl}
+          className="mx-4 mt-0.5 max-lg:min-h-11 lg:hidden"
+        />
       )}
       <PaneTabs panes={panes} className="mt-1.5" />
       <Pane value="items" className="min-w-0 flex-1">
@@ -266,6 +269,7 @@ export function ProductView(props: ProductViewProps) {
           <TabsContent
             ref={listRef}
             value={statusTabValue(filters)}
+            tabIndex={-1}
             className="outline-none"
           >
             <ItemsBody

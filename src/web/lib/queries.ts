@@ -36,6 +36,7 @@ export const keys = {
     ["project", slug, "status-updates"] as const,
   issue: (key: string) => ["issue", key] as const,
   feed: (filter: FeedFilter) => ["feed", filter] as const,
+  workingNow: ["working-now"] as const,
   search: (q: string) => ["search", q] as const,
   people: ["people"] as const,
   conversations: ["conversations"] as const,
@@ -66,9 +67,6 @@ export const projectsQuery = queryOptions({
   queryFn: async (): Promise<WebProjectView[]> =>
     (await readPages(api.projects, PROJECT_PAGES_MAX)).flatMap((p) => p.items),
 });
-
-/** A product's in-progress items of every type: what the feed's Working now reads. */
-export const IN_PROGRESS: ItemQuery = { type: null, status: "in_progress" };
 
 /** Pages of a product's or project's items the page reads before it stops: neither has Load more. */
 export const ITEM_PAGES_MAX = 10;
@@ -132,6 +130,15 @@ export const projectItemsQuery = (slug: string, filters: ProjectItemQuery) =>
       })),
     // no placeholder: a group's count follows every filter, so any other list's would miscount
   });
+
+/** Bots at work across the viewer's products, for the feed's Working now strip. */
+export const workingNowQuery = queryOptions({
+  queryKey: keys.workingNow,
+  queryFn: api.workingNow,
+  // the feed's stream re-reads it as bot work moves; a mount still reads, since no stream
+  // ran while the viewer was off the feed
+  refetchOnWindowFocus: false,
+});
 
 const nextCursor = (page: { nextCursor: string | null }) => page.nextCursor;
 

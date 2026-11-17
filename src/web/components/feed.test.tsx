@@ -836,16 +836,25 @@ describe("Filters on the phone", () => {
 describe("Working now", () => {
   test("shows above the filters when a bot has an item in progress", () => {
     renderFeed({
-      workingNow: [
-        { bot: beta, item: { key: "TRL-15", title: "Back up the volume" } },
-      ],
+      workingNow: {
+        total: 3,
+        entries: [
+          {
+            bot: beta,
+            item: { key: "TRL-15", title: "Back up the volume" },
+            productKey: "TRL",
+          },
+        ],
+      },
     });
     const strip = screen.getByRole("region", { name: "Working now" });
-    expect(
-      within(strip).getByRole("link", {
-        name: "Beta is working on TRL-15 Back up the volume",
-      }),
-    ).toHaveAttribute("href", "/products/TRL/15");
+    const link = within(strip).getByRole("link", {
+      name: "TRL-15 Back up the volume, worked on by Beta, bot",
+    });
+    expect(link).toHaveAttribute("href", "/products/TRL/15");
+    expect(within(link).getByText("Beta")).toBeVisible();
+    // the two items the server counted but didn't send
+    expect(within(strip).getAllByText("+2")).toHaveLength(2);
     expect(
       strip.compareDocumentPosition(filtersButtonOrGroup()) &
         Node.DOCUMENT_POSITION_FOLLOWING,
@@ -853,7 +862,7 @@ describe("Working now", () => {
   });
 
   test("is absent while no bot has an item in progress", () => {
-    renderFeed({ workingNow: [] });
+    renderFeed({ workingNow: { total: 0, entries: [] } });
     expect(
       screen.queryByRole("region", { name: "Working now" }),
     ).not.toBeInTheDocument();
@@ -862,3 +871,31 @@ describe("Working now", () => {
 
 const filtersButtonOrGroup = () =>
   screen.getByRole("group", { name: "Filter the feed" });
+
+test("an assignment row shows the assignee's avatar before their name", () => {
+  renderFeed({
+    entries: [
+      {
+        kind: "assignee_changed",
+        id: "assign",
+        createdAt: minutesAgo(1),
+        actor: beta,
+        product: { key: "TRL", name: "trail" },
+        project: null,
+        item: {
+          key: "TRL-12",
+          title: "Stream the feed over SSE",
+          type: "issue",
+        },
+        from: null,
+        to: alpha,
+      },
+    ],
+  });
+  const row = rowFor("assign");
+  const avatar = within(row).getByRole("img", { name: "Alpha, bot" });
+  const name = within(row).getByText("Alpha");
+  expect(
+    avatar.compareDocumentPosition(name) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+});

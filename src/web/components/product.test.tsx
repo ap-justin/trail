@@ -9,6 +9,7 @@ import {
   type ProductViewProps,
 } from "@/components/product";
 import {
+  beta,
   issueRow,
   itemList,
   productDetail,
@@ -90,6 +91,9 @@ const tableRow = (key: string) => {
 };
 const tabs = () => screen.getByRole("tablist", { name: "Filter by status" });
 const typeToggle = () => screen.getByRole("group", { name: "Filter by type" });
+const titledUpdate = statusUpdate({
+  author: { ...beta, title: "Release manager for the web client" },
+});
 const aside = (name: string) => screen.getByRole("region", { name });
 const panes = () => screen.getByRole("tablist", { name: "Show" });
 const paneTab = (name: string) => within(panes()).getByRole("tab", { name });
@@ -354,6 +358,14 @@ describe("type toggle and status tabs", () => {
     expect(screen.getByRole("tabpanel", { name: /^All/ })).toHaveFocus();
   });
 
+  test("the status tab panel is focused from script only, never a Tab stop", () => {
+    renderProduct();
+    expect(screen.getByRole("tabpanel", { name: /^All/ })).toHaveAttribute(
+      "tabindex",
+      "-1",
+    );
+  });
+
   test("a product with no items at all offers New issue", async () => {
     const user = userEvent.setup();
     const p = renderProduct({ items: { status: "ready", data: itemList([]) } });
@@ -379,6 +391,15 @@ describe("type toggle and status tabs", () => {
 });
 
 describe("aside", () => {
+  test("below lg the repo link under the heading is a 44px tap target", () => {
+    renderProduct();
+    const links = screen.getAllByRole("link", {
+      name: /github\.com\/example\/trail/,
+    });
+    const phone = links.find((link) => link.classList.contains("lg:hidden"));
+    expect(phone).toHaveClass("max-lg:min-h-11");
+  });
+
   test("Repository shows the repo and opens GitHub; with no repo there is no section", () => {
     const { unmount } = render(<ProductView {...props()} />);
     const repo = within(aside("Repository")).getByRole("link");
@@ -446,6 +467,22 @@ describe("aside", () => {
       statusUpdates: { status: "ready", data: { items: [], nextCursor: null } },
     });
     expect(aside("Status updates")).toHaveTextContent("No status update yet");
+  });
+
+  test("a status update's bot name never truncates; its title gives way first", () => {
+    renderProduct({
+      statusUpdates: {
+        status: "ready",
+        data: { items: [titledUpdate], nextCursor: null },
+      },
+    });
+    const section = aside("Status updates");
+    const name = within(section).getByText("Beta");
+    expect(name).toHaveClass("shrink-0");
+    expect(name).not.toHaveClass("truncate");
+    expect(
+      within(section).getByText("Release manager for the web client"),
+    ).toHaveClass("min-w-0", "truncate");
   });
 
   test("Try again on status updates leaves focus on their heading", async () => {

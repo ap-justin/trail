@@ -33,7 +33,7 @@ import {
 import { KeyText, LabelChip } from "@/components/text";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { WorkingNow, type WorkingNowEntry } from "@/components/working-now";
+import { WorkingNow } from "@/components/working-now";
 import type {
   EntryView,
   FeedView as FeedPage,
@@ -41,6 +41,7 @@ import type {
   WebItemType,
   WebProductRefView,
   WebProjectRefView,
+  WebWorkingNowView,
 } from "@/lib/api-types";
 import { paths } from "@/lib/paths";
 import {
@@ -82,8 +83,8 @@ export type FeedViewProps = {
   onProjectFilterChange: (projectSlug: string | null) => void;
   onTypeFilterChange: (type: WebItemType | null) => void;
   onRetry: () => void;
-  /** Bots with an item in progress (`workingNowEntries`), for the Working now strip; it hides while empty. */
-  workingNow?: WorkingNowEntry[];
+  /** `GET /api/web/working-now`, for the Working now strip; it hides while undefined or `total` is 0. */
+  workingNow?: WebWorkingNowView;
   /** The viewer is a member with no product, so an empty feed is about access, not quiet. */
   noProducts?: boolean;
   /** The clock relative times are read against; ticks each minute when omitted. */
@@ -153,7 +154,7 @@ export function FeedView(props: FeedViewProps) {
       <div className="mx-auto flex max-w-220 flex-col">
         <div ref={topRef} />
         <WorkingNow
-          entries={props.workingNow ?? []}
+          workingNow={props.workingNow}
           className="px-4 pt-2 lg:px-3 lg:pt-0 lg:pb-2"
         />
         {!nothingToFollow && <FeedFilters {...props} ref={filtersRef} />}
@@ -526,6 +527,7 @@ function sentenceFor(entry: EntryView): Sentence | null {
             tail: (
               <>
                 {muted("to")}
+                <ActorAvatar actor={entry.to} size="xs" />
                 <span className="font-medium">{entry.to.name}</span>
               </>
             ),

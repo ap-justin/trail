@@ -1,7 +1,12 @@
 import { ArrowLeftRightIcon, MessagesSquareIcon } from "lucide-react";
 import { type ReactNode, useEffect, useRef } from "react";
 import { ActorAvatar, ActorName } from "@/components/actor";
-import { AppLink, RowLink, textLinkFocus } from "@/components/app-link";
+import {
+  AppLink,
+  RowLink,
+  textLinkFocus,
+  textLinkTap,
+} from "@/components/app-link";
 import { RowTime } from "@/components/feed";
 import { Markdown } from "@/components/markdown";
 import { MarkdownText } from "@/components/markdown-text";
@@ -110,7 +115,7 @@ export function ConversationBreadcrumb({
       >
         <AppLink
           href={listHref}
-          className={cn(textLinkFocus, "hover:text-foreground")}
+          className={cn(textLinkFocus, textLinkTap, "hover:text-foreground")}
         >
           Messages
         </AppLink>
@@ -382,7 +387,7 @@ function MessageCard({ message }: { message: WebMessageView }) {
     // its scroll margins keep focus() scrolling it clear of the 48px top bar and, below lg, the 56px tab bar
     <li
       tabIndex={-1}
-      className="scroll-mt-12 rounded-xl border outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring max-lg:scroll-mb-14"
+      className="scroll-mt-12 rounded-xl border focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring max-lg:scroll-mb-14"
     >
       <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 rounded-t-xl border-b bg-muted px-3 py-2">
         <ActorAvatar actor={message.sender} size="xs" />

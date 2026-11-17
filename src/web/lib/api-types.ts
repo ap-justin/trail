@@ -30,4 +30,5 @@ export type {
   WebStatusCountsView,
   WebStatusUpdatePageView,
   WebStatusUpdateView,
+  WebWorkingNowView,
 } from "../../shared/schemas";

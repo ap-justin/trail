@@ -24,8 +24,9 @@ async function onFeed() {
   return app;
 }
 
-/** The feed a member with no project is served: nothing, and nothing to filter by. */
+/** The feed a member with no project is served: nothing, nothing to filter by, no bot at work. */
 function serveNoProjectsFeed() {
+  serveInProgress();
   server.use(
     http.get("/api/web/feed", () =>
       HttpResponse.json({

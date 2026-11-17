@@ -1,38 +1,16 @@
-import { type UseQueryResult, useQueries } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { AppPage, useChrome } from "@/app/chrome";
 import { FeedView, LiveIndicator } from "@/components/feed";
-import { workingNowEntries } from "@/components/working-now";
 import type { FeedFilter } from "@/lib/api";
-import type { WebItemListView, WebProductRefView } from "@/lib/api-types";
 import { type FeedSearch, validateFeedSearch } from "@/lib/item-search";
-import { IN_PROGRESS, productItemsQuery } from "@/lib/queries";
+import { workingNowQuery } from "@/lib/queries";
 import { useLiveFeed } from "@/lib/use-live-feed";
 
 export const Route = createFileRoute("/_app/")({
   validateSearch: validateFeedSearch,
   component: FeedPage,
 });
-
-// module-level, so useQueries reruns it only when a read changes, not on every render
-const combineWorkingNow = (reads: UseQueryResult<WebItemListView>[]) =>
-  workingNowEntries(reads.flatMap((read) => read.data?.items ?? []));
-
-/**
- * Bots at work across `products`: each product's in-progress items, read on their own,
- * so a product whose read failed or hasn't answered only leaves its bots out.
- */
-function useWorkingNow(products: WebProductRefView[]) {
-  return useQueries({
-    queries: products.map((product) => ({
-      ...productItemsQuery(product.key, IN_PROGRESS),
-      // the feed's stream re-reads a product as its bot work moves, filtered or not; a mount
-      // still reads, since no stream ran while the viewer was off the feed
-      refetchOnWindowFocus: false,
-    })),
-    combine: combineWorkingNow,
-  });
-}
 
 function FeedPage() {
   const search = Route.useSearch();
@@ -60,7 +38,8 @@ function FeedPage() {
       }));
     },
   });
-  const workingNow = useWorkingNow(session.products);
+  // nothing while it loads or fails: the strip just isn't shown
+  const workingNow = useQuery(workingNowQuery).data;
   const noProducts = !session.viewer.isOwner && session.products.length === 0;
   return (
     <AppPage

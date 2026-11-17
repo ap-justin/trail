@@ -222,10 +222,19 @@ describe("ToggleGroup", () => {
     expect(all).toHaveClass(
       "aria-pressed:bg-background",
       "aria-pressed:border-border",
-      "h-10",
-      "lg:h-7",
       ...focusRing,
     );
+  });
+
+  test("a segment is itself the 44px tap target below lg, 28 inside the track from lg", () => {
+    render(
+      <ToggleGroup variant="segmented" aria-label="Type" defaultValue={["all"]}>
+        <ToggleGroupItem value="all">All</ToggleGroupItem>
+      </ToggleGroup>,
+    );
+    const all = screen.getByRole("button", { name: "All" });
+    expect(all).toHaveClass("h-11", "lg:h-7");
+    expect(all).not.toHaveClass("h-10");
   });
 });
 

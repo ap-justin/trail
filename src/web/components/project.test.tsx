@@ -10,6 +10,7 @@ import {
   type ProjectViewProps,
 } from "@/components/project";
 import {
+  beta,
   docsSite,
   issueRow,
   projectDetail,
@@ -444,6 +445,44 @@ describe("empty and failed", () => {
     expect(screen.getByRole("tabpanel", { name: /^Canceled/ })).toHaveFocus();
   });
 
+  test("the status tab panel is focused from script only, never a Tab stop", () => {
+    render(<ProjectView {...props()} />);
+    expect(screen.getByRole("tabpanel", { name: /^All/ })).toHaveAttribute(
+      "tabindex",
+      "-1",
+    );
+  });
+
+  test("a status update's bot name never truncates; its title gives way first", () => {
+    render(
+      <ProjectView
+        {...props({
+          statusUpdates: {
+            status: "ready",
+            data: {
+              items: [
+                statusUpdate({
+                  author: {
+                    ...beta,
+                    title: "Release manager for the web client",
+                  },
+                }),
+              ],
+              nextCursor: null,
+            },
+          },
+        })}
+      />,
+    );
+    const section = screen.getByRole("region", { name: "Status updates" });
+    const name = within(section).getByText("Beta");
+    expect(name).toHaveClass("shrink-0");
+    expect(name).not.toHaveClass("truncate");
+    expect(
+      within(section).getByText("Release manager for the web client"),
+    ).toHaveClass("min-w-0", "truncate");
+  });
+
   test("Try again on status updates leaves focus on their heading", async () => {
     const user = userEvent.setup();
     const { rerender } = render(
@@ -457,6 +496,13 @@ describe("empty and failed", () => {
       screen.getByRole("heading", { name: "Status updates" }),
     ).toHaveFocus();
   });
+});
+
+test("the Projects link in the heading is a 44px tap target below lg, its text's own box from lg", () => {
+  render(<ProjectHeading project={{ name: "Docs site" }} />);
+  const link = screen.getByRole("link", { name: "Projects" });
+  expect(link).toHaveClass("max-lg:min-h-11", "max-lg:items-center");
+  expect(link).not.toHaveClass("min-h-11");
 });
 
 test("the Projects link in the heading draws the shared focus outline", () => {

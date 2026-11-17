@@ -1,6 +1,11 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { __unstable__loadDesignSystem } from "@tailwindcss/node";
+import {
+  __unstable__loadDesignSystem,
+  compile,
+  optimize,
+} from "@tailwindcss/node";
+import userEvent from "@testing-library/user-event";
 import { beforeAll, describe, expect, test } from "vitest";
 
 // The half of the conformance gate the build can't enforce. The build half is in
@@ -24,13 +29,18 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
-/** Class-name tokens: every string literal, minus import paths and non-class JSX attributes. `className` and any `*ClassName` prop (`markClassName`) carry classes. */
-function classTokens(source: string): string[] {
+/** Class strings: every string literal, minus import paths and non-class JSX attributes. `className` and any `*ClassName` prop (`markClassName`) carry classes. */
+function classStrings(source: string): string[] {
   const stripped = source
     .replace(/from\s+"[^"]*"/g, "")
     .replace(/\b(?![\w-]*[cC]lassName\b)[\w-]+="[^"]*"/g, "");
   const literals = stripped.match(/"[^"\n]*"|`[^`]*`/g) ?? [];
-  return literals.flatMap((l) => l.slice(1, -1).split(/\s+/).filter(Boolean));
+  return literals.map((l) => l.slice(1, -1));
+}
+
+/** Class-name tokens: each class string split on whitespace. */
+function classTokens(source: string): string[] {
+  return classStrings(source).flatMap((l) => l.split(/\s+/).filter(Boolean));
 }
 
 // an arbitrary value carrying its own length, duration or colour instead of a token
@@ -146,6 +156,61 @@ describe("focus and disabled", () => {
     ).toEqual([]);
   });
 
+  // `outline-none` and `outline-hidden` set `--tw-outline-style: none`, which `focus-visible:outline-2` reads
+  test("no class string pairs a suppressed outline with a focus outline", () => {
+    const findings = componentFiles.flatMap((file) =>
+      classStrings(readFileSync(file, "utf8"))
+        .filter(
+          (classes) =>
+            /(?:^|\s)outline-(?:none|hidden)(?:\s|$)/.test(classes) &&
+            /(?:^|\s)(?:[\w-]+:)*focus-visible:-?outline-/.test(classes),
+        )
+        .map((classes) => ({ file: file.slice(webDir.length + 1), classes })),
+    );
+    expect(findings).toEqual([]);
+  });
+
+  test("every class string with a focus outline draws it when Tab lands there", async () => {
+    const outlined = componentFiles.flatMap((file) =>
+      classStrings(readFileSync(file, "utf8"))
+        .filter((classes) =>
+          /(?:^|\s)focus-visible:outline-2(?:\s|$)/.test(classes),
+        )
+        .map((classes) => ({
+          file: file.slice(webDir.length + 1),
+          classes: classes.trim(),
+        })),
+    );
+    expect(outlined.length).toBeGreaterThan(10);
+
+    const compiler = await compile(css, { base: stylesDir, onDependency() {} });
+    const candidates = outlined.flatMap(({ classes }) => classes.split(/\s+/));
+    const style = document.createElement("style");
+    style.textContent = optimize(compiler.build(candidates)).code;
+    document.head.append(style);
+
+    const user = userEvent.setup();
+    const undrawn = [];
+    for (const { file, classes } of outlined) {
+      document.body.replaceChildren();
+      const target = document.createElement("a");
+      target.href = "#";
+      target.setAttribute("class", classes);
+      document.body.append(target);
+      await user.tab();
+      const { outlineStyle, outlineWidth } = getComputedStyle(target);
+      if (
+        document.activeElement !== target ||
+        outlineStyle === "none" ||
+        outlineWidth !== "2px"
+      ) {
+        undrawn.push({ file, classes, outlineStyle, outlineWidth });
+      }
+    }
+    style.remove();
+    expect(undrawn).toEqual([]);
+  });
+
   // a disabled control stays legible: muted ground and ink, never faded
   test("nothing disabled fades", () => {
     expect(
@@ -214,6 +279,16 @@ describe("motion", () => {
     const reduced = reducedMotionCss();
     expect(reduced).toContain("row-enter-reduced");
     expect(reduced).not.toMatch(/translate|transform/);
+  });
+
+  test("a bare colour or opacity transition runs on --duration-fast, 150ms", () => {
+    expect(css).toMatch(/--duration-fast:\s*150ms;/);
+    expect(css).toMatch(
+      /--default-transition-duration:\s*var\(--duration-fast\);/,
+    );
+    expect(
+      designSystem.candidatesToCss(["duration-(--duration-fast)"])[0],
+    ).toContain("var(--duration-fast)");
   });
 
   test("no transition: all", () => {

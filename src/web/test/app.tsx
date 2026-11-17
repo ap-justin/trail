@@ -5,11 +5,11 @@ import type {
   EntryView,
   FeedView,
   MeView,
-  WebItemRowView,
+  WebWorkingNowView,
 } from "@/lib/api-types";
 import { createQueryClient } from "@/lib/queries";
 import { createAppRouter } from "@/router";
-import { allProducts, alpha, itemList, maya, trail } from "@/test/fixtures";
+import { allProducts, alpha, maya, trail } from "@/test/fixtures";
 import { server } from "@/test/server";
 
 /** The whole app at `path`, on a fresh cache that never retries unless the test brings its own. */
@@ -65,7 +65,7 @@ export function meView(state: MeView["state"]): MeView {
 }
 
 /**
- * Answers `/me` with `state`, and Working now's reads on the feed with nothing in progress;
+ * Answers `/me` with `state`, and Working now's read on the feed with nothing in progress;
  * `server.use` it again to change who is signed in.
  */
 export function signedInAs(state: MeView["state"]) {
@@ -87,20 +87,15 @@ export function feedPage(items: EntryView[]): FeedView {
   };
 }
 
-/**
- * Answers the feed's Working now reads, each product's in-progress items of every type,
- * with `byProduct[key]`, or none for a product it doesn't name. Other item reads fall
- * through to the handlers behind it.
- */
-export function serveInProgress(
-  byProduct: Record<string, WebItemRowView[]> = {},
-) {
+/** Answers the feed's Working now read with `entries`, the bots at work. */
+export function serveInProgress(entries: WebWorkingNowView["entries"] = []) {
   server.use(
-    http.get("/api/web/products/:key/items", ({ params, request }) => {
-      const search = new URL(request.url).searchParams;
-      if (search.get("status") !== "in_progress" || search.has("type")) return;
-      return HttpResponse.json(itemList(byProduct[String(params.key)] ?? []));
-    }),
+    http.get("/api/web/working-now", () =>
+      HttpResponse.json({
+        total: entries.length,
+        entries,
+      } satisfies WebWorkingNowView),
+    ),
   );
 }
 

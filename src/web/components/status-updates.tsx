@@ -62,7 +62,7 @@ export function UpdateHealth({
 
 /** A Health cell with no status update behind it. */
 export const NO_HEALTH = (
-  <span className="text-muted-foreground">None yet</span>
+  <span className="text-muted-foreground">No update yet</span>
 );
 
 export const NO_STATUS_UPDATE = "No status update yet";
@@ -87,12 +87,7 @@ export function LatestUpdate({
     <div className="flex min-w-0 items-center gap-2">
       <ActorAvatar actor={update.author} size="xs" />
       <span className={actorNameGroup}>
-        <span
-          className={cn(
-            "min-w-0 truncate",
-            layout === "table" && "font-medium",
-          )}
-        >
+        <span className={cn("shrink-0", layout === "table" && "font-medium")}>
           {update.author.name}
         </span>{" "}
         <BotTitle actor={update.author} />
@@ -165,9 +160,7 @@ function StatusUpdateItem({ update }: { update: WebStatusUpdateView }) {
       <ActorAvatar actor={update.author} size="xs" className="lg:size-5" />
       {/* at lg one line beside the health, a long title truncating rather than wrapping */}
       <span className={cn(actorNameGroup, "lg:flex-nowrap")}>
-        <span className="min-w-0 truncate font-medium">
-          {update.author.name}
-        </span>{" "}
+        <span className="shrink-0 font-medium">{update.author.name}</span>{" "}
         <BotTitle actor={update.author} />
       </span>
       <div className="col-start-2 -mt-0.5 flex min-w-0 items-center gap-2 text-xs text-muted-foreground lg:contents">

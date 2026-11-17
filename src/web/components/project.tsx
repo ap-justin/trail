@@ -1,7 +1,7 @@
 import { PackageIcon } from "lucide-react";
 import { type ReactNode, useId, useRef } from "react";
 import { ActorAvatar, BotTitle } from "@/components/actor";
-import { AppLink, textLinkFocus } from "@/components/app-link";
+import { AppLink, textLinkFocus, textLinkTap } from "@/components/app-link";
 import { ProductSelect } from "@/components/filter-select";
 import {
   FilterEmpty,
@@ -75,7 +75,7 @@ export function ProjectHeading({ project }: { project: { name: string } }) {
       <span className="flex items-center gap-2 text-sm font-normal text-muted-foreground">
         <AppLink
           href={paths.projects}
-          className={cn(textLinkFocus, "hover:text-foreground")}
+          className={cn(textLinkFocus, textLinkTap, "hover:text-foreground")}
         >
           Projects
         </AppLink>
@@ -316,6 +316,7 @@ function ProjectBody(
             <TabsContent
               ref={listRef}
               value={statusTabValue(filters)}
+              tabIndex={-1}
               className="outline-none"
             >
               <ItemsBody

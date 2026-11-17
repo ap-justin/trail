@@ -49,6 +49,7 @@
   --ease-out: ease-out;
   /* what a bare `transition-colors` / `transition-opacity` runs on */
   --default-transition-timing-function: var(--ease-out);
+  --default-transition-duration: var(--duration-fast);
 }
 
 @theme inline {
@@ -120,6 +121,8 @@
   --destructive: oklch(0.54 0.21 27);
   --destructive-muted: oklch(0.96 0.02 25);
 
+  /* colour and opacity changes: hovers, a tab's underline */
+  --duration-fast: 150ms;
   --duration-press: 100ms;
   --duration-menu: 120ms;
   --duration-dialog: 150ms;

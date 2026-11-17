@@ -6,7 +6,15 @@ import {
   IssueView,
   type IssueViewProps,
 } from "@/components/issue";
-import { humanUi, issue, maya, teamAccess, todo } from "@/test/fixtures";
+import {
+  alpha,
+  beta,
+  humanUi,
+  issue,
+  maya,
+  teamAccess,
+  todo,
+} from "@/test/fixtures";
 
 function renderIssue(overrides: Partial<IssueViewProps> = {}) {
   const props: IssueViewProps = {
@@ -498,6 +506,19 @@ describe("projects property", () => {
     });
     expect(within(link).getByText("TRL")).toHaveClass("font-mono");
   });
+
+  test("the Product and Projects links are 44px tap targets below lg", () => {
+    renderIssue({
+      issue: { status: "ready", data: issue({ projects: [humanUi] }) },
+    });
+    for (const link of [
+      within(propertyValue("Product")).getByRole("link"),
+      within(propertyValue("Projects")).getByRole("link"),
+    ]) {
+      expect(link).toHaveClass("max-lg:min-h-11");
+      expect(link).not.toHaveClass("min-h-11");
+    }
+  });
 });
 
 describe("project and type events", () => {
@@ -612,4 +633,35 @@ test("the breadcrumb reads Products / product name / key", () => {
   expect(screen.getByText("TRL-14")).toBeInTheDocument();
   for (const link of screen.getAllByRole("link"))
     expect(link).toHaveClass(...focusRing);
+});
+
+test("an assignment line shows the assignee's avatar before their name", () => {
+  const base = issue();
+  renderIssue({
+    issue: {
+      status: "ready",
+      data: issue({
+        timeline: [
+          {
+            product: base.product,
+            item: { key: "TRL-14", title: "Team access", type: "issue" },
+            project: null,
+            kind: "assignee_changed",
+            id: "assign",
+            createdAt: "2026-11-09T14:03:00.000Z",
+            actor: beta,
+            from: null,
+            to: alpha,
+          },
+        ],
+      }),
+    },
+  });
+  const line = document.querySelector<HTMLElement>('[data-entry-id="assign"]');
+  if (!line) throw new Error("no assignment line");
+  const avatar = within(line).getByRole("img", { name: "Alpha, bot" });
+  const name = within(line).getByText("Alpha");
+  expect(
+    avatar.compareDocumentPosition(name) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
 });

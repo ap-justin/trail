@@ -17,6 +17,7 @@ import type {
   WebProjectItemsView,
   WebProjectPageView,
   WebStatusUpdatePageView,
+  WebWorkingNowView,
 } from "@/lib/api-types";
 
 /** A non-2xx answer from trail, carrying the server's own message; or no answer at all (status 0). */
@@ -149,6 +150,7 @@ export const api = {
   issue: (key: string) => request<WebItemView>(web(`/items/${seg(key)}`)),
   feed: (filter: FeedFilter) =>
     request<FeedView>(web(`/feed${query({ ...filter, limit: MAX_PAGE })}`)),
+  workingNow: () => request<WebWorkingNowView>(web("/working-now")),
   search: (q: string) => request<SearchView>(web(`/search${query({ q })}`)),
   createIssue: (issue: {
     product: string;

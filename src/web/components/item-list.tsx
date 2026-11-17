@@ -565,7 +565,7 @@ export function ItemRows({ groups, now }: { groups: ItemGroup[]; now: Date }) {
                     href={paths.issue(item.key)}
                     aria-label={`${item.key} ${item.title}`}
                     aria-describedby={`${typeId} ${metaId}`}
-                    className="flex gap-2.5 py-3 outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+                    className="flex gap-2.5 py-3 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
                   >
                     <StatusIcon status={item.status} className="mt-0.75" />
                     <span className="flex min-w-0 flex-1 flex-col gap-0.5">

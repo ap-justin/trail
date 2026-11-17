@@ -190,7 +190,7 @@ function ProductPicker({
       <PopoverTrigger
         aria-labelledby={`${labelId} ${valueId}`}
         className={cn(
-          "flex h-11 min-w-0 items-center gap-1.5 overflow-hidden rounded-lg border border-input px-1.5 text-left outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring lg:h-8 dark:bg-input/30",
+          "flex h-11 min-w-0 items-center gap-1.5 overflow-hidden rounded-lg border border-input px-1.5 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring lg:h-8 dark:bg-input/30",
           className,
         )}
       >

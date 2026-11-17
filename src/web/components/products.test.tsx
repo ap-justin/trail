@@ -2,7 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 import { ProductsView, type ProductsViewProps } from "@/components/products";
-import { product, statusUpdate } from "@/test/fixtures";
+import { beta, product, statusUpdate } from "@/test/fixtures";
 
 const now = new Date("2026-11-11T09:53:00.000Z");
 
@@ -59,12 +59,30 @@ describe("products", () => {
     expect(within(table()).getByText("41m ago")).toBeInTheDocument();
   });
 
-  test('"No status update yet" shows no health, even with a health on file; the Health column reads "None yet"', () => {
+  test("the latest update's bot name never truncates; its title gives way first", () => {
+    renderProducts({
+      products: [
+        product({
+          latestStatusUpdate: statusUpdate({
+            author: { ...beta, title: "Release manager for the web client" },
+          }),
+        }),
+      ],
+    });
+    const name = within(table()).getByText("Beta");
+    expect(name).toHaveClass("shrink-0");
+    expect(name).not.toHaveClass("truncate");
+    expect(
+      within(table()).getByText("Release manager for the web client"),
+    ).toHaveClass("min-w-0", "truncate");
+  });
+
+  test('"No status update yet" shows no health, even with a health on file; the Health column reads "No update yet"', () => {
     renderProducts({
       products: [product({ latestStatusUpdate: null, health: "at_risk" })],
     });
     expect(screen.getAllByText("No status update yet")).toHaveLength(2);
-    expect(within(table()).getByText("None yet")).toBeInTheDocument();
+    expect(within(table()).getByText("No update yet")).toBeInTheDocument();
     for (const word of ["On track", "At risk", "Off track"]) {
       expect(screen.queryByText(word)).not.toBeInTheDocument();
     }

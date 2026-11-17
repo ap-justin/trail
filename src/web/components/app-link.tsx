@@ -45,7 +45,11 @@ export function AppLink(props: AppLinkProps) {
 
 /** A text link's keyboard focus: the 2px `--ring` outline every control draws. */
 export const textLinkFocus =
-  "rounded-md outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
+  "rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
+
+/** A standalone text link's 44px tap area below lg; from lg its box is the text's own. */
+export const textLinkTap =
+  "max-lg:inline-flex max-lg:min-h-11 max-lg:items-center";
 
 /**
  * The link a row opens; its ::after covers the nearest positioned ancestor (the row), so

@@ -364,10 +364,7 @@ test("a stream filtered to a quiet product still sends a comment line every 15 s
     await vi.advanceTimersByTimeAsync(5_000);
     await file(busy.id, `busy ${i}`);
   }
-  let message = await stream.next();
-  // the busy product's filings reach a filtered stream only as work events
-  while (message?.event === "work") message = await stream.next();
-  expect(message).toEqual({ comment: "heartbeat" });
+  expect(await stream.next()).toEqual({ comment: "heartbeat" });
   await stream.cancel();
 });
 
@@ -915,67 +912,103 @@ const workMessage = (productKey: string) => ({
   data: JSON.stringify({ productKey }),
 });
 
-test("a product-filtered stream gets a work event, with no id, for bot work moving in another product the member sees", async () => {
-  const watched = addProject("WorkWatched");
-  const elsewhere = addProject("WorkElsewhere");
-  const stream = await openStream(
-    await addMember("work-watcher", [watched.id, elsewhere.id]),
-    { query: `?product=${watched.key}` },
-  );
-  const filed = await file(elsewhere.id, "started elsewhere");
-  expect(await nextMessage(stream)).toStrictEqual(workMessage(elsewhere.key));
-  await request("PATCH", `/api/v1/issues/${filed.id}`, {
-    json: { status: "in_progress" },
+/** The named events up to and including the next work event: entries and comment lines left out. */
+async function untilWork(stream: Awaited<ReturnType<typeof openStream>>) {
+  const named = [];
+  for (;;) {
+    const message = await nextMessage(stream);
+    if (message === null) return named;
+    if (message.event !== undefined) named.push(message);
+    if (message.event === "work") return named;
+  }
+}
+
+const todo = async (productKey: string, title: string) => {
+  const res = await request("POST", "/api/v1/items", {
+    json: { type: "todo", product: productKey, title },
   });
-  expect(await nextMessage(stream)).toStrictEqual(workMessage(elsewhere.key));
+  expect(res.status).toBe(201);
+  return ((await res.json()) as { key: string }).key;
+};
+
+const patchItem = (key: string, json: Record<string, unknown>) =>
+  request("PATCH", `/api/v1/items/${key}`, { json });
+
+test("a work event, with no id, follows an item moving into and out of in progress and a new assignee on an in-progress item", async () => {
+  const alpha = addProject("alpha");
+  const other = addBot("other-bot");
+  const stream = await openStream(await addMember("work-alpha", [alpha.id]));
+  const key = await todo(alpha.key, "alpha work");
+  await patchItem(key, { status: "in_progress" });
+  expect(await untilWork(stream)).toStrictEqual([workMessage(alpha.key)]);
+  await patchItem(key, { assignee: other.actor.id });
+  expect(await untilWork(stream)).toStrictEqual([workMessage(alpha.key)]);
+  await patchItem(key, { status: "done" });
+  expect(await untilWork(stream)).toStrictEqual([workMessage(alpha.key)]);
   await stream.cancel();
 });
 
-test("a filtered stream gets no work event for a product the member can't see, nor for a comment or a change that moves no work", async () => {
-  const watched = addProject("QuietWatched");
-  const elsewhere = addProject("QuietElsewhere");
-  const hidden = addProject("QuietHidden");
-  const before = await file(elsewhere.id, "filed before");
+test("an item created in progress sends a work event", async () => {
+  const alpha = addProject("alpha");
+  const beta = addProject("beta");
   const stream = await openStream(
-    await addMember("quiet-watcher", [watched.id, elsewhere.id]),
-    { query: `?product=${watched.key}` },
+    await addMember("work-created", [alpha.id, beta.id]),
+    { query: `?product=${beta.key}` },
   );
-  await file(hidden.id, "out of sight");
-  await request("POST", `/api/v1/items/${before.key}/comments`, {
+  await todo(alpha.key, "alpha work");
+  const created = db
+    .select()
+    .from(activityEvent)
+    .where(eq(activityEvent.productId, alpha.id))
+    .orderBy(desc(activityEvent.seq))
+    .get();
+  if (!created) throw new Error("no event");
+  // no route creates an item in progress, so the event is published as one would be
+  bus.publish({
+    ...created,
+    seq: created.seq + 1,
+    payload: { ...created.payload, status: "in_progress" },
+  });
+  expect(await untilWork(stream)).toStrictEqual([workMessage(alpha.key)]);
+  await stream.cancel();
+});
+
+test("no work event for a title edit, a comment, a todo done from open, a new assignee on an open item, an issue filed in triage, or a product the member can't see", async () => {
+  const alpha = addProject("alpha");
+  const beta = addProject("beta");
+  const hidden = addProject("hidden");
+  const other = addBot("quiet-bot");
+  const key = await todo(alpha.key, "alpha work");
+  const hiddenKey = await todo(hidden.key, "out of sight");
+  const sentinel = await todo(beta.key, "beta work");
+  const stream = await openStream(
+    await addMember("work-quiet", [alpha.id, beta.id]),
+  );
+  await patchItem(key, { title: "alpha work, renamed" });
+  await request("POST", `/api/v1/items/${key}/comments`, {
     json: { body: "just talk" },
   });
-  await request("PATCH", `/api/v1/issues/${before.id}`, {
-    json: { priority: 1 },
-  });
-  await file(watched.id, "the one in the filter");
-  const message = await nextMessage(stream);
-  expect(message?.event).toBeUndefined();
-  expect(JSON.parse(message?.data ?? "null")).toMatchObject({
-    item: { title: "the one in the filter" },
-  });
+  await patchItem(key, { assignee: other.actor.id });
+  await patchItem(key, { status: "done" });
+  await file(alpha.id, "filed in triage");
+  await patchItem(hiddenKey, { status: "in_progress" });
+  await patchItem(sentinel, { status: "in_progress" });
+  expect(await untilWork(stream)).toStrictEqual([workMessage(beta.key)]);
   await stream.cancel();
 });
 
-test("an unfiltered stream carries moving work as entries alone, never as work events too", async () => {
-  const p = addProject("WorkUnfiltered");
-  const stream = await openStream(ownerCookie);
-  const filed = await file(p.id, "started");
-  await request("PATCH", `/api/v1/issues/${filed.id}`, {
-    json: { status: "in_progress" },
+test("a stream whose filter shows the entry gets the work event after it", async () => {
+  const alpha = addProject("alpha");
+  const key = await todo(alpha.key, "alpha work");
+  const stream = await openStream(ownerCookie, {
+    query: `?product=${alpha.key}`,
   });
-  const kinds = [];
-  for (let i = 0; i < 2; i++) {
-    const message = await nextMessage(stream);
-    expect(message?.event).toBeUndefined();
-    kinds.push(JSON.parse(message?.data ?? "null").kind);
-  }
-  expect(kinds).toEqual(["item_created", "status_changed"]);
-  // the next message is the next entry: no work event sat between them
-  await file(p.id, "sentinel");
-  const next = await nextMessage(stream);
-  expect(next?.event).toBeUndefined();
-  expect(JSON.parse(next?.data ?? "null")).toMatchObject({
-    item: { title: "sentinel" },
+  await patchItem(key, { status: "in_progress" });
+  const entry = await nextMessage(stream);
+  expect(JSON.parse(entry?.data ?? "null")).toMatchObject({
+    kind: "status_changed",
+    item: { key },
   });
+  expect(await nextMessage(stream)).toStrictEqual(workMessage(alpha.key));
   await stream.cancel();
 });

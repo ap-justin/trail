@@ -1,7 +1,7 @@
 import { FolderIcon, GitPullRequestIcon } from "lucide-react";
 import { type FormEvent, type ReactNode, useId, useState } from "react";
 import { ActorAvatar, ActorName } from "@/components/actor";
-import { AppLink, textLinkFocus } from "@/components/app-link";
+import { AppLink, textLinkFocus, textLinkTap } from "@/components/app-link";
 import { Markdown } from "@/components/markdown";
 import { IssueError, IssueSkeleton, NotFoundPanel } from "@/components/states";
 import {
@@ -264,6 +264,7 @@ function Properties({ issue }: { issue: WebItemView }) {
             href={paths.product(issue.product.key)}
             className={cn(
               textLinkFocus,
+              textLinkTap,
               "flex items-center gap-2 hover:underline",
             )}
           >
@@ -286,6 +287,7 @@ function Properties({ issue }: { issue: WebItemView }) {
                     href={paths.project(project.slug)}
                     className={cn(
                       textLinkFocus,
+                      textLinkTap,
                       "flex items-center gap-2 hover:underline",
                     )}
                   >
@@ -349,7 +351,7 @@ function Links({ links }: { links: WebItemView["links"] }) {
                   rel="noopener noreferrer"
                   className={cn(
                     row,
-                    "rounded-md outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                    "rounded-md hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
                   )}
                 >
                   {body}
@@ -418,7 +420,11 @@ function changePhrase(entry: EntryView): ReactNode {
       return <>added a link {strong(entry.link.title)}</>;
     case "assignee_changed":
       return entry.to ? (
-        <>assigned this to {strong(entry.to.name)}</>
+        <>
+          assigned this to{" "}
+          <ActorAvatar actor={entry.to} size="xs" className="lg:size-5" />
+          {strong(entry.to.name)}
+        </>
       ) : (
         "unassigned this issue"
       );

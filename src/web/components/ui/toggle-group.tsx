@@ -77,9 +77,10 @@ function ToggleGroupItem({
           variant: context.variant || variant,
           size: context.size || size,
         }),
-        // inside the track's 2px padding, so the track itself is the 44px / 32px control
+        // the segment is the tap target, so it is 44px below lg; from lg it sits inside the track's
+        // 2px padding, making the track the 32px control
         (context.variant || variant) === "segmented" &&
-          "h-10 min-w-0 lg:h-7 lg:min-w-0",
+          "h-11 min-w-0 lg:h-7 lg:min-w-0",
         className,
       )}
       {...props}

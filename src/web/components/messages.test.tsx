@@ -563,6 +563,14 @@ describe("conversation breadcrumb", () => {
     );
   });
 
+  test("Messages is a 44px tap target below lg", () => {
+    render(<ConversationBreadcrumb listHref="/messages" />);
+    expect(screen.getByRole("link", { name: "Messages" })).toHaveClass(
+      "max-lg:min-h-11",
+      "max-lg:items-center",
+    );
+  });
+
   test("names the pair in the list's order, whichever order it's handed", () => {
     render(
       <ConversationBreadcrumb listHref="/messages" bots={[beta, alpha]} />,

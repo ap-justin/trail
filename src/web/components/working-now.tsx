@@ -1,48 +1,31 @@
 import { useId } from "react";
 import { ActorAvatar } from "@/components/actor";
-import { AppLink } from "@/components/app-link";
+import { AppLink, textLinkFocus } from "@/components/app-link";
 import { KeyText } from "@/components/text";
-import type { WebActorView, WebItemRowView } from "@/lib/api-types";
+import type { WebWorkingNowView } from "@/lib/api-types";
 import { paths } from "@/lib/paths";
 import { cn } from "@/lib/utils";
-
-/** A bot and the in-progress item assigned to it. */
-export type WorkingNowEntry = {
-  bot: WebActorView;
-  item: Pick<WebItemRowView, "key" | "title">;
-};
 
 /** Entries shown from lg; below lg, `WORKING_NOW_PHONE_CAP` of them. */
 export const WORKING_NOW_CAP = 4;
 export const WORKING_NOW_PHONE_CAP = 2;
 
 /**
- * The items in progress with a bot assignee, most recently updated first. Items a
- * person holds, or nobody does, are not bot work.
- */
-export function workingNowEntries(items: WebItemRowView[]): WorkingNowEntry[] {
-  return items
-    .filter((item) => item.status === "in_progress")
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-    .flatMap(({ key, title, assignee }) =>
-      assignee?.kind === "bot" ? [{ bot: assignee, item: { key, title } }] : [],
-    );
-}
-
-/**
- * The top of the feed: each bot at work as its square teal avatar plus the item key,
- * linking to the item. Four entries from lg and two below, then "+N" for the rest.
- * Nothing at all while no bot has an item in progress.
+ * The top of the feed: each bot at work as its square teal avatar, its name and the
+ * item key, linking to the item. Four entries from lg and two below, then "+N" for the
+ * rest of `total`, which counts past the entries the server sends. Nothing at all while
+ * no bot has an item in progress.
  */
 export function WorkingNow({
-  entries,
+  workingNow,
   className,
 }: {
-  entries: WorkingNowEntry[];
+  workingNow: WebWorkingNowView | undefined;
   className?: string;
 }) {
   const headingId = useId();
-  if (entries.length === 0) return null;
+  if (!workingNow || workingNow.total === 0) return null;
+  const { total, entries } = workingNow;
   const shown = entries.slice(0, WORKING_NOW_CAP);
   return (
     <section
@@ -59,26 +42,33 @@ export function WorkingNow({
         {shown.map(({ bot, item }, index) => (
           <li
             key={item.key}
-            className={cn(index >= WORKING_NOW_PHONE_CAP && "max-lg:hidden")}
+            className={cn(
+              "min-w-0",
+              index >= WORKING_NOW_PHONE_CAP && "max-lg:hidden",
+            )}
           >
             <AppLink
               href={paths.issue(item.key)}
-              aria-label={`${bot.name} is working on ${item.key} ${item.title}`}
-              className="flex min-h-11 items-center gap-1.5 rounded-md px-1.5 hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring lg:min-h-8"
+              aria-label={`${item.key} ${item.title}, worked on by ${bot.name}, bot`}
+              className={cn(
+                textLinkFocus,
+                "flex min-h-11 min-w-0 items-center gap-1.5 pr-2 pl-1 hover:bg-accent lg:min-h-7",
+              )}
             >
               <ActorAvatar actor={bot} size="xs" />
-              <KeyText className="text-foreground">{item.key}</KeyText>
+              {/* the name gives way first: the key is what the link opens */}
+              <span className="min-w-0 truncate font-medium text-foreground">
+                {bot.name}
+              </span>
+              <KeyText>{item.key}</KeyText>
             </AppLink>
           </li>
         ))}
         <MoreCount
-          count={entries.length - WORKING_NOW_PHONE_CAP}
+          count={total - Math.min(shown.length, WORKING_NOW_PHONE_CAP)}
           className="lg:hidden"
         />
-        <MoreCount
-          count={entries.length - WORKING_NOW_CAP}
-          className="max-lg:hidden"
-        />
+        <MoreCount count={total - shown.length} className="max-lg:hidden" />
       </ul>
     </section>
   );
@@ -88,7 +78,7 @@ function MoreCount({ count, className }: { count: number; className: string }) {
   if (count <= 0) return null;
   return (
     <li
-      className={cn("px-1.5 text-xs text-muted-foreground", className)}
+      className={cn("shrink-0 px-1.5 text-xs text-muted-foreground", className)}
       data-more-count
     >
       +{count} <span className="sr-only">more</span>
