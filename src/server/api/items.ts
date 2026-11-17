@@ -36,7 +36,7 @@ const createItem = createRoute({
   method: "post",
   path: "/items",
   summary: "Add a todo or file an issue",
-  description: `Needs the issues action on a key that reaches the product. ${TODO_OR_ISSUE} A todo without product goes to the one product you own; with none or several, the 422 lists the products to pick from. It gets the product's next number, so its key reads like TRL-12.`,
+  description: `Needs the issues action on a key that reaches the product. ${TODO_OR_ISSUE} A todo without product goes to the one product you own; with none or several, the 422 lists the products to pick from. An issue with project joins that project as it is filed; a key that reaches a product only through a project files there with project. It gets the product's next number, so its key reads like TRL-12.`,
   tags,
   request: {
     headers: idempotencyHeaders,

@@ -91,7 +91,7 @@ test("a key limited to reading one project sets and clears its own title, and an
   await call(other, "set_my_title", { title: "Bystander" });
   const reader = await connect(
     createBot(db, "mcp-reader", {
-      scope: { projects: [addProject("McpTitleScope").key], actions: ["read"] },
+      scope: { products: [addProject("McpTitleScope").key], actions: ["read"] },
     }).key,
   );
   await call(reader, "set_my_title", { title: "Reader" });

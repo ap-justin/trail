@@ -66,7 +66,7 @@ test("a database holding 0008 keys keeps every key, unscoped, and still authenti
   expect(authenticateKey(db, live)).toMatchObject({
     id: "b1",
     displayName: "alpha",
-    scope: { products: null, actions: null },
+    scope: { products: null, projects: [], actions: null },
   });
   expect(authenticateKey(db, revoked)).toBeNull();
 
@@ -76,6 +76,7 @@ test("a database holding 0008 keys keeps every key, unscoped, and still authenti
   );
   expect(authenticateKey(db, live)?.scope).toEqual({
     products: [{ id: "p1", key: "TRL" }],
+    projects: [],
     actions: null,
   });
   expect(rows(db, "pragma foreign_key_check")).toEqual([]);

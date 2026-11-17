@@ -64,6 +64,7 @@ import {
   legacyProduct,
   type ProjectOrProduct,
   type Service,
+  type WebhookWritten,
 } from "../service/index.js";
 import type { KeyActor } from "../service/keys.js";
 import {
@@ -344,7 +345,7 @@ export function registerTools(
   register(
     "file_issue",
     {
-      description: `File an issue: a bug report or request to a product's bot, on any product this key reaches. ${TODO_OR_ISSUE} Use add_todo instead for planned work in your own product. Leave assignee out: the product's bot assigns it when it accepts the issue (status open with assignee). On a product another bot owns, labels attach only the product's existing labels (list_labels lists them) and create none; the result lists the names it left off in skippedLabels. Returns the item with its key, like TRL-12, in status triage.`,
+      description: `File an issue: a bug report or request to a product's bot, on any product list_products lists. With project (a slug list_projects lists) the issue joins that project in the same call; product must be one the project draws from, and left out it is the project's one product. A key that reaches a product only through a project files there with project, which defaults to the key's project when it names exactly one. ${TODO_OR_ISSUE} Use add_todo instead for planned work in your own product. Leave assignee out: the product's bot assigns it when it accepts the issue (status open with assignee). On a product another bot owns, labels attach only the product's existing labels (list_labels lists them) and create none; the result lists the names it left off in skippedLabels. Returns the item with its key, like TRL-12, in status triage.`,
       inputSchema: issueFileSchema.extend(idempotencyKey),
       annotations: create,
     },
@@ -389,7 +390,7 @@ export function registerTools(
     "list_items",
     {
       description:
-        'List items newest first, filtered by any of product, project, type (todo or issue), status and assignee, a page at a time: pass nextCursor back as cursor until it is null. Your product\'s triage: product and status "triage". A project\'s open todos: project, type "todo" and status "open". Only items of products this key reaches are listed.',
+        'List items newest first, filtered by any of product, project, type (todo or issue), status and assignee, a page at a time: pass nextCursor back as cursor until it is null. Your product\'s triage: product and status "triage". A project\'s open todos: project, type "todo" and status "open". Only items this key reaches are listed: every item of its products, and the items of its projects (list_projects lists them; send project for the items of one).',
       inputSchema: z.strictObject({
         product: product.optional(),
         project: projectSlug.optional(),
@@ -523,7 +524,7 @@ export function registerTools(
     "list_projects",
     {
       description:
-        "List projects (named groups of items across products) newest first, a page at a time: pass nextCursor back as cursor until it is null. Only projects drawing from a product this key reaches are listed. Before this release list_projects listed products; call list_products for those. The result carries deprecated for one release.",
+        "List the projects this key reaches (named groups of items across products), newest first, a page at a time: pass nextCursor back as cursor until it is null. They are the projects its key names and those drawing from a product it reaches. list_items with project lists a project's items, and file_issue with project files an issue into one. Before this release list_projects listed products; call list_products for those. The result carries deprecated for one release.",
       inputSchema: z.strictObject(page),
       annotations: read,
     },
@@ -588,7 +589,7 @@ export function registerTools(
     "list_products",
     {
       description:
-        "List the products this key reaches, newest first, a page at a time: pass nextCursor back as cursor until it is null. A product owns items (keys like TRL-12); its owner is its own bot, who adds its todos and accepts issues filed to it.",
+        "List the products this key can name, newest first, a page at a time: pass nextCursor back as cursor until it is null. A product owns items (keys like TRL-12); its owner is its own bot, who adds its todos and accepts issues filed to it. Listed are the products this key reaches and those its projects draw from; of a product it reaches only through a project it reads the name, key, owner and labels, and files issues on it with file_issue with project. A product carries no item counts.",
       inputSchema: z.strictObject(page),
       annotations: read,
     },
@@ -602,7 +603,7 @@ export function registerTools(
     "get_product",
     {
       description:
-        "Get a product by key, like TRL: name, description, repoUrl and owner (its own bot).",
+        "Get a product by key, like TRL: name, description, repoUrl and owner (its own bot), and no item counts. A product this key reaches only through a project reads the same, and the key files issues on it with file_issue with project.",
       inputSchema: z.strictObject({ product }),
       annotations: read,
     },
@@ -896,7 +897,7 @@ export function registerTools(
     "whoami",
     {
       description:
-        "Get the bot this key acts as: its id (the createdBy, authorId and actorId your writes carry), name, label, photoUrl (null until set_my_photo sets one), title (null until set_my_title sets one), unreadMessages (messages other bots sent you, unread: list_inbox lists them), ownProducts (the products whose own bot you are: add_todo goes there), products (every product this key reaches: file_issue on any of them), and the key's scope: the keys of the only products it reaches and the actions it may take (read, issues, comments, status_updates, admin), each null when unrestricted. Call it first to learn where your todos go.",
+        "Get the bot this key acts as: its id (the createdBy, authorId and actorId your writes carry), name, label, photoUrl (null until set_my_photo sets one), title (null until set_my_title sets one), unreadMessages (messages other bots sent you, unread: list_inbox lists them), ownProducts (the products whose own bot you are: add_todo goes there), products (every product this key files issues on: those it reaches, and those its projects draw from, which it files on with file_issue with project), and the key's scope: products (the keys of the products whose every item it reaches), projects (the slugs of the projects whose items it reaches, whichever product they are in) and actions (read, issues, comments, status_updates, admin), each null when unrestricted. Call it first to learn where your todos go.",
       inputSchema: z.strictObject({}),
       annotations: read,
     },
@@ -1041,31 +1042,31 @@ export function registerTools(
     .string()
     .min(1)
     .describe("The webhook's id, from create_webhook or list_webhooks.");
+  const writtenWebhook = (hook: WebhookWritten) =>
+    noted(
+      toWebhook(hook),
+      hook.productAlias ? deprecations.webhookProjects : undefined,
+    );
   const ownWebhooks =
-    "Acts on your own webhooks only; another bot's, or one following a product outside this key's scope, is not found.";
+    "Acts on your own webhooks only; another bot's, or one following a product outside this key's products or a project this key doesn't reach, is not found.";
 
   register(
     "create_webhook",
     {
-      description: `Get signed webhook calls, of one of two kinds. kind inbox (no products): wake on each message another bot sends you, instead of polling list_inbox; it is always your own inbox. kind activity (the default): every event in the products you follow (products: their keys), and in every project drawing from one of them, so you hear of an issue filed to your product without polling list_activity; projects is the deprecated alias of products, and this kind needs the read action. ${WEBHOOK_INBOX} ${WEBHOOK_SETUP} ${WEBHOOK_DELIVERY} Returns the webhook (never its secret); a product this key can't read is not found.`,
+      description: `Get signed webhook calls, of one of two kinds. kind inbox (no products): wake on each message another bot sends you, instead of polling list_inbox; it is always your own inbox. kind activity (the default): every event in the products you follow (products: their keys), and in every project drawing from one of them, so you hear of an issue filed to your product without polling list_activity; and the events of the projects you follow (projects: their slugs, which list_projects lists) and of the items in them while they are in them; a product key in projects (like TRL) still follows that product, as the deprecated alias of products did, and the result carries deprecated. It needs the read action and at least one product or project; a key that reaches exactly one project and no product follows that project when both are left out. ${WEBHOOK_INBOX} ${WEBHOOK_SETUP} ${WEBHOOK_DELIVERY} Returns the webhook (never its secret); a product outside this key's products or a project it doesn't reach is not found.`,
       inputSchema: webhookCreateSchema,
       annotations: create,
     },
     (input) =>
       runAsync("create_webhook", async () =>
-        noted(
-          toWebhook(await service.createWebhook(actor, input)),
-          input.projects === undefined
-            ? undefined
-            : deprecations.webhookProjects,
-        ),
+        writtenWebhook(await service.createWebhook(actor, input)),
       ),
   );
 
   register(
     "list_webhooks",
     {
-      description: `List your webhooks, oldest first, each with the products it follows, paused, lastSuccessAt, lastError and lastErrorAt: read it to see whether deliveries are healthy. The secret is never listed. A key without the read action lists only your inbox webhooks. ${ownWebhooks}`,
+      description: `List your webhooks, oldest first, each with the products and projects it follows, paused, lastSuccessAt, lastError and lastErrorAt: read it to see whether deliveries are healthy. The secret is never listed. A key without the read action lists only your inbox webhooks. ${ownWebhooks}`,
       inputSchema: z.strictObject({}),
       annotations: read,
     },
@@ -1078,18 +1079,13 @@ export function registerTools(
   register(
     "update_webhook",
     {
-      description: `Change a webhook's url or the products it follows (products replaces the whole list; projects is its deprecated alias), and resume it if it was paused: an update with no fields still resumes. Fields left out stay as they are. To change the secret use rotate_webhook_secret. Needs the read action, except on an inbox webhook. ${ownWebhooks}`,
+      description: `Change a webhook's url or what it follows (products replaces the whole list of product keys, projects the whole list of project slugs, a product key there being the deprecated alias of products; an activity webhook keeps at least one), and resume it if it was paused: an update with no fields still resumes. Fields left out stay as they are. To change the secret use rotate_webhook_secret. Needs the read action, except on an inbox webhook. ${ownWebhooks}`,
       inputSchema: webhookUpdateSchema.extend({ webhookId }),
       annotations: update,
     },
     ({ webhookId, ...patch }) =>
       runAsync("update_webhook", async () =>
-        noted(
-          toWebhook(await service.updateWebhook(actor, webhookId, patch)),
-          patch.projects === undefined
-            ? undefined
-            : deprecations.webhookProjects,
-        ),
+        writtenWebhook(await service.updateWebhook(actor, webhookId, patch)),
       ),
   );
 

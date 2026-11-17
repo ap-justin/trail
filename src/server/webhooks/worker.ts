@@ -8,7 +8,11 @@ import {
   webhookSubscription,
 } from "../db/schema.js";
 import type { ActivityEvent, EventBus } from "../events/bus.js";
-import { isPending, type WebhookSettings } from "../service/webhooks.js";
+import {
+  isPending,
+  leftFollowedProjects,
+  type WebhookSettings,
+} from "../service/webhooks.js";
 import {
   buildEnvelope,
   buildMessageEnvelope,
@@ -39,6 +43,9 @@ export const DELIVERED_KEEP_MS = 7 * 24 * HOUR;
 export const FAILED_KEEP_MS = 30 * 24 * HOUR;
 export const PURGE_MS = 10 * MINUTE;
 export const PURGE_BATCH = 500;
+/** The lastError of a delivery the worker drops instead of sending. */
+export const LEFT_PROJECT =
+  "not sent: the item left the projects this webhook follows before it went out";
 
 export type WebhookWorkerOptions = {
   db: Db;
@@ -291,7 +298,31 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
     );
   }
 
+  /**
+   * Marks failed, without an attempt, a delivery a project follow alone
+   * queued whose item has left the project since, so nothing about the item
+   * goes out after it left; true when it did. The webhook's health is left as
+   * it is, since the receiver had no part in it.
+   */
+  function dropLeftProject(delivery: Delivery): boolean {
+    if (delivery.eventId === null) return false;
+    const event = db
+      .select()
+      .from(activityEvent)
+      .where(eq(activityEvent.id, delivery.eventId))
+      .get();
+    if (!event || !leftFollowedProjects(db, delivery.subscriptionId, event)) {
+      return false;
+    }
+    db.update(webhookDelivery)
+      .set({ status: "failed", body: null, lastError: LEFT_PROJECT })
+      .where(and(eq(webhookDelivery.id, delivery.id), isPending))
+      .run();
+    return true;
+  }
+
   async function attempt(delivery: Delivery) {
+    if (dropLeftProject(delivery)) return;
     const sub = db
       .select()
       .from(webhookSubscription)

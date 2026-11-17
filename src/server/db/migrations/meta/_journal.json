@@ -120,6 +120,13 @@
       "when": 1794848996162,
       "tag": "0016_direct_messages",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1794892277448,
+      "tag": "0017_project_scoped_keys",
+      "breakpoints": true
     }
   ]
 }

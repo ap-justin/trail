@@ -10,7 +10,7 @@ type Body = Record<string, any>;
 
 const a = addProject("A");
 const scoped = createBot(db, "alpha-scoped", {
-  scope: { projects: [a.key], actions: ["read", "issues", "comments"] },
+  scope: { products: [a.key], actions: ["read", "issues", "comments"] },
 });
 let issueA = "";
 
@@ -416,7 +416,7 @@ test("a key scoped to A with read, issues and comments writes issues and comment
 
 test("a key scoped to A with the status_updates and admin actions posts, labels and patches A", async () => {
   const manager = createBot(db, "scoped manager", {
-    scope: { projects: [a.key], actions: ["read", "status_updates", "admin"] },
+    scope: { products: [a.key], actions: ["read", "status_updates", "admin"] },
   });
   const as = (method: string, path: string, json: unknown) =>
     request(method, `/api/v1/projects/${a.key}${path}`, {
@@ -458,7 +458,7 @@ test("a key with an action list and no project list reaches every project", asyn
 test("a key limited to projects can't create one, even with admin, and learns nothing of a taken key", async () => {
   const b = await hiddenProject();
   const admin = createBot(db, "scoped admin", {
-    scope: { projects: [a.key] },
+    scope: { products: [a.key] },
   });
   const refusal = {
     error: {
@@ -509,7 +509,7 @@ test("a key limited to projects imports into them, and an import outside them is
   // an owned product takes imports from its owner alone
   await unowned(inside, unscoped.key);
   const importer = createBot(db, "scoped importer", {
-    scope: { projects: [inside, a.key], actions: ["admin"] },
+    scope: { products: [inside, a.key], actions: ["admin"] },
   });
   const again = await request("POST", "/api/v1/import", {
     key: importer.key,
@@ -552,7 +552,7 @@ test("whoami reports the calling key's scope, null where it is unrestricted", as
     label: null,
     scope: {
       products: [a.key],
-      projects: [a.key],
+      projects: [],
       actions: ["read", "issues", "comments"],
     },
     ownProducts: [],
@@ -727,7 +727,7 @@ test("an import whose source key a hidden issue holds is refused naming nothing 
   await unowned(inside, bot.key);
 
   const importer = createBot(db, "scoped source-key importer", {
-    scope: { projects: [inside], actions: ["admin"] },
+    scope: { products: [inside], actions: ["admin"] },
   });
   const attempt = async (key: string, sourceKey: string) => {
     const res = await request("POST", "/api/v1/import", {

@@ -78,7 +78,7 @@ test("a bot creates, lists, reads, updates, rotates and deletes a webhook", asyn
   expect(created.status).toBe(201);
   expect(created.body).toMatchObject({
     url: HOOK,
-    projects: [a.key],
+    products: [a.key],
     paused: false,
     pausedAt: null,
     consecutiveFailures: 0,
@@ -94,9 +94,9 @@ test("a bot creates, lists, reads, updates, rotates and deletes a webhook", asyn
   expect((await call("GET", `/webhooks/${id}`)).body.id).toBe(id);
 
   const moved = await call("PATCH", `/webhooks/${id}`, {
-    json: { projects: [a.key, b.key.toLowerCase()] },
+    json: { products: [a.key, b.key.toLowerCase()] },
   });
-  expect(moved.body.projects).toEqual([a.key, b.key].sort());
+  expect(moved.body.products).toEqual([a.key, b.key].sort());
 
   const rotated = await call("PUT", `/webhooks/${id}/secret`, {
     json: { secret: NEW_SECRET },
@@ -188,7 +188,7 @@ test("a bot sees, changes, tests and deletes only its own webhooks", async () =>
 
 test("a key limited to one project can't subscribe to another: a 404, as for a missing project", async () => {
   const scoped = createBot(db, "alpha-scoped", {
-    scope: { projects: [a.key], actions: ["read", "issues"] },
+    scope: { products: [a.key], actions: ["read", "issues"] },
   });
   const hidden = await create({ projects: [b.key] }, scoped.key);
   const missing = await create({ projects: ["NOPE9"] }, scoped.key);
@@ -218,7 +218,7 @@ test("a webhook the key's scope doesn't fully cover is missing to that key", asy
     wideBot.key,
   );
   expect(wide.status).toBe(201);
-  const narrow = createKey(db, wideBot.actor.id, { projects: [a.key] }).key;
+  const narrow = createKey(db, wideBot.actor.id, { products: [a.key] }).key;
   expect((await call("GET", "/webhooks", { key: narrow })).body.items).toEqual(
     [],
   );
@@ -372,7 +372,7 @@ test("a key without read is refused on its bot's own webhook, and told nothing a
   expect(sent).toEqual([]);
   expect(
     (await call("GET", `/webhooks/${mine}`, { key: holder.key })).body,
-  ).toMatchObject({ id: mine, projects: [a.key] });
+  ).toMatchObject({ id: mine, products: [a.key] });
 });
 
 test("a key narrower than a webhook can't change, rotate or ping it", async () => {
@@ -383,7 +383,7 @@ test("a key narrower than a webhook can't change, rotate or ping it", async () =
       wideBot.key,
     )
   ).body.id as string;
-  const narrow = createKey(db, wideBot.actor.id, { projects: [a.key] }).key;
+  const narrow = createKey(db, wideBot.actor.id, { products: [a.key] }).key;
   for (const [method, path, json] of [
     ["PATCH", `/webhooks/${wide}`, { projects: [a.key] }],
     ["PUT", `/webhooks/${wide}/secret`, { secret: NEW_SECRET }],
@@ -395,13 +395,13 @@ test("a key narrower than a webhook can't change, rotate or ping it", async () =
   expect(sent).toEqual([]);
   expect(
     (await call("GET", `/webhooks/${wide}`, { key: wideBot.key })).body
-      .projects,
+      .products,
   ).toEqual([a.key, b.key].sort());
 });
 
 test("a scoped key adding a project it can't see on update gets the same 404 as on create", async () => {
   const scoped = createBot(db, "beta-scoped", {
-    scope: { projects: [a.key], actions: ["read"] },
+    scope: { products: [a.key], actions: ["read"] },
   });
   const id = (await create({ url: "https://bot.example.com/june" }, scoped.key))
     .body.id;
@@ -416,7 +416,7 @@ test("a scoped key adding a project it can't see on update gets the same 404 as 
   expect(hidden.status).toBe(404);
   expect(hidden.body).toEqual(onCreate.body);
   expect(
-    (await call("GET", `/webhooks/${id}`, { key: scoped.key })).body.projects,
+    (await call("GET", `/webhooks/${id}`, { key: scoped.key })).body.products,
   ).toEqual([a.key]);
 });
 
@@ -595,7 +595,7 @@ test("limits: 50 projects, a 16 to 256 character secret and a 2048 character URL
     projects: many.slice(0, 50),
   });
   expect(atLimit.status).toBe(201);
-  expect(atLimit.body.projects).toHaveLength(50);
+  expect(atLimit.body.products).toHaveLength(50);
   const overLimit = await create({
     url: "https://bot.example.com/fifty-one",
     projects: many,
@@ -701,7 +701,7 @@ test("a create that collides with a webhook this key can't manage doesn't name i
   const url = "https://bot.example.com/twin";
   const wide = await create({ url, projects: [a.key, b.key] }, wideBot.key);
   expect(wide.status).toBe(201);
-  const narrow = createKey(db, wideBot.actor.id, { projects: [a.key] }).key;
+  const narrow = createKey(db, wideBot.actor.id, { products: [a.key] }).key;
   const refused = await create({ url, projects: [a.key] }, narrow);
   expect(refused.status).toBe(409);
   expect(refused.body.error.code).toBe("conflict");
@@ -738,7 +738,7 @@ test("at the limit, a key that can't manage every webhook gets a message with no
     );
     expect(made.status).toBe(201);
   }
-  const narrow = createKey(db, hoarder.actor.id, { projects: [a.key] }).key;
+  const narrow = createKey(db, hoarder.actor.id, { products: [a.key] }).key;
   const over = await create({ url: "https://bot.example.com/hoard/x" }, narrow);
   expect(over.status).toBe(409);
   expect(over.body.error.code).toBe("conflict");
@@ -788,7 +788,7 @@ test("at the limit, an inbox webhook is refused with advice an inbox webhook can
 
 test("a key limited to the webhook's projects is told which webhook already has the URL", async () => {
   const bigBot = createBot(db, "scoped-twin-bot");
-  const narrow = createKey(db, bigBot.actor.id, { projects: [a.key] }).key;
+  const narrow = createKey(db, bigBot.actor.id, { products: [a.key] }).key;
   const url = "https://bot.example.com/scoped-twin";
   const twin = await create({ url, projects: [a.key] }, narrow);
   expect(twin.status).toBe(201);
@@ -827,7 +827,7 @@ test("a key without read whose URL collides with an activity webhook isn't sent 
   expect(refused.body.error.message).not.toContain("update_webhook");
   expect(refused.body.error.message).toContain("this key can't manage");
   expect(refused.body.error.message).toContain(
-    "a key that can read every product that webhook follows",
+    "a key that can read every product and project that webhook follows",
   );
 
   const own = await inbox(noRead, "https://bot.example.com/unread-twin-2");

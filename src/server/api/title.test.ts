@@ -135,7 +135,7 @@ test("a key limited to reading one project sets and clears its own title, and an
   const other = addBot("bystander");
   await putTitle({ title: "Bystander" }, other.key);
   const scoped = createBot(db, "scoped-titler", {
-    scope: { projects: [addProject("TitleScope").key], actions: ["read"] },
+    scope: { products: [addProject("TitleScope").key], actions: ["read"] },
   });
   expect((await putTitle({ title: "Reader" }, scoped.key)).status).toBe(200);
   expect((await whoami(scoped.key)).title).toBe("Reader");

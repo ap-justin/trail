@@ -79,7 +79,7 @@ test("create_project takes a lead by name and several products, and refuses a pr
   );
 
   const scoped = await connect(
-    createBot(db, "Beta scoped", { scope: { projects: [beta.product.key] } })
+    createBot(db, "Beta scoped", { scope: { products: [beta.product.key] } })
       .key,
   );
   expect(
@@ -140,7 +140,7 @@ test("update_project changes name, goal, lead and target date; a key reaching no
   const outsider = await productBot("Pi");
   const scoped = await connect(
     createBot(db, "Pi scoped", {
-      scope: { projects: [outsider.product.key] },
+      scope: { products: [outsider.product.key] },
     }).key,
   );
   expect(
@@ -219,7 +219,7 @@ test("add_to_project takes at most 100 items and refuses an item the key can't s
   const hidden = await productBot("Omicron");
   const secret = await call(hidden.client, "add_todo", { title: "secret" });
   const scoped = await connect(
-    createBot(db, "Mu scoped", { scope: { projects: [mu.product.key] } }).key,
+    createBot(db, "Mu scoped", { scope: { products: [mu.product.key] } }).key,
   );
   expect(
     await callError(scoped, "add_to_project", {
@@ -255,7 +255,7 @@ test("a key scoped to one product sees a cross-product project without any trace
 
   const scoped = await connect(
     createBot(db, "Lambda scoped", {
-      scope: { projects: [lambda.product.key] },
+      scope: { products: [lambda.product.key] },
     }).key,
   );
   const seen: Body[] = [
@@ -311,7 +311,7 @@ test("a project drawing only from products the key can't reach is the 404 an unk
   const outsider = await productBot("Xi");
   const scoped = await connect(
     createBot(db, "Xi scoped", {
-      scope: { projects: [outsider.product.key] },
+      scope: { products: [outsider.product.key] },
     }).key,
   );
   const hidden = await callError(scoped, "get_project", { project: slug });

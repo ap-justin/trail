@@ -145,7 +145,7 @@ test("PATCH /projects/{slug} changes the project and refuses a description", asy
 
 test("a key that reaches no product of a project gets the 404 an unknown slug gets, on every project route", async () => {
   const outsider = createBot(db, "rest project outsider", {
-    scope: { projects: [other.product.key] },
+    scope: { products: [other.product.key] },
   });
   const routes: [string, string, unknown][] = [
     ["GET", "/api/v1/projects/rest-launch", undefined],

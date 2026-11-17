@@ -389,13 +389,17 @@ export const whoamiSchema = actorSchema
           .nullable()
           .meta({
             description:
-              "The keys of the only products this key reaches; null when it reaches every product.",
+              "The keys of the products whose every item this key reaches; empty when it reaches only projects, null when it reaches everything.",
             example: ["TRL"],
           }),
         projects: z
           .array(z.string())
           .nullable()
-          .meta({ description: "Deprecated alias of products." }),
+          .meta({
+            description:
+              "The slugs of the projects whose items this key reaches, whichever product they are in; it can read those products' names, keys and labels, and nothing else of theirs. Empty when it has none, null when it reaches everything.",
+            example: ["launch-q4"],
+          }),
         actions: z
           .array(z.enum(apiKeyActions))
           .nullable()
@@ -412,7 +416,7 @@ export const whoamiSchema = actorSchema
     }),
     products: z.array(productRefSchema).meta({
       description:
-        "Every product this key reaches, A to Z: file issues on any of them.",
+        "Every product this key files issues on, A to Z: those it reaches, and those its projects draw from, which it files on with project (file_issue, or POST /items with type issue).",
     }),
     photoUrl,
     title: actorTitle,
@@ -474,7 +478,7 @@ export const WEBHOOK_PAUSE_AFTER = 8;
 
 const webhookKind = z.enum(webhookSubscriptionKinds).meta({
   description:
-    "activity: the events of the products it follows. inbox: only trail.message.received, for each message another bot sends you; it follows no products.",
+    "activity: the events of the products and projects it follows. inbox: only trail.message.received, for each message another bot sends you; it follows no products or projects.",
 });
 
 export const webhookSchema = z
@@ -484,11 +488,12 @@ export const webhookSchema = z
     url: z.string(),
     products: z.array(z.string()).meta({
       description:
-        "The keys of the products it follows, A to Z; empty on an inbox webhook.",
+        "The keys of the products it follows, A to Z; empty on an inbox webhook and on one following projects only.",
     }),
-    projects: z
-      .array(z.string())
-      .meta({ description: "Deprecated alias of products." }),
+    projects: z.array(z.string()).meta({
+      description:
+        "The slugs of the projects it follows, A to Z; empty when it follows none.",
+    }),
     paused: z.boolean().meta({
       description:
         "True after repeated failures; deliveries wait until an update or a rotate resumes it.",
@@ -523,30 +528,29 @@ const webhookProductsDescription =
   "Keys (like TRL) of the products to follow: you get their items' events, and the events of every project drawing from one of them. A product the key can't read is a 404, as a missing one is.";
 const webhookProducts = z
   .array(z.string().min(1))
-  .min(1)
   .max(WEBHOOK_PRODUCTS_MAX)
   .meta({ description: webhookProductsDescription, example: ["ATL"] });
-const webhookProjectsAlias = z
+const webhookProjects = z
   .array(z.string().min(1))
-  .min(1)
   .max(WEBHOOK_PRODUCTS_MAX)
   .meta({
     description:
-      "Deprecated alias of products: product keys. Send products instead; not both.",
+      "Slugs (like launch-q4) of the projects to follow: you get the project's own events (updates, status updates, items joining and leaving) and the events of its items and their comments while they are in it, whichever product they are in. A product's key (like TRL) here is the deprecated alias of products and follows that product. A value that is neither, or a project the key doesn't reach, is a 404, as a missing project is.",
+    example: ["launch-q4"],
   });
 
 export const webhookCreateSchema = z
   .strictObject({
     kind: webhookKind.optional().meta({
       description:
-        "activity (the default) for the events of products; inbox for the messages other bots send you, with products left out.",
+        "activity (the default) for the events of products and projects; inbox for the messages other bots send you, with products and projects left out.",
     }),
     url: webhookUrl,
     secret: webhookSecret,
     products: webhookProducts.optional().meta({
-      description: `Required unless kind is inbox. ${webhookProductsDescription}`,
+      description: `Required unless kind is inbox or projects names a project; a key reaching exactly one project and no product follows that project when both are left out. ${webhookProductsDescription}`,
     }),
-    projects: webhookProjectsAlias.optional(),
+    projects: webhookProjects.optional(),
   })
   .openapi("WebhookCreate");
 
@@ -554,7 +558,7 @@ export const webhookUpdateSchema = z
   .strictObject({
     url: webhookUrl.optional(),
     products: webhookProducts.optional(),
-    projects: webhookProjectsAlias.optional(),
+    projects: webhookProjects.optional(),
   })
   .openapi("WebhookUpdate");
 
@@ -739,6 +743,8 @@ const projectSlug = z.string().min(1).max(SLUG_MAX).meta({
     "The project's slug, like launch-q4, exactly; list_projects lists them.",
   example: "launch-q4",
 });
+const ISSUE_PROJECT =
+  "A project's slug, like launch-q4: the issue joins that project as it is filed, and product must be one the project draws from (left out, the project's one product). A key that reaches the product only through projects must send it, and with exactly one project that one is the default. list_projects lists them with their products.";
 const botRef = z.string().min(1).max(200);
 const LABEL_NAMES =
   "A name matches the product's label ignoring the case of A-Z. Only the product's owner creates labels: from the owner, or on a product with no owner, a new name creates the label; from anyone else, the names the product lacks come back in skippedLabels.";
@@ -983,10 +989,11 @@ export const todoCreateSchema = z
 export const issueFileSchema = z
   .strictObject(
     {
-      product: productRef.meta({
+      product: productRef.optional().meta({
         description:
-          "The key (like TRL) of the product the issue is for; any product this key reaches. list_products lists them.",
+          "The key (like TRL) of the product the issue is for: any product list_products lists, which for a key reaching it only through a project needs project too. Left out, the project's one product.",
       }),
+      project: projectSlug.optional().meta({ description: ISSUE_PROJECT }),
       ...itemFields,
       labels: labelNames.optional(),
       assignee: assigneeRef.nullable().optional().meta({
@@ -996,6 +1003,11 @@ export const issueFileSchema = z
     },
     itemCreateRenames,
   )
+  // documents fileIssue's rule (service/index.ts), which enforces it with a 422 saying what to send
+  .meta({
+    description: "Name product, project, or both.",
+    anyOf: [{ required: ["product"] }, { required: ["project"] }],
+  })
   .openapi("IssueFile");
 
 /** POST /items: a todo or an issue by `type`. */
@@ -1008,7 +1020,10 @@ export const itemCreateSchema = z
       }),
       product: productRef.optional().meta({
         description:
-          "The product's key (like TRL). Required for an issue; a todo goes to the one product you own when left out.",
+          "The product's key (like TRL). An issue needs it unless project draws from one product; a todo goes to the one product you own when left out.",
+      }),
+      project: projectSlug.optional().meta({
+        description: `Issues only (a todo with it is a 422). ${ISSUE_PROJECT}`,
       }),
       ...itemFields,
       labels: labelNames.optional(),

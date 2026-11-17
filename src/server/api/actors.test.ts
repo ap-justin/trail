@@ -40,7 +40,7 @@ test("GET /whoami lists the products the bot owns and every product its key reac
     key: owner.key,
   });
   const scoped = createBot(db, "rest scoped", {
-    scope: { projects: ["WHOB"] },
+    scope: { products: ["WHOB"] },
   });
   const me = (await (
     await request("GET", "/api/v1/whoami", { key: owner.key })
@@ -54,7 +54,7 @@ test("GET /whoami lists the products the bot owns and every product its key reac
     await request("GET", "/api/v1/whoami", { key: scoped.key })
   ).json()) as Body;
   expect(limited).toMatchObject({
-    scope: { products: ["WHOB"], projects: ["WHOB"] },
+    scope: { products: ["WHOB"], projects: [] },
     ownProducts: [],
     products: [{ key: "WHOB", name: "whob" }],
   });
@@ -134,4 +134,25 @@ test("GET /whoami with a revoked key or a garbage key is a 401", async () => {
     (await request("GET", "/api/v1/whoami", { key: "trl_garbage_nope" }))
       .status,
   ).toBe(401);
+});
+
+test("GET /whoami shows a project-only key's projects by slug, an empty products list, and the products its project draws from", async () => {
+  await request("POST", "/api/v1/products", {
+    json: { key: "WHOC", name: "whoc", owner: null },
+  });
+  const made = await request("POST", "/api/v1/projects", {
+    json: { name: "Who recon", slug: "who-recon", products: ["WHOC"] },
+  });
+  expect(made.status).toBe(201);
+  const scoped = createBot(db, "rest project scoped", {
+    scope: { projects: ["who-recon"] },
+  });
+  const me = (await (
+    await request("GET", "/api/v1/whoami", { key: scoped.key })
+  ).json()) as Body;
+  expect(me).toMatchObject({
+    scope: { products: [], projects: ["who-recon"], actions: null },
+    ownProducts: [],
+    products: [{ key: "WHOC", name: "whoc" }],
+  });
 });

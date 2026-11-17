@@ -412,7 +412,7 @@ test("add_todo names the products to pick from when the caller owns none or seve
   );
 
   const scoped = createBot(db, "Pi", {
-    scope: { projects: [kappa.product.key] },
+    scope: { products: [kappa.product.key] },
   });
   expect(
     await callError(await connect(scoped.key), "add_todo", { title: "where" }),
@@ -424,7 +424,7 @@ test("add_todo names the products to pick from when the caller owns none or seve
 test("file_issue on a product the key doesn't reach is the 404 an unknown product is", async () => {
   const mu = await productBot("Mu");
   const scoped = await connect(
-    createBot(db, "Omicron", { scope: { projects: [mu.product.key] } }).key,
+    createBot(db, "Omicron", { scope: { products: [mu.product.key] } }).key,
   );
   const hiddenOwner = await productBot("Lambda");
   const hidden = await callError(scoped, "file_issue", {

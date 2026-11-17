@@ -1,8 +1,9 @@
 import { beforeAll, describe, expect, test } from "vitest";
+import { createBot } from "../service/keys.js";
 import { atFakeTimeAsync, setupTestApp } from "../test-app.js";
 import { type Body, webSeed } from "./test-seed.js";
 
-const { request, signIn, owner, addMember, addProject, addBot } =
+const { db, request, signIn, owner, addMember, addProject, addBot } =
   setupTestApp();
 const { get, item, project, statusUpdate } = webSeed(request);
 
@@ -346,4 +347,19 @@ test("GET /projects/:slug/status-updates pages newest first, and 404s an unreach
   });
   const hidden = await get("/projects/gamma-only/status-updates", member);
   expect(hidden.status).toBe(404);
+});
+
+describe("a person beside project-scoped keys", () => {
+  test("a member invited by product sees the projects, products and counts they saw before", async () => {
+    const before = await get("/projects", member);
+    const launchBefore = await get("/projects/launch/items", member);
+    createBot(db, "alpha project key", { scope: { projects: ["gamma-only"] } });
+    createBot(db, "beta project key", {
+      scope: { products: [alpha.key], projects: ["launch"] },
+    });
+    expect(await get("/projects", member)).toEqual(before);
+    expect(await get("/projects/launch/items", member)).toEqual(launchBefore);
+    expect(before.body.items[1].openCount).toBe(3);
+    expect((await get("/projects/gamma-only", member)).status).toBe(404);
+  });
 });

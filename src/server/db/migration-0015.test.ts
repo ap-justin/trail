@@ -505,7 +505,7 @@ test("before the migration an event queued once per webhook, whatever its type",
 
 test("a fresh database migrates to the product tables, with no projects", () => {
   const db = open();
-  migrate(db);
+  migrate(db, through(15));
   const tables = rows(
     db,
     "select name from sqlite_master where type = 'table' and name in ('product', 'project', 'project_product', 'project_item', 'project_status_update', 'product_status_update', 'api_key_product', 'product_member', 'webhook_subscription_product', 'api_key_project', 'project_member', 'webhook_subscription_project') order by name",

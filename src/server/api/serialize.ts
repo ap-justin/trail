@@ -35,7 +35,7 @@ import type {
   Webhook,
   Whoami,
 } from "../service/index.js";
-import type { KeyScope } from "../service/keys.js";
+import { type KeyScope, scopeView } from "../service/keys.js";
 import { MESSAGE_PREVIEW_CHARS } from "../service/messages.js";
 
 // One function per resource, each listing its wire keys, so a new column reaches the wire only on purpose.
@@ -194,14 +194,13 @@ export function toActor(row: Actor): ActorView {
 }
 
 export function toWhoami(row: Whoami, scope: KeyScope): WhoamiView {
-  const products = scope.products?.map((p) => p.key) ?? null;
   const ref = (p: { key: string; name: string }) => ({
     key: p.key,
     name: p.name,
   });
   return {
     ...toActor(row),
-    scope: { products, projects: products, actions: scope.actions },
+    scope: scopeView(scope),
     ownProducts: row.ownProducts.map(ref),
     products: row.products.map(ref),
     photoUrl: row.photoUrl,
@@ -246,7 +245,7 @@ export function toWebhook(row: Webhook): WebhookView {
     kind: row.kind,
     url: row.url,
     products: row.products,
-    projects: row.products,
+    projects: row.projects,
     paused: row.pausedAt !== null,
     pausedAt: row.pausedAt?.toISOString() ?? null,
     consecutiveFailures: row.consecutiveFailures,

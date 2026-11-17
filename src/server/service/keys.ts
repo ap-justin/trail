@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { Db } from "../db/client.js";
 import {
   type ApiKeyAction,
@@ -7,7 +7,9 @@ import {
   apiKey,
   apiKeyActions,
   apiKeyProduct,
+  apiKeyProject,
   product,
+  project,
 } from "../db/schema.js";
 import { ConflictError, NotFoundError, ValidationError } from "./errors.js";
 import type { Tx } from "./tx.js";
@@ -15,10 +17,16 @@ import { validBotTitle } from "./validate.js";
 
 export type Actor = typeof actor.$inferSelect;
 
-/** What a key may reach; null on either side is unrestricted. */
+/**
+ * What a key may reach. `products` is null only on an unrestricted key, one
+ * with neither products nor projects; a key limited to projects alone has
+ * `products: []`. `actions` null is every action.
+ */
 export type KeyScope = {
   /** by id and key, A to Z by key */
   products: { id: string; key: string }[] | null;
+  /** by id and slug, A to Z by slug; empty for none */
+  projects: { id: string; slug: string }[];
   /** in `apiKeyActions` order */
   actions: ApiKeyAction[] | null;
 };
@@ -26,19 +34,32 @@ export type KeyScope = {
 /** A bot as one of its keys authenticates it: the bot, and that key's scope. */
 export type KeyActor = Actor & { scope: KeyScope };
 
-/** A key's scope as a person or bot reads it: products by key. */
+/** A key's scope as a person or bot reads it: products by key, projects by slug, both null on an unrestricted key. */
 export type KeyScopeView = {
   products: string[] | null;
+  projects: string[] | null;
   actions: ApiKeyAction[] | null;
 };
 
-/** The scope to mint a key with: product keys in any case (`projects`, the name before products), and actions; a list left out is unrestricted. */
-export type KeyScopeInput = { projects?: string[]; actions?: string[] };
+/**
+ * The scope to mint a key with: product keys in any case, project slugs and
+ * actions. Products and projects both left out is a key that reaches
+ * everything; actions left out is every action.
+ */
+export type KeyScopeInput = {
+  products?: string[];
+  projects?: string[];
+  actions?: string[];
+};
 
-export const scopeView = (scope: KeyScope): KeyScopeView => ({
-  products: scope.products?.map((p) => p.key) ?? null,
-  actions: scope.actions,
-});
+export const scopeView = (scope: KeyScope): KeyScopeView =>
+  scope.products === null
+    ? { products: null, projects: null, actions: scope.actions }
+    : {
+        products: scope.products.map((p) => p.key),
+        projects: scope.projects.map((p) => p.slug),
+        actions: scope.actions,
+      };
 
 // trail_<8 hex prefix>_<43 base64url chars of 32 random bytes>; hex keeps `_` out of the prefix
 const keyPattern = /^trail_([0-9a-f]{8})_[A-Za-z0-9_-]{43}$/;
@@ -114,9 +135,43 @@ function productIdsOf(tx: Tx, keys: string[] | undefined): string[] | null {
   return found.map((p) => p.id);
 }
 
+/** The ids of the projects with these slugs; null for a list left out. */
+function projectIdsOf(tx: Tx, slugs: string[] | undefined): string[] | null {
+  if (slugs === undefined) return null;
+  if (slugs.length === 0) {
+    throw new ValidationError(
+      "projects must name at least one project: leave it out for a key that isn't limited to projects",
+    );
+  }
+  const wanted = [...new Set(slugs.map((s) => s.trim()))];
+  const found = tx
+    .select({ id: project.id, slug: project.slug })
+    .from(project)
+    .where(inArray(project.slug, wanted))
+    .all();
+  const unknown = wanted.filter((s) => !found.some((p) => p.slug === s));
+  if (unknown.length > 0) {
+    const existing = tx
+      .select({ slug: project.slug })
+      .from(project)
+      .orderBy(asc(project.slug))
+      .all()
+      .map((p) => p.slug);
+    throw new ValidationError(
+      `no project ${unknown.join(", ")}: ${
+        existing.length === 0
+          ? "there is no project yet, so leave projects out"
+          : `scope the key to projects that exist, by slug, which are ${existing.join(", ")}`
+      }`,
+    );
+  }
+  return found.map((p) => p.id);
+}
+
 function mintKey(tx: Tx, actorId: string, scope: KeyScopeInput): string {
   const actions = validActions(scope.actions);
-  const productIds = productIdsOf(tx, scope.projects);
+  const productIds = productIdsOf(tx, scope.products);
+  const projectIds = projectIdsOf(tx, scope.projects);
   const prefix = randomBytes(4).toString("hex");
   const key = `trail_${prefix}_${randomBytes(32).toString("base64url")}`;
   const { id } = tx
@@ -127,6 +182,11 @@ function mintKey(tx: Tx, actorId: string, scope: KeyScopeInput): string {
   if (productIds !== null) {
     tx.insert(apiKeyProduct)
       .values(productIds.map((productId) => ({ apiKeyId: id, productId })))
+      .run();
+  }
+  if (projectIds !== null) {
+    tx.insert(apiKeyProject)
+      .values(projectIds.map((projectId) => ({ apiKeyId: id, projectId })))
       .run();
   }
   return key;
@@ -333,15 +393,15 @@ export type KeyListing = {
   scope: KeyScopeView;
 };
 
-/** The projects each of these keys is limited to, by key id; a key with none is absent. */
-function allowlists(
-  db: Db,
+/** The products and projects of these keys' scopes, by key id; an unrestricted key has products null. */
+function scopesOf(
+  tx: Tx | Db,
   keyIds: string[],
-): Map<string, { id: string; key: string }[]> {
-  const rows =
+): Map<string, Pick<KeyScope, "products" | "projects">> {
+  const products =
     keyIds.length === 0
       ? []
-      : db
+      : tx
           .select({
             keyId: apiKeyProduct.apiKeyId,
             id: product.id,
@@ -352,11 +412,33 @@ function allowlists(
           .where(inArray(apiKeyProduct.apiKeyId, keyIds))
           .orderBy(asc(product.key))
           .all();
-  const byKey = new Map<string, { id: string; key: string }[]>();
-  for (const { keyId, id, key } of rows) {
-    byKey.set(keyId, [...(byKey.get(keyId) ?? []), { id, key }]);
+  const projects =
+    keyIds.length === 0
+      ? []
+      : tx
+          .select({
+            keyId: apiKeyProject.apiKeyId,
+            id: project.id,
+            slug: project.slug,
+          })
+          .from(apiKeyProject)
+          .innerJoin(project, eq(project.id, apiKeyProject.projectId))
+          .where(inArray(apiKeyProject.apiKeyId, keyIds))
+          .orderBy(asc(project.slug))
+          .all();
+  const scopes = new Map<string, Pick<KeyScope, "products" | "projects">>();
+  for (const keyId of keyIds) {
+    const own = products.filter((p) => p.keyId === keyId);
+    const groups = projects.filter((p) => p.keyId === keyId);
+    scopes.set(keyId, {
+      products:
+        own.length === 0 && groups.length === 0
+          ? null
+          : own.map(({ id, key }) => ({ id, key })),
+      projects: groups.map(({ id, slug }) => ({ id, slug })),
+    });
   }
-  return byKey;
+  return scopes;
 }
 
 /** Every key, oldest first, with its scope and without its hash. */
@@ -376,13 +458,16 @@ export function listKeys(db: Db): KeyListing[] {
     .innerJoin(actor, eq(actor.id, apiKey.actorId))
     .orderBy(asc(apiKey.createdAt), asc(apiKey.id))
     .all();
-  const lists = allowlists(
+  const scopes = scopesOf(
     db,
     rows.map((r) => r.id),
   );
   return rows.map(({ id, actions, ...listing }) => ({
     ...listing,
-    scope: scopeView({ products: lists.get(id) ?? null, actions }),
+    scope: scopeView({
+      ...(scopes.get(id) as Pick<KeyScope, "products" | "projects">),
+      actions,
+    }),
   }));
 }
 
@@ -424,6 +509,106 @@ export function revokeKey(
   );
 }
 
+/** Product keys and project slugs to add to a key's scope and to take off it. */
+export type KeyScopeEdit = {
+  addProducts?: string[];
+  removeProducts?: string[];
+  addProjects?: string[];
+  removeProjects?: string[];
+};
+
+/**
+ * Adds and removes products and projects on the live key with this prefix, in
+ * one transaction, and returns its scope. Adding what the key has, or removing
+ * what it hasn't, changes nothing. Refused: adding to an unrestricted key, and
+ * an edit leaving a restricted key with neither, which would make it unrestricted.
+ */
+export function editKeyScope(
+  db: Db,
+  prefix: string,
+  edit: KeyScopeEdit,
+): KeyScopeView {
+  return db.transaction(
+    (tx) => {
+      const key = tx
+        .select({ id: apiKey.id, actions: apiKey.actions })
+        .from(apiKey)
+        .where(and(eq(apiKey.prefix, prefix), isNull(apiKey.revokedAt)))
+        .get();
+      if (!key) {
+        throw new NotFoundError(
+          `no live key with prefix ${prefix}: \`trail key list\` shows each key's prefix`,
+        );
+      }
+      const current = scopesOf(tx, [key.id]).get(key.id) as Pick<
+        KeyScope,
+        "products" | "projects"
+      >;
+      const adds =
+        (edit.addProducts?.length ?? 0) + (edit.addProjects?.length ?? 0) > 0;
+      if (current.products === null && adds) {
+        throw new ValidationError(
+          "this key is unrestricted and already reaches every product and project, so adding to it changes nothing: mint a key limited to what it should reach with `trail key create`, and revoke this one",
+        );
+      }
+      const addProducts = edit.addProducts?.length
+        ? (productIdsOf(tx, edit.addProducts) as string[])
+        : [];
+      const addProjects = edit.addProjects?.length
+        ? (projectIdsOf(tx, edit.addProjects) as string[])
+        : [];
+      const productKeys = (edit.removeProducts ?? []).map((k) =>
+        k.trim().toUpperCase(),
+      );
+      const slugs = (edit.removeProjects ?? []).map((s) => s.trim());
+      const products = new Set(
+        (current.products ?? [])
+          .filter((p) => !productKeys.includes(p.key))
+          .map((p) => p.id),
+      );
+      const projects = new Set(
+        current.projects
+          .filter((p) => !slugs.includes(p.slug))
+          .map((p) => p.id),
+      );
+      for (const id of addProducts) products.add(id);
+      for (const id of addProjects) projects.add(id);
+      if (current.products === null) {
+        return scopeView({ ...current, actions: key.actions });
+      }
+      if (products.size === 0 && projects.size === 0) {
+        throw new ValidationError(
+          `that edit leaves the key with no product and no project, and a key with neither reaches everything: add a product or project in the same edit, or revoke the key with \`trail key revoke ${prefix}\``,
+        );
+      }
+      tx.delete(apiKeyProduct).where(eq(apiKeyProduct.apiKeyId, key.id)).run();
+      tx.delete(apiKeyProject).where(eq(apiKeyProject.apiKeyId, key.id)).run();
+      if (products.size > 0) {
+        tx.insert(apiKeyProduct)
+          .values(
+            [...products].map((productId) => ({ apiKeyId: key.id, productId })),
+          )
+          .run();
+      }
+      if (projects.size > 0) {
+        tx.insert(apiKeyProject)
+          .values(
+            [...projects].map((projectId) => ({ apiKeyId: key.id, projectId })),
+          )
+          .run();
+      }
+      return scopeView({
+        ...(scopesOf(tx, [key.id]).get(key.id) as Pick<
+          KeyScope,
+          "products" | "projects"
+        >),
+        actions: key.actions,
+      });
+    },
+    { behavior: "immediate" },
+  );
+}
+
 function verifiedKey(db: Db, token: string) {
   const prefix = keyPattern.exec(token)?.[1];
   if (prefix === undefined) return null;
@@ -457,7 +642,10 @@ export function authenticateKey(db: Db, token: string): KeyActor | null {
   return {
     ...row.actor,
     scope: {
-      products: allowlists(db, [row.id]).get(row.id) ?? null,
+      ...(scopesOf(db, [row.id]).get(row.id) as Pick<
+        KeyScope,
+        "products" | "projects"
+      >),
       actions: row.actions,
     },
   };

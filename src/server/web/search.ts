@@ -13,7 +13,7 @@ import { searchQuerySchema, searchSchema } from "../../shared/schemas.js";
 import { jsonContent } from "../api/routes.js";
 import type { Db } from "../db/client.js";
 import { issue, product, project } from "../db/schema.js";
-import { amongVisible } from "../service/visible.js";
+import { amongProducts } from "../service/visible.js";
 import { createWebRouter } from "./env.js";
 import { projectIdsAmong, visibleIds } from "./visible.js";
 
@@ -55,7 +55,7 @@ export function searchRoutes(db: Db) {
       .innerJoin(product, eq(product.id, issue.productId))
       .where(
         and(
-          amongVisible(issue.productId, ids),
+          amongProducts(issue.productId, ids),
           or(
             contains(issue.title, q),
             contains(itemKey, q),
@@ -76,7 +76,7 @@ export function searchRoutes(db: Db) {
       .from(product)
       .where(
         and(
-          amongVisible(product.id, ids),
+          amongProducts(product.id, ids),
           or(contains(product.key, q), contains(product.name, q)),
         ),
       )

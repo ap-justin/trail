@@ -67,14 +67,14 @@ test("a bot manages its webhooks over MCP and the secret never comes back", asyn
     secret: SECRET,
     projects: [a.key],
   });
-  expect(made).toMatchObject({ projects: [a.key], paused: false });
+  expect(made).toMatchObject({ products: [a.key], paused: false });
   const listed = await call(client, "list_webhooks");
   expect(listed.items.map((w: Body) => w.id)).toEqual([made.id]);
   const moved = await call(client, "update_webhook", {
     webhookId: made.id,
     projects: [a.key, b.key],
   });
-  expect(moved.projects).toEqual([a.key, b.key].sort());
+  expect(moved.products).toEqual([a.key, b.key].sort());
   await call(client, "rotate_webhook_secret", {
     webhookId: made.id,
     secret: NEXT_SECRET,
@@ -125,7 +125,7 @@ test("another bot's webhook, a hidden project and an internal URL are refused", 
 
   const scoped = await connect(
     createBot(db, "scoped-bot", {
-      scope: { projects: [a.key], actions: ["read"] },
+      scope: { products: [a.key], actions: ["read"] },
     }).key,
   );
   const hidden = await raw(scoped, "create_webhook", {
@@ -133,7 +133,7 @@ test("another bot's webhook, a hidden project and an internal URL are refused", 
     secret: SECRET,
     projects: [b.key],
   });
-  expect(hidden.text).toMatch(/^not_found: no product/);
+  expect(hidden.text).toMatch(/^not_found: no project/);
   const internal = await raw(scoped, "create_webhook", {
     url: "https://10.0.0.1/hook",
     secret: SECRET,
@@ -165,7 +165,7 @@ test("update_webhook onto a URL the bot already uses is a conflict that names th
   expect(onto.text).toContain(`webhook ${both.id} already sends to this URL`);
 
   const narrow = await connect(
-    createKey(db, bot.actor.id, { projects: [a.key] }).key,
+    createKey(db, bot.actor.id, { products: [a.key] }).key,
   );
   // the twin follows B too, which this key can't reach: it is not named
   const hidden = await raw(narrow, "update_webhook", {
@@ -264,7 +264,7 @@ test("a signed-in person gets no MCP tools: every webhook call is a 401 and chan
   expect(after.items[0]).toMatchObject({
     id: mine.id,
     url: "https://bot.example.com/person",
-    projects: [a.key],
+    products: [a.key],
   });
 });
 
@@ -307,7 +307,7 @@ test("a key narrower than a webhook can't list, change, test or delete it", asyn
     projects: [a.key, b.key],
   });
   const narrow = await connect(
-    createKey(db, owner.actor.id, { projects: [a.key] }).key,
+    createKey(db, owner.actor.id, { products: [a.key] }).key,
   );
   expect((await call(narrow, "list_webhooks")).items).toEqual([]);
   for (const [tool, args] of [
@@ -333,30 +333,29 @@ test("a key narrower than a webhook can't list, change, test or delete it", asyn
   ).toContain(made.id);
 });
 
-test("create_webhook and update_webhook take products, report products and its alias projects, and refuse both together", async () => {
+test("create_webhook and update_webhook take products and projects together, and refuse an activity webhook following nothing", async () => {
   const client = await connect(bot.key);
   const made = await call(client, "create_webhook", {
     url: "https://bot.example.com/products",
     secret: SECRET,
     products: [a.key],
   });
-  expect(made).toMatchObject({ products: [a.key], projects: [a.key] });
+  expect(made).toMatchObject({ products: [a.key], projects: [] });
+  expect(made).not.toHaveProperty("deprecated");
+  await call(client, "create_project", {
+    name: "both plan",
+    slug: "both-plan",
+    products: [a.key],
+  });
   const moved = await call(client, "update_webhook", {
     webhookId: made.id,
     products: [b.key],
+    projects: ["both-plan"],
   });
-  expect(moved).toMatchObject({ products: [b.key], projects: [b.key] });
-  expect(
-    (
-      await raw(client, "update_webhook", {
-        webhookId: made.id,
-        products: [a.key],
-        projects: [b.key],
-      })
-    ).text,
-  ).toBe(
-    "validation_failed: send products alone: projects is its deprecated alias, and both together is ambiguous",
-  );
+  expect(moved).toMatchObject({
+    products: [b.key],
+    projects: ["both-plan"],
+  });
   expect(
     (
       await raw(client, "create_webhook", {
@@ -365,11 +364,11 @@ test("create_webhook and update_webhook take products, report products and its a
       })
     ).text,
   ).toBe(
-    "validation_failed: products is required: send the keys (like TRL) of the products whose events you want, or send kind inbox for the messages other bots send you",
+    "validation_failed: products or projects is required: send products with the keys (like TRL) of the products whose events you want, or projects with the slugs (like launch-q4) of projects (list_projects lists them), or send kind inbox for the messages other bots send you",
   );
 });
 
-test("projects, the deprecated alias of products, carries a deprecated note, and a project's slug sent there is refused pointing to products", async () => {
+test("a product key in projects is the deprecated alias of products, with a note; a slug there follows the project, and one in products is refused pointing to projects", async () => {
   const client = await connect(bot.key);
   const made = await call(client, "create_webhook", {
     url: "https://bot.example.com/alias",
@@ -399,13 +398,42 @@ test("projects, the deprecated alias of products, carries a deprecated note, and
     slug: "hooked-plan",
     products: [a.key],
   });
-  const refused = await raw(client, "create_webhook", {
+  const slugged = await call(client, "create_webhook", {
     url: "https://bot.example.com/slug",
     secret: SECRET,
     projects: ["hooked-plan"],
   });
-  expect(refused).toEqual({
+  expect(slugged).toMatchObject({ products: [], projects: ["hooked-plan"] });
+  expect(slugged).not.toHaveProperty("deprecated");
+  // value by value: the key follows its product, the slug its project
+  const mixed = await call(client, "create_webhook", {
+    url: "https://bot.example.com/mixed",
+    secret: SECRET,
+    projects: [b.key, "hooked-plan"],
+  });
+  expect(mixed).toMatchObject({
+    products: [b.key],
+    projects: ["hooked-plan"],
+    deprecated: note,
+  });
+  expect(
+    await raw(client, "create_webhook", {
+      url: "https://bot.example.com/neither",
+      secret: SECRET,
+      projects: ["no-such-plan"],
+    }),
+  ).toEqual({
     isError: true,
-    text: `validation_failed: projects takes product keys, as products does, and hooked-plan is a project's slug: send products with the keys of the products it draws from (${a.key})`,
+    text: "not_found: no project no-such-plan: pass the slug (like launch-q4) of a project this key reaches; list_projects (GET /api/v1/projects) lists them",
+  });
+  expect(
+    await raw(client, "create_webhook", {
+      url: "https://bot.example.com/slug-in-products",
+      secret: SECRET,
+      products: ["hooked-plan"],
+    }),
+  ).toEqual({
+    isError: true,
+    text: 'validation_failed: products takes product keys and hooked-plan is a project\'s slug: send it in projects (projects: ["hooked-plan"])',
   });
 });
