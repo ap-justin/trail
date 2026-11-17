@@ -7,8 +7,8 @@ import {
   type IssueStatus,
   type ItemType,
   PriorityLabel,
+  priorityLabel,
   StatusIcon,
-  StatusLabel,
   statusLabel,
   TypeIcon,
   typeLabel,
@@ -300,6 +300,19 @@ function Assignee({ item }: { item: WebItemRowView }) {
   );
 }
 
+/** The phone row's assignee: the name, with its kind for screen readers. */
+function RowAssignee({ item }: { item: WebItemRowView }) {
+  if (!item.assignee) {
+    return item.type === "issue" ? <span>Unassigned</span> : null;
+  }
+  return (
+    <span className="min-w-0 truncate">
+      <span className="sr-only">Assigned to</span> {item.assignee.name}
+      <span className="sr-only">, {kindNoun(item.assignee.kind)}</span>
+    </span>
+  );
+}
+
 /** `oneLine` keeps a table row at its height: labels past the cell's width clip. */
 function Labels({
   labels,
@@ -339,7 +352,7 @@ export function GroupHeading({
     <span className="flex min-w-0 items-center gap-2">
       <KeyText className="text-foreground">{product.key}</KeyText>{" "}
       <span className="truncate font-medium">{product.name}</span>{" "}
-      <span className="shrink-0 font-normal whitespace-nowrap text-muted-foreground">
+      <span className="shrink-0 text-xs font-normal whitespace-nowrap text-muted-foreground">
         {count} {itemNoun(count)}
       </span>
     </span>
@@ -460,10 +473,10 @@ export function ItemTable({
 }
 
 /**
- * Below 1024px, three lines a row: key, type glyph and age; the title; status, priority
- * glyph, labels and the assignee's avatar. The whole row is the link, named by key and
- * title and described by its type and the last line. A group with a product gets a 36px
- * heading.
+ * Below 1024px, two lines a row beside the status glyph: the title; then the type glyph,
+ * key, assignee, priority, labels and age in grey. The whole row is the link, named by
+ * key and title and described by its type, status, assignee, priority and labels. A
+ * group with a product gets a heading.
  */
 export function ItemRows({ groups, now }: { groups: ItemGroup[]; now: Date }) {
   const id = useId();
@@ -480,7 +493,7 @@ export function ItemRows({ groups, now }: { groups: ItemGroup[]; now: Date }) {
           {group.product && (
             <h3
               id={`${id}-${group.product.key}`}
-              className="flex h-9 items-center px-4 font-normal"
+              className="flex items-center px-4 pt-5 pb-0.5 font-normal"
             >
               <GroupHeading product={group.product} count={group.count} />
             </h3>
@@ -499,45 +512,37 @@ export function ItemRows({ groups, now }: { groups: ItemGroup[]; now: Date }) {
                     href={paths.issue(item.key)}
                     aria-label={`${item.key} ${item.title}`}
                     aria-describedby={`${typeId} ${metaId}`}
-                    className="flex flex-col px-4 py-3 outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+                    className="flex gap-2.5 px-4 py-3 outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
                   >
-                    <span className="flex items-center gap-2">
-                      <KeyText>{item.key}</KeyText>
-                      <TypeIcon type={item.type} decorative />
-                      <span id={typeId} className="sr-only">
-                        {typeLabel(item.type)}
+                    <StatusIcon status={item.status} className="mt-0.75" />
+                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <span
+                        className={cn(
+                          item.status === "canceled" && "text-muted-foreground",
+                        )}
+                      >
+                        {item.title}
                       </span>
-                      <span className="ml-auto text-muted-foreground">
+                      <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+                        <TypeIcon type={item.type} decorative />
+                        <span id={typeId} className="sr-only">
+                          {typeLabel(item.type)}
+                        </span>
+                        <KeyText>{item.key}</KeyText>{" "}
+                        <span id={metaId} className="contents">
+                          <span className="sr-only">
+                            {statusLabel(item.status)}
+                          </span>{" "}
+                          <RowAssignee item={item} />{" "}
+                          {item.priority !== 0 && (
+                            <span>{priorityLabel(item.priority)} </span>
+                          )}
+                          {item.labels.length > 0 && (
+                            <Labels labels={item.labels} />
+                          )}
+                        </span>{" "}
                         <Age iso={item.updatedAt} now={now} />
                       </span>
-                    </span>
-                    <span
-                      className={cn(
-                        "mt-0.5 mb-1.5",
-                        item.status === "canceled" && "text-muted-foreground",
-                      )}
-                    >
-                      {item.title}
-                    </span>
-                    <span className="flex items-center gap-2 text-xs">
-                      <span id={metaId} className="contents">
-                        <StatusLabel status={item.status} />{" "}
-                        <PriorityLabel priority={item.priority} iconOnly />{" "}
-                        <Labels labels={item.labels} />{" "}
-                        {item.assignee && (
-                          <span className="sr-only">
-                            Assigned to {item.assignee.name},{" "}
-                            {kindNoun(item.assignee.kind)}
-                          </span>
-                        )}
-                      </span>
-                      {item.assignee && (
-                        <ActorAvatar
-                          actor={item.assignee}
-                          size="xs"
-                          className="ml-auto"
-                        />
-                      )}
                     </span>
                   </AppLink>
                 </li>

@@ -1,6 +1,6 @@
 import { FolderIcon, GitPullRequestIcon } from "lucide-react";
 import { type FormEvent, type ReactNode, useId, useState } from "react";
-import { ActorAvatar, ActorBadge, ActorName } from "@/components/actor";
+import { ActorAvatar, ActorName } from "@/components/actor";
 import { AppLink } from "@/components/app-link";
 import { Markdown } from "@/components/markdown";
 import { IssueError, IssueSkeleton, NotFoundPanel } from "@/components/states";
@@ -9,7 +9,8 @@ import {
   PriorityLabel,
   priorityLabel,
   StatusLabel,
-  TypeBadge,
+  TypeIcon,
+  typeLabel,
 } from "@/components/status";
 import { KeyText, LabelChip } from "@/components/text";
 import { Button } from "@/components/ui/button";
@@ -78,12 +79,10 @@ export function IssueBreadcrumb({
 
 function Actor({
   actor,
-  titleSurface,
   withTitle = true,
 }: {
   actor: WebActorView;
-  titleSurface?: "card";
-  /** False drops a bot's title pill, as the byline does. */
+  /** False drops a bot's title, as the byline does. */
   withTitle?: boolean;
 }) {
   return (
@@ -92,7 +91,6 @@ function Actor({
       <ActorName
         actor={actor}
         nameClassName="font-medium text-foreground"
-        titleSurface={titleSurface}
         titleClassName={withTitle ? undefined : "hidden"}
       />{" "}
     </>
@@ -109,14 +107,24 @@ function createdAs(issue: WebItemView): WebItemType {
   return created?.kind === "item_created" ? created.createdAs : issue.type;
 }
 
+/** Issue or Todo as its grey glyph and word: a fact about the item, never a chip. */
+function ItemType({ type }: { type: WebItemType }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+      <TypeIcon type={type} decorative />
+      {typeLabel(type)}
+    </span>
+  );
+}
+
 function Header({ issue }: { issue: WebItemView }) {
   return (
-    <header className="flex flex-col gap-2 border-b px-4 pt-3.5 pb-3 lg:gap-1.5 lg:border-0 lg:p-0">
+    <header className="flex flex-col gap-2 px-4 pt-3.5 pb-3 lg:gap-1.5 lg:p-0">
       <h1 className="text-lg leading-tight font-semibold lg:text-xl">
         {issue.title}
       </h1>
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground">
-        <TypeBadge type={issue.type} />
+        <ItemType type={issue.type} />
         <KeyText>{issue.key}</KeyText>
         <span>{createdAs(issue) === "todo" ? "planned by" : "filed by"}</span>
         <Actor actor={issue.creator} withTitle={false} />
@@ -183,19 +191,13 @@ const noAssignee: Record<WebItemType, ReactNode> = {
 function Properties({ issue }: { issue: WebItemView }) {
   const headingId = useId();
   return (
-    <section
-      aria-labelledby={headingId}
-      className="max-lg:border-b max-lg:px-4 max-lg:py-3.5"
-    >
-      <h2
-        id={headingId}
-        className="mb-3 h-7 border-b font-medium max-lg:sr-only"
-      >
+    <section aria-labelledby={headingId} className="max-lg:px-4 max-lg:py-3.5">
+      <h2 id={headingId} className="mb-2 font-medium lg:mb-3">
         Properties
       </h2>
       <dl className="grid grid-cols-[auto_minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 lg:grid-cols-[--spacing(21)_minmax(0,1fr)]">
         <Property label="Type" className="max-lg:hidden">
-          <TypeBadge type={issue.type} />
+          <ItemType type={issue.type} />
         </Property>
         <Property label="Status">
           <StatusLabel status={issue.status} className="text-sm" />
@@ -214,19 +216,16 @@ function Properties({ issue }: { issue: WebItemView }) {
           valueClassName="max-lg:col-span-3"
         >
           {issue.assignee ? (
-            // at lg a grid with the title on a second row, indented past the avatar: the
-            // name's track shrinks first so the badge's auto track keeps its width, and the
-            // trailing fr track takes what's left so the avatar's auto track never stretches;
-            // below, one line that wraps the pill and badge under a long name
-            <span className="flex min-w-0 items-center gap-1.5 lg:grid lg:grid-cols-[auto_minmax(0,max-content)_auto_minmax(0,1fr)] lg:justify-items-start lg:gap-x-2 lg:gap-y-1">
+            // at lg a grid with the title on a second row, indented past the avatar;
+            // below, one line that wraps the title under a long name
+            <span className="flex min-w-0 items-center gap-1.5 lg:grid lg:grid-cols-[auto_minmax(0,1fr)] lg:justify-items-start lg:gap-x-2 lg:gap-y-1">
               <ActorAvatar actor={issue.assignee} size="xs" />
               <ActorName
                 actor={issue.assignee}
                 className="lg:contents"
                 // start-aligned, a nowrap name is as wide as its text: capped to its track
                 nameClassName="max-w-full"
-                // across the fr track, so the pill adds no width to the name's track
-                titleClassName="lg:col-span-3 lg:col-start-2 lg:row-start-2"
+                titleClassName="lg:col-start-2 lg:row-start-2"
               />
             </span>
           ) : (
@@ -298,12 +297,9 @@ function Links({ links }: { links: WebItemView["links"] }) {
   return (
     <section
       aria-labelledby={headingId}
-      className="max-lg:border-b max-lg:px-4 max-lg:py-3.5 lg:mt-6"
+      className="max-lg:px-4 max-lg:py-3.5 lg:mt-7"
     >
-      <h2
-        id={headingId}
-        className="mb-1.5 font-medium lg:mb-2 lg:h-7 lg:border-b"
-      >
+      <h2 id={headingId} className="mb-1.5 font-medium lg:mb-2">
         Links
       </h2>
       <ul>
@@ -333,7 +329,7 @@ function Links({ links }: { links: WebItemView["links"] }) {
                   rel="noopener noreferrer"
                   className={cn(
                     row,
-                    "rounded-md outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/25",
+                    "rounded-md outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
                   )}
                 >
                   {body}
@@ -439,10 +435,7 @@ function EntryTime({ iso, className }: { iso: string; className?: string }) {
   );
 }
 
-const dot =
-  "before:absolute before:-left-6 before:size-1.75 before:rounded-full before:bg-border before:ring-2 before:ring-background max-lg:before:-left-5";
-
-function CommentCard({
+function CommentWell({
   entry,
 }: {
   entry: Extract<EntryView, { kind: "comment" }>;
@@ -450,10 +443,10 @@ function CommentCard({
   return (
     <li
       data-entry-id={entry.id}
-      className={cn("relative my-2 rounded-xl border before:top-4", dot)}
+      className="my-1.5 flex flex-col gap-1.5 rounded-lg bg-muted px-3 py-2.5"
     >
-      <div className="flex items-center gap-1.5 rounded-t-xl border-b bg-muted px-3 py-2">
-        <Actor actor={entry.actor} titleSurface="card" />
+      <div className="flex items-center gap-1.5">
+        <Actor actor={entry.actor} />
         {entry.comment.sourceAuthor && (
           <span className="text-2xs text-muted-foreground">
             originally by {entry.comment.sourceAuthor}
@@ -461,7 +454,8 @@ function CommentCard({
         )}
         <EntryTime iso={entry.createdAt} className="ml-auto max-lg:hidden" />
       </div>
-      <div className="flex flex-col gap-1.5 px-3 py-2.5">
+      {/* indented past the avatar at lg, so the body lines up with the name */}
+      <div className="flex flex-col gap-1.5 lg:pl-6">
         <Markdown>{entry.comment.body}</Markdown>
         <EntryTime iso={entry.createdAt} className="lg:hidden" />
       </div>
@@ -475,10 +469,7 @@ function ChangeLine({ entry }: { entry: EntryView }) {
   return (
     <li
       data-entry-id={entry.id}
-      className={cn(
-        "relative flex flex-wrap items-center gap-x-1.5 gap-y-0.5 py-1.25 text-muted-foreground before:top-3",
-        dot,
-      )}
+      className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 py-1.25 text-muted-foreground"
     >
       <Actor actor={entry.actor} />
       {phrase}
@@ -490,13 +481,13 @@ function ChangeLine({ entry }: { entry: EntryView }) {
   );
 }
 
-/** Oldest first: comments as cards, every other change as one line. */
+/** Oldest first: comments in a flat well, every other change as one line. */
 function Timeline({ entries }: { entries: EntryView[] }) {
   return (
-    <ol className="ml-2.25 border-l pl-4 lg:ml-2.75 lg:pl-5">
+    <ol>
       {entries.map((entry) =>
         entry.kind === "comment" ? (
-          <CommentCard key={entry.id} entry={entry} />
+          <CommentWell key={entry.id} entry={entry} />
         ) : (
           <ChangeLine key={entry.id} entry={entry} />
         ),
@@ -525,6 +516,7 @@ function CommentBox({
   }
   const fieldId = useId();
   const errorId = useId();
+  const reasonId = useId();
   const empty = body.trim() === "";
 
   const submit = (event: FormEvent) => {
@@ -534,33 +526,37 @@ function CommentBox({
   };
 
   return (
-    <form onSubmit={submit} className="mt-3.5 flex flex-col gap-2">
-      <label htmlFor={fieldId} className="sr-only">
+    <form onSubmit={submit} className="mt-6 flex flex-col">
+      <label htmlFor={fieldId} className="mb-1.5 font-medium">
         Comment
       </label>
       <Textarea
         id={fieldId}
         value={body}
         onChange={(event) => setBody(event.currentTarget.value)}
-        placeholder="Leave a comment. Markdown works."
         aria-describedby={errorId}
         aria-invalid={error ? true : undefined}
-        className="min-h-21 resize-none rounded-xl px-3 py-2.5 text-sm"
+        className="min-h-21 resize-none text-sm"
       />
-      <p id={errorId} role="status" className="text-xs text-destructive">
+      <p id={errorId} role="status" className="mt-1 text-xs text-destructive">
         {error}
       </p>
-      <div className="flex items-center gap-1.5">
-        <p className="flex min-w-0 flex-wrap items-center gap-1 text-muted-foreground">
-          Commenting as {strong(viewer.name)}
-          <ActorBadge kind="human" />
+      <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-2">
+        <p className="min-w-0 flex-1 text-muted-foreground">
+          Commenting as {strong(viewer.name)}. Markdown works.
         </p>
+        {empty && (
+          <p id={reasonId} className="text-xs text-muted-foreground">
+            Write something to post it
+          </p>
+        )}
+        {/* aria-disabled, not disabled: the button keeps focus and its reason stays announced */}
         <Button
           type="submit"
-          disabled={empty}
-          aria-disabled={pending || undefined}
+          aria-disabled={empty || undefined}
+          aria-describedby={empty ? reasonId : undefined}
           aria-busy={pending || undefined}
-          className="ml-auto disabled:border-border disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100 max-lg:h-10 max-lg:px-4"
+          className="max-lg:w-full"
         >
           {pending ? "Commenting…" : "Comment"}
         </Button>
@@ -592,7 +588,7 @@ export function IssueView(props: IssueViewProps) {
         <Links links={data.links} />
       </aside>
       {data.description.trim() !== "" && (
-        <Markdown className="border-b px-4 py-3.5 lg:mt-4 lg:border-0 lg:p-0">
+        <Markdown className="px-4 py-3.5 lg:mt-4 lg:p-0">
           {data.description}
         </Markdown>
       )}

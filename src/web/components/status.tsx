@@ -27,29 +27,6 @@ const types: Record<WebItemType, { label: string; icon: LucideIcon }> = {
   todo: { label: "Todo", icon: ListTodoIcon },
 };
 
-/** Issue or Todo, glyph plus word. Neutral on purpose: teal is for bots alone. */
-export function TypeBadge({
-  type,
-  className,
-}: {
-  type: WebItemType;
-  className?: string;
-}) {
-  const { icon: Icon, label } = types[type];
-  return (
-    <span
-      data-item-type={type}
-      className={cn(
-        "inline-flex h-4.5 shrink-0 items-center gap-0.75 rounded-sm bg-secondary px-1.5 text-2xs leading-none font-medium whitespace-nowrap text-secondary-foreground",
-        className,
-      )}
-    >
-      <Icon aria-hidden="true" className="size-3.5 shrink-0" />
-      {label}
-    </span>
-  );
-}
-
 export function typeLabel(type: WebItemType): string {
   return types[type].label;
 }

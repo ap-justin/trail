@@ -37,8 +37,6 @@ export function BotTitle({
   className,
 }: {
   actor: Pick<WebActorView, "kind" | "title">;
-  /** @deprecated No effect: the title is plain text on any surface. */
-  surface?: "muted" | "card";
   className?: string;
 }) {
   if (actor.kind !== "bot" || !actor.title) return null;
@@ -76,8 +74,6 @@ export function ActorName({
   actor: Pick<WebActorView, "name" | "kind" | "title">;
   className?: string;
   nameClassName?: string;
-  /** @deprecated No effect: the title is plain text on any surface. */
-  titleSurface?: "muted" | "card";
   titleClassName?: string;
 }) {
   return (

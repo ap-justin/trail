@@ -297,7 +297,7 @@ describe("product", () => {
     );
   }
 
-  test("a status update reads avatar, name, Bot badge, then the title pill before the date on its own row; the issue list's assignee never carries it", () => {
+  test("a status update reads avatar and name, then the title before the date on its own row; the issue list's assignee never carries it", () => {
     renderProduct();
     // the issue table (1440), its rows (375) and both updates are all in the DOM
     const pills = screen.getAllByTitle("Release manager");
@@ -306,10 +306,12 @@ describe("product", () => {
     const update = pill.closest("li");
     if (!update) throw new Error("no status update");
     const name = within(update).getByText("Beta");
-    const badge = within(update).getByText("Bot");
     const health = within(update).getByText("On track");
-    // row 1: name, badge, health; the name truncates rather than pushing the row wider
-    expect(name.parentElement).toBe(badge.parentElement);
+    // row 1: avatar, name, health; the name truncates rather than pushing the row wider
+    expect(
+      within(update).getByRole("img", { name: "Beta, bot" }).parentElement,
+    ).toBe(name.parentElement);
+    expect(within(update).queryByText("Bot")).toBeNull();
     expect(health.closest("div")).toBe(name.parentElement);
     expect(name).toHaveClass("min-w-0", "truncate");
     // row 2: the pill, then the date, in a row of their own after row 1

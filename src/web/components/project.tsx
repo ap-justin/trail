@@ -1,6 +1,6 @@
 import { PackageIcon } from "lucide-react";
 import { type ReactNode, useId, useRef, useState } from "react";
-import { ActorAvatar, ActorBadge, BotTitle } from "@/components/actor";
+import { ActorAvatar, BotTitle } from "@/components/actor";
 import { AppLink } from "@/components/app-link";
 import { ProductSelect } from "@/components/filter-select";
 import {
@@ -95,8 +95,8 @@ const HIDDEN_PRODUCTS = "Items from products you can't see are not shown.";
 
 /**
  * Lead, Target, Health and Products as a ledger. `aside` (1024px and up): a 72px label
- * column, the lead's title pill under the name, each product's key and name. `inline`
- * (below): a 56px column, the pill in line, keys alone, and no Health, which rides the
+ * column, the lead's title under the name, each product's key and name. `inline`
+ * (below): a 56px column, the title in line, keys alone, and no Health, which rides the
  * heading there.
  */
 function ProjectDetails({
@@ -125,8 +125,7 @@ function ProjectDetails({
         <span className="min-w-0 truncate">{project.lead.name}</span>{" "}
         <span className={cn(aside && "order-last w-full pl-6.5")}>
           <BotTitle actor={project.lead} />
-        </span>{" "}
-        <ActorBadge kind={project.lead.kind} />
+        </span>
       </dd>
       {project.targetDate && (
         <>
@@ -270,9 +269,7 @@ function ProjectBody(
           )}
         >
           <div>
-            <p className="text-2xs font-medium text-muted-foreground max-lg:sr-only">
-              Goal
-            </p>
+            <p className="text-xs text-muted-foreground max-lg:sr-only">Goal</p>
             <p className="max-w-155">{project.goal}</p>
           </div>
           <div className="lg:hidden">

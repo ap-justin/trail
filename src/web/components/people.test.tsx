@@ -575,7 +575,9 @@ describe("invite", () => {
     const user = userEvent.setup();
     const { props } = renderPeople();
     await user.type(entry(), "devon-r");
-    await user.click(screen.getByRole("button", { name: /^Products:/ }));
+    await user.click(
+      screen.getByRole("button", { name: /^Products they can see/ }),
+    );
     await user.click(
       await screen.findByRole("checkbox", { name: "TRL trail" }),
     );
@@ -664,10 +666,12 @@ describe("parseEntry", () => {
 });
 
 describe("products", () => {
-  test("the invite's picker says Pick products until one is picked, then shows the picked keys alone", async () => {
+  test("the invite's picker is named by its label, says Pick products until one is picked, then shows each picked key and name", async () => {
     const user = userEvent.setup();
     renderPeople();
-    const picker = screen.getByRole("button", { name: /^Products:/ });
+    const picker = screen.getByRole("button", {
+      name: /^Products they can see/,
+    });
     expect(picker).toHaveTextContent("Pick products");
     await user.click(picker);
     await user.click(
@@ -675,7 +679,30 @@ describe("products", () => {
     );
     await user.click(screen.getByRole("checkbox", { name: "DOC Docs site" }));
     await user.keyboard("{Escape}");
-    expect(picker).toHaveTextContent(/^Products:\s*TRL\s*DOC$/);
+    expect(picker).toHaveTextContent(/^TRL trail\s*DOC Docs site$/);
+    expect(picker).toHaveAccessibleName(
+      "Products they can see TRL trail DOC Docs site",
+    );
+  });
+
+  test("the invite fields have visible labels and no placeholder", () => {
+    renderPeople();
+    const box = screen.getByRole("textbox", {
+      name: "GitHub username or email",
+    });
+    expect(box).not.toHaveAttribute("placeholder");
+    expect(document.querySelector(`label[for="${box.id}"]`)).not.toHaveClass(
+      "sr-only",
+    );
+    expect(screen.getByText("Products they can see")).not.toHaveClass(
+      "sr-only",
+    );
+  });
+
+  test("the owner is named in plain text, not a badge", () => {
+    renderPeople();
+    const owner = row("jordansmith").getByText("Owner");
+    expect(owner).not.toHaveAttribute("data-slot", "badge");
   });
 
   test("a person's row lists each product as key and name", () => {

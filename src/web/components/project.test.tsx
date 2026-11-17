@@ -97,7 +97,7 @@ const details = () => screen.getByRole("region", { name: "Details" });
 const HIDDEN = "Items from products you can't see are not shown.";
 
 describe("goal and details", () => {
-  test("the goal, then Details: lead with badge and title pill, target, health, the visible products", () => {
+  test("the goal, then Details: lead with avatar and title, target, health, the visible products", () => {
     renderProject();
     expect(screen.getByText("Goal")).toBeInTheDocument();
     expect(
@@ -109,7 +109,11 @@ describe("goal and details", () => {
     const terms = dl.getAllByRole("term").map((dt) => dt.textContent);
     expect(terms).toEqual(["Lead", "Target", "Health", "Products"]);
     const [lead, target, health, products] = dl.getAllByRole("definition");
-    expect(lead).toHaveTextContent(/Gamma.*Release engineer.*Bot/);
+    expect(lead).toHaveTextContent(/Gamma.*Release engineer/);
+    expect(
+      within(lead as HTMLElement).getByRole("img", { name: "Gamma, bot" }),
+    ).toBeVisible();
+    expect(lead).not.toHaveTextContent("Bot");
     expect(target).toHaveTextContent(/^Dec 4$/);
     expect(health).toHaveTextContent(/^At risk$/);
     expect(products).toHaveTextContent(/DOC Docs site\s*TRL trail/);

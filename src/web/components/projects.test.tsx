@@ -52,7 +52,7 @@ describe("projects", () => {
     ]);
   });
 
-  test("a row reads name and goal, health, product keys, the lead with the Bot badge, target, update, open count and age", () => {
+  test("a row reads name and goal, health, product keys, the lead with their avatar, target, update, open count and age", () => {
     renderProjects();
     const cells = cellsOf(rowFor("human-ui"));
     expect(
@@ -65,7 +65,10 @@ describe("projects", () => {
     );
     expect(cells[1]).toHaveTextContent(/^At risk$/);
     expect(cells[2]).toHaveTextContent(/^DOC OPB TRL\s*$/);
-    expect(cells[3]).toHaveTextContent(/Gamma.*Bot/);
+    expect(cells[3]).toHaveTextContent(/Gamma$/);
+    expect(
+      within(cells[3] as HTMLElement).getByRole("img", { name: "Gamma, bot" }),
+    ).toBeVisible();
     expect(cells[4]).toHaveTextContent(/^Dec 4$/);
     expect(cells[5]).toHaveTextContent(/Feed and product pages are drawn/);
     expect(cells[6]).toHaveTextContent(/^14$/);

@@ -5,7 +5,12 @@ import {
   ProductsEmpty,
   ProductsError,
 } from "@/components/states";
-import { Age, LatestUpdate, UpdateHealth } from "@/components/status-updates";
+import {
+  Age,
+  LatestUpdate,
+  NO_HEALTH,
+  UpdateHealth,
+} from "@/components/status-updates";
 import { KeyText } from "@/components/text";
 import {
   Table,
@@ -67,9 +72,9 @@ function RepoLine({ url }: { url: string }) {
 }
 
 // 16px between columns, 12px at the row's ends
-const head = "h-10 px-2 text-2xs text-muted-foreground first:pl-3 last:pr-3";
+const head = "h-10 px-2 first:pl-3 last:pr-3";
 const cell = "px-2 first:pl-3 last:pr-3";
-const figure = cn(cell, "text-right tabular-nums");
+const figure = cn(cell, "text-right");
 
 function ProductsTable({
   products,
@@ -109,7 +114,7 @@ function ProductsTable({
               {product.repoUrl && <RepoLine url={product.repoUrl} />}
             </TableCell>
             <TableCell className={cell}>
-              <UpdateHealth of={product} />
+              <UpdateHealth of={product} empty={NO_HEALTH} />
             </TableCell>
             <TableCell className={cell}>
               <LatestUpdate
@@ -139,12 +144,12 @@ function ProductCards({
   now: Date;
 }) {
   return (
-    <ul className="border-t lg:hidden">
+    <ul className="lg:hidden">
       {products.map((product) => (
         <li
           key={product.key}
           data-product-key={product.key}
-          className="relative flex flex-col gap-2 border-b px-4 py-3.5"
+          className="relative flex flex-col gap-2 border-b border-rule px-4 py-3.5"
         >
           <div className="flex flex-col gap-0.5">
             <div className="flex items-center justify-between gap-2">

@@ -104,7 +104,7 @@ export function RepoLink({
       target="_blank"
       rel="noreferrer"
       className={cn(
-        "inline-flex max-w-full min-w-0 items-center gap-2 rounded-sm outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/25",
+        "inline-flex max-w-full min-w-0 items-center gap-2 rounded-sm outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
         className,
       )}
     >
@@ -179,7 +179,7 @@ function ItemsBody({
 
 function ProjectItem({ project, now }: { project: WebProjectView; now: Date }) {
   return (
-    <li className="relative flex flex-col gap-1 border-b py-2 max-lg:px-4 max-lg:py-3">
+    <li className="relative flex flex-col gap-1 border-b border-rule py-2 max-lg:px-4 max-lg:py-3">
       <span className="flex min-w-0 items-center gap-2">
         <RowLink
           href={paths.project(project.slug)}

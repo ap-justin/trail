@@ -137,7 +137,11 @@ describe("items", () => {
     });
     expect(tableRow("TRL-19")).toHaveTextContent("Unassigned");
     expect(tableRow("TRL-22")).not.toHaveTextContent("Unassigned");
-    expect(screen.getAllByText("Unassigned")).toHaveLength(1);
+    const phoneRow = (key: string) =>
+      document.querySelector<HTMLElement>(`li[data-item-key="${key}"]`);
+    expect(phoneRow("TRL-19")).toHaveTextContent("Unassigned");
+    expect(phoneRow("TRL-22")).not.toHaveTextContent("Unassigned");
+    expect(screen.getAllByText("Unassigned")).toHaveLength(2);
   });
 
   test("each row opens its item", () => {
@@ -149,7 +153,7 @@ describe("items", () => {
     }
   });
 
-  test("below 1024px the whole row is the link, described by its type, status, priority, labels and assignee", () => {
+  test("below 1024px the whole row is the link, described by its type, status, assignee, priority and labels", () => {
     renderProduct();
     const item = document.querySelector('li[data-item-key="TRL-17"]');
     if (!(item instanceof HTMLElement)) throw new Error("no 375 row");
@@ -157,7 +161,7 @@ describe("items", () => {
       name: "TRL-17 Human UI: feed, projects, issue page",
     });
     expect(link).toHaveAccessibleDescription(
-      /^Issue Open .*ui design Assigned to Beta, bot$/,
+      /^Issue Open Assigned to Beta, bot .*ui design$/,
     );
   });
 

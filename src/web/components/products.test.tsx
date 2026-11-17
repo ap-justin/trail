@@ -52,15 +52,19 @@ describe("products", () => {
     renderProducts();
     expect(within(table()).getByText("On track")).toBeInTheDocument();
     expect(within(table()).getByText("Beta")).toBeInTheDocument();
-    expect(within(table()).getByText("Bot")).toBeInTheDocument();
+    expect(
+      within(table()).getByRole("img", { name: "Beta, bot" }),
+    ).toBeInTheDocument();
+    expect(within(table()).queryByText("Bot")).toBeNull();
     expect(within(table()).getByText("41m ago")).toBeInTheDocument();
   });
 
-  test('"No status update yet" shows no health, even with a health on file', () => {
+  test('"No status update yet" shows no health, even with a health on file; the Health column reads "None yet"', () => {
     renderProducts({
       products: [product({ latestStatusUpdate: null, health: "at_risk" })],
     });
     expect(screen.getAllByText("No status update yet")).toHaveLength(2);
+    expect(within(table()).getByText("None yet")).toBeInTheDocument();
     for (const word of ["On track", "At risk", "Off track"]) {
       expect(screen.queryByText(word)).not.toBeInTheDocument();
     }

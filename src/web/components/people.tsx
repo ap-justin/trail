@@ -1,6 +1,7 @@
-import { Trash2Icon, UserIcon } from "lucide-react";
+import { ChevronDownIcon, Trash2Icon } from "lucide-react";
 import {
   type FormEvent,
+  Fragment,
   type KeyboardEvent,
   type ReactNode,
   type Ref,
@@ -115,21 +116,11 @@ function PersonAvatar({ person }: { person: PersonView }) {
   );
 }
 
-function ProductChip({
-  product,
-  keyOnly = false,
-}: {
-  product: WebProductRefView;
-  keyOnly?: boolean;
-}) {
+function ProductChip({ product }: { product: WebProductRefView }) {
   return (
-    <Badge
-      variant="outline"
-      data-product-chip
-      className="h-5.5 gap-1.5 rounded-md px-2 text-xs font-normal"
-    >
+    <Badge variant="tag" data-product-chip>
       <KeyText className="text-current">{product.key}</KeyText>
-      {!keyOnly && ` ${product.name}`}
+      {` ${product.name}`}
     </Badge>
   );
 }
@@ -156,7 +147,7 @@ function ProductChecklist({
           // biome-ignore lint/a11y/noLabelWithoutControl: Base UI's Checkbox renders the input this label wraps
           <label
             key={product.key}
-            className="flex min-h-10 cursor-pointer items-center gap-2 lg:min-h-7"
+            className="flex min-h-11 cursor-pointer items-center gap-2 lg:min-h-7"
           >
             <Checkbox
               ref={index === 0 ? firstRef : undefined}
@@ -178,28 +169,48 @@ function ProductChecklist({
   );
 }
 
+/** Named by its visible label, then what it holds: "Products they can see TRL trail". */
 function ProductPicker({
   products,
   selected,
   onChange,
+  labelId,
+  className,
 }: {
   products: WebProductRefView[];
   selected: string[];
   onChange: (keys: string[]) => void;
+  labelId: string;
+  className?: string;
 }) {
   const picked = products.filter((p) => selected.includes(p.key));
+  const valueId = useId();
   return (
     <Popover>
-      <PopoverTrigger className="flex h-8 min-w-0 shrink-0 items-center gap-1.5 rounded-lg border border-input px-1.5 lg:flex-1 text-left outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/25 max-lg:h-10 dark:bg-input/30">
-        <span className="sr-only">Products:</span>
-        {picked.map((product) => (
-          <ProductChip key={product.key} product={product} keyOnly />
-        ))}
-        {picked.length === 0 && (
-          <span className="truncate px-1 text-muted-foreground lg:ml-auto">
-            Pick products
-          </span>
+      <PopoverTrigger
+        aria-labelledby={`${labelId} ${valueId}`}
+        className={cn(
+          "flex h-11 min-w-0 items-center gap-1.5 overflow-hidden rounded-lg border border-input px-1.5 text-left outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring lg:h-8 dark:bg-input/30",
+          className,
         )}
+      >
+        <span id={valueId} className="contents">
+          {picked.map((product) => (
+            // the space keeps the chips apart in the button's name; flex drops it visually
+            <Fragment key={product.key}>
+              <ProductChip product={product} />{" "}
+            </Fragment>
+          ))}
+          {picked.length === 0 && (
+            <span className="truncate px-1 text-muted-foreground">
+              Pick products
+            </span>
+          )}
+        </span>
+        <ChevronDownIcon
+          aria-hidden="true"
+          className="ml-auto size-4 shrink-0 text-muted-foreground"
+        />
       </PopoverTrigger>
       <PopoverContent align="start" className="w-64">
         <ProductChecklist
@@ -245,6 +256,7 @@ function InviteForm({
   const ids = {
     heading: useId(),
     username: useId(),
+    products: useId(),
     error: useId(),
     hint: useId(),
     status: useId(),
@@ -282,58 +294,68 @@ function InviteForm({
       aria-labelledby={ids.heading}
       className="flex flex-col gap-1.5"
     >
-      <h2 id={ids.heading} className="mb-0.5 font-medium max-lg:sr-only">
+      <h2 id={ids.heading} className="sr-only">
         Invite someone
       </h2>
-      <div className="flex flex-col gap-2 lg:flex-row lg:items-start">
-        <div className="flex flex-col gap-1 lg:w-80">
-          <label htmlFor={ids.username} className="sr-only">
-            GitHub username or email
-          </label>
-          <Input
-            id={ids.username}
-            ref={inputRef}
-            value={username}
-            placeholder="priya@studio.example"
-            autoComplete="off"
-            spellCheck={false}
-            onChange={(event) => {
-              const next = event.currentTarget.value;
-              setUsername(next);
-              setEditedSinceInvite(true);
-              if (submitted) setUsernameError(check(next));
-            }}
-            aria-invalid={fieldError ? true : undefined}
-            aria-describedby={
-              fieldError ? `${ids.error} ${ids.hint}` : ids.hint
-            }
-            className="max-lg:h-10"
-          />
-          {fieldError && (
-            <p id={ids.error} className="text-xs text-destructive">
-              {fieldError}
-            </p>
-          )}
-        </div>
+      {/* at lg labels over one row of controls; below, each label over its own control */}
+      <div className="flex flex-col gap-1.5 lg:grid lg:grid-cols-[--spacing(80)_minmax(0,1fr)_auto] lg:gap-x-3">
+        <label htmlFor={ids.username} className="font-medium max-lg:order-1">
+          GitHub username or email
+        </label>
+        <span
+          id={ids.products}
+          className="font-medium max-lg:order-4 max-lg:mt-2.5 lg:col-span-2"
+        >
+          Products they can see
+        </span>
+        <Input
+          id={ids.username}
+          ref={inputRef}
+          value={username}
+          autoComplete="off"
+          spellCheck={false}
+          onChange={(event) => {
+            const next = event.currentTarget.value;
+            setUsername(next);
+            setEditedSinceInvite(true);
+            if (submitted) setUsernameError(check(next));
+          }}
+          aria-invalid={fieldError ? true : undefined}
+          aria-describedby={fieldError ? `${ids.error} ${ids.hint}` : ids.hint}
+          className="max-lg:order-2"
+        />
         <ProductPicker
           products={products}
           selected={productKeys}
           onChange={setProductKeys}
+          labelId={ids.products}
+          className="max-lg:order-5"
         />
         <Button
           type="submit"
           aria-disabled={pending || undefined}
           aria-busy={pending || undefined}
-          className="max-lg:h-10 lg:px-3"
+          className="max-lg:order-7 max-lg:mt-1 lg:px-3"
         >
           {pending ? "Inviting…" : "Invite"}
         </Button>
+        {fieldError && (
+          <p
+            id={ids.error}
+            className="text-xs text-destructive max-lg:order-3 lg:col-start-1"
+          >
+            {fieldError}
+          </p>
+        )}
+        <p
+          id={ids.hint}
+          className="text-xs text-muted-foreground max-lg:order-6 lg:col-span-3"
+        >
+          GitHub invitees sign in with GitHub; email invitees get a sign-in link
+          by email. They see only the products you pick; a project shows them
+          just the items from those products.
+        </p>
       </div>
-      <p id={ids.hint} className="text-xs text-muted-foreground">
-        GitHub invitees sign in with GitHub; email invitees get a sign-in link
-        by email. They see only the products you pick; a project shows them just
-        the items from those products.
-      </p>
       <p id={ids.status} role="status" className="text-xs text-destructive">
         {answered && !answered.atField ? answered.message : null}
       </p>
@@ -434,7 +456,7 @@ function PersonRow({
     <li
       data-person={personId(person)}
       className={cn(
-        "flex flex-col gap-2 border-b px-4 py-3 lg:flex-row lg:flex-wrap lg:items-center lg:gap-3 lg:px-2",
+        "flex flex-col gap-2 border-b border-rule px-4 py-3 lg:flex-row lg:flex-wrap lg:items-center lg:gap-3 lg:px-2",
         editing && "lg:my-1.5 lg:rounded-xl lg:border lg:bg-muted",
       )}
     >
@@ -444,13 +466,7 @@ function PersonRow({
           <span className="flex items-center gap-2">
             <span className="truncate font-medium">{name}</span>
             {person.owner && (
-              <Badge
-                variant="outline"
-                className="h-4.5 gap-0.75 rounded-sm px-1.5 text-2xs text-muted-foreground"
-              >
-                <UserIcon data-icon="inline-start" aria-hidden="true" />
-                Owner
-              </Badge>
+              <span className="text-muted-foreground">Owner</span>
             )}
           </span>
           <span className="truncate text-muted-foreground">
@@ -503,7 +519,7 @@ function PersonRow({
               size="sm"
               aria-disabled={busy || undefined}
               aria-busy={saving || undefined}
-              className="max-lg:h-10 max-lg:flex-1"
+              className="max-lg:flex-1"
             >
               {saving ? "Saving…" : "Save products"}
             </Button>
@@ -511,7 +527,7 @@ function PersonRow({
               type="button"
               variant="outline"
               size="sm"
-              className="max-lg:h-10 max-lg:flex-1"
+              className="max-lg:flex-1"
               onClick={() => changeMode("view")}
             >
               Cancel
@@ -538,7 +554,7 @@ function PersonRow({
                 ref={keepRef}
                 variant="outline"
                 size="sm"
-                className="max-lg:h-10 max-lg:flex-1"
+                className="max-lg:flex-1"
                 onClick={() => changeMode("view")}
               >
                 Keep
@@ -548,7 +564,7 @@ function PersonRow({
                 size="sm"
                 aria-disabled={busy || undefined}
                 aria-busy={removing || undefined}
-                className="max-lg:h-10 max-lg:flex-1"
+                className="max-lg:flex-1"
                 onClick={() => {
                   if (busy) return;
                   setSent("remove");
@@ -567,7 +583,7 @@ function PersonRow({
                 variant="outline"
                 size="sm"
                 aria-label={`Edit products for ${handle}`}
-                className="max-lg:h-10 max-lg:flex-1"
+                className="max-lg:flex-1"
                 onClick={() => {
                   setDraft(person.products.map((p) => p.key));
                   changeMode("edit");
@@ -580,7 +596,7 @@ function PersonRow({
                 variant="outline"
                 size="sm"
                 aria-label={`Remove ${handle}`}
-                className="text-destructive max-lg:h-10 max-lg:flex-1"
+                className="text-destructive max-lg:flex-1"
                 onClick={() => changeMode("confirm")}
               >
                 <Trash2Icon data-icon="inline-start" aria-hidden="true" />
@@ -639,7 +655,7 @@ export function PeopleView(props: PeopleViewProps) {
             id={listHeading}
             ref={headingRef}
             tabIndex={-1}
-            className="mb-1 font-medium outline-none max-lg:sr-only"
+            className="mb-1 font-medium outline-none max-lg:px-4"
           >
             People
             {props.status === "ready" && (
@@ -659,7 +675,7 @@ export function PeopleView(props: PeopleViewProps) {
             />
           )}
           {props.status === "ready" && (
-            <ul ref={listRef} className="border-t">
+            <ul ref={listRef}>
               {props.people.map((person) => (
                 <PersonRow
                   key={personId(person)}
