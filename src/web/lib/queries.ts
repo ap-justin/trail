@@ -67,6 +67,9 @@ export const projectsQuery = queryOptions({
     (await readPages(api.projects, PROJECT_PAGES_MAX)).flatMap((p) => p.items),
 });
 
+/** A product's in-progress items of every type: what the feed's Working now reads. */
+export const IN_PROGRESS: ItemQuery = { type: null, status: "in_progress" };
+
 /** Pages of a product's or project's items the page reads before it stops: neither has Load more. */
 export const ITEM_PAGES_MAX = 10;
 

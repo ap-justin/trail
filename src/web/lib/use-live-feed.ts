@@ -13,7 +13,7 @@ import { api, type FeedFilter, isNotFound } from "@/lib/api";
 import type { EntryView } from "@/lib/api-types";
 import { holdFeedStream } from "@/lib/feed-stream-holds";
 import { statusOf } from "@/lib/loadable";
-import { keys } from "@/lib/queries";
+import { IN_PROGRESS, keys } from "@/lib/queries";
 
 /** How long a row that arrived over the stream keeps its highlight. */
 export const FRESH_MS = 2000;
@@ -27,6 +27,14 @@ export const RECONNECT_MS = 5000;
 export type FilterGone = { actor?: string; product?: string; project?: string };
 
 export type LiveConnection = "connecting" | "open" | "reconnecting";
+
+/** Entries that can start or end a bot's in-progress item, so Working now reads its product again. */
+const movesBotWork: ReadonlySet<EntryView["kind"]> = new Set([
+  "item_created",
+  "status_changed",
+  "assignee_changed",
+  "product_imported",
+]);
 
 type Arrivals = {
   /** The rows of the last `/feed` read that are on screen; null until the first read. */
@@ -160,6 +168,12 @@ export function useLiveFeed(
   const onEntry = useEffectEvent((entry: EntryView) => {
     if (received.current.has(entry.id) || readIds.has(entry.id)) return;
     received.current.add(entry.id);
+    if (entry.product !== null && movesBotWork.has(entry.kind)) {
+      void queryClient.invalidateQueries({
+        queryKey: keys.productItems(entry.product.key, IN_PROGRESS),
+        exact: true,
+      });
+    }
     dispatch({ type: "received", entry, hold });
     setFreshIds((ids) => new Set(ids).add(entry.id));
     later(FRESH_MS, () =>

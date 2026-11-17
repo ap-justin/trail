@@ -1,14 +1,32 @@
+import { useQueries } from "@tanstack/react-query";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { AppPage, useChrome } from "@/app/chrome";
 import { FeedView, LiveIndicator } from "@/components/feed";
+import { workingNowEntries } from "@/components/working-now";
 import type { FeedFilter } from "@/lib/api";
+import type { WebProductRefView } from "@/lib/api-types";
 import { type FeedSearch, validateFeedSearch } from "@/lib/item-search";
+import { IN_PROGRESS, productItemsQuery } from "@/lib/queries";
 import { useLiveFeed } from "@/lib/use-live-feed";
 
 export const Route = createFileRoute("/_app/")({
   validateSearch: validateFeedSearch,
   component: FeedPage,
 });
+
+/**
+ * Bots at work across `products`: each product's in-progress items, read on their own,
+ * so a product whose read failed or hasn't answered only leaves its bots out.
+ */
+function useWorkingNow(products: WebProductRefView[]) {
+  return useQueries({
+    queries: products.map((product) =>
+      productItemsQuery(product.key, IN_PROGRESS),
+    ),
+    combine: (reads) =>
+      workingNowEntries(reads.flatMap((read) => read.data?.items ?? [])),
+  });
+}
 
 function FeedPage() {
   const search = Route.useSearch();
@@ -36,6 +54,7 @@ function FeedPage() {
       }));
     },
   });
+  const workingNow = useWorkingNow(session.products);
   const noProducts = !session.viewer.isOwner && session.products.length === 0;
   return (
     <AppPage
@@ -80,6 +99,7 @@ function FeedPage() {
         }
         onRetry={feed.retry}
         noProducts={noProducts}
+        workingNow={workingNow}
       />
     </AppPage>
   );

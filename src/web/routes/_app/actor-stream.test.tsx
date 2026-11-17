@@ -2,7 +2,7 @@ import { act, screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { RECONNECT_MS } from "@/lib/use-live-feed";
-import { meView, renderApp, serveFeed } from "@/test/app";
+import { meView, renderApp, serveFeed, serveInProgress } from "@/test/app";
 import { FakeEventSource } from "@/test/event-source";
 import { alpha, issue, statusEntry } from "@/test/fixtures";
 import { server } from "@/test/server";
@@ -16,6 +16,7 @@ const liveStreams = () =>
 /** Signs in a member and answers the issue page, counting each read of both. */
 function serveCounted() {
   const reads = { me: 0, issue: 0 };
+  serveInProgress();
   server.use(
     http.get("/api/web/me", () => {
       reads.me += 1;
