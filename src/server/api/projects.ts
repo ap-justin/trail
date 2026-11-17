@@ -3,6 +3,7 @@ import {
   errorSchema,
   labelCreateSchema,
   labelSchema,
+  legacyNamedProductSchema,
   legacyProductSchema,
   pageQuerySchema,
   pageSchema,
@@ -15,7 +16,12 @@ import {
   statusUpdateCreateSchema,
   statusUpdateSchema,
 } from "../../shared/schemas.js";
-import type { ProjectOrProduct, Service } from "../service/index.js";
+import type {
+  NamedProduct,
+  ProductView,
+  ProjectOrProduct,
+  Service,
+} from "../service/index.js";
 import { deprecations } from "./deprecations.js";
 import { createRouter } from "./env.js";
 import {
@@ -38,6 +44,7 @@ import {
   toLabel,
   toPage,
   toProduct,
+  toProductRead,
   toProject,
   toStatusUpdate,
 } from "./serialize.js";
@@ -45,6 +52,11 @@ import {
 const tags = ["projects"];
 
 const projectOrProduct = z.union([projectSchema, legacyProductSchema]);
+const projectOrProductRead = z.union([
+  projectSchema,
+  legacyProductSchema,
+  legacyNamedProductSchema,
+]);
 
 /** A project as it is, or a product the legacy way, with the note naming its replacement. */
 const viewOf = (
@@ -54,6 +66,12 @@ const viewOf = (
   found.kind === "project"
     ? toProject(found.project)
     : deprecated(toProduct(found.product), note);
+
+/** `viewOf` for a read, where a product the key reaches only through a project is named only. */
+const readOf = (found: ProjectOrProduct<ProductView | NamedProduct>) =>
+  found.kind === "project"
+    ? viewOf(found)
+    : deprecated(toProductRead(found.product), deprecations.product);
 
 const WHO_CHANGES =
   "Needs the issues action on a key that reaches at least one of the project's products.";
@@ -110,7 +128,7 @@ const getProject = createRoute({
   tags,
   request: { params: projectParam },
   responses: {
-    200: jsonContent(projectOrProduct, "The project"),
+    200: jsonContent(projectOrProductRead, "The project"),
     ...forbiddenError("read"),
     ...readErrors,
     ...notFoundError,
@@ -294,7 +312,7 @@ export function projectRoutes(service: Service) {
     )
     .openapi(getProject, (c) =>
       c.json(
-        viewOf(
+        readOf(
           service.getProjectOrProduct(c.var.actor, c.req.valid("param").ref),
         ),
         200,

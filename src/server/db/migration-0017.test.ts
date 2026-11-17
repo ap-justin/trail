@@ -8,7 +8,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, expect, test } from "vitest";
+import { afterAll, beforeAll, beforeEach, expect, test } from "vitest";
 import { type Db, migrate, openDatabase } from "./client.js";
 
 const dir = mkdtempSync(join(tmpdir(), "trail-0017-"));
@@ -49,6 +49,8 @@ const scope = (apiKeyId: string, projectId: string) => () =>
     .run(apiKeyId, projectId);
 
 let db: Db;
+/** the join tables' row counts straight after the migration, before any test writes */
+let migrated: unknown[];
 
 // a database as it stood at 0016: a bot with an unrestricted key and a product-scoped one, and a project
 beforeAll(() => {
@@ -63,17 +65,36 @@ beforeAll(() => {
       ('pj-other', 'other', 'other', 'alpha', 'alpha', 0, 0);
     insert into api_key (id, actor_id, prefix, hash, created_at) values
       ('k-open', 'alpha', 'open', '${hash}', 0),
-      ('k-atl', 'alpha', 'atl', '${hash}', 0),
-      ('k-gone', 'alpha', 'gone', '${hash}', 0);
+      ('k-atl', 'alpha', 'atl', '${hash}', 0);
     insert into api_key_product (api_key_id, product_id) values ('k-atl', 'p-atl');
     insert into webhook_subscription (id, actor_id, url, secret_cipher, created_at, updated_at) values
-      ('s-atl', 'alpha', 'https://x.test/a', 'sealed', 1, 1),
-      ('s-gone', 'alpha', 'https://x.test/b', 'sealed', 1, 1);
+      ('s-atl', 'alpha', 'https://x.test/a', 'sealed', 1, 1);
     insert into webhook_subscription_product (subscription_id, product_id) values ('s-atl', 'p-atl');
   `);
   migrate(db, through(17));
+  migrated = rows(
+    db,
+    "select (select count(*) from api_key_project) keys, (select count(*) from webhook_subscription_project) subs",
+  );
   return () => db.$client.close();
 });
+
+// each test starts with no project rows, so none depends on another having run
+beforeEach(() => {
+  db.$client.exec(
+    "delete from api_key_project; delete from webhook_subscription_project;",
+  );
+});
+
+const HASH = "0".repeat(64);
+const mintKey = (id: string) =>
+  db.$client.exec(
+    `insert into api_key (id, actor_id, prefix, hash, created_at) values ('${id}', 'alpha', '${id}', '${HASH}', 0)`,
+  );
+const makeSubscription = (id: string) =>
+  db.$client.exec(
+    `insert into webhook_subscription (id, actor_id, url, secret_cipher, created_at, updated_at) values ('${id}', 'alpha', 'https://x.test/${id}', 'sealed', 1, 1)`,
+  );
 
 test("both tables are STRICT, and existing keys and subscriptions keep their scope with no project rows", () => {
   expect(
@@ -85,12 +106,7 @@ test("both tables are STRICT, and existing keys and subscriptions keep their sco
     { name: "api_key_project", strict: 1 },
     { name: "webhook_subscription_project", strict: 1 },
   ]);
-  expect(
-    rows(
-      db,
-      "select (select count(*) from api_key_project) keys, (select count(*) from webhook_subscription_project) subs",
-    ),
-  ).toEqual([{ keys: 0, subs: 0 }]);
+  expect(migrated).toEqual([{ keys: 0, subs: 0 }]);
   expect(
     rows(db, "select api_key_id, product_id from api_key_product"),
   ).toEqual([{ api_key_id: "k-atl", product_id: "p-atl" }]);
@@ -117,12 +133,13 @@ test("a key names a project once, and only a key and project that exist", () => 
 });
 
 test("deleting a key takes its project rows with it", () => {
-  scope("k-gone", "pj-other")();
-  db.$client.exec("delete from api_key where id = 'k-gone'");
+  mintKey("k-gone-2");
+  scope("k-gone-2", "pj-other")();
+  db.$client.exec("delete from api_key where id = 'k-gone-2'");
   expect(
     rows(
       db,
-      "select count(*) n from api_key_project where api_key_id = 'k-gone'",
+      "select count(*) n from api_key_project where api_key_id = 'k-gone-2'",
     ),
   ).toEqual([{ n: 0 }]);
   expect(
@@ -166,12 +183,13 @@ test("a subscription follows a project once, and only a subscription and project
 });
 
 test("deleting a subscription takes its project rows with it; a followed project can't be deleted", () => {
-  follow("s-gone", "pj-recon")();
-  db.$client.exec("delete from webhook_subscription where id = 's-gone'");
+  makeSubscription("s-gone-2");
+  follow("s-gone-2", "pj-recon")();
+  db.$client.exec("delete from webhook_subscription where id = 's-gone-2'");
   expect(
     rows(
       db,
-      "select count(*) n from webhook_subscription_project where subscription_id = 's-gone'",
+      "select count(*) n from webhook_subscription_project where subscription_id = 's-gone-2'",
     ),
   ).toEqual([{ n: 0 }]);
   follow("s-atl", "pj-other")();

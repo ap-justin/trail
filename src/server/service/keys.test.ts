@@ -365,6 +365,43 @@ describe("editKeyScope", () => {
     ]);
   });
 
+  test("refuses to remove the last product of a products-only key, and the key keeps it", () => {
+    const key = keyWith({ products: ["BTA"] });
+    expect(() =>
+      editKeyScope(db, prefixOf(key), { removeProducts: ["bta"] }),
+    ).toThrow(/^that edit leaves the key with no product and no project/);
+    expect(authenticateKey(db, key)?.scope.products?.map((p) => p.key)).toEqual(
+      ["BTA"],
+    );
+  });
+
+  test("an edit refused for its empty result removes nothing it asked to", () => {
+    const key = keyWith({ products: ["BTA"], projects: ["recon"] });
+    expect(() =>
+      editKeyScope(db, prefixOf(key), {
+        removeProducts: ["BTA"],
+        removeProjects: ["recon"],
+      }),
+    ).toThrow(/^that edit leaves the key with no product and no project/);
+    expect(authenticateKey(db, key)?.scope).toMatchObject({
+      products: [{ key: "BTA" }],
+      projects: [{ slug: "recon" }],
+    });
+  });
+
+  test("an edit with a valid add and an unknown slug adds nothing", () => {
+    const key = keyWith({ products: ["BTA"] });
+    expect(() =>
+      editKeyScope(db, prefixOf(key), {
+        addProducts: ["ATL"],
+        addProjects: ["nope"],
+      }),
+    ).toThrow(/^no project nope/);
+    const scope = authenticateKey(db, key)?.scope;
+    expect(scope?.products?.map((p) => p.key)).toEqual(["BTA"]);
+    expect(scope?.projects).toEqual([]);
+  });
+
   test("refuses to add to an unrestricted key, which already reaches everything", () => {
     const key = keyWith({});
     expect(() =>

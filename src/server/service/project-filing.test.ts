@@ -58,6 +58,7 @@ service.createProject(admin, { name: "Solo", slug: "solo", products: ["BTA"] });
 service.addToProject(admin, "recon", [atlIn, btaIn]);
 
 const alpha = keyed("alpha", { projects: ["recon"] });
+const itemCount = () => service.listItems(admin, { limit: 200 }).items.length;
 
 describe("a key naming one project files issues into it", () => {
   test("with project, the issue is in the product's triage and in the project, visible to the filer while other items stay 404", () => {
@@ -203,21 +204,44 @@ describe("a key with a product grant", () => {
     expect(filed.projects.map((p) => p.slug)).toEqual(["recon"]);
   });
 
-  test("files nothing on a product of that project it has no grant on, nor into a project it does not reach", () => {
+  test("files nothing on a product of that project it has no grant on", () => {
+    const before = itemCount();
     expect(() =>
       service.fileIssue(gamma, {
         product: "ATL",
         project: "recon",
         title: "no",
       }),
-    ).toThrow(NotFoundError);
-    expect(() =>
-      service.fileIssue(gamma, {
-        product: "BTA",
-        project: "atlas",
-        title: "no",
-      }),
-    ).toThrow(NotFoundError);
+    ).toThrow(
+      new NotFoundError(
+        "no product ATL: pass the key (like TRL) of a product this key reaches; list_products (GET /api/v1/products) lists them",
+      ),
+    );
+    expect(itemCount()).toBe(before);
+  });
+
+  test("files nothing into a project it does not reach, which reads as a project that does not exist", () => {
+    const before = itemCount();
+    const refusal = (slug: string) => {
+      try {
+        service.fileIssue(gamma, {
+          product: "BTA",
+          project: slug,
+          title: "no",
+        });
+      } catch (error) {
+        return error;
+      }
+    };
+    const hidden = refusal("atlas");
+    expect(hidden).toBeInstanceOf(NotFoundError);
+    expect((hidden as Error).message).toBe(
+      "no project atlas: pass the slug (like launch-q4) of a project this key reaches; list_projects (GET /api/v1/projects) lists them",
+    );
+    expect((refusal("nowhere") as Error).message).toBe(
+      (hidden as Error).message.replace("atlas", "nowhere"),
+    );
+    expect(itemCount()).toBe(before);
   });
 
   test("with a project as well, a product reached only through it defaults to that project, and its granted product to none", () => {
@@ -237,7 +261,7 @@ describe("a key with a product grant", () => {
       products: ["ATL"],
       projects: ["solo"],
     });
-    const before = service.listItems(admin, { limit: 200 }).items.length;
+    const before = itemCount();
     let refusal: unknown;
     try {
       service.fileIssue(epsilon, {
@@ -252,7 +276,7 @@ describe("a key with a product grant", () => {
     expect((refusal as Error).message).toBe(
       'this key files on product BTA only through project solo, not project recon: send project: "solo" with product BTA, or send product with ATL and project recon',
     );
-    expect(service.listItems(admin, { limit: 200 }).items).toHaveLength(before);
+    expect(itemCount()).toBe(before);
     expect(
       service.fileIssue(epsilon, {
         product: "ATL",
@@ -312,14 +336,22 @@ describe("a project-only bot is a non-owner bot on the products it files into", 
       `${key} is in the triage of BTA, which admin owns: only admin accepts or cancels it`,
     );
     expect(() => service.updateItem(alpha, btaIn, { type: "issue" })).toThrow(
-      ForbiddenError,
+      new ForbiddenError(
+        "only admin, the owner of BTA, changes an item's type between todo and issue: comment on BTA-1 with add_comment to ask admin",
+      ),
     );
     expect(() =>
       service.addTodo(alpha, { product: "BTA", title: "todo" }),
     ).toThrow("this key reaches product BTA only through project recon");
+    const before = itemCount();
     expect(() =>
       service.addTodo(alpha, { product: "BTA", project: "recon", title: "t" }),
-    ).toThrow(ValidationError);
+    ).toThrow(
+      new ValidationError(
+        "add_todo takes no project: add the todo without it, then add it to the project with add_to_project (POST /projects/{slug}/items); file_issue (type issue) is what takes project",
+      ),
+    );
+    expect(itemCount()).toBe(before);
     expect(() =>
       service.createLabel(alpha, { productId: "BTA", name: "fresh" }),
     ).toThrow("this key reaches product BTA only through project recon");
@@ -393,6 +425,33 @@ describe("an idempotent filing into a project", () => {
         { idempotencyKey: "file-once" },
       ),
     ).toThrow(IdempotencyKeyReusedError);
+  });
+});
+
+describe("a filing into a project that fails after the item is written", () => {
+  test("leaves no item, membership or event behind, and the same filing goes through once the failure is gone", () => {
+    const file = () =>
+      service.fileIssue(alpha, {
+        product: "BTA",
+        project: "recon",
+        title: "rolled back",
+      });
+    const events = () =>
+      service.listActivity(admin, { limit: 200 }).items.length;
+    const [items, logged] = [itemCount(), events()];
+    // a real failure at the membership insert, after the item row is in
+    db.$client.exec(
+      "CREATE TRIGGER fail_membership BEFORE INSERT ON project_item BEGIN SELECT RAISE(ABORT, 'membership insert refused'); END",
+    );
+    try {
+      expect(file).toThrow("membership insert refused");
+    } finally {
+      db.$client.exec("DROP TRIGGER fail_membership");
+    }
+    expect(itemCount()).toBe(items);
+    expect(events()).toBe(logged);
+    expect(file().projects.map((p) => p.slug)).toEqual(["recon"]);
+    expect(itemCount()).toBe(items + 1);
   });
 });
 

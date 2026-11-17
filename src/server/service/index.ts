@@ -214,10 +214,14 @@ export type ProjectView = ProjectRow & {
   latestStatusUpdate: (StatusUpdate & { author: ActorRef }) | null;
 };
 
-/** What `get_project` and `update_project` found: a project, or a product by the legacy meaning. */
-export type ProjectOrProduct =
-  | { kind: "project"; project: ProjectView }
-  | { kind: "product"; product: ProductView };
+/**
+ * What `get_project` and `update_project` found: a project, or a product by
+ * the legacy meaning, named only (`P` widened to `NamedProduct`) where a read
+ * reaches it only through a project.
+ */
+export type ProjectOrProduct<
+  P extends ProductView | NamedProduct = ProductView,
+> = { kind: "project"; project: ProjectView } | { kind: "product"; product: P };
 
 /** Every create takes these; a repeat with the same key returns the first result. */
 export type WriteOptions = { idempotencyKey?: string };
@@ -629,8 +633,8 @@ export function createService({
 
   /**
    * `projects` as sent, value by value: a project's slug follows the project,
-   * and a product's exact key (upper case, which no slug matches) is the
-   * deprecated alias of `products`, as before projects. One the key can name
+   * and a product's key in any case (upper-cased, which no slug matches) is
+   * the deprecated alias of `products`, as before projects. One the key can name
    * neither way is the 404 a missing project is.
    */
   function splitProjectRefs(
@@ -659,7 +663,7 @@ export function createService({
         .from(product)
         .where(
           and(
-            eq(product.key, ref),
+            eq(product.key, ref.trim().toUpperCase()),
             productsNamed(db, reachFor(actor), product.id),
           ),
         )
@@ -3359,14 +3363,22 @@ export function createService({
     },
 
     /** A project by exact slug, else a product by key: the meaning `project` had before projects. */
-    getProjectOrProduct(actor: ActingActor, ref: string): ProjectOrProduct {
+    getProjectOrProduct(
+      actor: ActingActor,
+      ref: string,
+    ): ProjectOrProduct<ProductView | NamedProduct> {
       requireAction(actor, "read", "read a project", () =>
         resolveProjectOrProduct(db, ref, actor),
       );
       const found = resolveProjectOrProduct(db, ref, actor);
       return "project" in found
         ? { kind: "project", project: projectView(db, found.project, actor) }
-        : { kind: "product", product: productView(db, found.product) };
+        : {
+            kind: "product",
+            product: productReads(actor, [found.product])[0] as
+              | ProductView
+              | NamedProduct,
+          };
     },
 
     /**

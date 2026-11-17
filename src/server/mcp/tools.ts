@@ -63,6 +63,8 @@ import {
 } from "../service/errors.js";
 import {
   legacyProduct,
+  type NamedProduct,
+  type ProductView,
   type ProjectOrProduct,
   type Service,
   type WebhookWritten,
@@ -501,10 +503,13 @@ export function registerTools(
     }
     return ref as { value: string; note: string | undefined };
   };
-  const viewOf = (found: ProjectOrProduct, note: string | undefined) =>
+  const viewOf = (
+    found: ProjectOrProduct<ProductView | NamedProduct>,
+    note: string | undefined,
+  ) =>
     found.kind === "project"
       ? noted(toProject(found.project), note)
-      : deprecated(toProduct(found.product), deprecations.product);
+      : deprecated(toProductRead(found.product), deprecations.product);
 
   register(
     "get_project",

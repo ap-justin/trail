@@ -1,19 +1,25 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, expect, test } from "vitest";
 import { webhookDelivery, webhookSubscription } from "../db/schema.js";
-import { createBot, createKey } from "../service/keys.js";
+import { createBot, createKey, editKeyScope } from "../service/keys.js";
 import { setupTestApp, testWebhookSettings } from "../test-app.js";
 import { createWebhookWorker, LEFT_PROJECT } from "../webhooks/worker.js";
 
 const sent: { url: string; body: Body }[] = [];
+// the worker's clock runs with the real one and jumps ahead by `skew`, so a retry is due by advancing it
+let skew = 0;
+let receiverDown = false;
+const RETRY_AFTER_MS = 60_000;
 const { db, bus, request } = setupTestApp();
 const worker = createWebhookWorker({
   db,
   bus,
+  backoffMs: [RETRY_AFTER_MS],
   settings: testWebhookSettings({
+    now: () => Date.now() + skew,
     transport: async ({ url, body }) => {
       sent.push({ url: url.href, body: JSON.parse(body) });
-      return { status: 204 };
+      return { status: receiverDown ? 503 : 204 };
     },
   }),
 });
@@ -49,13 +55,18 @@ async function follow(json: Body, key?: string) {
   return made.body as { id: string; url: string };
 }
 
-/** What the worker sends `url` from here on, as "type subject", the trail.item.* twins left out. */
-async function receivedBy(url: string) {
+/** What the worker sends `url` from here on, as "type subject", `twins` choosing the trail.item.* copies or everything else. */
+async function sentTo(url: string, twins: boolean) {
   await worker.tick();
   return sent
-    .filter((s) => s.url === url && !s.body.type.startsWith("trail.item."))
+    .filter(
+      (s) => s.url === url && s.body.type.startsWith("trail.item.") === twins,
+    )
     .map((s) => `${s.body.type} ${s.body.data.subject.key}`);
 }
+const receivedBy = (url: string) => sentTo(url, false);
+/** The trail.item.* copies of the item events, which a follow must treat as it treats the originals. */
+const twinsOf = (url: string) => sentTo(url, true);
 
 // products ATL and BTA; project recon draws from both, and each keeps items outside it
 await ok("POST", "/products", { key: "ATL", name: "Alpha product" });
@@ -96,6 +107,7 @@ beforeEach(async () => {
   await worker.tick();
   db.delete(webhookSubscription).run();
   sent.length = 0;
+  receiverDown = false;
 });
 
 test("a project-only key follows its project with projects, and its view lists the slug beside an empty products", async () => {
@@ -133,7 +145,7 @@ test("a product the key only names through its project is refused, pointing to t
   );
 });
 
-test("projects takes slugs and, as the deprecated alias of products, exact product keys, value by value; a slug in products is a 422", async () => {
+test("projects takes slugs and, as the deprecated alias of products, product keys, value by value; a slug in products is a 422", async () => {
   const mixed = await hook({ projects: ["ATL", "recon"] });
   expect(mixed.status).toBe(201);
   expect(mixed.body).toMatchObject({
@@ -153,19 +165,20 @@ test("projects takes slugs and, as the deprecated alias of products, exact produ
   const slugOnly = await hook({ projects: ["recon"] });
   expect(slugOnly.body).not.toHaveProperty("deprecated");
 
-  const neither = await hook({ projects: ["atl"] });
+  const neither = await hook({ projects: ["nowhere"] });
   expect(neither.status).toBe(404);
-  expect(neither.body.error.message).toBe(
-    (await hook({ projects: ["nowhere"] })).body.error.message.replace(
-      "nowhere",
-      "atl",
-    ),
-  );
+  expect(neither.body.error.message).toContain("nowhere");
   const slug = await hook({ products: ["recon"] });
   expect(slug.status).toBe(422);
   expect(slug.body.error.message).toBe(
     'products takes product keys and recon is a project\'s slug: send it in projects (projects: ["recon"])',
   );
+});
+
+test("a product key in projects matches in any case, as the alias did before projects", async () => {
+  const lower = await hook({ projects: ["atl"] });
+  expect(lower.status, JSON.stringify(lower.body)).toBe(201);
+  expect(lower.body).toMatchObject({ products: ["ATL"], projects: [] });
 });
 
 test("a product key in projects that the key only names through its project gets the advice products gets", async () => {
@@ -186,6 +199,7 @@ test("an event on an item in the project is delivered; one on an item of the sam
     `trail.issue.updated ${btaIn}`,
     `trail.comment.created ${btaIn}`,
   ]);
+  expect(await twinsOf(url)).toEqual([`trail.item.updated ${btaIn}`]);
 });
 
 test("the project's own events are delivered: its updates, status updates and items joining it", async () => {
@@ -213,6 +227,7 @@ test("an item leaving the project stops its events: the removal is delivered, la
   expect(await receivedBy(url)).toEqual([
     `trail.project.item_removed ${leaving}`,
   ]);
+  expect(await twinsOf(url)).toEqual([]);
 });
 
 test("an event queued while the item was in the project is dropped at send once it has left, and shows as failed with the reason", async () => {
@@ -243,6 +258,87 @@ test("an event queued while the item was in the project is dropped at send once 
   });
 });
 
+/** A subscription's deliveries in queue order, as [type, status, attempts, lastError]. */
+const historyOf = (subscriptionId: string) =>
+  db
+    .select()
+    .from(webhookDelivery)
+    .where(eq(webhookDelivery.subscriptionId, subscriptionId))
+    .orderBy(webhookDelivery.seq)
+    .all()
+    .map((d) => [d.type, d.status, d.attempts, d.lastError]);
+
+test("a comment queued while the item was in the project is dropped at send once the item has left", async () => {
+  const leaving = await item("ATL", true);
+  const { id, url } = await follow({ projects: ["recon"] }, reconOnly);
+  await ok("POST", `/items/${leaving}/comments`, { body: "queued in recon" });
+  await ok("DELETE", `/projects/recon/items/${leaving}`);
+  expect(await receivedBy(url)).toEqual([
+    `trail.project.item_removed ${leaving}`,
+  ]);
+  expect(historyOf(id)).toEqual([
+    ["trail.comment.created", "failed", 0, LEFT_PROJECT],
+    ["trail.project.item_removed", "delivered", 1, null],
+  ]);
+});
+
+test("an item leaving a project is still delivered to a webhook that follows its product too", async () => {
+  const leaving = await item("ATL", true);
+  const { id, url } = await follow({ products: ["ATL"], projects: ["recon"] });
+  await retitle(leaving, "queued in recon");
+  await ok("POST", `/items/${leaving}/comments`, { body: "queued too" });
+  await ok("DELETE", `/projects/recon/items/${leaving}`);
+  expect(await receivedBy(url)).toEqual([
+    `trail.issue.updated ${leaving}`,
+    `trail.comment.created ${leaving}`,
+    `trail.project.item_removed ${leaving}`,
+  ]);
+  expect(await twinsOf(url)).toEqual([`trail.item.updated ${leaving}`]);
+  expect(historyOf(id).filter((h) => h[1] !== "delivered")).toEqual([]);
+});
+
+test("an item moving from one followed project to another keeps its events, each once", async () => {
+  const moving = await item("ATL", true);
+  const { id, url } = await follow({ projects: ["other", "recon"] });
+  await retitle(moving, "queued in recon");
+  await ok("POST", "/projects/other/items", { items: [moving] });
+  await ok("DELETE", `/projects/recon/items/${moving}`);
+  await retitle(moving, "after the move");
+  expect(await receivedBy(url)).toEqual([
+    `trail.issue.updated ${moving}`,
+    `trail.project.item_added ${moving}`,
+    `trail.project.item_removed ${moving}`,
+    `trail.issue.updated ${moving}`,
+  ]);
+  expect(historyOf(id).filter((h) => h[1] !== "delivered")).toEqual([]);
+});
+
+test("a delivery that failed once and is waiting to retry is dropped when its item has left the project meanwhile", async () => {
+  const leaving = await item("ATL", true);
+  const { id, url } = await follow({ projects: ["recon"] }, reconOnly);
+  receiverDown = true;
+  await retitle(leaving, "queued in recon");
+  await worker.tick();
+  expect(historyOf(id)[0]).toEqual([
+    "trail.issue.updated",
+    "pending",
+    1,
+    expect.any(String),
+  ]);
+  await ok("DELETE", `/projects/recon/items/${leaving}`);
+  receiverDown = false;
+  skew += RETRY_AFTER_MS;
+  expect(await receivedBy(url)).toEqual([
+    `trail.issue.updated ${leaving}`, // the failed first attempt
+    `trail.project.item_removed ${leaving}`,
+  ]);
+  expect(historyOf(id)).toEqual([
+    ["trail.issue.updated", "failed", 1, LEFT_PROJECT],
+    ["trail.item.updated", "failed", 0, LEFT_PROJECT],
+    ["trail.project.item_removed", "delivered", 1, null],
+  ]);
+});
+
 test("an item joining the project starts its events", async () => {
   const joining = await item("BTA", false);
   const { url } = await follow({ projects: ["recon"] }, reconOnly);
@@ -253,6 +349,7 @@ test("an item joining the project starts its events", async () => {
     `trail.project.item_added ${joining}`,
     `trail.issue.updated ${joining}`,
   ]);
+  expect(await twinsOf(url)).toEqual([`trail.item.updated ${joining}`]);
 });
 
 test("a webhook following both an item's product and its project gets each event once", async () => {
@@ -266,6 +363,7 @@ test("a webhook following both an item's product and its project gets each event
     `trail.issue.updated ${atlIn}`,
     "trail.status_update.created recon",
   ]);
+  expect(await twinsOf(url)).toEqual([`trail.item.updated ${atlIn}`]);
 });
 
 test("a product-following webhook is unchanged: it gets the product's items in and out of projects, and keeps an event queued before the item left", async () => {
@@ -280,6 +378,11 @@ test("a product-following webhook is unchanged: it gets the product's items in a
     `trail.issue.updated ${leaving}`,
     `trail.project.item_removed ${leaving}`,
     `trail.issue.updated ${leaving}`,
+  ]);
+  expect(await twinsOf(url)).toEqual([
+    `trail.item.updated ${btaOut}`,
+    `trail.item.updated ${leaving}`,
+    `trail.item.updated ${leaving}`,
   ]);
 });
 
@@ -357,6 +460,29 @@ test("adding a project the key doesn't reach on update is the 404 it is on creat
   );
 });
 
+test("a scope edit takes a followed project from the key's reach, and the webhook with it, until the project is added back", async () => {
+  const owner = createBot(db, "scope-edited");
+  const edited = createKey(db, owner.actor.id, {
+    projects: ["other", "recon"],
+  }).key;
+  const wide = await follow({ projects: ["other", "recon"] }, owner.key);
+  const prefix = edited.slice(6, 14);
+  const status = async () =>
+    (await call("GET", `/webhooks/${wide.id}`, edited)).status;
+  const listed = async () =>
+    (await call("GET", "/webhooks", edited)).body.items.map((w: Body) => w.id);
+  expect(await status()).toBe(200);
+  expect(await listed()).toEqual([wide.id]);
+
+  editKeyScope(db, prefix, { removeProjects: ["other"] });
+  expect(await status()).toBe(404);
+  expect(await listed()).toEqual([]);
+
+  editKeyScope(db, prefix, { addProjects: ["other"] });
+  expect(await status()).toBe(200);
+  expect(await listed()).toEqual([wide.id]);
+});
+
 test("a key follows only the projects it lists: one reached through its products is the 404 a missing one is", async () => {
   const btaKey = createBot(db, "bta-reader", {
     scope: { products: ["BTA"], actions: ["read"] },
@@ -404,6 +530,7 @@ test("an update drops the queued events of a project no longer followed and keep
     "trail.status_update.created recon",
     `trail.issue.updated ${atlIn}`,
   ]);
+  expect(await twinsOf(url)).toEqual([`trail.item.updated ${atlIn}`]);
 
   await ok("POST", "/projects/recon/status-updates", {
     body: "never sent",
@@ -415,6 +542,7 @@ test("an update drops the queued events of a project no longer followed and keep
     "trail.status_update.created recon",
     `trail.issue.updated ${atlIn}`,
   ]);
+  expect(await twinsOf(url)).toEqual([`trail.item.updated ${atlIn}`]);
   expect(
     db
       .select()

@@ -121,6 +121,10 @@ export const legacyProductSchema = productSchema
   .extend({ deprecated: deprecatedNote })
   .openapi("LegacyProduct");
 
+export const legacyNamedProductSchema = namedProductSchema
+  .extend({ deprecated: deprecatedNote })
+  .openapi("LegacyNamedProduct");
+
 const productRefSchema = z
   .object({ key: z.string(), name: z.string() })
   .openapi("ProductRef");

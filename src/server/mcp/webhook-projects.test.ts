@@ -86,3 +86,37 @@ test("create_webhook refuses a project the key doesn't reach and a product it on
     text: 'not_found: this key reaches product BTA only through project recon: send projects: ["recon"] in place of BTA, for the events of the project\'s items; the rest of BTA needs a key that lists BTA',
   });
 });
+
+test("update_webhook and list_webhooks carry projects: a replaced list shows, and one the key doesn't reach is refused", async () => {
+  const made = JSON.parse((await createWebhook({ projects: ["recon"] })).text);
+  const moved = await raw(reconOnly, "update_webhook", {
+    webhookId: made.id,
+    url: "https://bot.example.com/mcp/moved",
+  });
+  expect(moved.isError, moved.text).toBe(false);
+  expect(JSON.parse(moved.text)).toMatchObject({
+    url: "https://bot.example.com/mcp/moved",
+    products: [],
+    projects: ["recon"],
+  });
+  const listed = JSON.parse((await raw(reconOnly, "list_webhooks")).text);
+  expect(listed.items.find((w: Body) => w.id === made.id)).toMatchObject({
+    products: [],
+    projects: ["recon"],
+  });
+
+  expect(
+    await raw(reconOnly, "update_webhook", {
+      webhookId: made.id,
+      projects: ["recon", "other"],
+    }),
+  ).toEqual({
+    isError: true,
+    text: "not_found: no project other: pass the slug (like launch-q4) of a project this key reaches; list_projects (GET /api/v1/projects) lists them",
+  });
+  // the refused edit changed nothing
+  const after = JSON.parse((await raw(reconOnly, "list_webhooks")).text);
+  expect(after.items.find((w: Body) => w.id === made.id).projects).toEqual([
+    "recon",
+  ]);
+});

@@ -240,6 +240,9 @@ describe("a key scoped to project recon only", () => {
   test("reads activity on its project and its items only, with product and project filters", () => {
     service.addToProject(admin, "other", [atlIn]);
     service.removeFromProject(admin, "other", [atlIn]);
+    // its own comments, so the feed read stands without the tests before it
+    service.addComment(admin, { issueId: btaIn, body: "for the feed" });
+    service.addComment(admin, { issueId: atlOut, body: "not for the feed" });
     const items = [atlIn, btaIn].map((ref) => service.getItem(admin, ref).id);
     const comments = [atlIn, btaIn].flatMap((ref) =>
       service.listComments(admin, ref).items.map((c) => c.id),
@@ -254,7 +257,8 @@ describe("a key scoped to project recon only", () => {
           items.includes(e.subjectId) &&
           (e.projectId === null || e.projectId === recon)) ||
         (e.subjectType === "comment" && comments.includes(e.subjectId)) ||
-        (e.productId === null && e.projectId === recon);
+        // the project's own events, and items joining or leaving it, whichever item
+        e.projectId === recon;
       expect(ok, `${e.action} ${e.subjectType} ${e.productKey}`).toBe(true);
     }
     const actions = all.map((e) => e.action);
@@ -264,7 +268,9 @@ describe("a key scoped to project recon only", () => {
     expect(feed({ product: "BTA" }).every((e) => e.productKey === "BTA")).toBe(
       true,
     );
-    expect(feed({ product: "BTA" }).length).toBeGreaterThan(0);
+    expect(feed({ product: "BTA" }).map((e) => e.subjectId)).toContain(
+      items[1],
+    );
     expect(feed({ project: "recon" }).every((e) => e.projectId === recon)).toBe(
       true,
     );
@@ -308,28 +314,56 @@ describe("a key with a product and a project", () => {
 describe("membership is read live", () => {
   test("an item added to the project is reached, and removed it is the missing 404 again", () => {
     const gamma = keyed("gamma", { projects: ["recon"] });
+    const open = () => service.getProject(gamma.actor, "recon").counts.open;
+    const openBefore = open();
     expect(() => service.getItem(gamma.actor, btaOut)).toThrow(NotFoundError);
     service.addToProject(admin, "recon", [btaOut]);
     expect(service.getItem(gamma.actor, btaOut).key).toBe(btaOut);
-    expect(service.getProject(gamma.actor, "recon").counts.open).toBe(3);
+    expect(open()).toBe(openBefore + 1);
     service.removeFromProject(admin, "recon", [btaOut]);
     expect(() => service.getItem(gamma.actor, btaOut)).toThrow(NotFoundError);
-    expect(service.getProject(gamma.actor, "recon").counts.open).toBe(2);
+    expect(open()).toBe(openBefore);
   });
 
   test("an item leaving the project shows its removal in the feed as the last of its events, as a webhook following the project receives it", () => {
     const watcher = keyed("watcher", { projects: ["recon"] });
-    const id = service.getItem(admin, btaOut).id;
-    service.addToProject(admin, "recon", [btaOut]);
-    service.updateItem(admin, btaOut, { title: "bta in recon a while" });
-    service.removeFromProject(admin, "recon", [btaOut]);
-    service.updateItem(admin, btaOut, { title: "bta outside" });
-    const ofLeaving = service
-      .listActivity(watcher.actor, { limit: 200 })
-      .items.filter((e) => e.subjectId === id)
-      .map((e) => e.action);
-    expect(ofLeaving[0]).toBe("project.item_removed");
-    expect(ofLeaving).toContain("project.item_added");
+    const leaver = service.addTodo(admin, {
+      product: "BTA",
+      title: "bta leaving",
+    });
+    const seen = () =>
+      service.listActivity(watcher.actor, { limit: 200 }).items;
+    /** newest first, as the feed lists them */
+    const actionsOf = (id: string) =>
+      seen()
+        .filter((e) => e.subjectId === id)
+        .map((e) => e.action);
+    service.addToProject(admin, "recon", [leaver.key]);
+    service.updateItem(admin, leaver.key, { title: "in recon a while" });
+    const during = service.addComment(admin, {
+      issueId: leaver.key,
+      body: "written in the project",
+    });
+    expect(actionsOf(leaver.id)).toEqual([
+      "issue.updated",
+      "project.item_added",
+      "issue.created",
+    ]);
+    expect(actionsOf(during.id)).toEqual(["comment.created"]);
+
+    service.removeFromProject(admin, "recon", [leaver.key]);
+    service.updateItem(admin, leaver.key, { title: "outside again" });
+    const after = service.addComment(admin, {
+      issueId: leaver.key,
+      body: "written after it left",
+    });
+    // what it did in the project stays, as of its removal; what came after is out of reach
+    expect(actionsOf(leaver.id)).toEqual([
+      "project.item_removed",
+      "project.item_added",
+    ]);
+    expect(actionsOf(during.id)).toEqual([]);
+    expect(actionsOf(after.id)).toEqual([]);
   });
 
   test("a product joining the project is named, and none of its other items reached", () => {
@@ -363,21 +397,31 @@ describe("an unrestricted key", () => {
       projects: [],
       actions: null,
     });
-    expect(
+    const keysFor = (actor: Parameters<typeof service.listItems>[0]) =>
       service
-        .listItems(open.actor)
+        .listItems(actor, { limit: 200 })
         .items.map((i) => i.key)
-        .sort(),
-    ).toEqual([atlIn, atlOut, btaIn, btaOut, ctxOnly].sort());
+        .sort();
+    expect(keysFor(open.actor)).toEqual(keysFor(admin));
+    expect(keysFor(open.actor)).toEqual(
+      expect.arrayContaining([atlIn, atlOut, btaIn, btaOut, ctxOnly]),
+    );
     expect(
       service
         .listProjects(open.actor)
         .items.map((p) => p.slug)
         .sort(),
     ).toEqual(["other", "recon"]);
+    service.createStatusUpdate(admin, {
+      product: "ATL",
+      body: "atl for the open key",
+      health: "on_track",
+    });
     expect(
-      service.listStatusUpdates(open.actor, { product: "ATL" }).items,
-    ).toHaveLength(1);
+      service
+        .listStatusUpdates(open.actor, { product: "ATL" })
+        .items.map((u) => u.body),
+    ).toContain("atl for the open key");
   });
 });
 
@@ -425,6 +469,8 @@ describe("a project-only bot works items as any non-owner bot does", () => {
     expect(
       service.updateItem(eta.actor, btaIn, { status: "in_progress" }).status,
     ).toBe("in_progress");
+    // back to open, so the counts the tests above read don't depend on this one running last
+    service.updateItem(admin, btaIn, { status: "open" });
     service.updateItem(admin, btaOut, { assigneeId: eta.actor.id });
     expect(() =>
       service.updateItem(eta.actor, btaOut, { status: "in_progress" }),
