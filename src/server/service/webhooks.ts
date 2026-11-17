@@ -383,10 +383,10 @@ const keyLost = (what: string) =>
 
 /**
  * Why `keyId` may not send the subscription `event` now, as the delivery's
- * lastError; null when it may. Read as the key
- * stands: revoked, or its scope no longer reaching a product or project the
- * subscription follows, or the event (by the reach rules every read uses). An
- * unrestricted key only fails revoked. Bots alone hold keys, so the reach is a bot's.
+ * lastError; null when it may. Read as the key stands: revoked, or its scope
+ * no longer reaching a product or project the subscription follows, or the
+ * event (by the reach rules every read uses). An unrestricted key only fails
+ * revoked. Bots alone hold keys, so the reach is a bot's.
  */
 function keyRefusal(
   db: Db,
