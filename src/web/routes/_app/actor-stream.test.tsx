@@ -8,6 +8,7 @@ import { meView, renderApp, serveFeed, serveInProgress } from "@/test/app";
 import { FakeEventSource } from "@/test/event-source";
 import { alpha, beta, issue, statusEntry } from "@/test/fixtures";
 import { server } from "@/test/server";
+import { holding, watchFor } from "@/test/watch-for";
 
 const issueTitle = "Team access: invite people by GitHub username";
 const actorsOnly = "/api/web/events?only=actors";
@@ -266,5 +267,26 @@ describe("an access event on the shell's actor stream", () => {
     );
     expect(strip()).toBeNull();
     await feedOpened;
+  });
+
+  test("a product revoked: the feed visited before shows none of its cached rows on return", async () => {
+    const at: Access = {
+      products: [alphaProduct, betaProduct],
+      entries: [],
+    };
+    const { router, queryClient, stream } = await openIssueWithAccess(at);
+    // e3 was the revoked product's: the server's feed no longer has it
+    serveFeed([statusEntry("e4", new Date().toISOString())]);
+    at.products = [alphaProduct];
+    sendAccess(stream);
+    await waitFor(() => expect(productLink(/beta/)).toBeNull());
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+
+    const shown = watchFor(holding('[data-entry-id="e3"]'));
+    await router.navigate({ to: "/" });
+    await waitFor(() =>
+      expect(document.querySelector('[data-entry-id="e4"]')).not.toBeNull(),
+    );
+    expect(shown()).toBe(false);
   });
 });

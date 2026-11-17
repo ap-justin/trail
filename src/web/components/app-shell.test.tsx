@@ -803,6 +803,50 @@ test("at 1024px a long issue breadcrumb fits its bar column: Products drops, the
   expect(getComputedStyle(key).whiteSpace).toBe("nowrap");
 });
 
+test("from xl the issue breadcrumb shows Products and both slashes", async () => {
+  const { container } = render(
+    <ThemeProvider>
+      <AppShell
+        viewer={owner}
+        products={[]}
+        section={null}
+        heading={
+          <IssueBreadcrumb
+            issueKey="PLATFORMXX-1234"
+            product={{ key: "PLATFORMXX", name: longName }}
+          />
+        }
+        headingKind="breadcrumb"
+        onSearch={vi.fn()}
+        onNewIssue={vi.fn()}
+        onSignOut={vi.fn()}
+      >
+        <h1>Team access</h1>
+      </AppShell>
+    </ThemeProvider>,
+  );
+  onTestFinished(await applyCompiledCss(container));
+  const style = document.head.lastElementChild as HTMLStyleElement;
+  // jsdom's window is fixed at 1024px (64rem), so xl (80rem) is simulated by lowering its threshold to that
+  expect(style.textContent).toContain("min-width: 80rem");
+  style.textContent = (style.textContent ?? "").replaceAll(
+    "min-width: 80rem",
+    "min-width: 64rem",
+  );
+  const header = container.querySelector("header") as HTMLElement;
+  const nav = within(header).getByRole("navigation", { name: "Breadcrumb" });
+  expect(getComputedStyle(within(nav).getByText("Products")).display).not.toBe(
+    "none",
+  );
+  const slashes = [...nav.querySelectorAll("[aria-hidden='true']")].filter(
+    (el) => el.textContent?.trim() === "/",
+  );
+  expect(slashes).toHaveLength(2);
+  for (const slash of slashes) {
+    expect(getComputedStyle(slash).display).not.toBe("none");
+  }
+});
+
 /** The mark's svg (three pills) and the wordmark beside it, inside `scope`. */
 function expectLogoIn(scope: HTMLElement) {
   const mark = scope.querySelector(

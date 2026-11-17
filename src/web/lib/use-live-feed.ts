@@ -220,10 +220,12 @@ export function useLiveFeed(
   const readEverything = useEffectEvent(() => {
     void queryClient.invalidateQueries();
   });
-  // what this person may see changed, from `/me`'s products to Working now, the feed and any
-  // product or project page cached; this read also serves a `work` event's waiting one
+  // what this person may see changed, from `/me`'s products to Working now and the feed, read
+  // again; this read also serves a `work` event's waiting one. Every page off screen is dropped,
+  // so none can paint a revoked product's content on return: an invalidate only marks those stale
   const onAccess = useEffectEvent(() => {
     clearWorkWait();
+    queryClient.removeQueries({ type: "inactive" });
     readEverything();
   });
   const onActor = useEffectEvent((update: ActorUpdate) => {

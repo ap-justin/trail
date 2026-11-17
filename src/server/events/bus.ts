@@ -23,9 +23,9 @@ export type MessageNotice = { id: string; recipientId: string };
 export type MessageSubscriber = (notice: MessageNotice) => void;
 
 /**
- * The products an invite lists changed, or the invite went: named as `inviteOf`
- * in auth/identity.ts matches its holder. Live-only; it tells that person's open
- * streams to re-read.
+ * The products an invite lists changed, or the invite went, named by the invite's
+ * GitHub id or email; subscribers match it to a holder. Live-only; it tells that
+ * person's open streams to re-read.
  */
 export type AccessNotice = { githubId: number | null; email: string | null };
 

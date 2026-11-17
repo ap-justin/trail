@@ -460,6 +460,8 @@ export function eventRoutes(
             accessChanged = false;
             // without an id: not a feed entry, so Last-Event-ID stays the entries'
             await stream.writeSSE({ event: "access", data: "{}" });
+            // a removed member's sessions are already gone: end now, not at the next heartbeat
+            if (!(await stillLetIn()) || ended) return;
             continue;
           }
           if (actorUpdates.size > 0) {

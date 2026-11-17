@@ -14,6 +14,7 @@ import {
 } from "@/lib/use-live-feed";
 import {
   meView,
+  notFound,
   renderApp,
   serveFeed,
   serveInProgress,
@@ -25,10 +26,12 @@ import {
   alpha,
   beta,
   commentEntry,
+  issue,
   itemCreatedEntry,
   statusEntry,
 } from "@/test/fixtures";
 import { server } from "@/test/server";
+import { reading, watchFor } from "@/test/watch-for";
 
 type WorkingNowEntry = WebWorkingNowView["entries"][number];
 
@@ -421,5 +424,60 @@ describe("an access event", () => {
     expect(strip()).toBeNull();
     expect(productLink(/beta/)).toBeNull();
     expect(productLink(/alpha/)).toBeInTheDocument();
+  });
+
+  test("an access event clears the read a work event was waiting to make", async () => {
+    const at: Access = { products: [alphaProduct], entries: [] };
+    const { reads, stream } = await openWithAccess(at);
+    fakeTimers();
+    stream.work(work("ALP"));
+    sendAccess(stream);
+    await flushRequests();
+    const afterAccess = reads.workingNow;
+    // past the settle and the cap: neither timer is left to read again
+    act(() => vi.advanceTimersByTime(3000));
+    await flushRequests();
+    expect(reads.workingNow).toBe(afterAccess);
+    // a work event after the access is still read: the timers are live, only cleared
+    stream.work(work("ALP"));
+    act(() => vi.advanceTimersByTime(1000));
+    await flushRequests();
+    expect(reads.workingNow).toBe(afterAccess + 1);
+  });
+
+  test("a product revoked: an issue page visited before shows none of its cached content on return", async () => {
+    const title = "Team access: invite people by GitHub username";
+    const at = { gone: false };
+    signedInAs("member");
+    server.use(
+      http.get("/api/web/items/TRL-14", () =>
+        at.gone ? notFound() : HttpResponse.json(issue()),
+      ),
+    );
+    serveFeed([statusEntry("e1", minutesAgo(5))]);
+    const { router, queryClient } = renderApp("/products/TRL/14");
+    expect(await screen.findByText(title)).toBeInTheDocument();
+    await router.navigate({ to: "/" });
+    await waitFor(() =>
+      expect(document.querySelector('[data-entry-id="e1"]')).not.toBeNull(),
+    );
+    const stream = FakeEventSource.current;
+    expect(stream.url).not.toContain("only=actors");
+    stream.open();
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+
+    at.gone = true;
+    sendAccess(stream);
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+
+    const shown = watchFor(reading(title));
+    await router.navigate({
+      to: "/products/$key/$n",
+      params: { key: "TRL", n: "14" },
+    });
+    expect(
+      await screen.findByRole("heading", { name: "Page not found", level: 1 }),
+    ).toBeInTheDocument();
+    expect(shown()).toBe(false);
   });
 });

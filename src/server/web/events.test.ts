@@ -1111,12 +1111,14 @@ test("a revoked product sends an access event, with no id, to each of that membe
 
   expect((await putProducts("access-revoked", [alpha.key])).status).toBe(200);
 
+  // the bystander shares alpha and the owner hears of everyone, so all four
+  // hear it; the member's own streams stay open after their access event
+  const closer = closeBatch(actorIdOf("access-revoked"));
   for (const stream of [feed, shell]) {
     expect(await stream.next()).toStrictEqual(accessMessage);
+    expect(await stream.next()).toStrictEqual(closer);
     await stream.cancel();
   }
-  // the owner hears of everyone, so the bystander's own update closes both
-  const closer = closeBatch(actorIdOf("access-bystander"));
   for (const stream of [otherStream, ownerStream]) {
     expect(await stream.next()).toStrictEqual(closer);
     await stream.cancel();
@@ -1150,8 +1152,10 @@ test("a granted product sends an access event to the email member it was granted
   await granted.cancel();
 });
 
-test("removing a member sends their open stream an access event, so the page re-reads /me at once", async () => {
+test("removing a member sends their open stream an access event and then ends it, without waiting for the heartbeat", async () => {
   const alpha = addProject("alpha");
+  // the heartbeat's re-check never fires, so only the access event's can end the stream
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   const stream = await openStream(
     await addMember("access-removed", [alpha.id]),
   );
@@ -1161,5 +1165,28 @@ test("removing a member sends their open stream an access event, so the page re-
   });
   expect(res.status).toBe(204);
   expect(await stream.next()).toStrictEqual(accessMessage);
-  await stream.cancel();
+  expect(await stream.next()).toBeNull();
+});
+
+test("a PUT or DELETE that fails publishes no access notice, and one that succeeds publishes exactly one", async () => {
+  const alpha = addProject("alpha");
+  await addMember("access-failing", [alpha.id]);
+  const notices: unknown[] = [];
+  const unsubscribe = bus.subscribeAccess((n) => notices.push(n));
+
+  expect((await putProducts("access-ghost", [alpha.key])).status).toBe(404);
+  expect(
+    (
+      await request("DELETE", "/api/web/people/access-ghost", {
+        key: null,
+        cookie: ownerCookie,
+      })
+    ).status,
+  ).toBe(404);
+  expect((await putProducts("access-failing", ["NOPE"])).status).toBe(422);
+  expect(notices).toEqual([]);
+
+  expect((await putProducts("access-failing", [])).status).toBe(200);
+  unsubscribe();
+  expect(notices).toHaveLength(1);
 });

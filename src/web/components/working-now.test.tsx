@@ -166,6 +166,47 @@ describe("WorkingNow", () => {
     },
   );
 
+  test("a 9-character name is the first that no longer fits below lg", () => {
+    render(<WorkingNow workingNow={view(2, 2, ["alpha-001", "beta-002"])} />);
+    const items = entryLinks().map((link) => link.closest("li"));
+    expect(items[1]).toHaveClass("max-lg:hidden");
+    expect(within(strip()).getByText("alpha-001")).not.toHaveClass(
+      "max-lg:shrink-0",
+    );
+    expect(within(strip()).getByText("beta-002")).toHaveClass(
+      "max-lg:shrink-0",
+    );
+  });
+
+  test("names are counted in characters, not UTF-16 units: eight emoji fit, nine do not", () => {
+    const eight = "\u{1F916}".repeat(8);
+    const nine = "\u{1F916}".repeat(9);
+    const { rerender } = render(
+      <WorkingNow workingNow={view(2, 2, [eight, "beta"])} />,
+    );
+    expect(entryLinks()[1]?.closest("li")).not.toHaveClass("max-lg:hidden");
+    expect(within(strip()).getByText(eight)).toHaveClass("max-lg:shrink-0");
+    rerender(<WorkingNow workingNow={view(2, 2, [nine, "beta"])} />);
+    expect(entryLinks()[1]?.closest("li")).toHaveClass("max-lg:hidden");
+    expect(within(strip()).getByText(nine)).not.toHaveClass("max-lg:shrink-0");
+  });
+
+  test.each([
+    ["a short", "beta"],
+    ["a long", "beta-relay-service"],
+  ])(
+    "a single entry with %s name shows below lg, with +N for the rest of total",
+    (_, name) => {
+      render(<WorkingNow workingNow={view(1, 3, [name])} />);
+      expect(entryLinks()).toHaveLength(1);
+      expect(entryLinks()[0]?.closest("li")?.className).not.toMatch(/hidden/);
+      expect(moreCounts()).toEqual([
+        ["+2 more", expect.stringMatching(/(?:^| )lg:hidden/)],
+        ["+2 more", expect.stringContaining("max-lg:hidden")],
+      ]);
+    },
+  );
+
   test("two bots with a 9+ character name: one below lg and +1, both from lg", () => {
     render(<WorkingNow workingNow={view(2, 2, ["alpha", "beta-relay"])} />);
     const items = entryLinks().map((link) => link.closest("li"));
