@@ -222,11 +222,21 @@ export function useLiveFeed(
   });
   // what this person may see changed, from `/me`'s products to Working now and the feed, read
   // again; this read also serves a `work` event's waiting one. Every page off screen is dropped,
-  // so none can paint a revoked product's content on return: an invalidate only marks those stale
-  const onAccess = useEffectEvent(() => {
+  // so none can paint a revoked product's content on return: an invalidate only marks those stale.
+  // The feed on screen starts over too, its rows and the stream's alike, since any of them may
+  // be from a revoked product; a 404 on the read again is a filter on one, cleared as on a close
+  const onAccess = useEffectEvent((live: () => boolean) => {
     clearWorkWait();
+    dispatch({ type: "clear" });
+    setFreshIds(new Set());
+    received.current = new Set();
     queryClient.removeQueries({ type: "inactive" });
+    void queryClient.resetQueries({
+      queryKey: keys.feed(current),
+      exact: true,
+    });
     readEverything();
+    void readFeedGone(live);
   });
   const onActor = useEffectEvent((update: ActorUpdate) => {
     dispatch({ type: "actor", update });
@@ -239,7 +249,7 @@ export function useLiveFeed(
   // which only /feed can say, since EventSource never exposes the status
   // `live` turns false once the stream is torn down: a check answering after the viewer left
   // the feed, or moved its filter, must not pull them back
-  const readAfterClose = useEffectEvent(async (live: () => boolean) => {
+  const readFeedGone = useEffectEvent(async (live: () => boolean) => {
     if (!(await feedGone(current)) || !live()) return;
     // with both set, the 404 doesn't say which: each alone answers for itself
     if (product !== null && project !== null) {
@@ -283,7 +293,7 @@ export function useLiveFeed(
       // a stream that ends can mean the session did, or this person was removed
       recheckSession();
       if (source.readyState === EventSource.CLOSED) {
-        void readAfterClose(() => live);
+        void readFeedGone(() => live);
         retry = setTimeout(() => setAttempt((n) => n + 1), RECONNECT_MS);
       }
     });
@@ -295,7 +305,7 @@ export function useLiveFeed(
     });
     // bot work started or stopped in a visible product, whatever this stream's filter
     source.addEventListener("work", () => onWork());
-    source.addEventListener("access", () => onAccess());
+    source.addEventListener("access", () => onAccess(() => live));
     // the server fell too far behind to replay what this stream missed
     source.addEventListener("reset", () => {
       refetch();

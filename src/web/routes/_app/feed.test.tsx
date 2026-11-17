@@ -5,14 +5,22 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { keys } from "@/lib/queries";
 import {
   feedPage,
+  meView,
   notFound,
   renderApp,
   serveFeed,
   signedInAs,
 } from "@/test/app";
 import { FakeEventSource } from "@/test/event-source";
-import { commentEntry, humanUi, issue, statusEntry } from "@/test/fixtures";
+import {
+  alpha,
+  commentEntry,
+  humanUi,
+  issue,
+  statusEntry,
+} from "@/test/fixtures";
 import { server } from "@/test/server";
+import { holding, reading, watchFor } from "@/test/watch-for";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -296,6 +304,136 @@ describe("a product taken away while filtered to it", () => {
     expect(
       screen.getByRole("combobox", { name: "Filter by product" }),
     ).toHaveTextContent("All products");
+  });
+});
+
+describe("a product taken away by an access event", () => {
+  const alphaProduct = { key: "ALP", name: "alpha" };
+  const betaProduct = { key: "BET", name: "beta" };
+  type Product = typeof alphaProduct;
+
+  const entryIn = (id: string, minutes: number, product: Product) =>
+    commentEntry(id, minutesAgo(minutes), {
+      product,
+      item: { key: `${product.key}-1`, title: "Read the queue", type: "issue" },
+    });
+
+  /**
+   * `/me` and `/feed` answering from what the viewer can see when each request lands: a
+   * product filter outside it is a 404. `holdFeed` keeps the next `/feed` answer back.
+   */
+  function serveAccess(
+    products: Product[],
+    rows: ReturnType<typeof entryIn>[],
+  ) {
+    const at = { products, rows, held: Promise.resolve() };
+    const visible = (key: string) => at.products.some((p) => p.key === key);
+    server.use(
+      http.get("/api/web/me", () =>
+        HttpResponse.json({
+          ...meView("member"),
+          products: at.products,
+          ownerName: "Olive Owner",
+        }),
+      ),
+      http.get("/api/web/feed", async ({ request }) => {
+        await at.held;
+        const product = new URL(request.url).searchParams.get("product");
+        if (product !== null && !visible(product)) return notFound();
+        return HttpResponse.json({
+          ...feedPage(
+            at.rows.filter(
+              (e) =>
+                e.product !== null &&
+                visible(e.product.key) &&
+                (product === null || e.product.key === product),
+            ),
+          ),
+          filters: { actors: [alpha], products: at.products, projects: [] },
+        });
+      }),
+    );
+    const holdFeed = () => {
+      let release = () => {};
+      at.held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return () => release();
+    };
+    return { at, holdFeed };
+  }
+
+  const sendAccess = (stream: FakeEventSource) =>
+    act(() => {
+      stream.dispatchEvent(new MessageEvent("access", { data: "{}" }));
+    });
+
+  test("its rows go at once, read, live and held alike, and the read again keeps the rest", async () => {
+    const topInView = watchTop();
+    signedInAs("member");
+    const a1 = entryIn("a1", 30, alphaProduct);
+    const b1 = entryIn("b1", 20, betaProduct);
+    const { at, holdFeed } = serveAccess([alphaProduct, betaProduct], [b1, a1]);
+    renderApp("/");
+    await waitFor(() => expect(order()).toEqual(["b1", "a1"]));
+    const stream = FakeEventSource.current;
+    stream.open();
+    const a2 = entryIn("a2", 3, alphaProduct);
+    const b2 = entryIn("b2", 2, betaProduct);
+    const b3 = entryIn("b3", 1, betaProduct);
+    at.rows = [b3, b2, a2, ...at.rows];
+    stream.send(a2);
+    stream.send(b2);
+    topInView(false);
+    stream.send(b3);
+    expect(order()).toEqual(["b2", "a2", "b1", "a1"]);
+    expect(screen.getByRole("button", { name: "1 new" })).toBeInTheDocument();
+
+    const release = holdFeed();
+    at.products = [alphaProduct];
+    sendAccess(stream);
+    // before the read again answers: nothing of beta's is left to paint
+    expect(order()).toEqual([]);
+    expect(screen.queryByRole("button", { name: /new$/ })).toBeNull();
+    release();
+    await waitFor(() => expect(order()).toEqual(["a2", "a1"]));
+    expect(screen.queryByRole("button", { name: /new$/ })).toBeNull();
+  });
+
+  test("a feed filtered to it drops the filter, shows the rest, and offers it no more", async () => {
+    signedInAs("member");
+    const a1 = entryIn("a1", 30, alphaProduct);
+    const b1 = entryIn("b1", 20, betaProduct);
+    const { at } = serveAccess([alphaProduct, betaProduct], [b1, a1]);
+    const { router } = renderApp("/?product=BET");
+    await waitFor(() => expect(order()).toEqual(["b1"]));
+    const stream = FakeEventSource.current;
+    expect(stream.url).toBe("/api/web/events?product=BET");
+    stream.open();
+    const b2 = entryIn("b2", 2, betaProduct);
+    at.rows = [b2, ...at.rows];
+    stream.send(b2);
+    expect(order()).toEqual(["b2", "b1"]);
+
+    const shown = watchFor(holding('[data-entry-id^="b"]'));
+    // the 404 is a filter on its way out, not a feed that failed to load
+    const failed = watchFor(reading("Couldn't load the feed"));
+    at.products = [alphaProduct];
+    sendAccess(stream);
+    await waitFor(() => expect(router.state.location.search).toEqual({}));
+    await waitFor(() => expect(order()).toEqual(["a1"]));
+    expect(shown()).toBe(false);
+    expect(failed()).toBe(false);
+    expect(FakeEventSource.current.url).toBe("/api/web/events");
+    const productFilter = screen.getByRole("combobox", {
+      name: "Filter by product",
+    });
+    expect(productFilter).toHaveTextContent("All products");
+    await userEvent.click(productFilter);
+    const options = (await screen.findAllByRole("option")).map(
+      (o) => o.textContent,
+    );
+    expect(options).toEqual(["All products", "ALP alpha"]);
   });
 });
 

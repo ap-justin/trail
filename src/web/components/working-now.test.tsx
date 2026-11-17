@@ -1,10 +1,8 @@
 import { render, screen, within } from "@testing-library/react";
-import { describe, expect, test } from "vitest";
-import {
-  WORKING_NOW_PHONE_ENTRIES_MAX,
-  WorkingNow,
-} from "@/components/working-now";
+import { describe, expect, onTestFinished, test } from "vitest";
+import { WorkingNow } from "@/components/working-now";
 import type { WebActorView, WebWorkingNowView } from "@/lib/api-types";
+import { applyCompiledCss } from "@/test/compiled-css";
 import { alpha } from "@/test/fixtures";
 
 const bot = (n: number, name = `bot-${n}`): WebActorView => ({
@@ -84,19 +82,11 @@ describe("WorkingNow", () => {
     const name = within(link as HTMLElement).getByText("bot-1");
     expect(name).toHaveClass("min-w-0", "truncate");
     expect(within(link as HTMLElement).getByText("TRL-1")).toHaveClass(
+      "shrink-0",
       "whitespace-nowrap",
     );
     expect(link).toHaveClass("min-w-0");
     expect(link?.closest("li")).toHaveClass("min-w-0");
-  });
-
-  test("below lg a name of up to 8 characters keeps every letter; a longer one truncates", () => {
-    render(<WorkingNow workingNow={view(2, 2, ["olivetta", "beta-relay"])} />);
-    const short = within(strip()).getByText("olivetta");
-    expect(short).toHaveClass("max-lg:shrink-0", "truncate");
-    const long = within(strip()).getByText("beta-relay");
-    expect(long).toHaveClass("min-w-0", "truncate");
-    expect(long).not.toHaveClass("max-lg:shrink-0");
   });
 
   test("the link draws a focus outline", () => {
@@ -109,63 +99,20 @@ describe("WorkingNow", () => {
     expect(link?.className).not.toMatch(/(?:^| )outline-none(?: |$)/);
   });
 
-  test("two: both show at every width, with no +N", () => {
-    render(<WorkingNow workingNow={view(2)} />);
-    for (const link of entryLinks()) {
-      expect(link.closest("li")?.className ?? "").not.toMatch(/hidden/);
-    }
-    expect(moreCounts()).toEqual([]);
-  });
-
-  test("three: the third hides below lg, where +1 stands for it", () => {
-    render(<WorkingNow workingNow={view(3)} />);
-    const items = entryLinks().map((link) => link.closest("li"));
-    expect(items[2]).toHaveClass("max-lg:hidden");
-    expect(moreCounts()).toEqual([
-      ["+1 more", expect.stringMatching(/(?:^| )lg:hidden/)],
-    ]);
-  });
-
-  test("five or more: four from lg, then +N; two below lg, then +N", () => {
-    render(<WorkingNow workingNow={view(6)} />);
-    expect(entryLinks()).toHaveLength(4);
-    expect(within(strip()).queryByText("TRL-5")).toBeNull();
-    expect(moreCounts()).toEqual([
-      ["+4 more", expect.stringMatching(/(?:^| )lg:hidden/)],
-      ["+2 more", expect.stringContaining("max-lg:hidden")],
-    ]);
-  });
-
-  test("below lg, two 8-character names show both, with +N from total; four from lg", () => {
-    render(
-      <WorkingNow
-        workingNow={view(5, 7, ["alpha-01", "beta-002"], ["AB-1", "AB-2"])}
-      />,
-    );
-    const items = entryLinks().map((link) => link.closest("li"));
-    expect(items).toHaveLength(4);
-    expect(items[0]?.className).not.toMatch(/hidden/);
-    expect(items[1]?.className).not.toMatch(/hidden/);
-    expect(items[2]).toHaveClass("max-lg:hidden");
-    expect(items[3]).toHaveClass("max-lg:hidden");
-    expect(moreCounts()).toEqual([
-      ["+5 more", expect.stringMatching(/(?:^| )lg:hidden/)],
-      ["+3 more", expect.stringContaining("max-lg:hidden")],
-    ]);
-  });
-
   test.each([
-    ["the first", ["alpha-relay", "beta"]],
-    ["the second", ["alpha", "beta-relay"]],
+    ["two short names and keys", ["alpha", "beta"], ["AB-1", "AB-2"]],
+    ["a long first name", ["alpha-relay-service", "beta"], []],
+    ["a long key", ["delta", "beta"], ["PLATFORMXX-1234", "AB-2"]],
   ])(
-    "below lg, a 9+ character name as %s entry leaves one shown, with +N for the rest; four from lg",
-    (_, names) => {
-      render(<WorkingNow workingNow={view(5, 7, names)} />);
+    "below lg exactly one entry shows whatever the names and keys (%s), then +N for the rest of total; four from lg",
+    (_, names, keys) => {
+      render(<WorkingNow workingNow={view(5, 7, names, keys)} />);
       const items = entryLinks().map((link) => link.closest("li"));
       expect(items).toHaveLength(4);
       expect(items[0]?.className).not.toMatch(/hidden/);
       for (const item of items.slice(1)) {
         expect(item).toHaveClass("max-lg:hidden");
+        expect(item?.className).not.toMatch(/(?:^| )lg:hidden/);
       }
       expect(moreCounts()).toEqual([
         ["+6 more", expect.stringMatching(/(?:^| )lg:hidden/)],
@@ -174,86 +121,11 @@ describe("WorkingNow", () => {
     },
   );
 
-  test("a 9-character name is the first that no longer fits below lg", () => {
-    render(
-      <WorkingNow
-        workingNow={view(2, 2, ["alpha-001", "beta-002"], ["A-1", "B-2"])}
-      />,
-    );
+  test("two: one below lg with +1, both from lg with no +N", () => {
+    render(<WorkingNow workingNow={view(2, 2, ["alpha", "beta"])} />);
     const items = entryLinks().map((link) => link.closest("li"));
-    expect(items[1]).toHaveClass("max-lg:hidden");
-    expect(within(strip()).getByText("alpha-001")).not.toHaveClass(
-      "max-lg:shrink-0",
-    );
-    expect(within(strip()).getByText("beta-002")).toHaveClass(
-      "max-lg:shrink-0",
-    );
-  });
-
-  test("names are counted in characters, not UTF-16 units: eight emoji fit, nine do not", () => {
-    const eight = "\u{1F916}".repeat(8);
-    const nine = "\u{1F916}".repeat(9);
-    const { rerender } = render(
-      <WorkingNow workingNow={view(2, 2, [eight, "beta"])} />,
-    );
-    expect(entryLinks()[1]?.closest("li")).not.toHaveClass("max-lg:hidden");
-    expect(within(strip()).getByText(eight)).toHaveClass("max-lg:shrink-0");
-    rerender(<WorkingNow workingNow={view(2, 2, [nine, "beta"])} />);
-    expect(entryLinks()[1]?.closest("li")).toHaveClass("max-lg:hidden");
-    expect(within(strip()).getByText(nine)).not.toHaveClass("max-lg:shrink-0");
-  });
-
-  test("below lg, a long key leaves one shown even when both names fit, with +N from total; four from lg", () => {
-    render(
-      <WorkingNow
-        workingNow={view(
-          4,
-          6,
-          ["delta", "gamma"],
-          ["DLT-1", "PLATFORMXX-1234"],
-        )}
-      />,
-    );
-    const items = entryLinks().map((link) => link.closest("li"));
-    expect(items).toHaveLength(4);
     expect(items[0]?.className).not.toMatch(/hidden/);
-    for (const item of items.slice(1)) {
-      expect(item).toHaveClass("max-lg:hidden");
-    }
-    expect(moreCounts()).toEqual([
-      ["+5 more", expect.stringMatching(/(?:^| )lg:hidden/)],
-      ["+2 more", expect.stringContaining("max-lg:hidden")],
-    ]);
-  });
-
-  test("below lg, short names and short keys still show two", () => {
-    render(
-      <WorkingNow
-        workingNow={view(2, 2, ["delta", "beta"], ["DLT-1", "BCN-1"])}
-      />,
-    );
-    for (const link of entryLinks()) {
-      expect(link.closest("li")?.className ?? "").not.toMatch(/hidden/);
-    }
-    expect(moreCounts()).toEqual([]);
-  });
-
-  test(`two entries fit below lg up to ${WORKING_NOW_PHONE_ENTRIES_MAX} characters of names and keys together, not one more`, () => {
-    // 5 + 4 + 8 + 7 = 24
-    const { rerender } = render(
-      <WorkingNow
-        workingNow={view(2, 2, ["delta", "beta"], ["DLT-1234", "BCN-123"])}
-      />,
-    );
-    expect(entryLinks()[1]?.closest("li")).not.toHaveClass("max-lg:hidden");
-    expect(moreCounts()).toEqual([]);
-    // 5 + 4 + 8 + 8 = 25
-    rerender(
-      <WorkingNow
-        workingNow={view(2, 2, ["delta", "beta"], ["DLT-1234", "BCN-1234"])}
-      />,
-    );
-    expect(entryLinks()[1]?.closest("li")).toHaveClass("max-lg:hidden");
+    expect(items[1]).toHaveClass("max-lg:hidden");
     expect(moreCounts()).toEqual([
       ["+1 more", expect.stringMatching(/(?:^| )lg:hidden/)],
     ]);
@@ -263,34 +135,64 @@ describe("WorkingNow", () => {
     ["a short", "beta"],
     ["a long", "beta-relay-service"],
   ])(
-    "a single entry with %s name shows below lg, with +N for the rest of total",
+    "a single entry with %s name shows at every width, with +N for the rest of total",
     (_, name) => {
-      render(<WorkingNow workingNow={view(1, 3, [name])} />);
+      const { rerender } = render(
+        <WorkingNow workingNow={view(1, 3, [name])} />,
+      );
       expect(entryLinks()).toHaveLength(1);
       expect(entryLinks()[0]?.closest("li")?.className).not.toMatch(/hidden/);
       expect(moreCounts()).toEqual([
         ["+2 more", expect.stringMatching(/(?:^| )lg:hidden/)],
         ["+2 more", expect.stringContaining("max-lg:hidden")],
       ]);
+      rerender(<WorkingNow workingNow={view(1, 1, [name])} />);
+      expect(moreCounts()).toEqual([]);
     },
   );
-
-  test("two bots with a 9+ character name: one below lg and +1, both from lg", () => {
-    render(<WorkingNow workingNow={view(2, 2, ["alpha", "beta-relay"])} />);
-    const items = entryLinks().map((link) => link.closest("li"));
-    expect(items[0]?.className).not.toMatch(/hidden/);
-    expect(items[1]).toHaveClass("max-lg:hidden");
-    expect(moreCounts()).toEqual([
-      ["+1 more", expect.stringMatching(/(?:^| )lg:hidden/)],
-    ]);
-  });
 
   test("+N counts from total, past the 12 entries the server sends", () => {
     render(<WorkingNow workingNow={view(12, 30)} />);
     expect(entryLinks()).toHaveLength(4);
+    expect(within(strip()).queryByText("TRL-5")).toBeNull();
     expect(moreCounts()).toEqual([
-      ["+28 more", expect.stringMatching(/(?:^| )lg:hidden/)],
+      ["+29 more", expect.stringMatching(/(?:^| )lg:hidden/)],
       ["+26 more", expect.stringContaining("max-lg:hidden")],
     ]);
+  });
+
+  test("a long key: the name truncates, the key stays whole, +N never shrinks, and nothing clips the link's focus ring", async () => {
+    const { container } = render(
+      <WorkingNow
+        workingNow={view(2, 2, ["delta-relay", "beta"], ["PLATFORMXX-1234"])}
+      />,
+    );
+    onTestFinished(await applyCompiledCss(container));
+    const [link] = entryLinks() as [HTMLElement];
+    const name = getComputedStyle(within(link).getByText("delta-relay"));
+    expect(name.minWidth).toBe("0px");
+    expect(name.overflow).toBe("hidden");
+    expect(name.textOverflow).toBe("ellipsis");
+    expect(name.whiteSpace).toBe("nowrap");
+    const key = getComputedStyle(within(link).getByText("PLATFORMXX-1234"));
+    expect(key.flexShrink).toBe("0");
+    expect(key.whiteSpace).toBe("nowrap");
+    const [more] = strip().querySelectorAll("[data-more-count]");
+    expect(getComputedStyle(more as Element).flexShrink).toBe("0");
+
+    // every flex box from the section down to the name may shrink below its content
+    const chain: string[] = [];
+    const clipping: string[] = [];
+    for (let at: Element | null = link; at; at = at.parentElement) {
+      const style = getComputedStyle(at);
+      if (style.minWidth !== "0px") chain.push(`<${at.localName}>`);
+      if (at !== link && style.overflow !== "visible") {
+        clipping.push(`<${at.localName} class="${at.className}">`);
+      }
+      if (at === strip()) break;
+    }
+    expect(chain).toEqual([]);
+    expect(clipping).toEqual([]);
+    expect(getComputedStyle(strip()).maxWidth).toBe("100%");
   });
 });

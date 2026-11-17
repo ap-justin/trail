@@ -1780,7 +1780,7 @@ export const searchSchema = z.object({
 export const workingNowSchema = z.object({
   total: z.int().meta({
     description:
-      "Every in-progress item assigned to a bot in a visible product, however many `entries` shows.",
+      "Every in-progress bot item in a visible product, however many `entries` has.",
   }),
   entries: z.array(
     z.object({

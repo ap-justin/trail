@@ -23,7 +23,7 @@ export type MessageNotice = { id: string; recipientId: string };
 export type MessageSubscriber = (notice: MessageNotice) => void;
 
 /**
- * The products an invite lists changed, or the invite went, named by the invite's
+ * An invite now lists different products, or was removed, named by the invite's
  * GitHub id or email; subscribers match it to a holder. Live-only; it tells that
  * person's open streams to re-read.
  */
