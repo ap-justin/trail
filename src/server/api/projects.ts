@@ -263,7 +263,7 @@ const listLabels = createRoute({
   summary:
     "Deprecated: list a product's labels (use GET /products/{key}/labels)",
   description:
-    "Deprecated alias of GET /products/{key}/labels, removed after the next release: ref is a product's key.",
+    "Deprecated alias of GET /products/{key}/labels, removed after the next release: ref is a product's key. A product the key names only through a project drawing from its products is not found here, as a product it doesn't reach is; through a project the key lists, its labels are listed.",
   deprecated: true,
   tags: labelTags,
   request: { params: projectParam, query: pageQuerySchema },

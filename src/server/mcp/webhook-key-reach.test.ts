@@ -1,10 +1,10 @@
 import { eq } from "drizzle-orm";
 import { expect, test } from "vitest";
 import { webhookDelivery, webhookSubscription } from "../db/schema.js";
-import { createBot, revokeKey } from "../service/keys.js";
+import { createBot, createKey, revokeKey } from "../service/keys.js";
 import { setupTestApp, testWebhookSettings } from "../test-app.js";
 import { createWebhookWorker } from "../webhooks/worker.js";
-import { mcpClients } from "./test-client.js";
+import { type Body, mcpClients } from "./test-client.js";
 
 const sent: string[] = [];
 const { app, db, bus, bot } = setupTestApp();
@@ -68,6 +68,18 @@ test("revoking the key that made a webhook over MCP stops its deliveries, each m
     ["failed", revoked],
     ["failed", revoked],
   ]);
+
+  const rotated = await connect(
+    createKey(db, made.actor.id, { actions: ["read"] }).key,
+  );
+  const [listed] = (await call(rotated, "list_webhooks")).items as Body[];
+  expect(listed).toMatchObject({
+    id: webhook.id,
+    paused: false,
+    consecutiveFailures: 0,
+    lastError: revoked,
+  });
+  expect(listed?.lastErrorAt).toEqual(expect.any(String));
 });
 
 test("a webhook made over MCP before keys were recorded is delivered while its bot has a live key, and skipped once it has none", async () => {

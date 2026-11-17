@@ -1,4 +1,6 @@
+import { eq } from "drizzle-orm";
 import { expect, test } from "vitest";
+import { apiKey, webhookSubscription } from "../db/schema.js";
 import { createBot, createKey, revokeKey } from "../service/keys.js";
 import { setupTestApp, testWebhookSettings } from "../test-app.js";
 import { createWebhookWorker } from "../webhooks/worker.js";
@@ -61,4 +63,42 @@ test("update_webhook and rotate_webhook_secret by a second key move the check to
   revokeKey(db, prefixOf(rotator));
   await call(wide, "update_item", { item, title: "every key revoked" });
   expect(await sentNow()).toBe(0);
+});
+
+const keyIdOf = (webhookId: string) =>
+  db
+    .select({ apiKeyId: webhookSubscription.apiKeyId })
+    .from(webhookSubscription)
+    .where(eq(webhookSubscription.id, webhookId))
+    .get()?.apiKeyId;
+
+const keyIdByPrefix = (key: string) =>
+  db
+    .select({ id: apiKey.id })
+    .from(apiKey)
+    .where(eq(apiKey.prefix, prefixOf(key)))
+    .get()?.id;
+
+test("an inbox webhook records the key that creates, updates or rotates it over MCP", async () => {
+  const scope = { actions: ["read" as const] };
+  const made = createBot(db, "mcp-inbox-manager", { scope });
+  const updater = createKey(db, made.actor.id, scope).key;
+  const rotator = createKey(db, made.actor.id, scope).key;
+  const webhook = await call(await connect(made.key), "create_webhook", {
+    url: "https://bot.example.com/mcp-inbox-manager",
+    secret: "whsec_mcp_inbox_manager_0123456789",
+    kind: "inbox",
+  });
+  expect(keyIdOf(webhook.id)).toBe(keyIdByPrefix(made.key));
+
+  await call(await connect(updater), "update_webhook", {
+    webhookId: webhook.id,
+  });
+  expect(keyIdOf(webhook.id)).toBe(keyIdByPrefix(updater));
+
+  await call(await connect(rotator), "rotate_webhook_secret", {
+    webhookId: webhook.id,
+    secret: "whsec_mcp_inbox_manager_rotated_",
+  });
+  expect(keyIdOf(webhook.id)).toBe(keyIdByPrefix(rotator));
 });

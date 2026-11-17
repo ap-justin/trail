@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { and, eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 import { migrate, openDatabase } from "../db/client.js";
 import { issue, projectProduct } from "../db/schema.js";
 import { createEventBus } from "../events/bus.js";
@@ -504,6 +504,20 @@ describe("add_to_project draws a project from a new product only on a product gr
     });
     lister = keyed("theta", { projects: ["recon", "other", "context"] });
   });
+  // each test leaves the fixtures as it found them, whether or not it passed
+  afterEach(() => {
+    service.removeFromProject(admin, "other", [atlIn]);
+    service.removeFromProject(admin, "context", [atlIn, btaIn, btaOut]);
+    db.delete(projectProduct)
+      .where(
+        and(
+          eq(projectProduct.projectId, service.getProject(admin, "context").id),
+          eq(projectProduct.productId, service.getProduct(admin, "BTA").id),
+        ),
+      )
+      .run();
+    for (const key of ["ATL", "BTA"]) setProductOwner(db, key, "admin");
+  });
   const productsOf = (slug: string) =>
     service
       .getProject(admin, slug)
@@ -516,7 +530,6 @@ describe("add_to_project draws a project from a new product only on a product gr
     expect(service.addToProject(lister.actor, "other", [atlIn]).added).toEqual([
       atlIn,
     ]);
-    service.removeFromProject(admin, "other", [atlIn]);
   });
 
   test("into a project not drawing from the item's product, it is a 403 naming whom to ask, and the project's products stay", () => {
@@ -548,15 +561,6 @@ describe("add_to_project draws a project from a new product only on a product gr
       service.addToProject(withBta.actor, "context", [btaOut]).added,
     ).toEqual([btaOut]);
     expect(productsOf("context")).toEqual(["BTA", "CTX"]);
-    service.removeFromProject(admin, "context", [btaOut]);
-    db.delete(projectProduct)
-      .where(
-        and(
-          eq(projectProduct.projectId, service.getProject(admin, "context").id),
-          eq(projectProduct.productId, service.getProduct(admin, "BTA").id),
-        ),
-      )
-      .run();
     const { key } = createBot(db, "atl-owner", {
       scope: { projects: ["recon", "context"] },
     });
@@ -566,6 +570,5 @@ describe("add_to_project draws a project from a new product only on a product gr
     expect(service.addToProject(owner, "context", [atlIn]).added).toEqual([
       atlIn,
     ]);
-    service.removeFromProject(admin, "context", [atlIn]);
   });
 });

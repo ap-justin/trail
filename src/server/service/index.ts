@@ -1262,17 +1262,7 @@ export function createService({
       .where(inArray(issueLink.issueId, ids))
       .orderBy(sql`rowid`)
       .all();
-    const projects = tx
-      .select({
-        issueId: projectItem.issueId,
-        slug: project.slug,
-        name: project.name,
-      })
-      .from(projectItem)
-      .innerJoin(project, eq(project.id, projectItem.projectId))
-      .where(and(inArray(projectItem.issueId, ids), reachableProjects(actor)))
-      .orderBy(asc(project.slug))
-      .all();
+    const projects = projectsSeenBy(tx, ids, actor);
     const assignees = actorRefs(
       tx,
       rows.map((r) => r.assigneeId),
@@ -1294,6 +1284,20 @@ export function createService({
         .map(({ slug, name }) => ({ slug, name })),
     }));
   }
+
+  /** The projects of these items the actor reaches, in slug order. */
+  const projectsSeenBy = (tx: Tx | Db, ids: string[], actor: ActingActor) =>
+    tx
+      .select({
+        issueId: projectItem.issueId,
+        slug: project.slug,
+        name: project.name,
+      })
+      .from(projectItem)
+      .innerJoin(project, eq(project.id, projectItem.projectId))
+      .where(and(inArray(projectItem.issueId, ids), reachableProjects(actor)))
+      .orderBy(asc(project.slug))
+      .all();
 
   const hydrateOne = (tx: Tx | Db, row: IssueRow, actor: ActingActor) =>
     hydrate(tx, [row], actor)[0] as Issue;
@@ -2279,12 +2283,22 @@ export function createService({
   const withSkipped = (item: Issue, skipped: string[]): WrittenItem =>
     skipped.length === 0 ? item : { ...item, skippedLabels: skipped };
 
-  /** A stored replay from before items carried their product key and projects, brought to today's shape. */
+  /**
+   * A created item as `actor` sees it now: its projects are those the caller
+   * reaches, since a replay may come from another key of the bot or after a
+   * scope edit; a stored replay from before items carried their product key
+   * and projects is brought to today's shape.
+   */
   function currentShape(
     item: WrittenItem | LegacyStoredItem,
     actor: ActingActor,
   ): WrittenItem {
-    if ("productKey" in item) return item;
+    if ("productKey" in item) {
+      const projects = projectsSeenBy(db, [item.id], actor).map(
+        ({ slug, name }) => ({ slug, name }),
+      );
+      return { ...item, projects };
+    }
     const { projectId, ...stored } = item;
     // the stored item has no type: the one migration 0015 gave the row
     const { type } = db
@@ -3853,7 +3867,19 @@ export function createService({
                 .map((ref) => resolveIssueRow(tx, ref, actor))
                 .map((row) => {
                   requireItemWrite(tx, actor, row, "remove it from a project");
-                  if (!projectIdsOf(actor)?.includes(target.id)) {
+                  const isMember =
+                    tx
+                      .select({ one: sql`1` })
+                      .from(projectItem)
+                      .where(
+                        and(
+                          eq(projectItem.projectId, target.id),
+                          eq(projectItem.issueId, row.id),
+                        ),
+                      )
+                      .get() !== undefined;
+                  // a non-member is listed unchanged, which needs no grant
+                  if (isMember && !projectIdsOf(actor)?.includes(target.id)) {
                     requireProductGrant(
                       tx,
                       actor,

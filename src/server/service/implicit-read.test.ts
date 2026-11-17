@@ -250,6 +250,26 @@ describe("remove_from_project on a project the key reads only through its produc
     ]);
     service.addToProject(admin, "recon", [btaIn]);
   });
+
+  test("lists another product's item that isn't in the project as unchanged", () => {
+    service.createProject(admin, {
+      name: "ATL only",
+      slug: "atl-only",
+      products: ["ATL"],
+    });
+    const outside = service.addTodo(alpha, {
+      product: "ATL",
+      title: "atl in atl-only, not recon",
+    }).key;
+    service.addToProject(admin, "atl-only", [outside]);
+    const lister = keyed("atl-only-lister", {
+      products: ["BTA"],
+      projects: ["atl-only"],
+    });
+    expect(service.removeFromProject(lister, "recon", [outside])).toMatchObject(
+      { removed: [], unchanged: [outside] },
+    );
+  });
 });
 
 describe("a BTA-only key files nothing through its implicit read", () => {

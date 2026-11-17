@@ -303,30 +303,58 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
   /**
    * Why a delivery mustn't go out now, or null: its event's item has left
    * the project a follow alone queued it for, or the webhook's key can no
-   * longer send it (`deliveryKeyRefusal`).
+   * longer send it (`deliveryKeyRefusal`). `tell` is set on the key's refusals,
+   * which only the bot can fix.
    */
-  function unsendable(delivery: Delivery, sub: Subscription): string | null {
-    if (delivery.eventId === null) return deliveryKeyRefusal(db, sub, null);
+  function unsendable(
+    delivery: Delivery,
+    sub: Subscription,
+  ): { reason: string; tell: boolean } | null {
+    const keyRefused = (event: typeof activityEvent.$inferSelect | null) => {
+      const reason = deliveryKeyRefusal(db, sub, event);
+      return reason === null ? null : { reason, tell: true };
+    };
+    if (delivery.eventId === null) return keyRefused(null);
     const event = db
       .select()
       .from(activityEvent)
       .where(eq(activityEvent.id, delivery.eventId))
       .get();
     if (!event) return null;
-    if (leftFollowedProjects(db, sub.id, event)) return LEFT_PROJECT;
-    return deliveryKeyRefusal(db, sub, event);
+    if (leftFollowedProjects(db, sub.id, event))
+      return { reason: LEFT_PROJECT, tell: false };
+    return keyRefused(event);
   }
 
   /**
    * Marks the delivery failed with `reason`, without an attempt and keeping
-   * no body. The webhook's health is left as it is, since the receiver had no
-   * part in it.
+   * no body. The receiver had no part in it, so nothing counts toward a pause;
+   * with `tell` the webhook's own lastError carries the reason, the only one
+   * its bot can read.
    */
-  function drop(delivery: Delivery, reason: string) {
-    db.update(webhookDelivery)
-      .set({ status: "failed", body: null, lastError: reason })
-      .where(and(eq(webhookDelivery.id, delivery.id), isPending))
-      .run();
+  function drop(
+    delivery: Delivery,
+    { reason, tell }: { reason: string; tell: boolean },
+  ) {
+    db.transaction(
+      (tx) => {
+        const dropped = tx
+          .update(webhookDelivery)
+          .set({ status: "failed", body: null, lastError: reason })
+          .where(and(eq(webhookDelivery.id, delivery.id), isPending))
+          .run();
+        if (!tell || dropped.changes === 0) return;
+        tx.update(webhookSubscription)
+          .set({
+            lastError: reason,
+            lastErrorAt: new Date(settings.now()),
+            updatedAt: keepUpdatedAt,
+          })
+          .where(eq(webhookSubscription.id, delivery.subscriptionId))
+          .run();
+      },
+      { behavior: "immediate" },
+    );
   }
 
   async function attempt(delivery: Delivery) {
@@ -336,9 +364,9 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
       .where(eq(webhookSubscription.id, delivery.subscriptionId))
       .get();
     if (!sub) return;
-    const reason = unsendable(delivery, sub);
-    if (reason !== null) {
-      drop(delivery, reason);
+    const refused = unsendable(delivery, sub);
+    if (refused !== null) {
+      drop(delivery, refused);
       return;
     }
     const secret = openSecret(settings.key, sub.id, sub.secretCipher);

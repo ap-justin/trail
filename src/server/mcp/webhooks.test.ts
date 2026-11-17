@@ -7,10 +7,12 @@ import { PING_LIMIT, PING_WINDOW_MS } from "../service/webhooks.js";
 import { setupTestApp } from "../test-app.js";
 
 const sent: string[] = [];
+const bodies: string[] = [];
 const { app, db, bot, addProject, signIn, owner } = setupTestApp({
   webhooks: {
-    transport: async ({ url }) => {
+    transport: async ({ url, body }) => {
       sent.push(url.href);
+      bodies.push(body);
       return { status: 204 };
     },
   },
@@ -101,6 +103,28 @@ test("a bot manages its webhooks over MCP and the secret never comes back", asyn
     expect(text).not.toContain(NEXT_SECRET);
     expect(text).not.toContain("tiny");
   }
+});
+
+test("test_webhook pings with the product keys under products and the project slugs under projects", async () => {
+  const client = await connect(bot.key);
+  await call(client, "create_project", {
+    name: "Ping recon",
+    slug: "ping-recon",
+    products: [a.key],
+  });
+  const made = await call(client, "create_webhook", {
+    url: "https://bot.example.com/mcp-ping",
+    secret: SECRET,
+    projects: [b.key, "ping-recon"],
+  });
+  expect(made).toMatchObject({ products: [b.key], projects: ["ping-recon"] });
+  bodies.length = 0;
+  await call(client, "test_webhook", { webhookId: made.id });
+  expect(JSON.parse(bodies[0] ?? "").data).toMatchObject({
+    webhookId: made.id,
+    products: [b.key],
+    projects: ["ping-recon"],
+  });
 });
 
 test("another bot's webhook, a hidden project and an internal URL are refused", async () => {

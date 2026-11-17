@@ -169,6 +169,32 @@ describe("a file_issue replay", () => {
     expect(send()).toEqual(first);
   });
 
+  test("names only the projects the replaying key reaches now", () => {
+    service.createProject(admin, {
+      name: "Pair",
+      slug: "pair",
+      products: ["ATL"],
+    });
+    const bot = keyed("moved-project", { projects: ["recon"] });
+    const send = () =>
+      service.fileIssue(
+        bot.now(),
+        { product: "ATL", title: "filed into the key's one project" },
+        { idempotencyKey: "moved" },
+      );
+    const first = send();
+    expect(first.projects.map((p) => p.slug)).toEqual(["recon"]);
+    service.addToProject(admin, "pair", [first.key]);
+    editKeyScope(db, bot.prefix, {
+      removeProjects: ["recon"],
+      addProjects: ["pair"],
+    });
+
+    const replayed = send();
+    expect(replayed.id).toBe(first.id);
+    expect(replayed.projects).toEqual([{ slug: "pair", name: "Pair" }]);
+  });
+
   test("with a different body is still a reused key, even once the item left the project", () => {
     const bot = keyed("reuser", { projects: ["recon"] });
     const first = service.fileIssue(

@@ -148,3 +148,87 @@ test("a BTA-only key can't add recon's ATL item to a project, nor file on ATL, w
     (await call("GET", "/items?limit=200", btaKey)).body.items,
   ).toHaveLength(before);
 });
+
+test("add_to_project of an item whose product the project doesn't draw from is a 403 naming the product's grant and owner, and the project keeps its products", async () => {
+  await seed("POST", "/api/v1/products", { key: "CTX", name: "Product CTX" });
+  await seed("POST", "/api/v1/projects", {
+    name: "Context",
+    slug: "context",
+    products: ["CTX"],
+  });
+  const drawn = await todo("ATL", "atl to draw");
+  await seed("POST", "/api/v1/projects/recon/items", { items: [drawn] });
+  const lister = createBot(db, "ctx-lister", {
+    scope: { projects: ["recon", "context"] },
+  }).key;
+  const productsOfContext = async () =>
+    (
+      (
+        (await (
+          await request("GET", "/api/v1/projects/context")
+        ).json()) as Body
+      ).products as Body[]
+    )
+      .map((p) => p.key)
+      .sort();
+
+  const refused = await call("POST", "/projects/context/items", lister, {
+    items: [drawn],
+  });
+  expect(refused.status).toBe(403);
+  expect(refused.body.error).toEqual({
+    code: "forbidden_scope",
+    message: `adding ${drawn} to project context would draw context from product ATL: to add it, the bot needs a key that lists product ATL. Ask tester, the owner of ATL, for that grant.`,
+  });
+  hidesItem(refused, "atl to draw");
+  expect(await productsOfContext()).toEqual(["CTX"]);
+
+  const granted = createBot(db, "ctx-granted", {
+    scope: { products: ["ATL"], projects: ["context"] },
+  }).key;
+  const added = await call("POST", "/projects/context/items", granted, {
+    items: [drawn],
+  });
+  expect(added.status).toBeLessThan(300);
+  expect(added.body.added).toEqual([drawn]);
+  expect(await productsOfContext()).toEqual(["ATL", "CTX"]);
+});
+
+test("DELETE /projects/{slug}/items/{key} of a member is a 403 for a key reading the project only through its products, and a non-member is a 200 unchanged", async () => {
+  await seed("POST", "/api/v1/projects", {
+    name: "ATL list",
+    slug: "atl-list",
+    products: ["ATL"],
+  });
+  const both = await todo("ATL", "atl in recon and atl-list");
+  const outside = await todo("ATL", "atl in atl-list only");
+  await seed("POST", "/api/v1/projects/recon/items", { items: [both] });
+  await seed("POST", "/api/v1/projects/atl-list/items", {
+    items: [both, outside],
+  });
+  const mixed = createBot(db, "mixed", {
+    scope: { products: ["BTA"], projects: ["atl-list"] },
+  }).key;
+
+  const refused = await call("DELETE", `/projects/recon/items/${both}`, mixed);
+  expect(refused.status).toBe(403);
+  hidesItem(refused, "atl in recon and atl-list");
+  expect(refused.body.error).toEqual({
+    code: "forbidden_scope",
+    message: `${both} is in project recon, which this key reads only through its products: to remove it from recon, the bot needs a key that lists product ATL or project recon. Ask tester, the owner of ATL, for that grant.`,
+  });
+
+  const unchanged = await call(
+    "DELETE",
+    `/projects/recon/items/${outside}`,
+    mixed,
+  );
+  expect(unchanged.status).toBe(200);
+  expect(unchanged.body).toMatchObject({ removed: [], unchanged: [outside] });
+  const removed = await call(
+    "DELETE",
+    `/projects/atl-list/items/${both}`,
+    mixed,
+  );
+  expect(removed.body.removed).toEqual([both]);
+});

@@ -121,3 +121,93 @@ test("add_to_project of recon's ATL item and file_issue on ATL are refused with 
     before,
   );
 });
+
+test("add_to_project of an item whose product the project doesn't draw from is refused naming the product's grant and owner, and the project keeps its products", async () => {
+  const wide = await connect(bot.key);
+  await call(wide, "create_product", { key: "CTX", name: "Product CTX" });
+  await call(wide, "create_project", {
+    name: "Context",
+    slug: "context",
+    products: ["CTX"],
+  });
+  const drawn = (
+    await call(wide, "add_todo", { product: "ATL", title: "atl to draw" })
+  ).key as string;
+  await call(wide, "add_to_project", { project: "recon", items: [drawn] });
+  const lister = await connect(
+    createBot(db, "ctx-lister", { scope: { projects: ["recon", "context"] } })
+      .key,
+  );
+  const productsOfContext = async () =>
+    (await call(wide, "get_project", { project: "context" })).products
+      .map((p: { key: string }) => p.key)
+      .sort();
+
+  const refused = await callError(lister, "add_to_project", {
+    project: "context",
+    items: [drawn],
+  });
+  expect(refused).toBe(
+    `forbidden_scope: adding ${drawn} to project context would draw context from product ATL: to add it, the bot needs a key that lists product ATL. Ask tester, the owner of ATL, for that grant.`,
+  );
+  hidesItem(refused, "atl to draw");
+  expect(await productsOfContext()).toEqual(["CTX"]);
+
+  const granted = await connect(
+    createBot(db, "ctx-granted", {
+      scope: { products: ["ATL"], projects: ["context"] },
+    }).key,
+  );
+  const added = await call(granted, "add_to_project", {
+    project: "context",
+    items: [drawn],
+  });
+  expect(added.added).toEqual([drawn]);
+  expect(await productsOfContext()).toEqual(["ATL", "CTX"]);
+});
+
+test("remove_from_project of a member is refused for a key reading the project only through its products, and a non-member is listed unchanged", async () => {
+  const wide = await connect(bot.key);
+  await call(wide, "create_project", {
+    name: "ATL list",
+    slug: "atl-list",
+    products: ["ATL"],
+  });
+  const todo = async (title: string) =>
+    (await call(wide, "add_todo", { product: "ATL", title })).key as string;
+  const both = await todo("atl in recon and atl-list");
+  const outside = await todo("atl in atl-list only");
+  await call(wide, "add_to_project", { project: "recon", items: [both] });
+  await call(wide, "add_to_project", {
+    project: "atl-list",
+    items: [both, outside],
+  });
+  const mixed = await connect(
+    createBot(db, "mixed", {
+      scope: { products: ["BTA"], projects: ["atl-list"] },
+    }).key,
+  );
+
+  const refused = await callError(mixed, "remove_from_project", {
+    project: "recon",
+    items: [both],
+  });
+  hidesItem(refused, "atl in recon and atl-list");
+  expect(refused).toBe(
+    `forbidden_scope: ${both} is in project recon, which this key reads only through its products: to remove it from recon, the bot needs a key that lists product ATL or project recon. Ask tester, the owner of ATL, for that grant.`,
+  );
+
+  const unchanged = await call(mixed, "remove_from_project", {
+    project: "recon",
+    items: [outside],
+  });
+  expect(unchanged).toMatchObject({ removed: [], unchanged: [outside] });
+  expect(
+    (
+      await call(mixed, "remove_from_project", {
+        project: "atl-list",
+        items: [both],
+      })
+    ).removed,
+  ).toEqual([both]);
+});

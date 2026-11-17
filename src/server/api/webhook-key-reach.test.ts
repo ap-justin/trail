@@ -2,6 +2,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { beforeEach, expect, test } from "vitest";
 import {
   activityEvent,
+  apiKey,
   product,
   project,
   projectProduct,
@@ -111,7 +112,9 @@ beforeEach(async () => {
 });
 
 test("revoking the key that made a webhook skips its queued deliveries and those after, each marked with the reason", async () => {
-  const key = botWith({ products: ["ATL"] });
+  const { actor, key } = createBot(db, `reach-${++bots}`, {
+    scope: { products: ["ATL"], actions: ["read"] },
+  });
   const { id, url } = await follow({ products: ["ATL"] }, key);
   await retitle(atl, "queued before the revoke");
   revokeKey(db, prefixOf(key));
@@ -124,18 +127,16 @@ test("revoking the key that made a webhook skips its queued deliveries and those
     ["trail.issue.updated", "failed", 0, revoked],
     ["trail.item.updated", "failed", 0, revoked],
   ]);
-  // a skip is not the receiver's failure: the webhook stays healthy
-  expect(
-    db
-      .select()
-      .from(webhookSubscription)
-      .where(eq(webhookSubscription.id, id))
-      .get(),
-  ).toMatchObject({
+  // a skip is not the receiver's failure: it names itself on the webhook but counts toward no pause
+  const rotated = createKey(db, actor.id, { actions: ["read"] }).key;
+  const read = await call("GET", `/webhooks/${id}`, rotated);
+  expect(read.status).toBe(200);
+  expect(read.body).toMatchObject({
+    paused: false,
     consecutiveFailures: 0,
-    lastError: null,
-    pausedAt: null,
+    lastError: revoked,
   });
+  expect(read.body.lastErrorAt).toEqual(expect.any(String));
 });
 
 test("a project taken off the key skips the deliveries of a webhook following it, naming the project", async () => {
@@ -282,7 +283,12 @@ test("a webhook with no recorded key is delivered while its bot's live key reach
       .from(webhookSubscription)
       .where(eq(webhookSubscription.id, id))
       .get(),
-  ).toMatchObject({ consecutiveFailures: 0, lastError: null, pausedAt: null });
+  ).toMatchObject({
+    consecutiveFailures: 0,
+    lastError: NO_LIVE_KEY,
+    lastErrorAt: expect.any(Date),
+    pausedAt: null,
+  });
 });
 
 const sender = createBot(db, "reach-sender").key;
@@ -321,7 +327,12 @@ test("an inbox webhook gets its messages while the key that made it lives, and s
       .from(webhookSubscription)
       .where(eq(webhookSubscription.id, id))
       .get(),
-  ).toMatchObject({ consecutiveFailures: 0, lastError: null, pausedAt: null });
+  ).toMatchObject({
+    consecutiveFailures: 0,
+    lastError: "not sent: this webhook's key is revoked",
+    lastErrorAt: expect.any(Date),
+    pausedAt: null,
+  });
 });
 
 test("an inbox webhook made by one key is still delivered after the bot's other key is revoked", async () => {
@@ -355,23 +366,27 @@ test("a webhook with no recorded key is delivered while a second live key reache
 
 test("a webhook with no recorded key goes out when any one of its bot's keys reaches it, and is skipped with the oldest key's reason when none does", async () => {
   const older = createBot(db, `reach-${++bots}`, {
-    scope: { products: ["BTA"], actions: ["read"] },
+    scope: { products: ["ATL", "BTA"], actions: ["read"] },
   });
   const newer = createKey(db, older.actor.id, {
-    products: ["ATL"],
+    products: ["ATL", "BTA"],
     actions: ["read"],
   }).key;
-  const { id, url } = await follow({ products: ["ATL"] }, newer);
+  // key ages tie within a clock tick: pin which is the oldest
+  db.update(apiKey)
+    .set({ createdAt: new Date(Date.now() - 3_600_000) })
+    .where(eq(apiKey.prefix, prefixOf(older.key)))
+    .run();
+  const { id, url } = await follow({ products: ["ATL", "BTA"] }, newer);
   forgetKey(id);
-  await retitle(atl, "the newer key reaches ATL");
+  editKeyScope(db, prefixOf(older.key), { removeProducts: ["BTA"] });
+  await retitle(atl, "the newer key reaches both products");
   expect(await sentNowTo(url)).toBe(2);
-  editKeyScope(db, prefixOf(newer), {
-    removeProducts: ["ATL"],
-    addProducts: ["BTA"],
-  });
-  await retitle(atl, "neither key reaches ATL");
+  editKeyScope(db, prefixOf(newer), { removeProducts: ["ATL"] });
+  await retitle(atl, "neither key reaches both products");
   expect(await sentNowTo(url)).toBe(0);
-  const lost = "not sent: this webhook's key no longer reaches ATL";
+  // the older key lost BTA and the newer lost ATL: only the older's reason is recorded
+  const lost = "not sent: this webhook's key no longer reaches BTA";
   expect(historyOf(id).slice(2)).toEqual([
     ["trail.issue.updated", "failed", 0, lost],
     ["trail.item.updated", "failed", 0, lost],
