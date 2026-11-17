@@ -16,7 +16,7 @@ import {
 } from "../db/schema.js";
 import type { ActivityEvent, ActorUpdate, EventBus } from "../events/bus.js";
 import type { FeedFilters } from "../service/paging.js";
-import { entriesByEvent } from "./entries.js";
+import { entriesByEvent, productRefs } from "./entries.js";
 import { createWebRouter, type Member } from "./env.js";
 import { eventsAfter, feedFilters, ofItemType } from "./feed.js";
 import { visibleIds } from "./visible.js";
@@ -94,7 +94,7 @@ const streamEvents = createRoute({
     200: {
       content: { "text/event-stream": { schema: z.string() } },
       description:
-        "Feed entries as they happen, each event's seq its id; Last-Event-ID resumes after that seq. A `reset` event means the client is too far behind: refetch /feed. An `actor` event, `{actorId, photoUrl, title}` with no id, says an actor's photo or a bot's title was set, replaced or removed, and carries both as they are now (each null when unset; title always null on a person), so the latest event for an actor is its whole state: sent whatever the stream's filters, but only to a viewer who can see that actor (the person who runs this trail sees all; a member sees themselves, bots acting in their products and people who share a product with them), and it is not a feed entry, so Last-Event-ID never replays it. With only=actors the stream carries `actor` events and heartbeats alone.",
+        "Feed entries as they happen, each event's seq its id; Last-Event-ID resumes after that seq. A `reset` event means the client is too far behind: refetch /feed. An `actor` event, `{actorId, photoUrl, title}` with no id, says an actor's photo or a bot's title was set, replaced or removed, and carries both as they are now (each null when unset; title always null on a person), so the latest event for an actor is its whole state: sent whatever the stream's filters, but only to a viewer who can see that actor (the person who runs this trail sees all; a member sees themselves, bots acting in their products and people who share a product with them), and it is not a feed entry, so Last-Event-ID never replays it. A `work` event, `{productKey}` with no id, says an item in that product was created or changed status or assignee, or the product was imported: sent for those the stream's filters keep out (one per product per batch), only for a product the viewer sees, so a client can re-read that product's work in progress; it is never replayed. With only=actors the stream carries `actor` events and heartbeats alone.",
     },
     404: jsonContent(errorSchema, "No such product or project to filter by"),
     429: jsonContent(
@@ -228,6 +228,28 @@ function ofType(
   return events.filter((e) => kept.has(e.id));
 }
 
+/**
+ * Whether the event becomes an entry that can move an item into or out of a
+ * bot's work: `item_created`, `status_changed`, `assignee_changed` or
+ * `product_imported` (the kinds `movesBotWork` in src/web/lib/use-live-feed.ts re-reads on).
+ */
+function movesWork(event: ActivityEvent): boolean {
+  if (event.action === "issue.created" || event.action === "product.imported")
+    return true;
+  if (event.action !== "issue.updated") return false;
+  const changes = event.payload as Record<string, unknown> | null;
+  return changes?.status != null || changes?.assigneeId != null;
+}
+
+/** The distinct product ids, in order, of the events that move work. */
+const productsMovingWork = (events: ActivityEvent[]) => [
+  ...new Set(
+    events.flatMap((e) =>
+      e.productId !== null && movesWork(e) ? [e.productId] : [],
+    ),
+  ),
+];
+
 const newestSeq = (db: Db) =>
   db
     .select({ seq: max(activityEvent.seq) })
@@ -320,10 +342,15 @@ export function eventRoutes(
           if (fresh.length === 0) return;
           lastSeq = Math.max(...fresh.map((e) => e.seq));
           const visible = productsNow(db, member);
+          // a work-moving event has a product, so its mayShow reads nothing
+          const seen = fresh.filter(
+            (e) =>
+              (matches(filters, e) || movesWork(e)) && mayShow(db, e, visible),
+          );
           const shown = ofType(
             db,
             filters,
-            fresh.filter((e) => matches(filters, e) && mayShow(db, e, visible)),
+            seen.filter((e) => matches(filters, e)),
           );
           for (const [i, entries] of entriesByEvent(db, shown).entries()) {
             for (const entry of entries) {
@@ -332,6 +359,18 @@ export function eventRoutes(
                 data: JSON.stringify(entry),
               });
             }
+          }
+          // the shown ones already reached the client as entries
+          const sent = new Set(shown);
+          const workIn = productsMovingWork(seen.filter((e) => !sent.has(e)));
+          if (workIn.length === 0) return;
+          const productOf = productRefs(db, workIn);
+          // without an id: not a feed entry, so Last-Event-ID stays the entries'
+          for (const productId of workIn) {
+            await stream.writeSSE({
+              event: "work",
+              data: JSON.stringify({ productKey: productOf(productId).key }),
+            });
           }
         };
         if (resumeFrom !== undefined) {

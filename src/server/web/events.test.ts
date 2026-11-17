@@ -364,7 +364,10 @@ test("a stream filtered to a quiet product still sends a comment line every 15 s
     await vi.advanceTimersByTimeAsync(5_000);
     await file(busy.id, `busy ${i}`);
   }
-  expect(await stream.next()).toEqual({ comment: "heartbeat" });
+  let message = await stream.next();
+  // the busy product's filings reach a filtered stream only as work events
+  while (message?.event === "work") message = await stream.next();
+  expect(message).toEqual({ comment: "heartbeat" });
   await stream.cancel();
 });
 
@@ -897,4 +900,82 @@ test("a photo change writes no activity event and no webhook delivery", async ()
   expect((await putPhoto(hooked.key, PNG)).status).toBe(200);
   expect((await clearPhoto(hooked.key)).status).toBe(200);
   expect(rows()).toEqual(before);
+});
+
+/** The next message that isn't a comment line: a heartbeat or the like. */
+async function nextMessage(stream: Awaited<ReturnType<typeof openStream>>) {
+  for (;;) {
+    const message = await stream.next();
+    if (message === null || message.comment === undefined) return message;
+  }
+}
+
+const workMessage = (productKey: string) => ({
+  event: "work",
+  data: JSON.stringify({ productKey }),
+});
+
+test("a product-filtered stream gets a work event, with no id, for bot work moving in another product the member sees", async () => {
+  const watched = addProject("WorkWatched");
+  const elsewhere = addProject("WorkElsewhere");
+  const stream = await openStream(
+    await addMember("work-watcher", [watched.id, elsewhere.id]),
+    { query: `?product=${watched.key}` },
+  );
+  const filed = await file(elsewhere.id, "started elsewhere");
+  expect(await nextMessage(stream)).toStrictEqual(workMessage(elsewhere.key));
+  await request("PATCH", `/api/v1/issues/${filed.id}`, {
+    json: { status: "in_progress" },
+  });
+  expect(await nextMessage(stream)).toStrictEqual(workMessage(elsewhere.key));
+  await stream.cancel();
+});
+
+test("a filtered stream gets no work event for a product the member can't see, nor for a comment or a change that moves no work", async () => {
+  const watched = addProject("QuietWatched");
+  const elsewhere = addProject("QuietElsewhere");
+  const hidden = addProject("QuietHidden");
+  const before = await file(elsewhere.id, "filed before");
+  const stream = await openStream(
+    await addMember("quiet-watcher", [watched.id, elsewhere.id]),
+    { query: `?product=${watched.key}` },
+  );
+  await file(hidden.id, "out of sight");
+  await request("POST", `/api/v1/items/${before.key}/comments`, {
+    json: { body: "just talk" },
+  });
+  await request("PATCH", `/api/v1/issues/${before.id}`, {
+    json: { priority: 1 },
+  });
+  await file(watched.id, "the one in the filter");
+  const message = await nextMessage(stream);
+  expect(message?.event).toBeUndefined();
+  expect(JSON.parse(message?.data ?? "null")).toMatchObject({
+    item: { title: "the one in the filter" },
+  });
+  await stream.cancel();
+});
+
+test("an unfiltered stream carries moving work as entries alone, never as work events too", async () => {
+  const p = addProject("WorkUnfiltered");
+  const stream = await openStream(ownerCookie);
+  const filed = await file(p.id, "started");
+  await request("PATCH", `/api/v1/issues/${filed.id}`, {
+    json: { status: "in_progress" },
+  });
+  const kinds = [];
+  for (let i = 0; i < 2; i++) {
+    const message = await nextMessage(stream);
+    expect(message?.event).toBeUndefined();
+    kinds.push(JSON.parse(message?.data ?? "null").kind);
+  }
+  expect(kinds).toEqual(["item_created", "status_changed"]);
+  // the next message is the next entry: no work event sat between them
+  await file(p.id, "sentinel");
+  const next = await nextMessage(stream);
+  expect(next?.event).toBeUndefined();
+  expect(JSON.parse(next?.data ?? "null")).toMatchObject({
+    item: { title: "sentinel" },
+  });
+  await stream.cancel();
 });
