@@ -264,7 +264,7 @@ export function useLiveFeed(
   });
   // whether /feed under this filter now 404s, meaning a filtered product or project this person
   // lost: asked after the server closes the stream on a 4xx, since EventSource never exposes the
-  // status, and after an access event on a stream left open;
+  // status, and after an access event on a stream left open.
   // `live` turns false once the stream is torn down: a check answering after the viewer left
   // the feed, or moved its filter, must not pull them back
   const readFeedGone = useEffectEvent(async (live: () => boolean) => {
