@@ -437,7 +437,7 @@ describe("the readers around an item follow the implicit read", () => {
     const hidden = thrown(() => service.listLabels(beta, "ATL"));
     expect(hidden).toBeInstanceOf(NotFoundError);
     expect(hidden.message).toBe(
-      "this key reads product ATL only through project recon, which shows ATL's name and key and not its labels: ATL's labels need a key that lists product ATL or project recon. Ask alpha, the owner of ATL, for that grant.",
+      "this key reads only the name and key of product ATL, through project recon: ATL's labels need a key that lists product ATL or project recon. Ask alpha, the owner of ATL, for that grant.",
     );
     expect(hidden.message).not.toContain("list_products");
     const listing = keyed("label-lister", { projects: ["recon"] });

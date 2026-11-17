@@ -93,7 +93,7 @@ test("list_labels on ATL is a not_found naming recon, the grants and the owner, 
   await call(wide, "update_item", { item: atlIn, addLabels: ["bug"] });
   const hidden = await callError(beta, "list_labels", { product: "ATL" });
   expect(hidden).toBe(
-    "not_found: this key reads product ATL only through project recon, which shows ATL's name and key and not its labels: ATL's labels need a key that lists product ATL or project recon. Ask tester, the owner of ATL, for that grant.",
+    "not_found: this key reads only the name and key of product ATL, through project recon: ATL's labels need a key that lists product ATL or project recon. Ask tester, the owner of ATL, for that grant.",
   );
   expect(hidden).not.toContain("list_products");
   const listing = await connect(

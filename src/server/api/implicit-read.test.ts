@@ -110,7 +110,7 @@ test("GET /products/ATL/labels is a 404 naming recon, the grants and the owner, 
   expect(hidden.body.error).toEqual({
     code: missing.body.error.code,
     message:
-      "this key reads product ATL only through project recon, which shows ATL's name and key and not its labels: ATL's labels need a key that lists product ATL or project recon. Ask tester, the owner of ATL, for that grant.",
+      "this key reads only the name and key of product ATL, through project recon: ATL's labels need a key that lists product ATL or project recon. Ask tester, the owner of ATL, for that grant.",
   });
   expect(hidden.text).not.toContain("list_products");
   const aliased = await call("GET", "/projects/ATL/labels", btaKey);

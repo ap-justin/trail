@@ -904,9 +904,10 @@ export const webhookSubscription = sqliteTable(
     lastSuccessAt: integer("last_success_at", { mode: "timestamp_ms" }),
     lastError: text("last_error"),
     lastErrorAt: integer("last_error_at", { mode: "timestamp_ms" }),
-    // the key that last created or changed it, which the worker checks before each delivery (an inbox one only for
-    // being live); null on one created before keys were recorded and unchanged since whose bot then had no single
-    // live key, checked against the bot's live keys. No cascade: keys are revoked, not deleted
+    // the key that last created or changed it, or, on one created before keys were recorded and unchanged since,
+    // the bot's only live key when migration 0019 ran; the worker checks it before each delivery (an inbox one only
+    // for being live). Null where that bot had none or several, checked against the bot's live keys. No cascade:
+    // keys are revoked, not deleted
     apiKeyId: text("api_key_id").references(() => apiKey.id),
   },
   (t) => [

@@ -565,7 +565,7 @@ export function registerTools(
     "add_to_project",
     {
       description:
-        "Add items to a project by key, up to 100 a call, from any products this key reaches: an item's product joins the project's products by itself, when the key lists that product or is its owner, and is refused (forbidden_scope) otherwise. An item already in the project is left as it is and listed in unchanged, so a retry is safe. Needs the issues action on a key reaching one of the project's products; an item the key reads only through a project (access via_project) is refused. Returns the project with added and unchanged keys.",
+        "Add items to a project by key, up to 100 a call, from any products this key reaches: an item's product joins the project's products by itself, when the key lists that product or its bot owns it, and is refused (forbidden_scope) otherwise. An item already in the project is left as it is and listed in unchanged, so a retry is safe. Needs the issues action on a key reaching one of the project's products; an item the key reads only through a project (access via_project) is refused. Returns the project with added and unchanged keys.",
       inputSchema: projectItemsSchema.extend({ project: projectSlug }),
       annotations: additive,
     },
@@ -580,7 +580,7 @@ export function registerTools(
     "remove_from_project",
     {
       description:
-        "Take items out of a project by key, up to 100 a call; the items themselves stay as they are, and the project keeps its products. From a project the key doesn't list, it removes only items of the products it lists, and refuses the rest (forbidden_scope). An item not in the project is listed in unchanged, so a retry is safe. Needs the issues action on a key reaching one of the project's products; an item the key reads only through a project (access via_project) is refused.",
+        "Take items out of a project by key, up to 100 a call; the items themselves stay as they are, and the project keeps its products. From a project the key doesn't list, it removes only items of the products it lists or its bot owns, and refuses the rest (forbidden_scope). An item not in the project is listed in unchanged, so a retry is safe. Needs the issues action on a key reaching one of the project's products; an item the key reads only through a project (access via_project) is refused.",
       inputSchema: projectItemsSchema.extend({ project: projectSlug }),
       annotations: update,
     },
@@ -770,7 +770,7 @@ export function registerTools(
     "list_labels",
     {
       description:
-        "List a product's labels, oldest first, a page at a time: pass nextCursor back as cursor until it is null. A product this key names only through a project drawing from its products is not found here, as a product it doesn't reach is; through a project the key lists, its labels are listed.",
+        "List a product's labels, oldest first, a page at a time: pass nextCursor back as cursor until it is null. A product this key names only through a project drawing from its products is not found here, with a message naming that project and the grants that would list its labels; through a project the key lists, its labels are listed.",
       inputSchema: z.strictObject({
         product: aliasedProduct,
         projectId: projectIdAlias,

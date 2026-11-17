@@ -1088,7 +1088,7 @@ export function createService({
       const via = implicitProjectsOf(tx, actor, named.id).map((p) => p.slug);
       if (via.length === 0) throw error;
       throw new NotFoundError(
-        `this key reads product ${named.key} only through ${projectList(via)}, which shows ${named.key}'s name and key and not its labels: ${named.key}'s labels need a key that lists ${grantsFor(named.key, via)}. ${askForGrant(tx, named)}`,
+        `this key reads only the name and key of product ${named.key}, through ${projectList(via)}: ${named.key}'s labels need a key that lists ${grantsFor(named.key, via)}. ${askForGrant(tx, named)}`,
       );
     }
   }

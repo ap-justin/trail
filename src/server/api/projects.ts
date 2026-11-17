@@ -174,7 +174,7 @@ const removeItem = createRoute({
   method: "delete",
   path: "/projects/{slug}/items/{key}",
   summary: "Take an item out of a project",
-  description: `${WHO_CHANGES} An item not in the project is listed in unchanged, so a retry is safe. The project keeps its products. From a project the key doesn't list, it removes only items of the products it lists.`,
+  description: `${WHO_CHANGES} An item not in the project is listed in unchanged, so a retry is safe. The project keeps its products. From a project the key doesn't list, it removes only items of the products it lists or its bot owns.`,
   tags,
   request: { params: projectItemParam },
   responses: {
@@ -263,7 +263,7 @@ const listLabels = createRoute({
   summary:
     "Deprecated: list a product's labels (use GET /products/{key}/labels)",
   description:
-    "Deprecated alias of GET /products/{key}/labels, removed after the next release: ref is a product's key. A product the key names only through a project drawing from its products is not found here, as a product it doesn't reach is; through a project the key lists, its labels are listed.",
+    "Deprecated alias of GET /products/{key}/labels, removed after the next release: ref is a product's key. A product the key names only through a project drawing from its products is a 404 here, whose message names that project and the grants that would list its labels; through a project the key lists, its labels are listed.",
   deprecated: true,
   tags: labelTags,
   request: { params: projectParam, query: pageQuerySchema },

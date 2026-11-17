@@ -159,7 +159,7 @@ describe("a file_issue replay", () => {
         { idempotencyKey: "growing-one" },
       );
     const first = send();
-    // no route adds a product to a project
+    // a product joins a project only with an item added from it; this adds ATL with none
     const atl = service.getProduct(admin, "ATL").id;
     db.insert(projectProduct)
       .values({ projectId: growing.id, productId: atl })
