@@ -105,8 +105,11 @@ function webhookOf(
 const actorOf = (stdout: string) =>
   /^actor\s+(\S+)$/m.exec(stdout)?.[1] as string;
 
-const moveHint =
-  "trail: to move a webhook to another key, call update_webhook (PATCH /api/v1/webhooks/{id}) or rotate_webhook_secret with that key (the key checked becomes the one that last changed the webhook)\n";
+/** The stderr line on moving a stopped webhook; it names the read action when an activity webhook is among them. */
+const moveHint = (activity: boolean) =>
+  `trail: to move a webhook to another key, call update_webhook (PATCH /api/v1/webhooks/{id}) or rotate_webhook_secret with that key${activity ? ", which needs the read action for an activity webhook" : ""} (the key checked becomes the one that last changed the webhook)\n`;
+const mintFirst = (command: string) =>
+  `trail: this bot has no live key left: mint one first with \`${command}\`\n`;
 
 test("key revoke prints a line per webhook the key recorded, by URL origin, and on stderr how to move them", () => {
   const made = run("bot", "create", "revoke lists", "--label", "lister");
@@ -138,7 +141,17 @@ test("key revoke prints a line per webhook the key recorded, by URL origin, and 
       `stopped webhook ${inbox} (inbox) to https://inbox.example.com:8443`,
     ].toSorted(),
   );
-  expect(stderr).toBe(moveHint);
+  expect(stderr).toBe(moveHint(true));
+});
+
+test("key revoke that stops only inbox webhooks gives the move hint without the read action", () => {
+  const made = run("bot", "create", "revoke inbox only", "--label", "inboxer");
+  const key = createdKey(made.stdout);
+  webhookOf(actorOf(made.stdout), key, "inbox", "https://in.example.com/x");
+  run("key", "create", "inboxer", "--actions", "issues");
+  const { code, stderr } = run("key", "revoke", key.slice(6, 14));
+  expect(code).toBe(0);
+  expect(stderr).toBe(moveHint(false));
 });
 
 test("key revoke of a bot's last live key lists its webhooks recording no key and says to mint a key first", () => {
@@ -152,9 +165,50 @@ test("key revoke of a bot's last live key lists its webhooks recording no key an
     `stopped webhook ${hook} (activity) to https://last.example.com`,
     "",
   ]);
+  expect(stderr).toBe(mintFirst("trail key create last-one") + moveHint(true));
+});
+
+test("key revoke of a bot's last scoped key says to mint one with the same scope flags, which mint a like-for-like key", () => {
+  const made = run(
+    "bot",
+    "create",
+    "revoke last scoped",
+    "--label",
+    "last-scoped",
+    "--products",
+    "BTA,ATL",
+    "--projects",
+    "recon",
+    "--actions",
+    "issues,read",
+  );
+  const key = createdKey(made.stdout);
+  webhookOf(actorOf(made.stdout), key, "activity", "https://ls.example.com");
+  const { code, stderr } = run("key", "revoke", key.slice(6, 14));
+  expect(code).toBe(0);
+  const command =
+    "trail key create last-scoped --products ATL,BTA --projects recon --actions read,issues";
+  expect(stderr).toBe(mintFirst(command) + moveHint(true));
+  const minted = run(...command.split(" ").slice(1));
+  expect(minted.code).toBe(0);
+  expect(scopeOf(createdKey(minted.stdout))).toEqual(scopeOf(key));
+});
+
+test("key revoke leaving live keys none of which can read says an activity webhook needs a key with the read action, and not to mint first", () => {
+  const made = run("bot", "create", "revoke unread", "--label", "unread-left");
+  const key = createdKey(made.stdout);
+  const bot = actorOf(made.stdout);
+  run("key", "create", "unread-left", "--actions", "issues");
+  const hook = webhookOf(bot, null, "activity", "https://ur.example.com/x");
+  const { code, stdout, stderr } = run("key", "revoke", key.slice(6, 14));
+  expect(code).toBe(0);
+  expect(stdout.split("\n").slice(1)).toEqual([
+    `stopped webhook ${hook} (activity) to https://ur.example.com`,
+    "",
+  ]);
   expect(stderr).toBe(
-    "trail: this bot has no live key left: mint one first with `trail key create last-one`\n" +
-      moveHint,
+    "trail: none of this bot's live keys has the read action, which moving an activity webhook needs\n" +
+      moveHint(true),
   );
 });
 

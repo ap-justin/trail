@@ -20,6 +20,12 @@ const worker = createWebhookWorker({
   }),
 });
 
+// the lastError of each delivery refused for its key, as a bot reads it
+const KEY_REVOKED =
+  "not sent: this webhook's key is revoked: update the webhook (update_webhook) or rotate its secret (rotate_webhook_secret) with a live key (with the read action, on an activity webhook) to get deliveries again";
+const NO_LIVE_KEY =
+  "not sent: this bot has no live key: a key must be minted for it first (trail key create), then update the webhook (update_webhook) or rotate its secret (rotate_webhook_secret) with that key (with the read action, on an activity webhook) to get deliveries again";
+
 async function sentNow() {
   sent.length = 0;
   await worker.tick();
@@ -51,8 +57,6 @@ test("revoking the key that made a webhook over MCP stops its deliveries, each m
   await call(wide, "update_item", { item, title: "after the revoke" });
   expect(await sentNow()).toBe(0);
 
-  const revoked =
-    "not sent: this webhook's key is revoked: update the webhook (update_webhook) or rotate its secret with a live key to get deliveries again";
   expect(
     db
       .select()
@@ -64,10 +68,10 @@ test("revoking the key that made a webhook over MCP stops its deliveries, each m
   ).toEqual([
     ["delivered", null],
     ["delivered", null],
-    ["failed", revoked],
-    ["failed", revoked],
-    ["failed", revoked],
-    ["failed", revoked],
+    ["failed", KEY_REVOKED],
+    ["failed", KEY_REVOKED],
+    ["failed", KEY_REVOKED],
+    ["failed", KEY_REVOKED],
   ]);
 
   const rotated = await connect(
@@ -78,7 +82,7 @@ test("revoking the key that made a webhook over MCP stops its deliveries, each m
     id: webhook.id,
     paused: false,
     consecutiveFailures: 0,
-    lastError: revoked,
+    lastError: KEY_REVOKED,
   });
   expect(listed?.lastErrorAt).toEqual(expect.any(String));
 });
@@ -121,13 +125,7 @@ test("a webhook made over MCP before keys were recorded is delivered while its b
   ).toEqual([
     ["delivered", null],
     ["delivered", null],
-    [
-      "failed",
-      "not sent: this bot has no live key: update the webhook (update_webhook) or rotate its secret with a live key to get deliveries again",
-    ],
-    [
-      "failed",
-      "not sent: this bot has no live key: update the webhook (update_webhook) or rotate its secret with a live key to get deliveries again",
-    ],
+    ["failed", NO_LIVE_KEY],
+    ["failed", NO_LIVE_KEY],
   ]);
 });

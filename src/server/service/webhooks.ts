@@ -377,9 +377,9 @@ export function setFollows(
     .run();
 }
 
-const TO_RESUME =
-  "update the webhook (update_webhook) or rotate its secret with a live key to get deliveries again";
-const KEY_REVOKED = `not sent: this webhook's key is revoked: ${TO_RESUME}`;
+const toResume = (withKey: string) =>
+  `update the webhook (update_webhook) or rotate its secret (rotate_webhook_secret) with ${withKey} to get deliveries again`;
+const KEY_REVOKED = `not sent: this webhook's key is revoked: ${toResume("a live key (with the read action, on an activity webhook)")}`;
 const keyLost = (what: string) =>
   `not sent: this webhook's key no longer reaches ${what}`;
 
@@ -468,10 +468,10 @@ export function deliveryKeyRefusal(
   return first;
 }
 
-const NO_LIVE_KEY = `not sent: this bot has no live key: ${TO_RESUME}`;
-const KEY_CANNOT_READ = "not sent: this webhook's key lacks the read action";
-const NO_KEY_CAN_READ =
-  "not sent: none of this bot's live keys has the read action";
+// a bot can't mint its own key: only the operator's `trail key create` does
+const NO_LIVE_KEY = `not sent: this bot has no live key: a key must be minted for it first (trail key create), then ${toResume("that key (with the read action, on an activity webhook)")}`;
+const KEY_CANNOT_READ = `not sent: this webhook's key lacks the read action: ${toResume("a key that has the read action")}`;
+const NO_KEY_CAN_READ = `not sent: none of this bot's live keys has the read action: ${toResume("a key that has the read action")}`;
 
 /** The unrevoked keys matching `where`, oldest first, with their actions. */
 const liveKeysWhere = (db: Db, where: SQL) =>

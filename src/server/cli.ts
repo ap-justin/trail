@@ -57,7 +57,10 @@ const usage = `Usage:
                                    each flag repeats, and one is required
   trail key list                   list every key's prefix, bot, times and scope
   trail key revoke <prefix>        revoke a key by its prefix or the full key
-                                   and list the webhooks no live key now sends
+                                   and list the webhooks recording it, and
+                                   those recording no key once the bot has no
+                                   live key left, or, for an activity webhook,
+                                   none with the read action
   trail products owners            list each product's current owner bot, or none
   trail products set-owner <key> <bot-id-label-or-name>
                                    make a bot the product's owner: it adds
@@ -415,7 +418,8 @@ const keyRevoke: Command<string> = {
   flags: [],
   parse: prefixArg,
   run(db, prefix, io) {
-    const { actorId, revokedAt, stopped } = revokeKey(db, prefix);
+    const revoked = revokeKey(db, prefix);
+    const { actorId, revokedAt, stopped } = revoked;
     io.stdout.write(
       `revoked trail_${prefix} (actor ${actorId}) at ${revokedAt.toISOString()}\n`,
     );
@@ -426,17 +430,34 @@ const keyRevoke: Command<string> = {
         `stopped webhook ${hook.id} (${hook.kind}) to ${new URL(hook.url).origin}\n`,
       );
     }
-    const keys = listKeys(db).filter((k) => k.actorId === actorId);
-    if (keys.every((k) => k.revokedAt !== null)) {
+    const activityStopped = stopped.some((hook) => hook.kind === "activity");
+    if (!revoked.liveKeysLeft) {
       io.stderr.write(
-        `trail: this bot has no live key left: mint one first with \`trail key create ${keys[0]?.label ?? actorId}\`\n`,
+        `trail: this bot has no live key left: mint one first with \`trail key create ${revoked.label ?? actorId}${scopeFlagsOf(revoked.scope)}\`\n`,
+      );
+    } else if (!revoked.liveKeyCanRead && activityStopped) {
+      // update_webhook and rotate_webhook_secret refuse every remaining key on an activity webhook
+      io.stderr.write(
+        "trail: none of this bot's live keys has the read action, which moving an activity webhook needs\n",
       );
     }
     io.stderr.write(
-      "trail: to move a webhook to another key, call update_webhook (PATCH /api/v1/webhooks/{id}) or rotate_webhook_secret with that key (the key checked becomes the one that last changed the webhook)\n",
+      `trail: to move a webhook to another key, call update_webhook (PATCH /api/v1/webhooks/{id}) or rotate_webhook_secret with that key${activityStopped ? ", which needs the read action for an activity webhook" : ""} (the key checked becomes the one that last changed the webhook)\n`,
     );
   },
 };
+
+/** `scope` as the `key create` flags that mint it, each led by a space; none for an unrestricted key with every action. */
+function scopeFlagsOf(scope: KeyScopeView): string {
+  return [
+    scope.products?.length && `--products ${scope.products.join(",")}`,
+    scope.projects?.length && `--projects ${scope.projects.join(",")}`,
+    scope.actions && `--actions ${scope.actions.join(",")}`,
+  ]
+    .filter(Boolean)
+    .map((flag) => ` ${flag}`)
+    .join("");
+}
 
 const scopeEditFlags = {
   "add-product": "addProducts",

@@ -511,6 +511,20 @@ export type StoppedWebhook = {
   url: string;
 };
 
+export type RevokedKey = {
+  prefix: string;
+  actorId: string;
+  /** the bot's label, null when it has none */
+  label: string | null;
+  revokedAt: Date;
+  /** the revoked key's scope, to mint a like-for-like replacement from */
+  scope: KeyScopeView;
+  liveKeysLeft: boolean;
+  /** true when a live key left has the read action */
+  liveKeyCanRead: boolean;
+  stopped: StoppedWebhook[];
+};
+
 /**
  * Revokes the key with this prefix; revoking a revoked key keeps its first
  * `revokedAt` and stops nothing. `stopped` is the bot's webhooks, oldest first,
@@ -519,15 +533,7 @@ export type StoppedWebhook = {
  * webhook, none with the read action. Its webhooks recording another key, and
  * a live key's reach, are not weighed.
  */
-export function revokeKey(
-  db: Db,
-  prefix: string,
-): {
-  prefix: string;
-  actorId: string;
-  revokedAt: Date;
-  stopped: StoppedWebhook[];
-} {
+export function revokeKey(db: Db, prefix: string): RevokedKey {
   return db.transaction(
     (tx) => {
       const key = tx
@@ -536,50 +542,69 @@ export function revokeKey(
         .where(eq(apiKey.prefix, prefix))
         .get();
       if (!key) throw new NotFoundError(`no key with prefix ${prefix}`);
-      if (key.revokedAt) {
-        return {
-          prefix,
-          actorId: key.actorId,
-          revokedAt: key.revokedAt,
-          stopped: [],
-        };
+      const revokedAt = key.revokedAt ?? new Date();
+      if (!key.revokedAt) {
+        tx.update(apiKey).set({ revokedAt }).where(eq(apiKey.id, key.id)).run();
       }
-      const revokedAt = new Date();
-      tx.update(apiKey).set({ revokedAt }).where(eq(apiKey.id, key.id)).run();
       const left = tx
         .select({ actions: apiKey.actions })
         .from(apiKey)
         .where(and(eq(apiKey.actorId, key.actorId), isNull(apiKey.revokedAt)))
         .all();
-      const unrecorded = isNull(webhookSubscription.apiKeyId);
-      const unrecordedStopped =
-        left.length === 0
-          ? unrecorded
-          : left.some(canRead)
-            ? undefined
-            : and(unrecorded, eq(webhookSubscription.kind, "activity"));
-      const stopped = tx
-        .select({
-          id: webhookSubscription.id,
-          kind: webhookSubscription.kind,
-          url: webhookSubscription.url,
-        })
-        .from(webhookSubscription)
-        .where(
-          and(
-            eq(webhookSubscription.actorId, key.actorId),
-            or(eq(webhookSubscription.apiKeyId, key.id), unrecordedStopped),
-          ),
-        )
-        .orderBy(
-          asc(webhookSubscription.createdAt),
-          asc(webhookSubscription.id),
-        )
-        .all();
-      return { prefix, actorId: key.actorId, revokedAt, stopped };
+      const bot = tx
+        .select({ label: actor.label })
+        .from(actor)
+        .where(eq(actor.id, key.actorId))
+        .get();
+      return {
+        prefix,
+        actorId: key.actorId,
+        label: bot?.label ?? null,
+        revokedAt,
+        scope: scopeView({
+          ...(scopesOf(tx, [key.id]).get(key.id) as Pick<
+            KeyScope,
+            "products" | "projects"
+          >),
+          actions: key.actions,
+        }),
+        liveKeysLeft: left.length > 0,
+        liveKeyCanRead: left.some(canRead),
+        stopped: key.revokedAt ? [] : stoppedWebhooks(tx, key, left),
+      };
     },
     { behavior: "immediate" },
   );
+}
+
+/** `revokeKey`'s `stopped`, read once `key` is revoked and `left` is the bot's live keys. */
+function stoppedWebhooks(
+  tx: Tx,
+  key: { id: string; actorId: string },
+  left: { actions: ApiKeyAction[] | null }[],
+): StoppedWebhook[] {
+  const unrecorded = isNull(webhookSubscription.apiKeyId);
+  const unrecordedStopped =
+    left.length === 0
+      ? unrecorded
+      : left.some(canRead)
+        ? undefined
+        : and(unrecorded, eq(webhookSubscription.kind, "activity"));
+  return tx
+    .select({
+      id: webhookSubscription.id,
+      kind: webhookSubscription.kind,
+      url: webhookSubscription.url,
+    })
+    .from(webhookSubscription)
+    .where(
+      and(
+        eq(webhookSubscription.actorId, key.actorId),
+        or(eq(webhookSubscription.apiKeyId, key.id), unrecordedStopped),
+      ),
+    )
+    .orderBy(asc(webhookSubscription.createdAt), asc(webhookSubscription.id))
+    .all();
 }
 
 /** Product keys and project slugs to add to a key's scope and to take off it. */

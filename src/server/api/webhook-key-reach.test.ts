@@ -78,6 +78,16 @@ async function sentNowTo(url: string) {
 
 const prefixOf = (key: string) => key.slice(6, 14);
 
+// the lastError of each delivery refused for its key, as a bot reads it
+const KEY_REVOKED =
+  "not sent: this webhook's key is revoked: update the webhook (update_webhook) or rotate its secret (rotate_webhook_secret) with a live key (with the read action, on an activity webhook) to get deliveries again";
+const NO_LIVE_KEY =
+  "not sent: this bot has no live key: a key must be minted for it first (trail key create), then update the webhook (update_webhook) or rotate its secret (rotate_webhook_secret) with that key (with the read action, on an activity webhook) to get deliveries again";
+const KEY_CANNOT_READ =
+  "not sent: this webhook's key lacks the read action: update the webhook (update_webhook) or rotate its secret (rotate_webhook_secret) with a key that has the read action to get deliveries again";
+const NO_KEY_CAN_READ =
+  "not sent: none of this bot's live keys has the read action: update the webhook (update_webhook) or rotate its secret (rotate_webhook_secret) with a key that has the read action to get deliveries again";
+
 // products ATL and BTA; project recon draws from both
 await ok("POST", "/products", { key: "ATL", name: "Alpha product" });
 await ok("POST", "/products", { key: "BTA", name: "Beta product" });
@@ -120,13 +130,11 @@ test("revoking the key that made a webhook skips its queued deliveries and those
   revokeKey(db, prefixOf(key));
   await retitle(atl, "after the revoke");
   expect(await sentNowTo(url)).toBe(0);
-  const revoked =
-    "not sent: this webhook's key is revoked: update the webhook (update_webhook) or rotate its secret with a live key to get deliveries again";
   expect(historyOf(id)).toEqual([
-    ["trail.issue.updated", "failed", 0, revoked],
-    ["trail.item.updated", "failed", 0, revoked],
-    ["trail.issue.updated", "failed", 0, revoked],
-    ["trail.item.updated", "failed", 0, revoked],
+    ["trail.issue.updated", "failed", 0, KEY_REVOKED],
+    ["trail.item.updated", "failed", 0, KEY_REVOKED],
+    ["trail.issue.updated", "failed", 0, KEY_REVOKED],
+    ["trail.item.updated", "failed", 0, KEY_REVOKED],
   ]);
   // a skip is not the receiver's failure: it names itself on the webhook but counts toward no pause
   const rotated = createKey(db, actor.id, { actions: ["read"] }).key;
@@ -135,7 +143,7 @@ test("revoking the key that made a webhook skips its queued deliveries and those
   expect(read.body).toMatchObject({
     paused: false,
     consecutiveFailures: 0,
-    lastError: revoked,
+    lastError: KEY_REVOKED,
   });
   expect(read.body.lastErrorAt).toEqual(expect.any(String));
 });
@@ -263,9 +271,6 @@ const forgetKey = (subscriptionId: string) =>
     .where(eq(webhookSubscription.id, subscriptionId))
     .run();
 
-const NO_LIVE_KEY =
-  "not sent: this bot has no live key: update the webhook (update_webhook) or rotate its secret with a live key to get deliveries again";
-
 test("a webhook with no recorded key is delivered while its bot's live key reaches it, and skipped once every key is revoked", async () => {
   const key = botWith({ products: ["ATL"] });
   const { id, url } = await follow({ products: ["ATL"] }, key);
@@ -316,12 +321,7 @@ test("an inbox webhook gets its messages while the key that made it lives, and s
   expect(await sentNowTo(url)).toBe(0);
   expect(historyOf(id)).toEqual([
     ["trail.message.received", "delivered", 1, null],
-    [
-      "trail.message.received",
-      "failed",
-      0,
-      "not sent: this webhook's key is revoked: update the webhook (update_webhook) or rotate its secret with a live key to get deliveries again",
-    ],
+    ["trail.message.received", "failed", 0, KEY_REVOKED],
   ]);
   expect(
     db
@@ -331,8 +331,7 @@ test("an inbox webhook gets its messages while the key that made it lives, and s
       .get(),
   ).toMatchObject({
     consecutiveFailures: 0,
-    lastError:
-      "not sent: this webhook's key is revoked: update the webhook (update_webhook) or rotate its secret with a live key to get deliveries again",
+    lastError: KEY_REVOKED,
     lastErrorAt: expect.any(Date),
     pausedAt: null,
   });
@@ -459,10 +458,9 @@ test("an activity webhook with no recorded key is skipped while none of its bot'
   revokeKey(db, prefixOf(a.key));
   await retitle(atl, "the live key can't read");
   expect(await sentNowTo(url)).toBe(0);
-  const unread = "not sent: none of this bot's live keys has the read action";
   expect(historyOf(id)).toEqual([
-    ["trail.issue.updated", "failed", 0, unread],
-    ["trail.item.updated", "failed", 0, unread],
+    ["trail.issue.updated", "failed", 0, NO_KEY_CAN_READ],
+    ["trail.item.updated", "failed", 0, NO_KEY_CAN_READ],
   ]);
   createKey(db, a.actor.id, { products: ["ATL"], actions: ["read"] });
   await retitle(atl, "a live key reads");
@@ -490,10 +488,9 @@ test("an activity webhook whose recorded key lacks the read action is skipped na
     .run();
   await retitle(atl, "recorded key can't read");
   expect(await sentNowTo(url)).toBe(0);
-  const lacks = "not sent: this webhook's key lacks the read action";
   expect(historyOf(id)).toEqual([
-    ["trail.issue.updated", "failed", 0, lacks],
-    ["trail.item.updated", "failed", 0, lacks],
+    ["trail.issue.updated", "failed", 0, KEY_CANNOT_READ],
+    ["trail.item.updated", "failed", 0, KEY_CANNOT_READ],
   ]);
 });
 

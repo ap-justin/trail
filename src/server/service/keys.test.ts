@@ -138,6 +138,34 @@ describe("the webhooks a revoke stops", () => {
     expect(stoppedBy(key)).toEqual([activity]);
   });
 
+  test("a revoke returns the revoked key's scope, the bot's label and whether a live key, and one that reads, is left", () => {
+    // BTA is the next describe's: a product of this one's own would join the list its refusal test names
+    const bot = createBot(db, "revoke-reports", {
+      label: "revoke-reports",
+      scope: { products: ["BTA"], actions: ["issues", "read"] },
+    });
+    const unread = createKey(db, bot.actor.id, { actions: ["issues"] }).key;
+    expect(revokeKey(db, prefixOf(bot.key))).toMatchObject({
+      label: "revoke-reports",
+      scope: { products: ["BTA"], projects: [], actions: ["read", "issues"] },
+      liveKeysLeft: true,
+      liveKeyCanRead: false,
+    });
+    expect(revokeKey(db, prefixOf(unread))).toMatchObject({
+      scope: { products: null, projects: null, actions: ["issues"] },
+      liveKeysLeft: false,
+      liveKeyCanRead: false,
+    });
+    const unlabelled = createBot(db, "revoke-reports-unlabelled");
+    createKey(db, unlabelled.actor.id);
+    expect(revokeKey(db, prefixOf(unlabelled.key))).toMatchObject({
+      label: null,
+      scope: { products: null, projects: null, actions: null },
+      liveKeysLeft: true,
+      liveKeyCanRead: true,
+    });
+  });
+
   test("a revoke that stops nothing, or of a revoked key, lists nothing", () => {
     const { actor, key } = createBot(db, "stops-nothing");
     const other = createKey(db, actor.id).key;
