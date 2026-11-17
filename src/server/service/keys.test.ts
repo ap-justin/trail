@@ -196,7 +196,7 @@ describe("the webhooks a revoke stops", () => {
   });
 
   test("a revoke returns the revoked key's scope, the bot's label and whether a live key, and one that reads, is left", () => {
-    // BTA is the next describe's: a product of this one's own would join the list its refusal test names
+    // reuses BTA: a new product here would join the product list a later refusal test asserts
     const bot = createBot(db, "revoke-reports", {
       label: "revoke-reports",
       scope: { products: ["BTA"], actions: ["issues", "read"] },

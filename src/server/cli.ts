@@ -438,7 +438,7 @@ const keyRevoke: Command<string> = {
     } else if (!revoked.liveKeyCanRead && activityStopped) {
       // update_webhook and rotate_webhook_secret refuse every remaining key on an activity webhook
       io.stderr.write(
-        "trail: none of this bot's live keys has the read action, which moving an activity webhook needs\n",
+        "trail: none of this bot's live keys has the read action, and moving an activity webhook needs one\n",
       );
     }
     io.stderr.write(

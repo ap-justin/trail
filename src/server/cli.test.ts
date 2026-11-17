@@ -216,7 +216,7 @@ test("key revoke leaving live keys none of which can read says an activity webho
     "",
   ]);
   expect(stderr).toBe(
-    "trail: none of this bot's live keys has the read action, which moving an activity webhook needs\n" +
+    "trail: none of this bot's live keys has the read action, and moving an activity webhook needs one\n" +
       moveHint(true),
   );
 });
