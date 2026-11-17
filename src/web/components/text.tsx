@@ -43,7 +43,7 @@ export function LabelChip({
   );
 }
 
-/** `trail` with the bot-indigo dot. */
+/** `trail` with the bot-teal dot. */
 export function Wordmark({ className }: { className?: string }) {
   return (
     <span className={cn("font-semibold", className)}>

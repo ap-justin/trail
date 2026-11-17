@@ -5,20 +5,19 @@ import { beforeAll, describe, expect, test } from "vitest";
 
 // The half of the conformance gate the build can't enforce. The build half is in
 // globals.css: `--color-*: initial` and friends leave an off-system class with no rule.
-// This sweeps trail's own components and the app chrome; components/ui is the shadcn CLI's.
+// This sweeps trail's components, the restyled primitives in components/ui, and the app chrome.
 
 const stylesDir = resolve("src/web/styles");
 const css = readFileSync(join(stylesDir, "globals.css"), "utf8");
 const webDir = resolve("src/web");
-const shadcnDir = resolve("src/web/components/ui");
 const sweptDirs = [resolve("src/web/components"), resolve("src/web/app")];
 const componentFiles = sweptDirs.flatMap((dir) => sourceFiles(dir));
 
-/** Every non-test .ts/.tsx under `dir`, subdirectories included, minus components/ui. */
+/** Every non-test .ts/.tsx under `dir`, subdirectories included. */
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const path = join(dir, entry.name);
-    if (entry.isDirectory()) return path === shadcnDir ? [] : sourceFiles(path);
+    if (entry.isDirectory()) return sourceFiles(path);
     return /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)
       ? [path]
       : [];
@@ -75,10 +74,57 @@ describe("components and app chrome stay inside the design system", () => {
       "text-gray-500",
       "bg-red-600",
       "text-2xl",
-      "rounded-3xl",
+      "rounded-xs",
       "shadow-sm",
     ]);
     expect(drawn).toEqual([null, null, null, null, null]);
+  });
+
+  test("the frame, the row rule and the sheet's corner are tokens", () => {
+    const [frame, rule, sheet] = designSystem.candidatesToCss([
+      "bg-frame",
+      "border-rule",
+      "rounded-3xl",
+    ]);
+    expect(frame).toContain("var(--frame)");
+    expect(rule).toContain("var(--rule)");
+    expect(sheet).toContain("var(--radius-3xl)");
+    expect(css).toMatch(/--radius-3xl:\s*16px/);
+  });
+
+  test("every figure is tabular", () => {
+    expect(css).toMatch(/body\s*{[^}]*tabular-nums/);
+  });
+});
+
+describe("focus and disabled", () => {
+  // focus is a 2px outline in --ring, offset 2px (inset in rows and menus), never a ring-* shadow
+  test("no focus style is drawn with a ring", () => {
+    expect(
+      sweep((token) =>
+        /^(?:[\w-]+:)*focus(?:-visible)?:(?:[\w-]+:)*ring(?:-|$)/.test(token),
+      ),
+    ).toEqual([]);
+  });
+
+  test("a focus outline is the 2px one in --ring", () => {
+    expect(
+      sweep(
+        (token) =>
+          /^(?:[\w-]+:)*focus(?:-visible)?:(?:[\w-]+:)*-?outline(?:-|$)/.test(
+            token,
+          ) && !/:(?:outline-2|-?outline-offset-2|outline-ring)$/.test(token),
+      ),
+    ).toEqual([]);
+  });
+
+  // a disabled control stays legible: muted ground and ink, never faded
+  test("nothing disabled fades", () => {
+    expect(
+      sweep((token) =>
+        /disabled[^:]*:(?:[\w-]+:)*opacity-(?!100$)/.test(token),
+      ),
+    ).toEqual([]);
   });
 });
 

@@ -27,7 +27,7 @@ const types: Record<WebItemType, { label: string; icon: LucideIcon }> = {
   todo: { label: "Todo", icon: ListTodoIcon },
 };
 
-/** Issue or Todo, glyph plus word. Neutral on purpose: indigo is for bots alone. */
+/** Issue or Todo, glyph plus word. Neutral on purpose: teal is for bots alone. */
 export function TypeBadge({
   type,
   className,

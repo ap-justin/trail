@@ -78,7 +78,7 @@ describe("ActorAvatar", () => {
   );
 
   test.each(sizes)(
-    "%s: a bot's photo wears the indigo border and rounded-md classes; a person's has the round class and no border",
+    "%s: a bot's photo wears the teal border and rounded-md classes; a person's has the round class and no border",
     (size, sizeClass) => {
       const { container } = render(
         <>

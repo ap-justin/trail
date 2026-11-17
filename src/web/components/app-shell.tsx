@@ -168,7 +168,7 @@ function navItems(isOwner: boolean, withAccount: boolean): NavItem[] {
 
 // state carried in ink and ground, never weight, so a label doesn't reflow when it turns on
 const sideItem =
-  "flex h-7.5 items-center gap-2 rounded-md px-2 text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/25 aria-[current]:bg-muted aria-[current]:text-foreground";
+  "flex h-8 items-center gap-2 rounded-md px-2 text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring aria-[current]:bg-accent aria-[current]:text-foreground";
 
 function Sidebar({
   viewer,
@@ -182,7 +182,7 @@ function Sidebar({
 >) {
   const productsLabel = useId();
   return (
-    <aside className="sticky top-0 hidden h-dvh w-58 shrink-0 flex-col gap-0.5 border-r px-2 py-3 lg:flex">
+    <aside className="sticky top-0 hidden h-dvh w-58 shrink-0 flex-col gap-0.5 px-2 py-3 lg:flex">
       <Logo className="h-8 px-2" />
       <nav aria-label="Main" className="flex flex-col gap-0.5">
         {navItems(viewer.isOwner, false).map((item) => (
@@ -208,7 +208,7 @@ function Sidebar({
         >
           <h2
             id={productsLabel}
-            className="px-2 pt-3.5 pb-1 text-2xs font-normal text-muted-foreground"
+            className="px-2 pt-3.5 pb-1 text-xs font-normal text-muted-foreground"
           >
             Products
           </h2>
@@ -230,7 +230,7 @@ function Sidebar({
           })}
         </nav>
       )}
-      <div className="mt-auto border-t pt-2.5">
+      <div className="mt-auto pt-2.5">
         <AccountMenu viewer={viewer} onSignOut={onSignOut} />
       </div>
     </aside>
@@ -246,7 +246,7 @@ function AccountMenu({
     <DropdownMenu>
       <DropdownMenuTrigger
         aria-label={`Account: ${viewer.name}`}
-        className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/25 aria-expanded:bg-muted"
+        className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring aria-expanded:bg-accent"
       >
         <ActorAvatar
           actor={{
@@ -260,11 +260,9 @@ function AccountMenu({
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate font-medium">{viewer.name}</span>
           {viewer.isOwner ? (
-            <span className="text-2xs text-muted-foreground">Owner</span>
+            <span className="text-xs text-muted-foreground">Owner</span>
           ) : (
-            <KeyText className="truncate text-2xs font-normal">
-              {viewer.handle}
-            </KeyText>
+            <KeyText className="truncate font-normal">{viewer.handle}</KeyText>
           )}
         </span>
         <ChevronsUpDownIcon
@@ -367,7 +365,7 @@ function SearchBox({
           type="search"
           aria-label="Search issues"
           placeholder="Search issues"
-          className="pl-7.5 max-lg:h-10"
+          className="pl-7.5"
           // the 375 box opens on a tap of the search button, so focus follows that tap
           autoFocus={autoFocus}
           value={query}
@@ -409,7 +407,7 @@ function TabBar({
   return (
     <nav
       aria-label="Main"
-      className="fixed inset-x-0 bottom-0 z-10 flex h-14 border-t bg-background lg:hidden"
+      className="fixed inset-x-0 bottom-0 z-10 flex h-14 bg-frame lg:hidden"
     >
       {navItems(viewer.isOwner, true).map((item) => (
         <AppLink
@@ -418,7 +416,7 @@ function TabBar({
           aria-current={sectionCurrent(item.section, section, productKey, {
             tab: true,
           })}
-          className="flex flex-1 flex-col items-center justify-center gap-0.5 text-2xs text-muted-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/25 focus-visible:ring-inset aria-[current]:text-foreground"
+          className="flex flex-1 flex-col items-center justify-center gap-0.5 text-xs text-muted-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring aria-[current]:font-medium aria-[current]:text-foreground"
         >
           <item.icon aria-hidden="true" className="size-4" />
           {item.label}
@@ -429,9 +427,10 @@ function TabBar({
 }
 
 /**
- * The signed-in frame. At 1024px and up: a 232px sidebar and a 48px top bar. Below:
- * the top bar with icon buttons, the heading under it, and a 56px bottom tab bar.
- * The switch is CSS only.
+ * The signed-in frame. At 1024px and up: a 232px sidebar and a 48px top bar on the frame
+ * tint, holding the page on a sheet inset 8px from the right and bottom. Below: the sheet is
+ * the screen, between the top bar with icon buttons and a 56px bottom tab bar, with the
+ * heading at its head. The switch is CSS only.
  */
 export function AppShell({
   viewer,
@@ -474,7 +473,7 @@ export function AppShell({
   };
 
   return (
-    <div className="flex min-h-dvh">
+    <div className="flex min-h-dvh bg-frame">
       <Sidebar
         viewer={viewer}
         products={products}
@@ -483,14 +482,14 @@ export function AppShell({
         onSignOut={onSignOut}
       />
       <div className="flex min-w-0 flex-1 flex-col pb-14 lg:pb-0">
-        <header className="sticky top-0 z-10 border-b bg-background">
-          <div className="flex h-12 items-center gap-1 pr-2 pl-4 lg:gap-3 lg:px-5">
+        <header className="sticky top-0 z-10 bg-frame">
+          <div className="flex h-12 items-center gap-1 pr-1 pl-4 lg:grid lg:grid-cols-[1fr_--spacing(105)_1fr] lg:gap-3 lg:pr-3 lg:pl-5">
             {back ? (
               <div className="flex min-w-0 flex-1 items-center gap-1 lg:hidden">
                 <AppLink
                   href={back.href}
                   aria-label={back.label}
-                  className="grid size-10 shrink-0 place-items-center rounded-md outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/25"
+                  className="grid size-11 shrink-0 place-items-center rounded-md hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                 >
                   <ChevronLeftIcon aria-hidden="true" className="size-4" />
                 </AppLink>
@@ -522,19 +521,22 @@ export function AppShell({
               onQueryChange={changeQuery}
               results={searchResults}
               // the window under the 48px bar, less a gap at its foot
-              resultsClassName="absolute top-full right-0 mt-1 flex max-h-[calc(100dvh-var(--spacing)*14)] w-100 flex-col"
+              resultsClassName="absolute inset-x-0 top-full mt-1 flex max-h-[calc(100dvh-var(--spacing)*14)] flex-col"
               onEnd={endSearch}
               inputRef={desktopInput}
-              className="hidden w-65 lg:block"
+              className="hidden lg:block"
             />
-            <Button className="hidden lg:inline-flex" onClick={onNewIssue}>
+            <Button
+              className="hidden justify-self-end lg:inline-flex"
+              onClick={onNewIssue}
+            >
               <PlusIcon data-icon="inline-start" aria-hidden="true" />
               New issue
             </Button>
             <Button
               variant="ghost"
               size="icon"
-              className="size-10 lg:hidden"
+              className="lg:hidden"
               ref={mobileToggle}
               aria-label="Search"
               aria-expanded={mobileSearchOpen}
@@ -544,9 +546,8 @@ export function AppShell({
               <SearchIcon aria-hidden="true" />
             </Button>
             <Button
-              variant="ghost"
               size="icon"
-              className="size-10 lg:hidden"
+              className="lg:hidden"
               aria-label="New issue"
               onClick={onNewIssue}
             >
@@ -559,23 +560,28 @@ export function AppShell({
                 query={query}
                 onQueryChange={changeQuery}
                 results={searchResults}
-                // clear of the 48px bar, the 40px box, this sheet's padding and the 56px tab bar
-                resultsClassName="mt-1 flex max-h-[calc(100dvh-var(--spacing)*40)] flex-col"
+                // clear of the 48px bar, the 44px box, this sheet's padding and the 56px tab bar
+                resultsClassName="mt-1 flex max-h-[calc(100dvh-var(--spacing)*41)] flex-col"
                 onEnd={endSearch}
                 autoFocus
               />
             </div>
           )}
         </header>
-        {heading != null && !back && (
-          <div className="flex items-center gap-2 px-4 pt-3 lg:hidden">
-            <ShellHeading kind={headingKind} className="font-medium">
-              {heading}
-            </ShellHeading>
-            {headingAccessory}
-          </div>
-        )}
-        <main className="flex min-w-0 flex-1 flex-col">{children}</main>
+        <div className="flex min-w-0 flex-1 flex-col bg-background lg:mr-2 lg:mb-2 lg:overflow-clip lg:rounded-3xl lg:border">
+          {heading != null && !back && (
+            <div className="flex items-center gap-2 px-4 pt-3 lg:hidden">
+              <ShellHeading
+                kind={headingKind}
+                className="text-base font-medium"
+              >
+                {heading}
+              </ShellHeading>
+              {headingAccessory}
+            </div>
+          )}
+          <main className="flex min-w-0 flex-1 flex-col">{children}</main>
+        </div>
       </div>
       <TabBar viewer={viewer} section={section} productKey={productKey} />
     </div>

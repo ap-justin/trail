@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 type ActorKind = WebActorView["kind"];
 
 /**
- * Bot or Human, always as a word with its glyph: indigo for bots, outline for people.
+ * Bot or Human, always as a word with its glyph: teal for bots, outline for people.
  * The word carries the meaning, so the rule never rests on colour alone.
  */
 export function ActorBadge({
@@ -132,7 +132,7 @@ function initials(actor: Pick<WebActorView, "name" | "kind">): string {
 /**
  * The actor's initials on a tinted ground, with their photo stacked on top when there
  * is one: a rounded square for a bot, a circle for a person. A bot's photo, once shown,
- * gets a thin indigo frame, so it still reads as a bot at 18px. The initials show while
+ * gets a thin teal frame, so it still reads as a bot at 18px. The initials show while
  * the photo loads and stay if it fails; once it loads they go, so a transparent photo
  * never shows them through.
  * Decorative: the name always sits beside it.

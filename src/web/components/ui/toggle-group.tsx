@@ -42,7 +42,7 @@ function ToggleGroup({
       data-orientation={orientation}
       style={{ "--gap": spacing } as React.CSSProperties}
       className={cn(
-        "group/toggle-group flex w-fit flex-row items-center gap-[--spacing(var(--gap))] rounded-lg data-[size=sm]:rounded-[min(var(--radius-md),10px)] data-vertical:flex-col data-vertical:items-stretch",
+        "group/toggle-group flex w-fit flex-row items-center gap-[--spacing(var(--gap))] rounded-lg data-[size=sm]:rounded-md data-vertical:flex-col data-vertical:items-stretch data-[variant=segmented]:gap-0 data-[variant=segmented]:rounded-md data-[variant=segmented]:bg-muted data-[variant=segmented]:p-0.5",
         className,
       )}
       {...props}
@@ -77,6 +77,9 @@ function ToggleGroupItem({
           variant: context.variant || variant,
           size: context.size || size,
         }),
+        // inside the track's 2px padding, so the track itself is the 44px / 32px control
+        (context.variant || variant) === "segmented" &&
+          "h-10 min-w-0 lg:h-7 lg:min-w-0",
         className,
       )}
       {...props}
