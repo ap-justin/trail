@@ -1,7 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, onTestFinished, test, vi } from "vitest";
 import {
   NO_PROJECT_FILTERS,
   ProjectHeading,
@@ -9,6 +9,7 @@ import {
   ProjectView,
   type ProjectViewProps,
 } from "@/components/project";
+import { applyCompiledCss } from "@/test/compiled-css";
 import {
   beta,
   docsSite,
@@ -453,20 +454,18 @@ describe("empty and failed", () => {
     );
   });
 
-  test("a status update's bot name truncates only once its title has given way", () => {
-    render(
+  // flex shrinks siblings in proportion, so a name that can shrink at all loses letters
+  // while a long title is still on the line; only a name wider than the line may clip
+  test("a status update's bot name truncates only once its title has given way", async () => {
+    const title = "Release manager for the web and desktop clients";
+    const { container } = render(
       <ProjectView
         {...props({
           statusUpdates: {
             status: "ready",
             data: {
               items: [
-                statusUpdate({
-                  author: {
-                    ...beta,
-                    title: "Release manager for the web client",
-                  },
-                }),
+                statusUpdate({ author: { ...beta, name: "gamma", title } }),
               ],
               nextCursor: null,
             },
@@ -474,13 +473,21 @@ describe("empty and failed", () => {
         })}
       />,
     );
+    onTestFinished(await applyCompiledCss(container));
     const section = screen.getByRole("region", { name: "Status updates" });
-    const name = within(section).getByText("Beta");
-    expect(name).toHaveClass("min-w-0", "truncate");
-    expect(name).not.toHaveClass("shrink-0");
-    expect(
-      within(section).getByText("Release manager for the web client"),
-    ).toHaveClass("min-w-0", "truncate", "shrink-4");
+    const name = getComputedStyle(within(section).getByText("gamma"));
+    expect(name.flexShrink).toBe("0");
+    expect(name.maxWidth).toBe("100%");
+    const titleNode = within(section).getByText(title);
+    const titleStyle = getComputedStyle(titleNode);
+    expect(titleStyle.flexShrink).not.toBe("0");
+    expect(titleStyle.minWidth).toBe("0px");
+    expect(titleStyle.overflow).toBe("hidden");
+    expect(titleStyle.textOverflow).toBe("ellipsis");
+    // the group holding both may shrink inside its grid track
+    expect(getComputedStyle(titleNode.parentElement as Element).minWidth).toBe(
+      "0px",
+    );
   });
 
   test("Try again on status updates leaves focus on their heading", async () => {

@@ -478,8 +478,7 @@ describe("aside", () => {
     });
     const section = aside("Status updates");
     const name = within(section).getByText("Beta");
-    expect(name).toHaveClass("min-w-0", "truncate");
-    expect(name).not.toHaveClass("shrink-0");
+    expect(name).toHaveClass("shrink-0", "max-w-full", "truncate");
     expect(
       within(section).getByText("Release manager for the web client"),
     ).toHaveClass("min-w-0", "truncate", "shrink-4");

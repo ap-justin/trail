@@ -55,7 +55,7 @@ export function IssueBreadcrumb({
 }) {
   return (
     <span className="flex min-w-0 items-center gap-2">
-      <span className="flex items-center gap-2 font-normal text-muted-foreground max-lg:hidden">
+      <span className="flex min-w-0 items-center gap-2 font-normal text-muted-foreground max-lg:hidden">
         <AppLink
           href={paths.products}
           className={cn(textLinkFocus, "hover:text-foreground")}
@@ -67,7 +67,7 @@ export function IssueBreadcrumb({
           <>
             <AppLink
               href={paths.product(product.key)}
-              className={cn(textLinkFocus, "hover:text-foreground")}
+              className={cn(textLinkFocus, "truncate hover:text-foreground")}
             >
               {product.name}
             </AppLink>

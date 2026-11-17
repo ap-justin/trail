@@ -163,9 +163,10 @@ function StatusUpdateItem({ update }: { update: WebStatusUpdateView }) {
   return (
     <li className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 py-2.5 max-lg:px-4">
       <ActorAvatar actor={update.author} size="xs" className="lg:size-5" />
-      {/* at lg one line beside the health, a long title truncating rather than wrapping */}
+      {/* at lg one line beside the health, a long title truncating rather than wrapping;
+          the name never shrinks for it, flex would take letters from both at once */}
       <span className={cn(actorNameGroup, "lg:flex-nowrap")}>
-        <span className="min-w-0 truncate font-medium">
+        <span className="max-w-full shrink-0 truncate font-medium">
           {update.author.name}
         </span>{" "}
         <BotTitle actor={update.author} />

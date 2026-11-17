@@ -472,6 +472,12 @@ export function AppShell({
     }
   };
 
+  // a breadcrumb never clips: its links' focus rings sit outside them; its crumbs truncate
+  const barHeadingClass =
+    headingKind === "breadcrumb"
+      ? "flex min-w-0 font-medium"
+      : "truncate font-medium";
+
   return (
     <div className="flex min-h-dvh bg-frame">
       <Sidebar
@@ -494,10 +500,7 @@ export function AppShell({
                   <ChevronLeftIcon aria-hidden="true" className="size-4" />
                 </AppLink>
                 {heading != null && (
-                  <ShellHeading
-                    kind={headingKind}
-                    className="truncate font-medium"
-                  >
+                  <ShellHeading kind={headingKind} className={barHeadingClass}>
                     {heading}
                   </ShellHeading>
                 )}
@@ -507,10 +510,7 @@ export function AppShell({
             )}
             <div className="hidden min-w-0 flex-1 items-center gap-2 lg:flex">
               {heading != null && (
-                <ShellHeading
-                  kind={headingKind}
-                  className="truncate font-medium"
-                >
+                <ShellHeading kind={headingKind} className={barHeadingClass}>
                   {heading}
                 </ShellHeading>
               )}
