@@ -313,7 +313,7 @@ describe("product", () => {
       within(update).getByRole("img", { name: "Beta, bot" }).nextElementSibling,
     ).toBe(name.parentElement);
     expect(within(update).queryByText("Bot")).toBeNull();
-    expect(name).toHaveClass("min-w-0", "truncate");
+    expect(name).toHaveClass("max-w-full", "shrink-0", "truncate");
     // line 2 below lg: health, then the date; at lg the health ends line 1
     expect(health.nextElementSibling?.tagName).toBe("TIME");
     expect(health.parentElement?.previousElementSibling).toBe(
