@@ -4,6 +4,7 @@ import { useState } from "react";
 import { describe, expect, test, vi } from "vitest";
 import {
   NO_PROJECT_FILTERS,
+  ProjectHeading,
   type ProjectItemFilters,
   ProjectView,
   type ProjectViewProps,
@@ -149,6 +150,21 @@ describe("goal and details", () => {
         .getAllByRole("term")
         .map((dt) => dt.textContent),
     ).toEqual(["Lead", "Target"]);
+    expect(within(inline).queryByText("Products")).toBeNull();
+    const phoneGroups = [
+      ...document.querySelectorAll<HTMLElement>(
+        ".lg\\:hidden section[data-group]",
+      ),
+    ];
+    expect(
+      phoneGroups.map((g) => [
+        g.dataset.group,
+        g.querySelector("h3")?.textContent,
+      ]),
+    ).toEqual([
+      ["DOC", expect.stringMatching(/^DOC\s*Docs site/)],
+      ["TRL", expect.stringMatching(/^TRL\s*trail/)],
+    ]);
   });
 });
 
@@ -441,4 +457,13 @@ describe("empty and failed", () => {
       screen.getByRole("heading", { name: "Status updates" }),
     ).toHaveFocus();
   });
+});
+
+test("the Projects link in the heading draws the shared focus outline", () => {
+  render(<ProjectHeading project={{ name: "Docs site" }} />);
+  expect(screen.getByRole("link", { name: "Projects" })).toHaveClass(
+    "focus-visible:outline-2",
+    "focus-visible:outline-offset-2",
+    "focus-visible:outline-ring",
+  );
 });

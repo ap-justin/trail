@@ -554,6 +554,15 @@ describe("conversation breadcrumb", () => {
     expect(screen.getByText("Alpha and Beta")).toBeInTheDocument();
   });
 
+  test("Messages draws the shared focus outline", () => {
+    render(<ConversationBreadcrumb listHref="/messages" />);
+    expect(screen.getByRole("link", { name: "Messages" })).toHaveClass(
+      "focus-visible:outline-2",
+      "focus-visible:outline-offset-2",
+      "focus-visible:outline-ring",
+    );
+  });
+
   test("names the pair in the list's order, whichever order it's handed", () => {
     render(
       <ConversationBreadcrumb listHref="/messages" bots={[beta, alpha]} />,

@@ -36,6 +36,12 @@ const row = (username: string) => {
   return within(item);
 };
 
+/** The prompt splits across the handle's mono span, so it is matched on the whole line. */
+const removePrompt = (person: string, handle = `@${person}`) =>
+  row(person).queryByText(
+    (_, el) => el?.tagName === "SPAN" && el.textContent === `Remove ${handle}?`,
+  );
+
 describe("people list", () => {
   test("a person with a photo shows it; one without shows initials", () => {
     renderPeople({
@@ -112,16 +118,17 @@ describe("people list", () => {
     await user.click(
       row("alpha-dev").getByRole("button", { name: "Remove @alpha-dev" }),
     );
+    expect(removePrompt("alpha-dev")).toBeInTheDocument();
     expect(
-      row("alpha-dev").getByText("Remove @alpha-dev?"),
-    ).toBeInTheDocument();
+      within(
+        row("alpha-dev").getByRole("group", { name: "Remove @alpha-dev" }),
+      ).getByText("@alpha-dev"),
+    ).toHaveClass("font-mono");
     const keep = row("alpha-dev").getByRole("button", { name: "Keep" });
     expect(keep).toHaveFocus();
     await user.click(keep);
     expect(props.onRemove).not.toHaveBeenCalled();
-    expect(
-      row("alpha-dev").queryByText("Remove @alpha-dev?"),
-    ).not.toBeInTheDocument();
+    expect(removePrompt("alpha-dev")).toBeNull();
     expect(
       row("alpha-dev").getByRole("button", { name: "Remove @alpha-dev" }),
     ).toHaveFocus();
@@ -329,9 +336,7 @@ describe("after a row changes", () => {
     await user.click(
       row("alpha-dev").getByRole("button", { name: "Remove @alpha-dev" }),
     );
-    expect(
-      row("alpha-dev").getByText("Remove @alpha-dev?"),
-    ).toBeInTheDocument();
+    expect(removePrompt("alpha-dev")).toBeInTheDocument();
     expect(row("alpha-dev").getByRole("status")).toHaveTextContent(/^$/);
   });
 
@@ -403,9 +408,7 @@ describe("after a row changes", () => {
       row("alpha-dev").getByRole("button", { name: "Remove @alpha-dev" }),
     );
     await user.keyboard("{Escape}");
-    expect(
-      row("alpha-dev").queryByText("Remove @alpha-dev?"),
-    ).not.toBeInTheDocument();
+    expect(removePrompt("alpha-dev")).toBeNull();
     expect(
       row("alpha-dev").getByRole("button", { name: "Remove @alpha-dev" }),
     ).toHaveFocus();
@@ -487,7 +490,7 @@ describe("people invited by email", () => {
       screen.getByRole("button", { name: "Remove dana@example.com" }),
     );
     expect(
-      row("dana@example.com").getByText("Remove dana@example.com?"),
+      removePrompt("dana@example.com", "dana@example.com"),
     ).toBeInTheDocument();
     await user.click(
       row("dana@example.com").getByRole("button", { name: "Remove" }),

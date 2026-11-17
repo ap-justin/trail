@@ -37,6 +37,24 @@ function classTokens(source: string): string[] {
 const literalValue =
   /\[[^\]]*(?:\d(?:px|rem|em|ms|s)\b|#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(|oklch\()/i;
 
+// a percentage stop: a mask fade (`mask-r-from-88%`) or a colour-mix share (`_5%`) invents a
+// value the token file doesn't name. Percentages that are a size (`w-[50%]`, `calc(100%-…)`)
+// are layout, not a design value, so only a stop or a mix share counts.
+const percentStop =
+  /(?:^|:)-?mask-[\w-]*-(?:from|to)-\d+(?:\.\d+)?%|\[[^\]]*_\d+(?:\.\d+)?%/;
+
+// Named gaps, each pending a design decision; anything not listed here fails the sweep.
+const allowedPercentStops: Finding[] = [
+  // the status tabs' fade edge: an 88% stop the tokens don't name
+  { file: "components/item-list.tsx", token: "max-lg:mask-r-from-88%" },
+  // the secondary button's hover step: a 5% mix the tokens don't name (no caller yet)
+  {
+    file: "components/ui/button.tsx",
+    token:
+      "hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)]",
+  },
+];
+
 type Finding = { file: string; token: string };
 
 let designSystem: Awaited<ReturnType<typeof __unstable__loadDesignSystem>>;
@@ -55,6 +73,16 @@ function sweep(check: (token: string) => boolean): Finding[] {
 describe("components and app chrome stay inside the design system", () => {
   test("no literal values: every colour, length and duration is a token", () => {
     expect(sweep((token) => literalValue.test(token))).toEqual([]);
+  });
+
+  test("no percentage stops: a mask fade or colour-mix share is a token too", () => {
+    const unallowed = sweep((token) => percentStop.test(token)).filter(
+      (found) =>
+        !allowedPercentStops.some(
+          (ok) => ok.file === found.file && ok.token === found.token,
+        ),
+    );
+    expect(unallowed).toEqual([]);
   });
 
   test("no class names the stylesheet doesn't draw", () => {
@@ -138,6 +166,19 @@ describe("the class collector", () => {
       "h-[18px]",
       "w-[2rem]",
     ]);
+  });
+});
+
+describe("the percentage-stop matcher", () => {
+  test("catches mask stops and colour-mix shares, not layout percentages", () => {
+    const hit = [
+      "max-lg:mask-r-from-88%",
+      "mask-b-to-90%",
+      "hover:bg-[color-mix(in_oklab,var(--foreground)_5%,transparent)]",
+    ];
+    const miss = ["w-[50%]", "h-[calc(100%-2rem)]", "w-1/2", "mask-r-from-4"];
+    expect(hit.filter((t) => percentStop.test(t))).toEqual(hit);
+    expect(miss.filter((t) => percentStop.test(t))).toEqual([]);
   });
 });
 

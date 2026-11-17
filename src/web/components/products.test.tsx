@@ -111,12 +111,15 @@ describe("products", () => {
   test("a card reads name, the update's author, the update, then the counts and the product's age", () => {
     renderProducts();
     const item = screen.getByRole("listitem");
+    const age = within(item).getByRole("time");
+    expect(age).toHaveAttribute("datetime", "2026-11-11T09:12:00.000Z");
+    expect(age).toHaveTextContent(/^41m$/);
     const order = [
       within(item).getByRole("link", { name: "TRL trail" }),
       within(item).getByText("Beta"),
       within(item).getByText(/^SSE feed shipped/),
       within(item).getByText(/issues/),
-      within(item).getByRole("time"),
+      age,
     ];
     for (const [before, after] of order
       .slice(0, -1)

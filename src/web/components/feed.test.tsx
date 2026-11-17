@@ -729,9 +729,9 @@ describe("Filters on the phone", () => {
     expect(filtersButton().closest(".max-lg\\:hidden")).toBeNull();
   });
 
-  test("opens a sheet titled Filters with a labelled select per filter, applied as chosen", async () => {
+  test("opens a sheet titled Filters with a labelled select per filter", async () => {
     const user = userEvent.setup();
-    const props = renderFeed();
+    renderFeed();
     await user.click(filtersButton());
     const sheet = await screen.findByRole("dialog", { name: "Filters" });
     for (const label of ["Bot", "Product", "Project", "Type"]) {
@@ -739,10 +739,62 @@ describe("Filters on the phone", () => {
         within(sheet).getByRole("combobox", { name: label }),
       ).toBeInTheDocument();
     }
-    await user.click(within(sheet).getByRole("combobox", { name: "Type" }));
-    await user.click(await screen.findByRole("option", { name: "Todos" }));
-    expect(props.onTypeFilterChange).toHaveBeenCalledWith(
-      "todo",
+  });
+
+  test.each([
+    ["Bot", "Alpha", "onActorFilterChange", alpha.id],
+    ["Product", "trail", "onProductFilterChange", "TRL"],
+    ["Project", "Human UI launch", "onProjectFilterChange", humanUi.slug],
+    ["Type", "Todos", "onTypeFilterChange", "todo"],
+  ] as const)(
+    "choosing in the sheet's %s select applies that filter",
+    async (field, option, callback, value) => {
+      const user = userEvent.setup();
+      const props = renderFeed();
+      await user.click(filtersButton());
+      const sheet = await screen.findByRole("dialog", { name: "Filters" });
+      await user.click(within(sheet).getByRole("combobox", { name: field }));
+      await user.click(
+        await screen.findByRole("option", { name: new RegExp(option) }),
+      );
+      expect(props[callback]).toHaveBeenCalledOnce();
+      expect(vi.mocked(props[callback]).mock.calls[0]?.[0]).toBe(value);
+      for (const other of [
+        "onActorFilterChange",
+        "onProductFilterChange",
+        "onProjectFilterChange",
+        "onTypeFilterChange",
+      ] as const) {
+        if (other !== callback) expect(props[other]).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  test("the sheet's selects show what is in force, and All clears it", async () => {
+    const user = userEvent.setup();
+    const props = renderFeed({
+      actorFilter: alpha.id,
+      productFilter: "TRL",
+      projectFilter: humanUi.slug,
+    });
+    await user.click(filtersButton());
+    const sheet = await screen.findByRole("dialog", { name: "Filters" });
+    expect(
+      within(sheet).getByRole("combobox", { name: "Bot" }),
+    ).toHaveTextContent("Alpha");
+    expect(
+      within(sheet).getByRole("combobox", { name: "Product" }),
+    ).toHaveTextContent(/TRL\s*trail/);
+    expect(
+      within(sheet).getByRole("combobox", { name: "Project" }),
+    ).toHaveTextContent("Human UI launch");
+    expect(
+      within(sheet).getByRole("combobox", { name: "Type" }),
+    ).toHaveTextContent("All types");
+    await user.click(within(sheet).getByRole("combobox", { name: "Bot" }));
+    await user.click(await screen.findByRole("option", { name: "All bots" }));
+    expect(props.onActorFilterChange).toHaveBeenCalledWith(
+      null,
       expect.anything(),
     );
   });

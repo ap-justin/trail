@@ -5,7 +5,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { Select, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -16,6 +22,7 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { Toggle } from "@/components/ui/toggle";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 // jsdom lays nothing out, so the states are read off the classes that draw them
@@ -170,6 +177,33 @@ describe("Tabs", () => {
     );
     expect(screen.getByRole("tab")).toHaveClass("max-lg:h-11");
   });
+});
+
+describe("Toggle", () => {
+  test("pressed styles from aria-pressed, the state Base UI sets; no Radix data-state", () => {
+    render(<Toggle defaultPressed>Bold</Toggle>);
+    const toggle = screen.getByRole("button", { name: "Bold" });
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    expect(toggle).toHaveClass("aria-pressed:bg-muted");
+    expect(toggle.className).not.toMatch(/data-\[state=/);
+  });
+});
+
+test("a select option is 44px below lg", async () => {
+  render(
+    <Select defaultOpen>
+      <SelectTrigger aria-label="Product">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="TRL">trail</SelectItem>
+      </SelectContent>
+    </Select>,
+  );
+  expect(await screen.findByRole("option", { name: "trail" })).toHaveClass(
+    "min-h-11",
+    "lg:min-h-0",
+  );
 });
 
 describe("ToggleGroup", () => {

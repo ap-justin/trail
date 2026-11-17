@@ -23,6 +23,12 @@ function renderIssue(overrides: Partial<IssueViewProps> = {}) {
   return { props, ...view };
 }
 
+const focusRing = [
+  "focus-visible:outline-2",
+  "focus-visible:outline-offset-2",
+  "focus-visible:outline-ring",
+];
+
 const absoluteTime = /^[A-Z][a-z]{2} \d{1,2}, \d{2}:\d{2}$/;
 
 /** TRL-15 as a todo whose created entry says Alpha filed it as an issue. */
@@ -68,6 +74,16 @@ describe("properties", () => {
     expect(
       within(props).getByRole("link", { name: "TRL trail" }),
     ).toHaveAttribute("href", "/products/TRL");
+  });
+
+  test("the product and project links draw the shared focus outline", () => {
+    renderIssue({
+      issue: { status: "ready", data: issue({ projects: [humanUi] }) },
+    });
+    const props = screen.getByRole("region", { name: "Properties" });
+    const links = within(props).getAllByRole("link");
+    expect(links).toHaveLength(2);
+    for (const link of links) expect(link).toHaveClass(...focusRing);
   });
 
   test("a link row shows its title and its URL in mono, and opens safely", () => {
@@ -594,4 +610,6 @@ test("the breadcrumb reads Products / product name / key", () => {
     "/products/TRL",
   );
   expect(screen.getByText("TRL-14")).toBeInTheDocument();
+  for (const link of screen.getAllByRole("link"))
+    expect(link).toHaveClass(...focusRing);
 });

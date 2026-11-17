@@ -3,7 +3,11 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, test, vi } from "vitest";
 import type { ItemFilters } from "@/components/item-list";
-import { ProductView, type ProductViewProps } from "@/components/product";
+import {
+  ProductHeading,
+  ProductView,
+  type ProductViewProps,
+} from "@/components/product";
 import {
   issueRow,
   itemList,
@@ -535,4 +539,13 @@ describe("aside", () => {
     expect(screen.queryByRole("region", { name: "Repository" })).toBeNull();
     expect(screen.queryByRole("region", { name: /^Projects/ })).toBeNull();
   });
+});
+
+test("the Products link in the heading draws the shared focus outline", () => {
+  render(<ProductHeading product={{ key: "TRL", name: "trail" }} />);
+  expect(screen.getByRole("link", { name: "Products" })).toHaveClass(
+    "focus-visible:outline-2",
+    "focus-visible:outline-offset-2",
+    "focus-visible:outline-ring",
+  );
 });
