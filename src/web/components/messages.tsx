@@ -1,7 +1,7 @@
 import { ArrowLeftRightIcon, MessagesSquareIcon } from "lucide-react";
 import { type ReactNode, useEffect, useRef } from "react";
 import { ActorAvatar, ActorName } from "@/components/actor";
-import { AppLink, RowLink } from "@/components/app-link";
+import { AppLink, RowLink, textLinkFocus } from "@/components/app-link";
 import { RowTime } from "@/components/feed";
 import { Markdown } from "@/components/markdown";
 import { MarkdownText } from "@/components/markdown-text";
@@ -108,7 +108,10 @@ export function ConversationBreadcrumb({
           bots && "max-lg:hidden",
         )}
       >
-        <AppLink href={listHref} className="hover:text-foreground">
+        <AppLink
+          href={listHref}
+          className={cn(textLinkFocus, "hover:text-foreground")}
+        >
           Messages
         </AppLink>
         {bots && <span aria-hidden="true">/</span>}

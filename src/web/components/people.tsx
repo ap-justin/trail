@@ -540,7 +540,7 @@ function PersonRow({
               onKeyDown={cancelOnEscape}
             >
               <span className="text-muted-foreground max-lg:basis-full">
-                Remove {handle}?
+                Remove <span className="font-mono">{handle}</span>?
               </span>
               <Button
                 ref={keepRef}

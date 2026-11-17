@@ -1,7 +1,7 @@
 import { ExternalLinkIcon } from "lucide-react";
 import { type ReactNode, useId, useRef, useState } from "react";
 import { ActorAvatar } from "@/components/actor";
-import { AppLink, RowLink } from "@/components/app-link";
+import { AppLink, RowLink, textLinkFocus } from "@/components/app-link";
 import {
   FilterEmpty,
   ItemFilterBar,
@@ -65,7 +65,10 @@ export function ProductHeading({ product }: { product: WebProductRefView }) {
   return (
     <span className="flex min-w-0 items-center gap-2">
       <span className="flex items-center gap-2 font-normal text-muted-foreground max-lg:hidden">
-        <AppLink href={paths.products} className="hover:text-foreground">
+        <AppLink
+          href={paths.products}
+          className={cn(textLinkFocus, "hover:text-foreground")}
+        >
           Products
         </AppLink>
         <span aria-hidden="true">/</span>

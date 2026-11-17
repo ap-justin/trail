@@ -1,7 +1,7 @@
 import { FolderIcon, GitPullRequestIcon } from "lucide-react";
 import { type FormEvent, type ReactNode, useId, useState } from "react";
 import { ActorAvatar, ActorName } from "@/components/actor";
-import { AppLink } from "@/components/app-link";
+import { AppLink, textLinkFocus } from "@/components/app-link";
 import { Markdown } from "@/components/markdown";
 import { IssueError, IssueSkeleton, NotFoundPanel } from "@/components/states";
 import {
@@ -56,7 +56,10 @@ export function IssueBreadcrumb({
   return (
     <span className="flex min-w-0 items-center gap-2">
       <span className="flex items-center gap-2 font-normal text-muted-foreground max-lg:hidden">
-        <AppLink href={paths.products} className="hover:text-foreground">
+        <AppLink
+          href={paths.products}
+          className={cn(textLinkFocus, "hover:text-foreground")}
+        >
           Products
         </AppLink>
         <span aria-hidden="true">/</span>
@@ -64,7 +67,7 @@ export function IssueBreadcrumb({
           <>
             <AppLink
               href={paths.product(product.key)}
-              className="hover:text-foreground"
+              className={cn(textLinkFocus, "hover:text-foreground")}
             >
               {product.name}
             </AppLink>
@@ -259,7 +262,10 @@ function Properties({ issue }: { issue: WebItemView }) {
         <Property label="Product">
           <AppLink
             href={paths.product(issue.product.key)}
-            className="flex items-center gap-2 hover:underline"
+            className={cn(
+              textLinkFocus,
+              "flex items-center gap-2 hover:underline",
+            )}
           >
             <KeyText className="text-foreground">{issue.product.key}</KeyText>{" "}
             {issue.product.name}
@@ -278,7 +284,10 @@ function Properties({ issue }: { issue: WebItemView }) {
                 >
                   <AppLink
                     href={paths.project(project.slug)}
-                    className="flex items-center gap-2 hover:underline"
+                    className={cn(
+                      textLinkFocus,
+                      "flex items-center gap-2 hover:underline",
+                    )}
                   >
                     <FolderIcon
                       aria-hidden="true"

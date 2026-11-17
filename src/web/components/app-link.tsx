@@ -43,6 +43,10 @@ export function AppLink(props: AppLinkProps) {
   return <Link {...props} />;
 }
 
+/** A text link's keyboard focus: the 2px `--ring` outline every control draws. */
+export const textLinkFocus =
+  "rounded-md outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
+
 /**
  * The link a row opens; its ::after covers the nearest positioned ancestor (the row), so
  * the whole row is the target while the link's name stays its own text.

@@ -1,7 +1,7 @@
 import { PackageIcon } from "lucide-react";
 import { type ReactNode, useId, useRef } from "react";
 import { ActorAvatar, BotTitle } from "@/components/actor";
-import { AppLink } from "@/components/app-link";
+import { AppLink, textLinkFocus } from "@/components/app-link";
 import { ProductSelect } from "@/components/filter-select";
 import {
   FilterEmpty,
@@ -73,7 +73,10 @@ export function ProjectHeading({ project }: { project: { name: string } }) {
   return (
     <span className="flex min-w-0 items-center gap-2 max-lg:flex-col max-lg:items-start max-lg:gap-1.5">
       <span className="flex items-center gap-2 text-sm font-normal text-muted-foreground">
-        <AppLink href={paths.projects} className="hover:text-foreground">
+        <AppLink
+          href={paths.projects}
+          className={cn(textLinkFocus, "hover:text-foreground")}
+        >
           Projects
         </AppLink>
         <span aria-hidden="true" className="max-lg:hidden">
