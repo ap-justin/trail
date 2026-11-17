@@ -1,10 +1,6 @@
 import { eq } from "drizzle-orm";
 import { expect, test } from "vitest";
-import {
-  apiKey,
-  webhookDelivery,
-  webhookSubscription,
-} from "../db/schema.js";
+import { apiKey, webhookDelivery, webhookSubscription } from "../db/schema.js";
 import { createBot, createKey, revokeKey } from "../service/keys.js";
 import { setupTestApp, testWebhookSettings } from "../test-app.js";
 import { createWebhookWorker } from "../webhooks/worker.js";

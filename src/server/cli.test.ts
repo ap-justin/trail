@@ -321,7 +321,8 @@ test("key revoke of the last of several keys mints the hint from that key's scop
     "",
   ]);
   expect(last.stderr).toBe(
-    mintFirst("trail key create several --actions read,issues") + moveHint(true),
+    mintFirst("trail key create several --actions read,issues") +
+      moveHint(true),
   );
 });
 
