@@ -64,12 +64,13 @@ test("create_project defaults to the caller's one product and to the caller as l
   ).toMatch(/^validation_failed: slug must be 2 to 39 lowercase letters/);
 });
 
-test("create_project takes a lead by name and several products, and refuses a product the key can't reach as missing", async () => {
+test("create_project takes a lead by name and several products, and refuses a product the key reads only through a project as missing", async () => {
   const beta = await productBot("Beta");
   const epsilon = await productBot("Epsilon");
+  const cross = freshSlug();
   const project = await call(beta.client, "create_project", {
     name: "Cross",
-    slug: freshSlug(),
+    slug: cross,
     lead: "EPSILON",
     products: [beta.product.key, epsilon.product.key.toLowerCase()],
   });
@@ -79,7 +80,7 @@ test("create_project takes a lead by name and several products, and refuses a pr
   );
 
   const scoped = await connect(
-    createBot(db, "Beta scoped", { scope: { projects: [beta.product.key] } })
+    createBot(db, "Beta scoped", { scope: { products: [beta.product.key] } })
       .key,
   );
   expect(
@@ -88,7 +89,7 @@ test("create_project takes a lead by name and several products, and refuses a pr
       products: [beta.product.key, epsilon.product.key],
     }),
   ).toBe(
-    `not_found: no product ${epsilon.product.key}: pass the key (like TRL) of a product this key reaches; list_products (GET /api/v1/products) lists them`,
+    `not_found: this key reads product ${epsilon.product.key} only through project ${cross}, which reaches ${cross}'s ${epsilon.product.key} items to read and comment on: anything on ${epsilon.product.key} itself needs a key that lists ${epsilon.product.key}`,
   );
   expect(
     await callError(scoped, "create_project", { name: "none of mine" }),
@@ -140,7 +141,7 @@ test("update_project changes name, goal, lead and target date; a key reaching no
   const outsider = await productBot("Pi");
   const scoped = await connect(
     createBot(db, "Pi scoped", {
-      scope: { projects: [outsider.product.key] },
+      scope: { products: [outsider.product.key] },
     }).key,
   );
   expect(
@@ -219,7 +220,7 @@ test("add_to_project takes at most 100 items and refuses an item the key can't s
   const hidden = await productBot("Omicron");
   const secret = await call(hidden.client, "add_todo", { title: "secret" });
   const scoped = await connect(
-    createBot(db, "Mu scoped", { scope: { projects: [mu.product.key] } }).key,
+    createBot(db, "Mu scoped", { scope: { products: [mu.product.key] } }).key,
   );
   expect(
     await callError(scoped, "add_to_project", {
@@ -229,7 +230,7 @@ test("add_to_project takes at most 100 items and refuses an item the key can't s
   ).toMatch(new RegExp(`^not_found: no item ${secret.key}: `));
 });
 
-test("a key scoped to one product sees a cross-product project without any trace of the other product", async () => {
+test("a key scoped to one product reads a cross-product project's items of the other product, and that product by name only", async () => {
   const lambda = await productBot("Lambda");
   const eta = await productBot("Eta");
   const slug = freshSlug();
@@ -239,69 +240,50 @@ test("a key scoped to one product sees a cross-product project without any trace
     products: [lambda.product.key, eta.product.key],
   });
   const visible = await call(lambda.client, "add_todo", { title: "visible" });
-  const hiddenItems = [
-    await call(eta.client, "add_todo", { title: "hidden one" }),
-    await call(eta.client, "add_todo", { title: "hidden two" }),
+  const etaItems = [
+    await call(eta.client, "add_todo", { title: "eta one" }),
+    await call(eta.client, "add_todo", { title: "eta two" }),
   ];
+  const etaOutside = await call(eta.client, "add_todo", { title: "outside" });
   await call(lambda.client, "add_to_project", {
     project: slug,
-    items: [visible.key, ...hiddenItems.map((i) => i.key)],
-  });
-  await call(eta.client, "post_status_update", {
-    project: slug,
-    body: "all on track",
-    health: "on_track",
+    items: [visible.key, ...etaItems.map((i) => i.key)],
   });
 
   const scoped = await connect(
     createBot(db, "Lambda scoped", {
-      scope: { projects: [lambda.product.key] },
+      scope: { products: [lambda.product.key] },
     }).key,
   );
-  const seen: Body[] = [
-    await call(scoped, "get_project", { project: slug }),
-    await call(scoped, "list_projects", { limit: 200 }),
-    await call(scoped, "list_items", { project: slug }),
-    await call(scoped, "list_activity", { project: slug, limit: 200 }),
-    await call(scoped, "list_activity", { limit: 200 }),
-    await call(scoped, "list_status_updates", { project: slug }),
-    await call(scoped, "get_item", { item: visible.key }),
-  ];
-  const project = seen[0] as Body;
-  expect(project.products).toEqual([
-    { key: lambda.product.key, name: "Lambda's product" },
-  ]);
-  expect(project.hiddenProducts).toBe(true);
-  expect(project.counts).toEqual({
-    triage: 0,
-    open: 1,
-    in_progress: 0,
-    done: 0,
-    canceled: 0,
-  });
-  expect((seen[2] as Body).items.map((i: Body) => i.key)).toEqual([
-    visible.key,
-  ]);
+  const project = await call(scoped, "get_project", { project: slug });
+  expect(project.products).toEqual(
+    [
+      { key: lambda.product.key, name: "Lambda's product" },
+      { key: eta.product.key, name: "Eta's product" },
+    ].sort((a, b) => a.key.localeCompare(b.key)),
+  );
+  expect(project.hiddenProducts).toBe(false);
+  expect(project.counts).toEqual(
+    (await call(lambda.client, "get_project", { project: slug })).counts,
+  );
   expect(
-    (seen[3] as Body).items.map((e: Body) => [e.action, e.projectSlug]),
-  ).toEqual([
-    ["status_update.created", slug],
-    ["project.item_added", slug],
-    ["project.created", slug],
-  ]);
-  const text = JSON.stringify(seen);
-  for (const trace of [
-    eta.product.key,
-    eta.product.id,
-    "Eta's product",
-    ...hiddenItems.flatMap((i) => [i.key, i.id]),
-  ]) {
-    expect(text, trace).not.toContain(trace);
-  }
-
-  const wide = await call(lambda.client, "get_project", { project: slug });
-  expect(wide).toMatchObject({ hiddenProducts: false });
-  expect(wide.counts.open).toBe(3);
+    (await call(scoped, "list_items", { project: slug })).items
+      .map((i: Body) => i.key)
+      .sort(),
+  ).toEqual([visible.key, ...etaItems.map((i) => i.key)].sort());
+  expect(
+    (await call(scoped, "get_item", { item: etaItems[0]?.key })).access,
+  ).toBe("via_project");
+  expect(
+    await callError(scoped, "get_item", { item: etaOutside.key }),
+  ).toContain(`no item ${etaOutside.key}`);
+  expect(
+    await call(scoped, "get_product", { product: eta.product.key }),
+  ).toEqual({
+    id: eta.product.id,
+    key: eta.product.key,
+    name: "Eta's product",
+  });
 });
 
 test("a project drawing only from products the key can't reach is the 404 an unknown slug is", async () => {
@@ -311,7 +293,7 @@ test("a project drawing only from products the key can't reach is the 404 an unk
   const outsider = await productBot("Xi");
   const scoped = await connect(
     createBot(db, "Xi scoped", {
-      scope: { projects: [outsider.product.key] },
+      scope: { products: [outsider.product.key] },
     }).key,
   );
   const hidden = await callError(scoped, "get_project", { project: slug });

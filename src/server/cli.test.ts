@@ -6,7 +6,14 @@ import { eq } from "drizzle-orm";
 import { afterAll, expect, test } from "vitest";
 import { runCli } from "./cli.js";
 import { migrate, openDatabase } from "./db/client.js";
-import { actor, product } from "./db/schema.js";
+import {
+  actor,
+  apiKey,
+  product,
+  project,
+  projectProduct,
+  webhookSubscription,
+} from "./db/schema.js";
 import {
   createBot,
   createHuman,
@@ -69,6 +76,263 @@ test.each([
   expect(code).toBe(0);
   expect(stdout).toContain(`revoked trail_${key.slice(6, 14)}`);
   expect(withDb((db) => resolveKey(db, key))).toBeNull();
+});
+
+/** A webhook row of the bot's, recording the key with `recorded`'s prefix or none. */
+function webhookOf(
+  actorId: string,
+  recorded: string | null,
+  kind: "activity" | "inbox",
+  url: string,
+  /** an explicit id or age, to pin the order a revoke lists webhooks in */
+  extra: { id?: string; createdAt?: Date } = {},
+) {
+  return withDb((db) => {
+    const apiKeyId =
+      recorded === null
+        ? null
+        : db
+            .select({ id: apiKey.id })
+            .from(apiKey)
+            .where(eq(apiKey.prefix, recorded.slice(6, 14)))
+            .get()?.id;
+    return db
+      .insert(webhookSubscription)
+      .values({
+        actorId,
+        url,
+        kind,
+        secretCipher: "sealed",
+        apiKeyId,
+        ...extra,
+      })
+      .returning({ id: webhookSubscription.id })
+      .get().id;
+  });
+}
+
+const actorOf = (stdout: string) =>
+  /^actor\s+(\S+)$/m.exec(stdout)?.[1] as string;
+
+/** The stderr line on moving a stopped webhook; it names the read action when an activity webhook is among them. */
+const moveHint = (activity: boolean) =>
+  `trail: to move a webhook to another key, call update_webhook (PATCH /api/v1/webhooks/{id}) or rotate_webhook_secret with that key${activity ? ", which needs the read action for an activity webhook" : ""} (the key checked becomes the one that last changed the webhook)\n`;
+const mintFirst = (command: string) =>
+  `trail: this bot has no live key left: mint one first with \`${command}\`\n`;
+
+test("key revoke prints a line per webhook the key recorded, by URL origin, and on stderr how to move them", () => {
+  const made = run("bot", "create", "revoke lists", "--label", "lister");
+  const key = createdKey(made.stdout);
+  const bot = actorOf(made.stdout);
+  run("key", "create", "lister");
+  const activity = webhookOf(
+    bot,
+    key,
+    "activity",
+    "https://hooks.example.com/a?token=s3cret",
+  );
+  const inbox = webhookOf(
+    bot,
+    key,
+    "inbox",
+    "https://inbox.example.com:8443/b/c",
+  );
+  const { code, stdout, stderr } = run("key", "revoke", key.slice(6, 14));
+  expect(code).toBe(0);
+  const lines = stdout.split("\n");
+  expect(lines[0]).toMatch(
+    new RegExp(`^revoked trail_${key.slice(6, 14)} \\(actor ${bot}\\) at `),
+  );
+  expect(lines.slice(1).toSorted()).toEqual(
+    [
+      "",
+      `stopped webhook ${activity} (activity) to https://hooks.example.com`,
+      `stopped webhook ${inbox} (inbox) to https://inbox.example.com:8443`,
+    ].toSorted(),
+  );
+  expect(stderr).toBe(moveHint(true));
+});
+
+test("key revoke that stops only inbox webhooks gives the move hint without the read action", () => {
+  const made = run("bot", "create", "revoke inbox only", "--label", "inboxer");
+  const key = createdKey(made.stdout);
+  webhookOf(actorOf(made.stdout), key, "inbox", "https://in.example.com/x");
+  run("key", "create", "inboxer", "--actions", "issues");
+  const { code, stderr } = run("key", "revoke", key.slice(6, 14));
+  expect(code).toBe(0);
+  expect(stderr).toBe(moveHint(false));
+});
+
+test("key revoke of a bot's last live key lists its webhooks recording no key and says to mint a key first", () => {
+  const made = run("bot", "create", "revoke last", "--label", "last-one");
+  const key = createdKey(made.stdout);
+  const bot = actorOf(made.stdout);
+  const hook = webhookOf(bot, null, "activity", "https://last.example.com/x");
+  const { code, stdout, stderr } = run("key", "revoke", key.slice(6, 14));
+  expect(code).toBe(0);
+  expect(stdout.split("\n").slice(1)).toEqual([
+    `stopped webhook ${hook} (activity) to https://last.example.com`,
+    "",
+  ]);
+  expect(stderr).toBe(mintFirst("trail key create last-one") + moveHint(true));
+});
+
+test("key revoke of a bot's last scoped key says to mint one with the same scope flags, which mint a like-for-like key", () => {
+  const made = run(
+    "bot",
+    "create",
+    "revoke last scoped",
+    "--label",
+    "last-scoped",
+    "--products",
+    "BTA,ATL",
+    "--projects",
+    "recon",
+    "--actions",
+    "issues,read",
+  );
+  const key = createdKey(made.stdout);
+  webhookOf(actorOf(made.stdout), key, "activity", "https://ls.example.com");
+  const { code, stderr } = run("key", "revoke", key.slice(6, 14));
+  expect(code).toBe(0);
+  const command =
+    "trail key create last-scoped --products ATL,BTA --projects recon --actions read,issues";
+  expect(stderr).toBe(mintFirst(command) + moveHint(true));
+  const minted = run(...command.split(" ").slice(1));
+  expect(minted.code).toBe(0);
+  expect(scopeOf(createdKey(minted.stdout))).toEqual(scopeOf(key));
+});
+
+test("key revoke leaving live keys none of which can read says an activity webhook needs a key with the read action, and not to mint first", () => {
+  const made = run("bot", "create", "revoke unread", "--label", "unread-left");
+  const key = createdKey(made.stdout);
+  const bot = actorOf(made.stdout);
+  run("key", "create", "unread-left", "--actions", "issues");
+  const hook = webhookOf(bot, null, "activity", "https://ur.example.com/x");
+  const { code, stdout, stderr } = run("key", "revoke", key.slice(6, 14));
+  expect(code).toBe(0);
+  expect(stdout.split("\n").slice(1)).toEqual([
+    `stopped webhook ${hook} (activity) to https://ur.example.com`,
+    "",
+  ]);
+  expect(stderr).toBe(
+    "trail: none of this bot's live keys has the read action, and moving an activity webhook needs one\n" +
+      moveHint(true),
+  );
+});
+
+test("key revoke that stops no webhook prints only the revoked line", () => {
+  const made = run("bot", "create", "revoke quiet");
+  const key = createdKey(made.stdout);
+  webhookOf(actorOf(made.stdout), null, "activity", "https://q.example.com");
+  run("key", "create", actorOf(made.stdout));
+  const { code, stdout, stderr } = run("key", "revoke", key.slice(6, 14));
+  expect(code).toBe(0);
+  expect(stdout).toMatch(/^revoked trail_[0-9a-f]{8} \(actor \S+\) at \S+\n$/);
+  expect(stderr).toBe("");
+});
+
+test("key revoke lists the stopped webhooks oldest first, whatever their ids and the order they were inserted in", () => {
+  const made = run("bot", "create", "revoke order", "--label", "orderly");
+  const key = createdKey(made.stdout);
+  const bot = actorOf(made.stdout);
+  const at = (year: number) => new Date(Date.UTC(year, 0, 1));
+  // the oldest has the largest id and the newest the smallest; one records the key, two record none
+  webhookOf(bot, null, "activity", "https://new.example.com", {
+    id: "order-a",
+    createdAt: at(2022),
+  });
+  webhookOf(bot, key, "inbox", "https://old.example.com", {
+    id: "order-z",
+    createdAt: at(2020),
+  });
+  webhookOf(bot, null, "activity", "https://mid.example.com", {
+    id: "order-m",
+    createdAt: at(2021),
+  });
+  const { stdout } = run("key", "revoke", key.slice(6, 14));
+  expect(stdout.split("\n").slice(1)).toEqual([
+    "stopped webhook order-z (inbox) to https://old.example.com",
+    "stopped webhook order-m (activity) to https://mid.example.com",
+    "stopped webhook order-a (activity) to https://new.example.com",
+    "",
+  ]);
+});
+
+test("key revoke prints a webhook's origin without the credentials in its URL", () => {
+  const made = run("bot", "create", "revoke userinfo", "--label", "userinfo");
+  const key = createdKey(made.stdout);
+  const hook = webhookOf(
+    actorOf(made.stdout),
+    key,
+    "inbox",
+    "https://hookuser:hookpass@creds.example.com/c?token=s3cret",
+  );
+  run("key", "create", "userinfo");
+  const { stdout, stderr } = run("key", "revoke", key.slice(6, 14));
+  expect(stdout.split("\n").slice(1)).toEqual([
+    `stopped webhook ${hook} (inbox) to https://creds.example.com`,
+    "",
+  ]);
+  expect(stdout + stderr).not.toMatch(/hookuser|hookpass|s3cret/);
+});
+
+test("key revoke of a bot's last key, with no webhook to stop, prints only the revoked line", () => {
+  const made = run("bot", "create", "revoke bare", "--label", "bare-last");
+  const key = createdKey(made.stdout);
+  const { code, stdout, stderr } = run("key", "revoke", key.slice(6, 14));
+  expect(code).toBe(0);
+  expect(stdout).toMatch(/^revoked trail_[0-9a-f]{8} \(actor \S+\) at \S+\n$/);
+  expect(stderr).toBe("");
+});
+
+test("key revoke of a key already revoked prints the first revoke's time and stops nothing more", () => {
+  const made = run("bot", "create", "revoke twice", "--label", "twice");
+  const key = createdKey(made.stdout);
+  webhookOf(actorOf(made.stdout), key, "activity", "https://twice.example.com");
+  const first = run("key", "revoke", key.slice(6, 14));
+  expect(first.stdout.split("\n")).toHaveLength(3);
+  expect(first.stderr).not.toBe("");
+  const again = run("key", "revoke", key.slice(6, 14));
+  expect(again.code).toBe(0);
+  expect(again.stdout).toBe(`${first.stdout.split("\n")[0]}\n`);
+  expect(again.stderr).toBe("");
+});
+
+test("key revoke of the last of several keys mints the hint from that key's scope and the bot's label, not the first key's", () => {
+  const made = run("bot", "create", "revoke several", "--label", "several");
+  const first = createdKey(made.stdout);
+  const second = createdKey(
+    run("key", "create", "several", "--actions", "issues,read").stdout,
+  );
+  const hook = webhookOf(
+    actorOf(made.stdout),
+    null,
+    "activity",
+    "https://several.example.com",
+  );
+  // the other key can read, so the webhook recording no key still has a sender
+  const early = run("key", "revoke", first.slice(6, 14));
+  expect(early.stdout.split("\n")).toHaveLength(2);
+  expect(early.stderr).toBe("");
+  const last = run("key", "revoke", second.slice(6, 14));
+  expect(last.stdout.split("\n").slice(1)).toEqual([
+    `stopped webhook ${hook} (activity) to https://several.example.com`,
+    "",
+  ]);
+  expect(last.stderr).toBe(
+    mintFirst("trail key create several --actions read,issues") +
+      moveHint(true),
+  );
+});
+
+test("key revoke of the last key of a bot with no label names the bot by its actor id", () => {
+  const made = run("bot", "create", "revoke unlabelled");
+  const key = createdKey(made.stdout);
+  const bot = actorOf(made.stdout);
+  webhookOf(bot, null, "activity", "https://unlabelled.example.com");
+  const { stderr } = run("key", "revoke", key.slice(6, 14));
+  expect(stderr).toBe(mintFirst(`trail key create ${bot}`) + moveHint(true));
 });
 
 test("bot create --key-only prints only the key on stdout, the rest on stderr", () => {
@@ -134,13 +398,28 @@ test.each([
   expect(withDb((db) => resolveKey(db, quiet.stdout.trim()))).toEqual(bot);
 });
 
-// the products a scoped key can name
+// the products and the project a scoped key can name; recon draws from both products
 withDb((db) => {
   const { actor } = createBot(db, "product owner");
-  db.insert(product)
+  const products = db
+    .insert(product)
     .values(
       ["BTA", "ATL"].map((key) => ({ key, name: key, createdBy: actor.id })),
     )
+    .returning()
+    .all();
+  const recon = db
+    .insert(project)
+    .values({
+      slug: "recon",
+      name: "Recon",
+      leadId: actor.id,
+      createdBy: actor.id,
+    })
+    .returning()
+    .get();
+  db.insert(projectProduct)
+    .values(products.map((p) => ({ projectId: recon.id, productId: p.id })))
     .run();
 });
 
@@ -166,9 +445,14 @@ test("key create --products --actions mints a key with that scope, product keys 
   expect(withDb((db) => resolveKey(db, key))).toEqual(bot);
   expect(scopeOf(key)).toEqual({
     products: ["ATL", "BTA"],
+    projects: [],
     actions: ["read", "issues", "comments"],
   });
-  expect(scopeOf(first)).toEqual({ products: null, actions: null });
+  expect(scopeOf(first)).toEqual({
+    products: null,
+    projects: null,
+    actions: null,
+  });
   expect(stdout).toMatch(
     /^actor {2}\S+\nkey {4}\S+\nscope {2}products ATL,BTA; actions read,issues,comments\n$/,
   );
@@ -188,7 +472,11 @@ test("bot create --products --key-only prints the key alone on stdout, its scope
   expect(withDb((db) => resolveKey(db, stdout.trim()))).toMatchObject({
     displayName: "alpha-scoped",
   });
-  expect(scopeOf(stdout)).toEqual({ products: ["BTA"], actions: null });
+  expect(scopeOf(stdout)).toEqual({
+    products: ["BTA"],
+    projects: [],
+    actions: null,
+  });
   expect(stderr).toMatch(
     /^actor {2}\S+\nscope {2}products BTA; all actions\n/m,
   );
@@ -199,6 +487,7 @@ test("bot create --actions alone limits only the actions", () => {
   expect(code).toBe(0);
   expect(scopeOf(createdKey(stdout))).toEqual({
     products: null,
+    projects: null,
     actions: ["read"],
   });
   expect(stdout).toMatch(/^scope {2}all products; actions read$/m);
@@ -242,6 +531,7 @@ test.each([
 
 test.each([
   ["--products ''", ["--products", ""]],
+  ["--projects with a blank entry", ["--projects=recon,"]],
   ["--actions ,", ["--actions", ","]],
   ["--actions with a blank entry", ["--actions=read,,issues"]],
 ])("%s is a usage error before the database is opened", (_, flags) => {
@@ -255,39 +545,84 @@ test.each([
   expect(code).toBe(2);
   expect(stdout).toBe("");
   expect(stderr).toMatch(
-    /^trail: --(products|actions) takes a comma-separated list/,
+    /^trail: --(products|projects|actions) takes a comma-separated list/,
   );
 });
 
-test("--projects, the flag's name before products, still scopes the key, with a one-line notice on stderr", () => {
+test("bot create --projects alone mints a project-only key and prints its scope", () => {
   const { code, stdout, stderr } = run(
     "bot",
     "create",
-    "old-flag",
+    "alpha-recon",
     "--projects",
-    "BTA",
-    "--key-only",
+    "recon",
   );
+  expect(stderr).not.toMatch(/deprecated/);
   expect(code).toBe(0);
-  expect(scopeOf(stdout)).toEqual({ products: ["BTA"], actions: null });
-  expect(stderr.split("\n")[0]).toBe(
-    "trail: --projects is deprecated: use --products",
-  );
+  const key = createdKey(stdout);
+  expect(scopeOf(key)).toEqual({
+    products: [],
+    projects: ["recon"],
+    actions: null,
+  });
+  expect(stdout).toMatch(/\nscope {2}projects recon; all actions\n$/);
 });
 
-test("--products and --projects together are a usage error", () => {
-  const { code, stdout, stderr } = run(
+test("key create --products --projects --actions mints a key reaching both, printed on one scope line", () => {
+  const { code, stdout } = run(
     "key",
     "create",
     "agent-quiet",
     "--products",
-    "BTA",
-    "--projects",
     "ATL",
+    "--projects",
+    "recon",
+    "--actions",
+    "read,comments",
+  );
+  expect(code).toBe(0);
+  expect(scopeOf(createdKey(stdout))).toEqual({
+    products: ["ATL"],
+    projects: ["recon"],
+    actions: ["read", "comments"],
+  });
+  expect(stdout).toMatch(
+    /\nscope {2}products ATL; projects recon; actions read,comments\n$/,
+  );
+});
+
+test.each([
+  ["key create", ["key", "create", "agent-quiet"]],
+  ["bot create", ["bot", "create", "beta-recon"]],
+])(
+  "%s --projects with a product key is a usage error naming --products, minting nothing",
+  (_, argv) => {
+    const before = withDb((db) => listKeys(db).length);
+    for (const value of ["recon,ATL", "atl"]) {
+      const { code, stdout, stderr } = run(...argv, "--projects", value);
+      expect(code).toBe(2);
+      expect(stdout).toBe("");
+      expect(stderr.split("\n")[0]).toBe(
+        "trail: --projects takes project slugs; ATL is a product key: pass it with --products",
+      );
+    }
+    expect(withDb((db) => listKeys(db).length)).toBe(before);
+  },
+);
+
+test("--projects with an unknown slug is refused like an unknown product, listing the slugs that exist", () => {
+  const { code, stdout, stderr } = run(
+    "key",
+    "create",
+    "agent-quiet",
+    "--projects",
+    "recon,nope",
   );
   expect(code).toBe(2);
   expect(stdout).toBe("");
-  expect(stderr).toMatch(/^trail: send --products or --projects, not both/);
+  expect(stderr.split("\n")[0]).toBe(
+    "trail: no project nope: scope the key to projects that exist, by slug, which are recon",
+  );
 });
 
 test("products owners prints each product's current owner, one line per product, writing nothing", () => {
@@ -376,7 +711,7 @@ test("key create for no such bot exits 1", () => {
   expect(stderr).toMatch(/^trail: no bot with id or label agent-nobody/);
 });
 
-test("key list shows each key's prefix, bot, label, times and scope, never the key or its hash", () => {
+test("key list shows each key's prefix, bot, label, times, products, projects and actions, never the key or its hash", () => {
   const key = createdKey(
     run("bot", "create", "listed", "--label", "agent-listed").stdout,
   );
@@ -395,32 +730,199 @@ test("key list shows each key's prefix, bot, label, times and scope, never the k
   expect(stdout).not.toContain(hash);
   const header = stdout.split("\n")[0];
   expect(header).toMatch(
-    /^prefix\s+actor\s+name\s+label\s+created\s+revoked\s+products\s+actions$/,
+    /^prefix\s+actor\s+name\s+label\s+created\s+revoked\s+products\s+projects\s+actions$/,
   );
   const line = stdout.split("\n").find((l) => l.startsWith(prefix));
   expect(line).toMatch(
     new RegExp(
-      `^${prefix}\\s+\\S+\\s+listed\\s+agent-listed\\s+\\d{4}-\\d\\d-\\d\\dT\\S+Z\\s+\\d{4}-\\d\\d-\\d\\dT\\S+Z\\s+all products\\s+all actions$`,
+      `^${prefix}\\s+\\S+\\s+listed\\s+agent-listed\\s+\\d{4}-\\d\\d-\\d\\dT\\S+Z\\s+\\d{4}-\\d\\d-\\d\\dT\\S+Z\\s+all products\\s+-\\s+all actions$`,
     ),
   );
+});
 
-  const scoped = run(
-    "bot",
-    "create",
-    "listed scoped",
+test.each([
+  [
+    "products only",
+    ["--products", "atl,bta", "--actions", "comments,read"],
+    /\s+-\s+ATL,BTA\s+-\s+read,comments$/,
+  ],
+  ["projects only", ["--projects", "recon"], /\s+-\s+-\s+recon\s+all actions$/],
+  [
+    "products and projects",
+    ["--products", "BTA", "--projects", "recon"],
+    /\s+-\s+BTA\s+recon\s+all actions$/,
+  ],
+])(
+  "key list shows a key scoped to %s in its products and projects columns",
+  (scope, flags, cells) => {
+    const key = run(
+      "bot",
+      "create",
+      `listed ${scope}`,
+      ...flags,
+      "--key-only",
+    ).stdout;
+    const line = run("key", "list")
+      .stdout.split("\n")
+      .find((l) => l.startsWith(key.slice(6, 14)));
+    // revoked `-`, then the scope cells
+    expect(line).toMatch(new RegExp(`\\dZ${cells.source}`));
+  },
+);
+
+const mint = (...flags: string[]) =>
+  run("key", "create", "agent-quiet", ...flags, "--key-only").stdout.trim();
+
+test("key scope adds a project and products, the flags repeated and combined, and prints the new scope", () => {
+  const key = mint("--products", "BTA");
+  const { code, stdout, stderr } = run(
+    "key",
+    "scope",
+    key.slice(6, 14),
+    "--add-project",
+    "recon",
+    "--add-product",
+    "atl",
+    "--add-product",
+    "BTA",
+  );
+  expect(stderr).toBe("");
+  expect(code).toBe(0);
+  expect(stdout).toBe("scope  products ATL,BTA; projects recon; all actions\n");
+  expect(scopeOf(key)).toEqual({
+    products: ["ATL", "BTA"],
+    projects: ["recon"],
+    actions: null,
+  });
+});
+
+test("key scope by the full key removes products and projects, leaving a project-only or product-only key", () => {
+  const key = mint(
     "--products",
-    "atl,bta",
+    "ATL,BTA",
+    "--projects",
+    "recon",
     "--actions",
-    "comments,read",
-    "--key-only",
-  ).stdout;
-  const scopedLine = run("key", "list")
-    .stdout.split("\n")
-    .find((l) => l.startsWith(scoped.slice(6, 14)));
-  expect(scopedLine).toMatch(
-    /\s+-\s+\d{4}-\d\d-\d\dT\S+Z\s+-\s+ATL,BTA\s+read,comments$/,
+    "read",
+  );
+  const projectOnly = run(
+    "key",
+    "scope",
+    key,
+    "--remove-product",
+    "ATL",
+    "--remove-product",
+    "bta",
+  );
+  expect(projectOnly.code).toBe(0);
+  expect(projectOnly.stdout).toBe("scope  projects recon; actions read\n");
+  const productOnly = run(
+    "key",
+    "scope",
+    key,
+    "--remove-project",
+    "recon",
+    "--add-product",
+    "BTA",
+  );
+  expect(productOnly.code).toBe(0);
+  expect(productOnly.stdout).toBe("scope  products BTA; actions read\n");
+  expect(scopeOf(key)).toEqual({
+    products: ["BTA"],
+    projects: [],
+    actions: ["read"],
+  });
+});
+
+test("key scope that changes nothing prints the scope and a one-line note on stderr", () => {
+  const key = mint("--projects", "recon");
+  const { code, stdout, stderr } = run(
+    "key",
+    "scope",
+    key.slice(6, 14),
+    "--add-project",
+    "recon",
+    "--remove-product",
+    "ATL",
+  );
+  expect(code).toBe(0);
+  expect(stdout).toBe("scope  projects recon; all actions\n");
+  expect(stderr).toBe(
+    "trail: nothing changed: the key already reaches what was added and not what was removed\n",
   );
 });
+
+test.each([
+  [
+    "taking the last project off a restricted key",
+    () => mint("--projects", "recon"),
+    ["--remove-project", "recon"],
+    (prefix: string) =>
+      `trail: that edit leaves the key with no product and no project, and a key with neither reaches everything: add a product or project in the same edit, or revoke the key with \`trail key revoke ${prefix}\`\n`,
+  ],
+  [
+    "adding to an unrestricted key",
+    () => mint(),
+    ["--add-project", "recon"],
+    () =>
+      "trail: this key is unrestricted and already reaches every product and project, so adding to it changes nothing: mint a key limited to what it should reach with `trail key create`, and revoke this one\n",
+  ],
+])(
+  "key scope %s exits 1 with the reason, changing nothing",
+  (_, keyOf, flags, reason) => {
+    const key = keyOf();
+    const prefix = key.slice(6, 14);
+    const before = scopeOf(key);
+    const { code, stdout, stderr } = run("key", "scope", prefix, ...flags);
+    expect(code).toBe(1);
+    expect(stdout).toBe("");
+    expect(stderr).toBe(reason(prefix));
+    expect(scopeOf(key)).toEqual(before);
+  },
+);
+
+test("key scope of an unknown prefix exits 1 pointing at key list", () => {
+  const { code, stdout, stderr } = run(
+    "key",
+    "scope",
+    "00000000",
+    "--add-project",
+    "recon",
+  );
+  expect(code).toBe(1);
+  expect(stdout).toBe("");
+  expect(stderr).toBe(
+    "trail: no live key with prefix 00000000: `trail key list` shows each key's prefix\n",
+  );
+});
+
+test.each([
+  [
+    "a product key to --add-project",
+    ["--add-project", "ATL"],
+    "trail: --add-project takes project slugs; ATL is a product key: pass it with --add-product",
+  ],
+  [
+    "an unknown slug to --add-project",
+    ["--add-project", "nope"],
+    "trail: no project nope: scope the key to projects that exist, by slug, which are recon",
+  ],
+])(
+  "key scope with %s is a usage error, changing nothing",
+  (_, flags, reason) => {
+    const key = mint("--products", "BTA");
+    const { code, stdout, stderr } = run(
+      "key",
+      "scope",
+      key.slice(6, 14),
+      ...flags,
+    );
+    expect(code).toBe(2);
+    expect(stdout).toBe("");
+    expect(stderr.split("\n")[0]).toBe(reason);
+    expect(scopeOf(key)?.projects).toEqual([]);
+  },
+);
 
 test("key revoke of an unknown prefix exits 1 with the reason on stderr", () => {
   const { code, stdout, stderr } = run("key", "revoke", "00000000");
@@ -473,6 +975,20 @@ test.each([
     ["bot", "title", "someone", "x", "--clear"],
   ],
   ["--clear on another command", ["bot", "rename", "a", "b", "--clear"]],
+  ["key scope without a change", ["key", "scope", "00000000"]],
+  [
+    "key scope with a blank slug",
+    ["key", "scope", "00000000", "--add-project="],
+  ],
+  ["key scope without a prefix", ["key", "scope", "--add-project", "recon"]],
+  [
+    "key scope of a malformed prefix",
+    ["key", "scope", "nope", "--add-project", "recon"],
+  ],
+  [
+    "--add-project on another command",
+    ["key", "create", "agent-quiet", "--add-project", "recon"],
+  ],
 ])("%s is a usage error: exit 2, usage on stderr", (_, argv) => {
   const { code, stdout, stderr } = run(...argv);
   expect(code).toBe(2);
@@ -696,10 +1212,13 @@ test("bot title refuses a person, an unknown bot and an ambiguous ref with exit 
   ).toBeNull();
 });
 
-test("--help prints usage on stdout and exits 0", () => {
+test("--help prints usage on stdout and exits 0, naming key scope and --projects", () => {
   const { code, stdout, stderr } = run("--help");
   expect(code).toBe(0);
   expect(stdout).toMatch(/^Usage:/);
+  expect(stdout).toMatch(/^ {2}trail key scope <prefix> /m);
+  expect(stdout).toMatch(/^ {2}--projects <slugs> /m);
+  expect(stdout).not.toMatch(/old name/);
   expect(stderr).toBe("");
 });
 

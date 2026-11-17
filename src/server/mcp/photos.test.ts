@@ -102,7 +102,7 @@ test("a bot's photo tools leave another bot's photo as it was", async () => {
 
 test("a key limited to reading one project still sets and clears its own photo", async () => {
   const scoped = createBot(db, "reader", {
-    scope: { projects: [addProject("scoped").key], actions: ["read"] },
+    scope: { products: [addProject("scoped").key], actions: ["read"] },
   });
   const reader = await connect(scoped.key);
   const { photoUrl } = await call(reader, "set_my_photo", { data: b64(PNG) });

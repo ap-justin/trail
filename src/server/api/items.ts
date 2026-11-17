@@ -23,6 +23,8 @@ import {
   notFoundError,
   OWNER_ONLY,
   readErrors,
+  VIA_PROJECT,
+  VIA_PROJECT_FILING,
   writeErrors,
 } from "./routes.js";
 import { toComment, toIssue, toPage, withSkippedLabels } from "./serialize.js";
@@ -36,7 +38,7 @@ const createItem = createRoute({
   method: "post",
   path: "/items",
   summary: "Add a todo or file an issue",
-  description: `Needs the issues action on a key that reaches the product. ${TODO_OR_ISSUE} A todo without product goes to the one product you own; with none or several, the 422 lists the products to pick from. It gets the product's next number, so its key reads like TRL-12.`,
+  description: `Needs the issues action on a key that reaches the product. ${TODO_OR_ISSUE} A todo without product goes to the one product you own; with none or several, the 422 lists the products to pick from. An issue with project joins that project as it is filed; a key that reaches a product only through a project files there with project. It gets the product's next number, so its key reads like TRL-12.`,
   tags,
   request: {
     headers: idempotencyHeaders,
@@ -44,7 +46,10 @@ const createItem = createRoute({
   },
   responses: {
     201: jsonContent(createdItemSchema, "The created item"),
-    ...forbiddenError("issues", { owner: OWNER_ONLY }),
+    ...forbiddenError("issues", {
+      owner: OWNER_ONLY,
+      scope: VIA_PROJECT_FILING,
+    }),
     ...writeErrors,
     ...notFoundError,
     ...conflictError,
@@ -93,7 +98,10 @@ const updateItem = createRoute({
       updatedItemSchema,
       "The updated item, with skippedLabels when labels another bot's product lacks were left off",
     ),
-    ...forbiddenError("issues", { owner: OWNER_ONLY }),
+    ...forbiddenError("issues", {
+      owner: OWNER_ONLY,
+      scope: VIA_PROJECT,
+    }),
     ...writeErrors,
     ...notFoundError,
   },

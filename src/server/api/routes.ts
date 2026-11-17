@@ -77,19 +77,33 @@ export const notFoundError = {
 /**
  * The 403 of an operation a key's actions gate: spread into every operation but
  * whoami. `scope` adds the refusal of a key limited to products, for the
- * operations that make one; `owner` the refusal of a write only the product's
- * owner bot makes. (The service's bot-only 403 can't reach /api/v1, whose
- * every caller is a bot.)
+ * operations that make one, worded by `scope` when it is a string; `owner`
+ * the refusal of a write only the product's owner bot makes. (The service's
+ * bot-only 403 can't reach /api/v1, whose every caller is a bot.)
  */
 export const forbiddenError = (
   action: ApiKeyAction,
-  { scope = false, owner }: { scope?: boolean; owner?: string } = {},
+  { scope = false, owner }: { scope?: boolean | string; owner?: string } = {},
 ) => ({
   403: jsonContent(
     errorSchema,
-    `The key lacks the ${action} action (code forbidden_action)${scope ? ", or reaches only some products (code forbidden_scope)" : ""}${owner === undefined ? "" : `, or ${owner} (code forbidden)`}`,
+    `The key lacks the ${action} action (code forbidden_action)${scope === false ? "" : `, or ${scope === true ? "reaches only some products" : scope} (code forbidden_scope)`}${owner === undefined ? "" : `, or ${owner} (code forbidden)`}`,
   ),
 });
+
+/** The forbidden_scope 403 of a change to an item the key reads only through a project drawing from its products. */
+export const VIA_PROJECT =
+  "the key reaches the item only through a project drawing from one of its products (access via_project), which lets it read the item and comment on it and nothing else; the message names the project, the grants that would allow the change and whom to ask";
+
+/** The forbidden_scope 403 of adding items to a project. */
+export const PROJECT_ADD_SCOPE = `${VIA_PROJECT}; or the project doesn't draw from an item's product yet and the key doesn't list that product (a key listing the product, or the product's owner, may add it)`;
+
+/** The forbidden_scope 403 of taking items out of a project. */
+export const PROJECT_REMOVE_SCOPE = `${VIA_PROJECT}; or the key reads the project only through its products and doesn't list the item's product (a key listing the item's product, a key listing the project, or the product's owner may remove it)`;
+
+/** The forbidden_scope 403 of a filing on a product the key reads only through such a project. */
+export const VIA_PROJECT_FILING =
+  "the key reads the product only through a project drawing from one of its products, so it files nothing on it; the message names the product to file on instead and the grants that would allow it";
 
 /** The 403 a write only a product's owner makes adds to `forbiddenError`. */
 export const OWNER_ONLY =
@@ -115,7 +129,7 @@ export const conflictError = {
 export const idempotencyHeaders = z.object({
   "idempotency-key": z.string().min(1).max(255).optional().openapi({
     description:
-      "Makes the create safe to retry: a repeat with the same key and request returns the first response and writes nothing. Reusing a key for a different request is a 422 (code idempotency_key_reused).",
+      "Makes the create safe to retry: a repeat with the same key and request returns the first response and writes nothing, while the calling API key may still make that create and read what it made; otherwise the repeat gets the error a new create or a read would. Reusing a key for a different request is a 422 (code idempotency_key_reused).",
     example: "3f6c1e0a-run-42-issue-7",
   }),
 });

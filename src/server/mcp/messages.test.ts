@@ -159,7 +159,7 @@ test("a key limited to one product and the read action still sends, reads and ma
   const product = addProject("Scoped");
   const scoped = await connect(
     createKey(db, beta.actor.id, {
-      projects: [product.key],
+      products: [product.key],
       actions: ["comments"],
     }).key,
   );

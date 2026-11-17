@@ -8,7 +8,12 @@ import {
   webhookSubscription,
 } from "../db/schema.js";
 import type { ActivityEvent, EventBus } from "../events/bus.js";
-import { isPending, type WebhookSettings } from "../service/webhooks.js";
+import {
+  deliveryKeyRefusal,
+  isPending,
+  leftFollowedProjects,
+  type WebhookSettings,
+} from "../service/webhooks.js";
 import {
   buildEnvelope,
   buildMessageEnvelope,
@@ -39,6 +44,9 @@ export const DELIVERED_KEEP_MS = 7 * 24 * HOUR;
 export const FAILED_KEEP_MS = 30 * 24 * HOUR;
 export const PURGE_MS = 10 * MINUTE;
 export const PURGE_BATCH = 500;
+/** The lastError of a delivery the worker drops instead of sending. */
+export const LEFT_PROJECT =
+  "not sent: the item left the projects this webhook follows before it went out";
 
 export type WebhookWorkerOptions = {
   db: Db;
@@ -55,6 +63,7 @@ export type WebhookWorkerOptions = {
 };
 
 type Delivery = typeof webhookDelivery.$inferSelect;
+type Subscription = typeof webhookSubscription.$inferSelect;
 
 /** updated_at is the bot's own changes; a delivery attempt writes the subscription but isn't one, and the column's on-update default would stamp it. */
 const keepUpdatedAt = sql`${webhookSubscription.updatedAt}`;
@@ -291,6 +300,63 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
     );
   }
 
+  /**
+   * Why a delivery mustn't go out now, or null: its event's item has left
+   * the project a follow alone queued it for, or the webhook's key can no
+   * longer send it (`deliveryKeyRefusal`). `tell` is set on the key's refusals,
+   * which only the bot can fix.
+   */
+  function unsendable(
+    delivery: Delivery,
+    sub: Subscription,
+  ): { reason: string; tell: boolean } | null {
+    const keyRefused = (event: typeof activityEvent.$inferSelect | null) => {
+      const reason = deliveryKeyRefusal(db, sub, event);
+      return reason === null ? null : { reason, tell: true };
+    };
+    if (delivery.eventId === null) return keyRefused(null);
+    const event = db
+      .select()
+      .from(activityEvent)
+      .where(eq(activityEvent.id, delivery.eventId))
+      .get();
+    if (!event) return null;
+    if (leftFollowedProjects(db, sub.id, event))
+      return { reason: LEFT_PROJECT, tell: false };
+    return keyRefused(event);
+  }
+
+  /**
+   * Marks the delivery failed with `reason`, without an attempt and keeping
+   * no body. The receiver had no part in it, so nothing counts toward a pause;
+   * with `tell` the webhook's own lastError carries the reason, the only one
+   * its bot can read.
+   */
+  function drop(
+    delivery: Delivery,
+    { reason, tell }: { reason: string; tell: boolean },
+  ) {
+    db.transaction(
+      (tx) => {
+        const dropped = tx
+          .update(webhookDelivery)
+          .set({ status: "failed", body: null, lastError: reason })
+          .where(and(eq(webhookDelivery.id, delivery.id), isPending))
+          .run();
+        if (!tell || dropped.changes === 0) return;
+        tx.update(webhookSubscription)
+          .set({
+            lastError: reason,
+            lastErrorAt: new Date(settings.now()),
+            updatedAt: keepUpdatedAt,
+          })
+          .where(eq(webhookSubscription.id, delivery.subscriptionId))
+          .run();
+      },
+      { behavior: "immediate" },
+    );
+  }
+
   async function attempt(delivery: Delivery) {
     const sub = db
       .select()
@@ -298,6 +364,11 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
       .where(eq(webhookSubscription.id, delivery.subscriptionId))
       .get();
     if (!sub) return;
+    const refused = unsendable(delivery, sub);
+    if (refused !== null) {
+      drop(delivery, refused);
+      return;
+    }
     const secret = openSecret(settings.key, sub.id, sub.secretCipher);
     const body = secret === null ? null : bodyOf(delivery);
     let result: SendResult;

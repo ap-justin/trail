@@ -30,7 +30,7 @@ async function connect(key: string) {
 
 const a = addProject("A");
 const scoped = createBot(db, "alpha-scoped", {
-  scope: { projects: [a.key], actions: ["read", "issues", "comments"] },
+  scope: { products: [a.key], actions: ["read", "issues", "comments"] },
 });
 let scopedClient: Client;
 let wide: Client;
@@ -340,7 +340,7 @@ test.each(["read", "issues", "comments", "status_updates", "admin"])(
 test("whoami reports a scoped key's products and actions", async () => {
   expect((await call(scopedClient, "whoami")).scope).toEqual({
     products: [a.key],
-    projects: [a.key],
+    projects: [],
     actions: ["read", "issues", "comments"],
   });
 });
@@ -383,7 +383,7 @@ test("import_project refuses a source key a hidden issue holds naming nothing of
 
   const importer = await connect(
     createBot(db, "mcp scoped source-key importer", {
-      scope: { projects: [inside], actions: ["admin"] },
+      scope: { products: [inside], actions: ["admin"] },
     }).key,
   );
   const attempt = (client: Client, sourceKey: string) =>

@@ -1,0 +1,1 @@
+ALTER TABLE `webhook_subscription` ADD `api_key_id` text REFERENCES api_key(id);

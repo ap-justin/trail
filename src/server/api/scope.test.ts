@@ -2,6 +2,12 @@ import { beforeAll, expect, test } from "vitest";
 import { activityEvent } from "../db/schema.js";
 import { createBot } from "../service/keys.js";
 import { projectKey, setupTestApp } from "../test-app.js";
+import {
+  PROJECT_ADD_SCOPE,
+  PROJECT_REMOVE_SCOPE,
+  VIA_PROJECT,
+  VIA_PROJECT_FILING,
+} from "./routes.js";
 
 const { db, bot, request, addProject } = setupTestApp();
 
@@ -10,7 +16,7 @@ type Body = Record<string, any>;
 
 const a = addProject("A");
 const scoped = createBot(db, "alpha-scoped", {
-  scope: { projects: [a.key], actions: ["read", "issues", "comments"] },
+  scope: { products: [a.key], actions: ["read", "issues", "comments"] },
 });
 let issueA = "";
 
@@ -416,7 +422,7 @@ test("a key scoped to A with read, issues and comments writes issues and comment
 
 test("a key scoped to A with the status_updates and admin actions posts, labels and patches A", async () => {
   const manager = createBot(db, "scoped manager", {
-    scope: { projects: [a.key], actions: ["read", "status_updates", "admin"] },
+    scope: { products: [a.key], actions: ["read", "status_updates", "admin"] },
   });
   const as = (method: string, path: string, json: unknown) =>
     request(method, `/api/v1/projects/${a.key}${path}`, {
@@ -458,7 +464,7 @@ test("a key with an action list and no project list reaches every project", asyn
 test("a key limited to projects can't create one, even with admin, and learns nothing of a taken key", async () => {
   const b = await hiddenProject();
   const admin = createBot(db, "scoped admin", {
-    scope: { projects: [a.key] },
+    scope: { products: [a.key] },
   });
   const refusal = {
     error: {
@@ -509,7 +515,7 @@ test("a key limited to projects imports into them, and an import outside them is
   // an owned product takes imports from its owner alone
   await unowned(inside, unscoped.key);
   const importer = createBot(db, "scoped importer", {
-    scope: { projects: [inside, a.key], actions: ["admin"] },
+    scope: { products: [inside, a.key], actions: ["admin"] },
   });
   const again = await request("POST", "/api/v1/import", {
     key: importer.key,
@@ -552,11 +558,13 @@ test("whoami reports the calling key's scope, null where it is unrestricted", as
     label: null,
     scope: {
       products: [a.key],
-      projects: [a.key],
+      projects: [],
       actions: ["read", "issues", "comments"],
     },
     ownProducts: [],
     products: [{ key: a.key, name: "A" }],
+    // the projects drawing from A that earlier tests left: the gate project and the one the issues-only key created
+    impliedProjects: ["gate-project", expect.stringMatching(/^p\d+$/)],
     unreadMessages: 0,
     photoUrl: null,
     title: null,
@@ -591,8 +599,12 @@ test("the spec documents each gated operation's 403 with the action it needs", a
     `The key lacks the ${action} action (code forbidden_action)`;
   const orScope = (action: string) =>
     `${needs(action)}, or reaches only some products (code forbidden_scope)`;
-  const orOwner = (action: string) =>
-    `${needs(action)}, or the product has an owner bot and the call is that bot's alone: adding a todo, moving an issue out of triage, canceling an item another bot filed, reopening a canceled issue another bot filed, or changing an item's type; the message names the owner and what to do instead (code forbidden)`;
+  const owner =
+    "the product has an owner bot and the call is that bot's alone: adding a todo, moving an issue out of triage, canceling an item another bot filed, reopening a canceled issue another bot filed, or changing an item's type; the message names the owner and what to do instead (code forbidden)";
+  const viaProject = (scope: string) => `, or ${scope} (code forbidden_scope)`;
+  const itemChange = viaProject(VIA_PROJECT);
+  const orOwner = (action: string, scope = "") =>
+    `${needs(action)}${scope}, or ${owner}`;
   const ownerLabels = `${needs("admin")}, or another bot owns the product: only its owner creates its labels (code forbidden)`;
   expect(forbidden).toEqual({
     "GET /activity": needs("read"),
@@ -617,13 +629,13 @@ test("the spec documents each gated operation's 403 with the action it needs", a
     "PUT /me/photo": null,
     "DELETE /me/title": null,
     "PUT /me/title": null,
-    "PATCH /items/{key}": orOwner("issues"),
-    "PATCH /issues/{id}": orOwner("issues"),
+    "PATCH /items/{key}": orOwner("issues", itemChange),
+    "PATCH /issues/{id}": orOwner("issues", itemChange),
     "PATCH /products/{key}": `${needs("admin")}, or owner changes the owner of a product another bot owns (code forbidden)`,
     "PATCH /projects/{ref}":
       "The key lacks the issues action, or for a product key the admin action (code forbidden_action)",
     "POST /import": `${orScope("admin")}, or the product exists and another bot owns it: only its owner imports into it (code forbidden)`,
-    "POST /items": orOwner("issues"),
+    "POST /items": orOwner("issues", viaProject(VIA_PROJECT_FILING)),
     "POST /items/{key}/comments": needs("comments"),
     "POST /issues": needs("issues"),
     "POST /issues/{id}/comments": needs("comments"),
@@ -634,8 +646,8 @@ test("the spec documents each gated operation's 403 with the action it needs", a
       "The key lacks the issues action, or with key the admin action (code forbidden_action), or with key reaches only some products (code forbidden_scope)",
     "POST /projects/{ref}/labels": ownerLabels,
     "POST /projects/{ref}/status-updates": needs("status_updates"),
-    "POST /projects/{slug}/items": needs("issues"),
-    "DELETE /projects/{slug}/items/{key}": needs("issues"),
+    "POST /projects/{slug}/items": `${needs("issues")}${viaProject(PROJECT_ADD_SCOPE)}`,
+    "DELETE /projects/{slug}/items/{key}": `${needs("issues")}${viaProject(PROJECT_REMOVE_SCOPE)}`,
     "GET /webhooks": null,
     "POST /webhooks": needs("read"),
     "GET /webhooks/{id}": needs("read"),
@@ -727,7 +739,7 @@ test("an import whose source key a hidden issue holds is refused naming nothing 
   await unowned(inside, bot.key);
 
   const importer = createBot(db, "scoped source-key importer", {
-    scope: { projects: [inside], actions: ["admin"] },
+    scope: { products: [inside], actions: ["admin"] },
   });
   const attempt = async (key: string, sourceKey: string) => {
     const res = await request("POST", "/api/v1/import", {

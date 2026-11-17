@@ -33,6 +33,8 @@ export const actingAs = (member: Member): ActingActor => ({
   ...(member.kind === "member" && {
     scope: {
       products: member.products.map(({ id, key }) => ({ id, key })),
+      // people are invited by product, never by project
+      projects: [],
       actions: null,
     },
   }),

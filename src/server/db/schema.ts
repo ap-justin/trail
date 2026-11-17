@@ -282,7 +282,9 @@ export const product = sqliteTable(
   ],
 );
 
-// the products a key may touch; a key with no rows touches every product
+// The products a key may touch. A key with rows in neither api_key_product nor
+// api_key_project is unrestricted; a key with rows in either is limited to the
+// union of what they reach.
 export const apiKeyProduct = sqliteTable(
   "api_key_product",
   {
@@ -299,6 +301,24 @@ export const apiKeyProduct = sqliteTable(
     // the key serves "which products may this key touch"
     primaryKey({ columns: [t.apiKeyId, t.productId] }),
     index("api_key_product_product_key_idx").on(t.productId, t.apiKeyId),
+  ],
+);
+
+// the projects a key may touch, scoped as on api_key_product
+export const apiKeyProject = sqliteTable(
+  "api_key_project",
+  {
+    apiKeyId: text("api_key_id")
+      .notNull()
+      .references(() => apiKey.id, { onDelete: "cascade" }),
+    // no cascade, as on api_key_product
+    projectId: text("project_id")
+      .notNull()
+      .references(() => project.id),
+  },
+  (t) => [
+    primaryKey({ columns: [t.apiKeyId, t.projectId] }),
+    index("api_key_project_project_key_idx").on(t.projectId, t.apiKeyId),
   ],
 );
 
@@ -884,6 +904,11 @@ export const webhookSubscription = sqliteTable(
     lastSuccessAt: integer("last_success_at", { mode: "timestamp_ms" }),
     lastError: text("last_error"),
     lastErrorAt: integer("last_error_at", { mode: "timestamp_ms" }),
+    // the key that last created or changed it, or, on one created before keys were recorded and unchanged since,
+    // the bot's only live key when migration 0019 ran; the worker checks it before each delivery (an inbox one only
+    // for being live). Null where that bot had none or several, checked against the bot's live keys. No cascade:
+    // keys are revoked, not deleted
+    apiKeyId: text("api_key_id").references(() => apiKey.id),
   },
   (t) => [
     check("webhook_subscription_url_check", sql`length(${c(t.url)}) > 0`),
@@ -916,6 +941,28 @@ export const webhookSubscriptionProduct = sqliteTable(
     // an event's product finds the subscriptions that follow it
     index("webhook_subscription_product_product_idx").on(
       t.productId,
+      t.subscriptionId,
+    ),
+  ],
+);
+
+// the projects a subscription follows
+export const webhookSubscriptionProject = sqliteTable(
+  "webhook_subscription_project",
+  {
+    subscriptionId: text("subscription_id")
+      .notNull()
+      .references(() => webhookSubscription.id, { onDelete: "cascade" }),
+    // no cascade, as on api_key_product: deleting a project must not quietly empty a subscription
+    projectId: text("project_id")
+      .notNull()
+      .references(() => project.id),
+  },
+  (t) => [
+    primaryKey({ columns: [t.subscriptionId, t.projectId] }),
+    // an event's project finds the subscriptions that follow it
+    index("webhook_subscription_project_project_idx").on(
+      t.projectId,
       t.subscriptionId,
     ),
   ],

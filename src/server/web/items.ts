@@ -27,7 +27,7 @@ import {
 import { NotFoundError } from "../service/errors.js";
 import type { Service } from "../service/index.js";
 import { photoUrlOf } from "../service/photos.js";
-import { amongVisible } from "../service/visible.js";
+import { amongProducts } from "../service/visible.js";
 import { timelineOf } from "./entries.js";
 import { createWebRouter, type Member } from "./env.js";
 import { actingAs, actorsById, visibleIds, visibleProduct } from "./visible.js";
@@ -78,7 +78,7 @@ export function visibleItem(db: Db, member: Member, ref: string) {
   const ids = visibleIds(member);
   const columns = { issue, productKey: product.key, productName: product.name };
   const visible = and(
-    amongVisible(issue.productId, ids),
+    amongProducts(issue.productId, ids),
     eq(product.id, issue.productId),
   );
   const match = itemKeyPattern.exec(ref);

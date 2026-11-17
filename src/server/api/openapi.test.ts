@@ -258,6 +258,18 @@ test("the legacy issue and label routes are marked deprecated, and their replace
   ).toBeUndefined();
 });
 
+test("the deprecated label list says what its replacement says about implicitly named products", async () => {
+  const res = await request("GET", "/api/v1/openapi.json", { key: null });
+  const spec = (await res.json()) as {
+    paths: Record<string, Record<string, { description?: string }>>;
+  };
+  const replacement = spec.paths["/products/{key}/labels"]?.get?.description;
+  expect(replacement).toMatch(/only through a project/);
+  expect(spec.paths["/projects/{ref}/labels"]?.get?.description).toContain(
+    replacement,
+  );
+});
+
 test.each([
   ["no Content-Type", {}, '{"name":"p"}', 415],
   ["malformed JSON", { "content-type": "application/json" }, "{", 400],

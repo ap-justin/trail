@@ -253,7 +253,10 @@ test("issue tools file, read, list and update an issue with its fields, labels a
     createdBy: bot.actor.id,
     completedAt: null,
   });
-  expect(await call(client, "get_item", { item: "MCI-1" })).toEqual(created);
+  expect(await call(client, "get_item", { item: "MCI-1" })).toEqual({
+    ...created,
+    access: "product",
+  });
 
   const done = await call(client, "update_item", {
     item: "mci-1",
@@ -561,6 +564,7 @@ test("whoami answers the key's bot and list_bots pages every bot with id, name, 
     scope: { products: null, projects: null, actions: null },
     ownProducts: [],
     products: expect.arrayContaining([{ key: seen, name: "whoami seen" }]),
+    impliedProjects: [],
     unreadMessages: 0,
     photoUrl: null,
     title: null,

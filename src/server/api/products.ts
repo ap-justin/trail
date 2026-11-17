@@ -5,6 +5,7 @@ import {
   pageQuerySchema,
   pageSchema,
   productCreateSchema,
+  productReadSchema,
   productSchema,
   productUpdateSchema,
   statusUpdateCreateSchema,
@@ -25,7 +26,13 @@ import {
   readErrors,
   writeErrors,
 } from "./routes.js";
-import { toLabel, toPage, toProduct, toStatusUpdate } from "./serialize.js";
+import {
+  toLabel,
+  toPage,
+  toProduct,
+  toProductRead,
+  toStatusUpdate,
+} from "./serialize.js";
 
 const tags = ["products"];
 
@@ -55,7 +62,7 @@ const listProducts = createRoute({
   tags,
   request: { query: pageQuerySchema },
   responses: {
-    200: jsonContent(pageSchema(productSchema), "A page of products"),
+    200: jsonContent(pageSchema(productReadSchema), "A page of products"),
     ...forbiddenError("read"),
     ...readErrors,
   },
@@ -68,7 +75,7 @@ const getProduct = createRoute({
   tags,
   request: { params: productParam },
   responses: {
-    200: jsonContent(productSchema, "The product"),
+    200: jsonContent(productReadSchema, "The product"),
     ...forbiddenError("read"),
     ...readErrors,
     ...notFoundError,
@@ -153,6 +160,8 @@ const listLabels = createRoute({
   method: "get",
   path: "/products/{key}/labels",
   summary: "List a product's labels, oldest first",
+  description:
+    "A product the key names only through a project drawing from its products is a 404 here, whose message names that project and the grants that would list its labels; through a project the key lists, its labels are listed.",
   tags,
   request: { params: productParam, query: pageQuerySchema },
   responses: {
@@ -179,14 +188,16 @@ export function productRoutes(service: Service) {
       c.json(
         toPage(
           service.listProducts(c.var.actor, c.req.valid("query")),
-          toProduct,
+          toProductRead,
         ),
         200,
       ),
     )
     .openapi(getProduct, (c) =>
       c.json(
-        toProduct(service.getProduct(c.var.actor, c.req.valid("param").key)),
+        toProductRead(
+          service.getProduct(c.var.actor, c.req.valid("param").key),
+        ),
         200,
       ),
     )

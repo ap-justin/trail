@@ -33,7 +33,7 @@ import {
   type FeedFilters,
   pageLimit,
 } from "../service/paging.js";
-import { amongVisible } from "../service/visible.js";
+import { amongProducts } from "../service/visible.js";
 import { entriesOf, shownEvent } from "./entries.js";
 import { createWebRouter, type Member } from "./env.js";
 import {
@@ -194,7 +194,7 @@ function botsActingIn(db: Db, productIds: string[]) {
             .where(
               and(
                 eq(activityEvent.actorId, actor.id),
-                amongVisible(activityEvent.productId, productIds),
+                amongProducts(activityEvent.productId, productIds),
               ),
             ),
         ),

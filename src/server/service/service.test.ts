@@ -17,9 +17,16 @@ import { ForbiddenError, NotFoundError, ValidationError } from "./errors.js";
 import {
   createService,
   type Issue,
+  type NamedProduct,
   type ProductView as Product,
 } from "./index.js";
 import { createBot, createHuman } from "./keys.js";
+
+/** A product read by a key whose products include it, which reads it whole. */
+const whole = (read: Product | NamedProduct): Product => {
+  if (!("createdBy" in read)) throw new Error(`read ${read.key} named only`);
+  return read;
+};
 
 const dir = mkdtempSync(join(tmpdir(), "trail-service-"));
 const db = openDatabase(join(dir, "trail.db"));
@@ -485,7 +492,7 @@ test("an update is attributed to the acting bot, not the row's creator", () => {
     action: "issue.updated",
     actorId: editor.id,
   });
-  expect(service.getProduct(bot, project.id).createdBy).toBe(bot.id);
+  expect(whole(service.getProduct(bot, project.id)).createdBy).toBe(bot.id);
   expect(service.getItem(bot, issue.id).createdBy).toBe(bot.id);
 });
 
@@ -501,7 +508,7 @@ describe("updatedAt", () => {
       project.updatedAt.getTime(),
     );
     expect(updated.createdAt).toEqual(project.createdAt);
-    expect(service.getProduct(bot, project.id).updatedAt).toEqual(
+    expect(whole(service.getProduct(bot, project.id)).updatedAt).toEqual(
       updated.updatedAt,
     );
   });
@@ -560,7 +567,10 @@ describe("updatedAt", () => {
         service.updateItem(bot, created.id, { title: "same", status: "open" }),
     ])[0] as Issue;
     expect(result).toEqual(created);
-    expect(service.getItem(bot, created.id)).toEqual(created);
+    expect(service.getItem(bot, created.id)).toEqual({
+      ...created,
+      access: "product",
+    });
     expect(published).toEqual([]);
   });
 });
@@ -859,9 +869,11 @@ test("whoami is the calling actor's row, label included", () => {
     photoUrl: null,
     unreadMessages: 0,
     ownProducts: [],
+    impliedProjects: [],
     products: service
       .listProducts(labelled, { limit: 200 })
-      .items.map(({ owner, ...row }) => row)
+      .items.map(whole)
+      .map(({ owner, ...row }) => row)
       .sort((a, b) => (a.key < b.key ? -1 : 1)),
   });
   expect(service.whoami(human)).toMatchObject({
@@ -936,7 +948,7 @@ describe("a page of projects or products", () => {
       statementsOf(() => {
         const page = service.listProducts(lead, { limit });
         expect(page.items).toHaveLength(limit);
-        expect(page.items[0]?.owner?.name).toBe("batched lead");
+        expect(page.items.map(whole)[0]?.owner?.name).toBe("batched lead");
       });
     expect(projects(50)).toBe(projects(5));
     expect(products(50)).toBe(products(5));

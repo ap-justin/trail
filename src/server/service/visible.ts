@@ -1,22 +1,198 @@
-import { inArray, type SQL } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, type SQL } from "drizzle-orm";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
+import type { Db } from "../db/client.js";
+import {
+  activityEvent,
+  comment,
+  project,
+  projectItem,
+  projectProduct,
+} from "../db/schema.js";
 import { NotFoundError } from "./errors.js";
 
 /**
- * The ids of the products a caller sees: a person's by their invite (/api/web),
- * a bot key's by its product list; null is every product.
+ * What a caller reaches, by id; null is everything. A person reaches their
+ * invited products (/api/web) and no project of their own; a bot key its
+ * products and projects, and with `implicitProjects` the items of every
+ * project drawing from its products too, to read and comment on. Project
+ * membership is read in each query, never copied onto the key.
  */
-export type VisibleIds = readonly string[] | null;
+export type Reach = {
+  products: readonly string[];
+  projects: readonly string[];
+  implicitProjects: boolean;
+} | null;
 
 /**
- * `column` holds the id of a visible product, checked inside the query so a
- * page is never trimmed afterwards; a NULL product id is never visible to a
- * list. No condition when every product is visible.
+ * The reach of a key with these products and projects: everything when
+ * `products` is null. A bot also reads the items of the projects drawing from
+ * its products; a person keeps the per-product view.
  */
-export const amongVisible = (
+export const reachOfScope = (
+  scope: {
+    products: readonly { id: string }[] | null;
+    projects: readonly { id: string }[];
+  },
+  bot: boolean,
+): Reach =>
+  scope.products === null
+    ? null
+    : {
+        products: scope.products.map((p) => p.id),
+        projects: scope.projects.map((p) => p.id),
+        implicitProjects: bot,
+      };
+
+/**
+ * `column` holds the id of one of these products, checked inside the query so
+ * a page is never trimmed afterwards; a NULL product id is never among them.
+ * No condition for null, every product.
+ */
+export const amongProducts = (
   column: SQLiteColumn,
-  ids: VisibleIds,
+  ids: readonly string[] | null,
 ): SQL | undefined => (ids === null ? undefined : inArray(column, [...ids]));
+
+/** The ids of the projects drawing from one of these products, as a subquery. */
+const projectsDrawingFrom = (db: Db, products: readonly string[]) =>
+  db
+    .select({ id: projectProduct.projectId })
+    .from(projectProduct)
+    .where(inArray(projectProduct.productId, [...products]));
+
+/**
+ * `column` holds the id of a project whose items the reach reaches: one it
+ * lists, or with `implicitProjects` one drawing from its products. Null when
+ * it reaches the items of no project.
+ */
+function itemProjects(
+  db: Db,
+  reach: NonNullable<Reach>,
+  column: SQLiteColumn,
+): SQL | null {
+  const listed =
+    reach.projects.length === 0
+      ? undefined
+      : inArray(column, [...reach.projects]);
+  const drawing =
+    reach.implicitProjects && reach.products.length > 0
+      ? inArray(column, projectsDrawingFrom(db, reach.products))
+      : undefined;
+  return or(listed, drawing) ?? null;
+}
+
+/**
+ * The item in `issueId` (of product `productId`) is reached: its product is
+ * one of the reach's, or it is in one of the projects whose items it reaches
+ * now.
+ */
+export function itemsReached(
+  db: Db,
+  reach: Reach,
+  issueId: SQLiteColumn,
+  productId: SQLiteColumn,
+): SQL | undefined {
+  if (reach === null) return undefined;
+  const byProduct = inArray(productId, [...reach.products]);
+  const projects = itemProjects(db, reach, projectItem.projectId);
+  if (projects === null) return byProduct;
+  return or(
+    byProduct,
+    inArray(
+      issueId,
+      db.select({ id: projectItem.issueId }).from(projectItem).where(projects),
+    ),
+  );
+}
+
+/**
+ * The product in `column` is one the caller may name, to read its name and
+ * key: one of the reach's products, or one a project whose items it reaches
+ * draws from. Naming a product reaches none of its items, and reads its labels
+ * and files on it only through a listed project.
+ */
+export function productsNamed(
+  db: Db,
+  reach: Reach,
+  column: SQLiteColumn,
+): SQL | undefined {
+  if (reach === null) return undefined;
+  const byProduct = inArray(column, [...reach.products]);
+  const projects = itemProjects(db, reach, projectProduct.projectId);
+  if (projects === null) return byProduct;
+  return or(
+    byProduct,
+    inArray(
+      column,
+      db
+        .select({ id: projectProduct.productId })
+        .from(projectProduct)
+        .where(projects),
+    ),
+  );
+}
+
+/** The project in `column` is reached: one of the reach's, or one drawing from one of its products. */
+export function projectsReached(
+  db: Db,
+  reach: Reach,
+  column: SQLiteColumn = project.id,
+): SQL | undefined {
+  if (reach === null) return undefined;
+  const byProduct = inArray(column, projectsDrawingFrom(db, reach.products));
+  if (reach.projects.length === 0) return byProduct;
+  return or(byProduct, inArray(column, [...reach.projects]));
+}
+
+/**
+ * The events `reach` sees: every event of its products; a project's own
+ * events (no product) when it reaches the project; and, through the projects
+ * whose items it reaches, every item joining or leaving one of them, the
+ * removal being the last event of an item that left, as a webhook following
+ * the project gets it, and the events of the items in them now and of their
+ * comments, an item's membership event only when that event's project is
+ * reached too.
+ */
+export function eventsReached(db: Db, reach: Reach): SQL | undefined {
+  if (reach === null) return undefined;
+  const byProduct = inArray(activityEvent.productId, [...reach.products]);
+  const projectOwn = and(
+    isNull(activityEvent.productId),
+    projectsReached(db, reach, activityEvent.projectId),
+  );
+  const projects = itemProjects(db, reach, projectItem.projectId);
+  if (projects === null) return or(byProduct, projectOwn);
+  const items = db
+    .select({ id: projectItem.issueId })
+    .from(projectItem)
+    .where(projects);
+  return or(
+    byProduct,
+    projectOwn,
+    and(
+      eq(activityEvent.subjectType, "issue"),
+      itemProjects(db, reach, activityEvent.projectId) as SQL,
+    ),
+    and(
+      eq(activityEvent.subjectType, "issue"),
+      inArray(activityEvent.subjectId, items),
+      or(
+        isNull(activityEvent.projectId),
+        projectsReached(db, reach, activityEvent.projectId),
+      ),
+    ),
+    and(
+      eq(activityEvent.subjectType, "comment"),
+      inArray(
+        activityEvent.subjectId,
+        db
+          .select({ id: comment.id })
+          .from(comment)
+          .where(inArray(comment.issueId, items)),
+      ),
+    ),
+  );
+}
 
 // One message for a reference that is missing and one the caller can't see, so a 404 never tells them apart.
 const notFound = (what: string, ref: string, help: string) =>

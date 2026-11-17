@@ -9,7 +9,7 @@ import {
   webhookTestResultSchema,
   webhookUpdateSchema,
 } from "../../shared/schemas.js";
-import type { Service } from "../service/index.js";
+import type { Service, WebhookWritten } from "../service/index.js";
 import {
   PING_LIMIT,
   PING_WINDOW_MS,
@@ -34,7 +34,7 @@ import { deprecated, toPage, toWebhook } from "./serialize.js";
 
 const tags = ["webhooks"];
 const own =
-  "Acts on the calling bot's own webhooks only; a webhook of another bot, or one that follows a product outside the key's scope, is a 404.";
+  "Acts on the calling bot's own webhooks only; a webhook of another bot, or one that follows a product outside the key's products or a project the key neither lists nor reaches through its products, is a 404.";
 
 const URL_TAKEN = "This bot already has a webhook to that URL";
 const urlTaken = { 409: jsonContent(errorSchema, URL_TAKEN) };
@@ -53,14 +53,14 @@ const createWebhook = createRoute({
   method: "post",
   path: "/webhooks",
   summary:
-    "Subscribe to products' events, or to your inbox, with a signed webhook",
-  description: `products names the products to follow, and needs the read action; projects is its deprecated alias, and not both. Or kind inbox, with no products, for the messages other bots send you. ${WEBHOOK_INBOX} ${WEBHOOK_SETUP} ${WEBHOOK_DELIVERY}`,
+    "Subscribe to products' and projects' events, or to your inbox, with a signed webhook",
+  description: `products names the products to follow by key and projects the projects by slug; a product key in projects (like TRL) still follows that product, as the deprecated alias of products did, and the response carries deprecated. An activity webhook needs the read action and at least one of either, and a key reaching exactly one project and no product follows that project when both are left out. Or kind inbox, with neither, for the messages other bots send you. ${WEBHOOK_INBOX} ${WEBHOOK_SETUP} ${WEBHOOK_DELIVERY}`,
   tags,
   request: { body: jsonBody(webhookCreateSchema) },
   responses: {
     201: jsonContent(
       webhookSchema.extend({ deprecated: z.string().optional() }),
-      "The webhook, without its secret; deprecated is set when the body sent projects",
+      "The webhook, without its secret; deprecated is set when projects carried a product key",
     ),
     ...forbiddenError("read"),
     ...writeErrors,
@@ -102,14 +102,14 @@ const getWebhook = createRoute({
 const updateWebhook = createRoute({
   method: "patch",
   path: "/webhooks/{id}",
-  summary: "Change a webhook's URL or products, and resume it",
-  description: `Needs the read action, except on an inbox webhook. ${own} Fields left out stay as they are; products (or its deprecated alias projects) replaces the whole list. Any update, one with no fields too, ends a pause. The secret changes through PUT /webhooks/{id}/secret.`,
+  summary: "Change a webhook's URL, products or projects, and resume it",
+  description: `Needs the read action, except on an inbox webhook. ${own} Fields left out stay as they are; products replaces the whole list of product keys and projects the whole list of project slugs (a product key in projects is the deprecated alias of products, and a projects of product keys alone leaves the project slugs as they are), and an activity webhook keeps at least one. Any update, one with no fields too, ends a pause. The secret changes through PUT /webhooks/{id}/secret.`,
   tags,
   request: { params: webhookParam, body: jsonBody(webhookUpdateSchema) },
   responses: {
     200: jsonContent(
       webhookSchema.extend({ deprecated: z.string().optional() }),
-      "The updated webhook; deprecated is set when the body sent projects",
+      "The updated webhook; deprecated is set when projects carried a product key",
     ),
     ...forbiddenError("read"),
     ...writeErrors,
@@ -180,17 +180,20 @@ const pingWebhook = createRoute({
   },
 });
 
+/** The view of a created or updated webhook, noted when `projects` carried product keys. */
+const written = (hook: WebhookWritten) =>
+  hook.productAlias
+    ? deprecated(toWebhook(hook), deprecations.webhookProjects)
+    : toWebhook(hook);
+
 export function webhookRoutes(service: Service) {
   return createRouter()
     .openapi(createWebhook, async (c) => {
-      const input = c.req.valid("json");
-      const made = toWebhook(await service.createWebhook(c.var.actor, input));
-      return c.json(
-        input.projects === undefined
-          ? made
-          : deprecated(made, deprecations.webhookProjects),
-        201,
+      const made = await service.createWebhook(
+        c.var.actor,
+        c.req.valid("json"),
       );
+      return c.json(written(made), 201);
     })
     .openapi(listWebhooks, (c) =>
       c.json(toPage(service.listWebhooks(c.var.actor), toWebhook), 200),
@@ -202,20 +205,12 @@ export function webhookRoutes(service: Service) {
       ),
     )
     .openapi(updateWebhook, async (c) => {
-      const patch = c.req.valid("json");
-      const updated = toWebhook(
-        await service.updateWebhook(
-          c.var.actor,
-          c.req.valid("param").id,
-          patch,
-        ),
+      const updated = await service.updateWebhook(
+        c.var.actor,
+        c.req.valid("param").id,
+        c.req.valid("json"),
       );
-      return c.json(
-        patch.projects === undefined
-          ? updated
-          : deprecated(updated, deprecations.webhookProjects),
-        200,
-      );
+      return c.json(written(updated), 200);
     })
     .openapi(rotateSecret, (c) =>
       c.json(

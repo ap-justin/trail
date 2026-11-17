@@ -367,21 +367,22 @@ describe("a key stored before items had products and types", () => {
 });
 
 describe("a retry hashes the request as the caller sent it, not values filled in from current data", () => {
-  test("a todo retried after its product changed owner replays", async () => {
+  test("a legacy create retried after its product changed owner replays the todo it made", async () => {
     const product = (await (
       await request("POST", "/api/v1/products", {
         json: { key: projectKey(), name: "owner moves" },
       })
     ).json()) as Body;
-    const json = { type: "todo", product: product.key, title: "planned" };
-    const first = await post("/items", json, "todo before owner move");
+    const json = { projectId: product.key, title: "planned" };
+    const first = await post("/issues", json, "todo before owner move");
     expect(first.status).toBe(201);
+    expect(((await first.clone().json()) as Body).type).toBe("todo");
     const heir = addBot("idem heir");
     await request("PATCH", `/api/v1/products/${product.key}`, {
       json: { owner: heir.actor.id },
     });
     const events = eventCount();
-    const again = await post("/items", json, "todo before owner move");
+    const again = await post("/issues", json, "todo before owner move");
     expect(again.status).toBe(201);
     expect(await again.json()).toEqual(await first.json());
     expect(eventCount()).toBe(events);

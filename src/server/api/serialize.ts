@@ -9,6 +9,7 @@ import type {
   LabelView,
   MarkReadResultView,
   MessageView,
+  NamedProductView,
   PageView,
   ProductView,
   ProjectView,
@@ -27,6 +28,7 @@ import type {
   Label,
   MarkReadResult,
   Message,
+  NamedProduct,
   Page,
   ProductView as Product,
   ProjectView as Project,
@@ -35,7 +37,7 @@ import type {
   Webhook,
   Whoami,
 } from "../service/index.js";
-import type { KeyScope } from "../service/keys.js";
+import { type KeyScope, scopeView } from "../service/keys.js";
 import { MESSAGE_PREVIEW_CHARS } from "../service/messages.js";
 
 // One function per resource, each listing its wire keys, so a new column reaches the wire only on purpose.
@@ -53,6 +55,15 @@ export function toProduct(row: Product): ProductView {
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+/** A product as a key reads it: `toProduct`, or for one named only through a project its id, key and name. */
+export function toProductRead(
+  row: Product | NamedProduct,
+): ProductView | NamedProductView {
+  return "createdBy" in row
+    ? toProduct(row)
+    : { id: row.id, key: row.key, name: row.name };
 }
 
 export function toProject(row: Project): ProjectView {
@@ -106,6 +117,7 @@ export function toIssue(row: Issue): IssueView {
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     completedAt: row.completedAt?.toISOString() ?? null,
+    ...(row.access && { access: row.access }),
   };
 }
 
@@ -194,16 +206,16 @@ export function toActor(row: Actor): ActorView {
 }
 
 export function toWhoami(row: Whoami, scope: KeyScope): WhoamiView {
-  const products = scope.products?.map((p) => p.key) ?? null;
   const ref = (p: { key: string; name: string }) => ({
     key: p.key,
     name: p.name,
   });
   return {
     ...toActor(row),
-    scope: { products, projects: products, actions: scope.actions },
+    scope: scopeView(scope),
     ownProducts: row.ownProducts.map(ref),
     products: row.products.map(ref),
+    impliedProjects: row.impliedProjects,
     photoUrl: row.photoUrl,
     title: row.title,
     unreadMessages: row.unreadMessages,
@@ -246,7 +258,7 @@ export function toWebhook(row: Webhook): WebhookView {
     kind: row.kind,
     url: row.url,
     products: row.products,
-    projects: row.products,
+    projects: row.projects,
     paused: row.pausedAt !== null,
     pausedAt: row.pausedAt?.toISOString() ?? null,
     consecutiveFailures: row.consecutiveFailures,

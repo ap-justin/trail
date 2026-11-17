@@ -7,9 +7,8 @@ import {
   gt,
   inArray,
   isNotNull,
-  isNull,
   lt,
-  or,
+  notInArray,
   type SQL,
   sql,
 } from "drizzle-orm";
@@ -103,11 +102,16 @@ import {
   withinIssueCap,
 } from "./validate.js";
 import {
-  amongVisible,
+  amongProducts,
+  eventsReached,
+  itemsReached,
   noIssue,
   noProduct,
   noProject,
-  type VisibleIds,
+  productsNamed,
+  projectsReached,
+  type Reach,
+  reachOfScope,
 } from "./visible.js";
 import {
   countOwn,
@@ -117,7 +121,7 @@ import {
   PING_LIMIT,
   PING_WINDOW_MS,
   resume,
-  setProducts,
+  setFollows,
   validSecret,
   WEBHOOK_PRODUCTS_MAX,
   WEBHOOKS_PER_BOT_MAX,
@@ -149,7 +153,11 @@ export type { Link, LinkInput } from "./validate.js";
  * Who a call acts as. A bot key's `scope` limits what it reaches; a person
  * carries none, and /api/web applies their visibility before calling.
  */
-export type ActingActor = Pick<Actor, "id" | "kind"> & { scope?: KeyScope };
+export type ActingActor = Pick<Actor, "id" | "kind"> & {
+  /** the key the call came with; none for a person */
+  keyId?: string;
+  scope?: KeyScope;
+};
 /** An actor with the URL of its photo, null without one. */
 export type ActorWithPhoto = Actor & { photoUrl: string | null };
 export type Product = typeof product.$inferSelect;
@@ -169,7 +177,17 @@ export type Issue = IssueRow & {
   links: Link[];
   assignee: ActorRef | null;
   projects: { slug: string; name: string }[];
+  /** On a bot's get_item: why its key reaches the item; see `ItemAccess`. */
+  access?: ItemAccess;
 };
+
+/**
+ * Why a bot key reaches an item, the strongest grant first: its product
+ * grant covers the item's product (an unrestricted key's too), a project it
+ * lists holds the item, or a project drawing from one of its products holds
+ * it, which lets the key read the item and comment on it and nothing else.
+ */
+export type ItemAccess = "product" | "project" | "via_project";
 
 /** An item the product's own bot creates is a todo; anyone else's is an issue. */
 const legacyTypeOf = (target: Product, creatorId: string): IssueType =>
@@ -194,6 +212,9 @@ export type StatusUpdate = {
 /** A product with its owner bot. */
 export type ProductView = Product & { owner: ActorRef | null };
 
+/** A product the actor reaches only through a project: what it may name, and no more. */
+export type NamedProduct = Pick<Product, "id" | "key" | "name">;
+
 export type ItemCounts = Record<IssueStatus, number>;
 
 /**
@@ -209,10 +230,14 @@ export type ProjectView = ProjectRow & {
   latestStatusUpdate: (StatusUpdate & { author: ActorRef }) | null;
 };
 
-/** What `get_project` and `update_project` found: a project, or a product by the legacy meaning. */
-export type ProjectOrProduct =
-  | { kind: "project"; project: ProjectView }
-  | { kind: "product"; product: ProductView };
+/**
+ * What `get_project` and `update_project` found: a project, or a product by
+ * the legacy meaning, named only (`P` widened to `NamedProduct`) where a read
+ * reaches it only through a project.
+ */
+export type ProjectOrProduct<
+  P extends ProductView | NamedProduct = ProductView,
+> = { kind: "project"; project: ProjectView } | { kind: "product"; product: P };
 
 /** Every create takes these; a repeat with the same key returns the first result. */
 export type WriteOptions = { idempotencyKey?: string };
@@ -236,6 +261,8 @@ export type ProductPatch = {
 /** An item to create. `product` takes the product's key or id. */
 export type ItemInput = {
   product?: string;
+  /** an issue's project, by slug: the issue joins it as it is filed */
+  project?: string;
   title: string;
   description?: string;
   /** a bot's id or name, or a person's id */
@@ -379,28 +406,19 @@ export type ActivityEntry = ActivityEvent & {
 export type Whoami = ActorWithPhoto & {
   ownProducts: Product[];
   products: Product[];
+  /** The slugs of the projects its key reads through its products, A to Z; see `implicitProjectsOf`. */
+  impliedProjects: string[];
   unreadMessages: number;
 };
 
-/** The products a webhook follows: `products`, or `projects`, its deprecated alias. */
-export type FollowedProducts = { products?: string[]; projects?: string[] };
+/** What an activity webhook follows: product keys and project slugs. */
+export type Follows = { products?: string[]; projects?: string[] };
 
-function followedRefs(
-  input: FollowedProducts,
-): { refs: string[]; field: "products" | "projects" } | undefined {
-  if (input.products !== undefined && input.projects !== undefined) {
-    throw new ValidationError(
-      "send products alone: projects is its deprecated alias, and both together is ambiguous",
-    );
-  }
-  if (input.products !== undefined) {
-    return { refs: input.products, field: "products" };
-  }
-  if (input.projects !== undefined) {
-    return { refs: input.projects, field: "projects" };
-  }
-  return undefined;
-}
+/** A created or updated webhook; `productAlias` when `projects` carried product keys, its deprecated use. */
+export type WebhookWritten = Webhook & { productAlias: boolean };
+
+const followsSent = (input: Follows) =>
+  input.products !== undefined || input.projects !== undefined;
 
 /** Most items one add_to_project call takes. */
 export const PROJECT_ITEMS_MAX = 100;
@@ -441,9 +459,26 @@ function requireAction(
   );
 }
 
-/** "product A" or "products A and B": the products a key is limited to. */
-const reachOf = (products: { key: string }[]) =>
-  `product${products.length > 1 ? "s" : ""} ${andList(products.map((p) => p.key))}`;
+const plural = (n: number) => (n > 1 ? "s" : "");
+
+/** "product A", "products A and B", "project recon", "product A and project recon": what a restricted key reaches. */
+const reachOf = ({ products, projects }: KeyScope) =>
+  andList(
+    [
+      products?.length
+        ? `product${plural(products.length)} ${andList(products.map((p) => p.key))}`
+        : "",
+      projects.length
+        ? `project${plural(projects.length)} ${andList(projects.map((p) => p.slug))}`
+        : "",
+    ].filter((part) => part !== ""),
+  );
+
+/** The key the minter is asked for instead of a restricted one. */
+const unlimitedKey = (scope: KeyScope) =>
+  scope.projects.length === 0
+    ? "one with no product list"
+    : "one with no product or project list";
 
 /** Fields of `patch` whose value differs from `current`, as from/to pairs. */
 function changesOf<T extends object>(
@@ -480,8 +515,33 @@ function changedFields<T extends object>(
 
 const isEmpty = (fields: object) => Object.keys(fields).length === 0;
 
-const visibleIdsOf = (actor: ActingActor): VisibleIds =>
-  actor.scope?.products?.map((p) => p.id) ?? null;
+/** What the actor reaches: everything, unless its scope limits it to products, projects or both. */
+const reachFor = (actor: ActingActor): Reach =>
+  actor.scope ? reachOfScope(actor.scope, actor.kind === "bot") : null;
+
+/** The product ids the actor's own product grant covers, null for every one; a project grant adds none. */
+const productIdsOf = (actor: ActingActor): readonly string[] | null =>
+  reachFor(actor)?.products ?? null;
+
+/** The project ids the actor's own project grant lists, null for every one; a product grant adds none. */
+const projectIdsOf = (actor: ActingActor): readonly string[] | null =>
+  reachFor(actor)?.projects ?? null;
+
+/** The actor's product grant covers the product: every one of its items is reached. */
+const grantsProduct = (actor: ActingActor, productId: string) =>
+  productIdsOf(actor)?.includes(productId) ?? true;
+
+/** "project recon", "projects recon and solo" */
+const projectList = (slugs: readonly string[]) =>
+  `project${plural(slugs.length)} ${andList(slugs)}`;
+
+/** "product ATL or project recon", "product ATL or one of projects recon, solo": the grants that would widen a key's implicit read. */
+const grantsFor = (productKey: string, slugs: readonly string[]) =>
+  `product ${productKey} or ${slugs.length === 1 ? `project ${slugs[0]}` : `one of projects ${slugs.join(", ")}`}`;
+
+/** `project: "recon"`, `project: "recon" or project: "solo"`: the argument to resend with. */
+const projectArgs = (slugs: readonly string[]) =>
+  slugs.map((s) => `project: "${s}"`).join(" or ");
 
 const sameJson = (a: unknown, b: unknown) =>
   JSON.stringify(a) === JSON.stringify(b);
@@ -548,19 +608,12 @@ export function createService({
   }
 
   /**
-   * Product keys or ids as the product ids a webhook follows; one the key
-   * can't see is a 404, as everywhere, and a project's slug a 422 naming its
-   * products, since `projects` reads as if it took one.
+   * Product keys or ids as the product ids a webhook follows. One the key
+   * can't see is a 404, as everywhere, one it reaches only through its
+   * projects a 404 saying to follow those, for the events of their items, and
+   * a project's slug a 422 saying to send it in `projects`.
    */
-  function webhookProductIds(
-    actor: ActingActor,
-    { refs, field }: { refs: string[]; field: "products" | "projects" },
-  ): string[] {
-    if (refs.length === 0) {
-      throw new ValidationError(
-        "products must name at least one product: send the keys (like TRL) of the products whose events you want",
-      );
-    }
+  function webhookProductIds(actor: ActingActor, refs: string[]): string[] {
     if (refs.length > WEBHOOK_PRODUCTS_MAX) {
       throw new ValidationError(
         `products names ${refs.length} products, over the limit of ${WEBHOOK_PRODUCTS_MAX}: follow fewer, or split them across webhooks`,
@@ -568,18 +621,121 @@ export function createService({
     }
     const idOf = (ref: string) => {
       try {
-        return resolveProduct(db, ref, actor).id;
+        return findProduct(
+          db,
+          ref,
+          amongProducts(product.id, productIdsOf(actor)),
+        ).id;
       } catch (error) {
-        const slugged =
-          error instanceof NotFoundError && findProject(db, ref, actor);
+        if (!(error instanceof NotFoundError)) throw error;
+        const named = namedOnly(db, ref, actor);
+        if (named) {
+          const slugs = [
+            ...projectsDrawingFrom(db, actor, named.id),
+            ...implicitProjectsOf(db, actor, named.id),
+          ]
+            .map((p) => p.slug)
+            .sort();
+          throw new NotFoundError(
+            `this key reaches product ${named.key} only through ${projectList(slugs)}: send projects: ${JSON.stringify(slugs)} in place of ${named.key}, for the events of the project's items; the rest of ${named.key} needs a key that lists ${named.key}`,
+          );
+        }
+        const slugged = findProject(db, ref, actor);
         if (!slugged) throw error;
-        const keys = projectView(db, slugged, actor).products.map((p) => p.key);
         throw new ValidationError(
-          `${field} takes product keys${field === "projects" ? ", as products does," : ""} and ${ref} is a project's slug: send products with the keys of the products it draws from (${andList(keys)})`,
+          `products takes product keys and ${ref} is a project's slug: send it in projects (projects: ["${slugged.slug}"])`,
         );
       }
     };
     return [...new Set(refs.map(idOf))];
+  }
+
+  /**
+   * `projects` as sent, value by value: a project's slug follows the project,
+   * and a product's key in any case (upper-cased, which no slug matches) is
+   * the deprecated alias of `products`. One the key can name
+   * neither way is the 404 a missing project is.
+   */
+  function splitProjectRefs(
+    actor: ActingActor,
+    refs: string[],
+  ): { projectIds: string[]; productKeys: string[] } {
+    if (refs.length > WEBHOOK_PRODUCTS_MAX) {
+      throw new ValidationError(
+        `projects names ${refs.length} projects, over the limit of ${WEBHOOK_PRODUCTS_MAX}: follow fewer, or split them across webhooks`,
+      );
+    }
+    const projectIds: string[] = [];
+    const productKeys: string[] = [];
+    for (const ref of refs) {
+      const found = db
+        .select({ id: project.id })
+        .from(project)
+        .where(and(eq(project.slug, ref.trim()), reachableProjects(actor)))
+        .get();
+      if (found) {
+        projectIds.push(found.id);
+        continue;
+      }
+      const named = db
+        .select({ key: product.key })
+        .from(product)
+        .where(
+          and(
+            eq(product.key, ref.trim().toUpperCase()),
+            productsNamed(db, reachFor(actor), product.id),
+          ),
+        )
+        .get();
+      if (!named) throw noProject(ref);
+      productKeys.push(named.key);
+    }
+    return { projectIds: [...new Set(projectIds)], productKeys };
+  }
+
+  /**
+   * The products and projects an activity webhook follows, as ids, from the
+   * lists sent; a list left out is undefined. Product keys sent in `projects`
+   * join `products`, and `productAlias` says some were; a `projects` of
+   * product keys alone leaves the project follows as they are. A key reaching exactly
+   * one project and no product follows that project when neither list is sent.
+   */
+  function webhookFollows(
+    actor: ActingActor,
+    input: Follows,
+  ): { productIds?: string[]; projectIds?: string[]; productAlias: boolean } {
+    const scope = actor.scope;
+    const soleProject =
+      scope?.products?.length === 0 && scope.projects.length === 1
+        ? scope.projects[0]
+        : undefined;
+    if (!followsSent(input) && soleProject) {
+      return {
+        productIds: [],
+        projectIds: [soleProject.id],
+        productAlias: false,
+      };
+    }
+    const split =
+      input.projects === undefined
+        ? undefined
+        : splitProjectRefs(actor, input.projects);
+    const productAlias = (split?.productKeys.length ?? 0) > 0;
+    const productRefs =
+      input.products === undefined && !productAlias
+        ? undefined
+        : [...(input.products ?? []), ...(split?.productKeys ?? [])];
+    return {
+      ...(productRefs !== undefined && {
+        productIds: webhookProductIds(actor, productRefs),
+      }),
+      // a list of product keys alone is the old alias call, which leaves project follows alone
+      ...(split !== undefined &&
+        (split.projectIds.length > 0 || !productAlias) && {
+          projectIds: split.projectIds,
+        }),
+      productAlias,
+    };
   }
 
   /** The URL vetted and its address resolved; a refusal is a 422 saying why. */
@@ -594,17 +750,37 @@ export function createService({
     }
   }
 
-  /** True when every product the webhook follows is within the key's scope. */
+  /** True when every product the webhook follows is within the key's products, and every project it follows is one whose items the key reads. */
   function withinScope(actor: ActingActor, hook: Webhook): boolean {
     const scoped = actor.scope?.products;
     if (scoped == null) return true;
-    return hook.products.every((key) => scoped.some((p) => p.key === key));
+    if (!hook.products.every((key) => scoped.some((p) => p.key === key))) {
+      return false;
+    }
+    if (hook.projects.length === 0) return true;
+    const reached = db
+      .select({ n: sql<number>`count(*)` })
+      .from(project)
+      .where(
+        and(inArray(project.slug, hook.projects), reachableProjects(actor)),
+      )
+      .get()?.n;
+    return reached === hook.projects.length;
   }
 
   /** True when the key can read, update and delete the webhook: an activity one needs the read action too. */
   function canManage(actor: ActingActor, hook: Webhook): boolean {
     const reads = actor.scope?.actions?.includes("read") ?? true;
     return withinScope(actor, hook) && (reads || hook.kind === "inbox");
+  }
+
+  /**
+   * The `apiKeyId` a write records on a webhook: the key making it, which
+   * deliveries are checked against from then on (an inbox webhook's only for
+   * being live). It passed `canManage`, so it reaches what the webhook follows.
+   */
+  function managingKey(actor: ActingActor) {
+    return actor.keyId ? { apiKeyId: actor.keyId } : {};
   }
 
   /** The 409 for a URL the bot already uses: names the webhook only when this key can manage it. */
@@ -615,7 +791,7 @@ export function createService({
     advice: string,
   ) {
     const unmanaged = new ConflictError(
-      "this bot already has a webhook to that URL that this key can't manage: use a different URL, or ask for a key that can read every product that webhook follows",
+      "this bot already has a webhook to that URL that this key can't manage: use a different URL, or ask for a key that can read every product and project that webhook follows",
     );
     try {
       if (!canManage(actor, ownWebhook(actor, twinId, from).view)) {
@@ -690,7 +866,10 @@ export function createService({
    * `commit` for a create. `prepare` resolves the input inside the transaction
    * and returns it normalised as `request`, which an idempotency key is checked
    * against before `write` runs; a replay writes nothing and returns the first
-   * result.
+   * result once `replay` passes it: the access checks `write` runs, then the
+   * 404 a read gives when the caller no longer reaches what the result is on.
+   * `replay` is left out where `prepare` already resolved that among what the
+   * caller reaches.
    */
   function create<T>(
     actor: ActingActor,
@@ -700,6 +879,7 @@ export function createService({
       request: unknown;
       legacyRequest?: unknown;
       write: () => Write<T>;
+      replay?: (stored: T) => void;
     },
   ): T {
     const key =
@@ -707,24 +887,217 @@ export function createService({
         ? undefined
         : validIdempotencyKey(options.idempotencyKey);
     return commit((tx) => {
-      const { request, legacyRequest, write } = prepare(tx);
+      const { request, legacyRequest, write, replay: check } = prepare(tx);
       if (key === undefined) return write();
       const idem: IdempotentRequest = { key, scope, request, legacyRequest };
       const replay = replayOf<T>(tx, actor.id, idem);
-      if (replay !== undefined) return { result: replay, event: null };
+      if (replay !== undefined) {
+        check?.(replay);
+        return { result: replay, event: null };
+      }
       const written = write();
       storeResult(tx, actor.id, idem, written.result);
       return written;
     });
   }
 
-  /** The product the actor sees with this id, or else this key (in any case). */
+  /**
+   * The product with this id, or else this key (in any case), among those the
+   * actor's product grant covers: the products whose every item it reaches.
+   */
   function resolveProduct(
     tx: Tx | Db,
     ref: string,
     actor: ActingActor,
   ): Product {
-    const visible = amongVisible(product.id, visibleIdsOf(actor));
+    try {
+      return findProduct(
+        tx,
+        ref,
+        amongProducts(product.id, productIdsOf(actor)),
+      );
+    } catch (error) {
+      if (!(error instanceof NotFoundError)) throw error;
+      const named = namedOnly(tx, ref, actor);
+      if (!named) throw error;
+      const slugs = projectsDrawingFrom(tx, actor, named.id).map((p) => p.slug);
+      if (slugs.length === 0) {
+        const via = implicitProjectsOf(tx, actor, named.id).map((p) => p.slug);
+        throw new NotFoundError(
+          `this key reads product ${named.key} only through ${projectList(via)}, which reaches ${via.length === 1 ? `${via[0]}'s` : "their"} ${named.key} items to read and comment on: anything on ${named.key} itself needs a key that lists ${named.key}`,
+        );
+      }
+      throw new NotFoundError(
+        `this key reaches product ${named.key} only through ${projectList(slugs)}: send ${projectArgs(slugs)} in place of product (file_issue takes both, to file into ${named.key} within the project); anything else on ${named.key} itself needs a key that lists ${named.key}`,
+      );
+    }
+  }
+
+  /** The product the actor may name but whose items it reaches only through its projects; undefined for any other ref. */
+  function namedOnly(
+    tx: Tx | Db,
+    ref: string,
+    actor: ActingActor,
+  ): Product | undefined {
+    try {
+      const named = resolveNamedProduct(tx, ref, actor);
+      return grantsProduct(actor, named.id) ? undefined : named;
+    } catch (error) {
+      if (!(error instanceof NotFoundError)) throw error;
+      return undefined;
+    }
+  }
+
+  /** The actor's own projects that draw from the product, A to Z by slug. */
+  function projectsDrawingFrom(
+    tx: Tx | Db,
+    actor: ActingActor,
+    productId: string,
+  ): ProjectRow[] {
+    const own = actor.scope?.projects.map((p) => p.id) ?? [];
+    if (own.length === 0) return [];
+    return tx
+      .select(getTableColumns(project))
+      .from(project)
+      .innerJoin(projectProduct, eq(projectProduct.projectId, project.id))
+      .where(
+        and(inArray(project.id, own), eq(projectProduct.productId, productId)),
+      )
+      .orderBy(project.slug)
+      .all();
+  }
+
+  /**
+   * The projects, A to Z by slug, whose items a bot reads without listing
+   * them: those drawing from one of its own products; with `productId`, only
+   * those drawing from that product too.
+   */
+  function implicitProjectsOf(
+    tx: Tx | Db,
+    actor: ActingActor,
+    productId?: string,
+  ): ProjectRow[] {
+    const reach = reachFor(actor);
+    if (reach === null || !reach.implicitProjects) return [];
+    return tx
+      .select()
+      .from(project)
+      .where(
+        and(
+          notInArray(project.id, [...reach.projects]),
+          projectsReached(db, { ...reach, projects: [] }),
+          productId === undefined
+            ? undefined
+            : inArray(
+                project.id,
+                tx
+                  .select({ id: projectProduct.projectId })
+                  .from(projectProduct)
+                  .where(eq(projectProduct.productId, productId)),
+              ),
+        ),
+      )
+      .orderBy(project.slug)
+      .all();
+  }
+
+  /** "Ask alpha, the owner of ATL, for that grant.", or the key's minter when the product has no owner. */
+  function askForGrant(tx: Tx | Db, named: Product): string {
+    const owner =
+      named.ownerId === null
+        ? undefined
+        : actorRefs(tx, [named.ownerId]).get(named.ownerId)?.name;
+    return owner === undefined
+      ? "Ask whoever minted the key for that grant."
+      : `Ask ${owner}, the owner of ${named.key}, for that grant.`;
+  }
+
+  /**
+   * Refuses filing on `named` when the actor reaches it only through
+   * projects drawing from its own products: that read gives no filing.
+   */
+  function requireFilingGrant(tx: Tx, actor: ActingActor, named: Product) {
+    if (grantsProduct(actor, named.id)) return;
+    if (projectsDrawingFrom(tx, actor, named.id).length > 0) return;
+    const via = implicitProjectsOf(tx, actor, named.id);
+    const slugs = via.map((p) => p.slug);
+    const own = tx
+      .selectDistinct({ key: product.key })
+      .from(product)
+      .innerJoin(projectProduct, eq(projectProduct.productId, product.id))
+      .where(
+        and(
+          inArray(
+            projectProduct.projectId,
+            via.map((p) => p.id),
+          ),
+          amongProducts(product.id, productIdsOf(actor)),
+        ),
+      )
+      .orderBy(product.key)
+      .all()
+      .map((p) => p.key);
+    const fileOn = own.length === 1 ? own[0] : `one of ${andList(own)}`;
+    const into =
+      slugs.length === 1
+        ? `with project: "${slugs[0]}" to put the issue in ${slugs[0]}`
+        : `with ${projectArgs(slugs)} to put the issue in that project`;
+    throw new ForbiddenScopeError(
+      `this key reads product ${named.key} only through ${projectList(slugs)}, which lets it read ${slugs.length === 1 ? `${slugs[0]}'s` : "their"} ${named.key} items and comment on them and file nothing on ${named.key}: file on ${fileOn} (${into}), or get a key that lists ${grantsFor(named.key, slugs)}. ${askForGrant(tx, named)}`,
+    );
+  }
+
+  /** `resolveProduct` among the products the actor may name, which adds those its projects draw from. */
+  function resolveNamedProduct(
+    tx: Tx | Db,
+    ref: string,
+    actor: ActingActor,
+  ): Product {
+    return findProduct(tx, ref, productsNamed(db, reachFor(actor), product.id));
+  }
+
+  /**
+   * `resolveNamedProduct` without the products named only through the implicit
+   * read, which shows their name and key and never their labels: one of those
+   * is a 404 naming the projects that show it and the grants that would list its labels.
+   */
+  function resolveLabeledProduct(
+    tx: Tx | Db,
+    ref: string,
+    actor: ActingActor,
+  ): Product {
+    const reach = reachFor(actor);
+    try {
+      return findProduct(
+        tx,
+        ref,
+        productsNamed(
+          db,
+          reach && { ...reach, implicitProjects: false },
+          product.id,
+        ),
+      );
+    } catch (error) {
+      if (!(error instanceof NotFoundError)) throw error;
+      let named: Product;
+      try {
+        named = resolveNamedProduct(tx, ref, actor);
+      } catch (unnamed) {
+        throw unnamed instanceof NotFoundError ? error : unnamed;
+      }
+      const via = implicitProjectsOf(tx, actor, named.id).map((p) => p.slug);
+      if (via.length === 0) throw error;
+      throw new NotFoundError(
+        `this key reads only the name and key of product ${named.key}, through ${projectList(via)}: ${named.key}'s labels need a key that lists ${grantsFor(named.key, via)}. ${askForGrant(tx, named)}`,
+      );
+    }
+  }
+
+  function findProduct(
+    tx: Tx | Db,
+    ref: string,
+    visible: SQL | undefined,
+  ): Product {
     const found =
       tx
         .select()
@@ -740,17 +1113,9 @@ export function createService({
     return found;
   }
 
-  /** Projects drawing from at least one product the actor reaches; every project for an unrestricted actor. */
+  /** The actor's projects and those drawing from one of its products; every project for an unrestricted actor. */
   function reachableProjects(actor: ActingActor): SQL | undefined {
-    const ids = visibleIdsOf(actor);
-    if (ids === null) return undefined;
-    return inArray(
-      project.id,
-      db
-        .select({ id: projectProduct.projectId })
-        .from(projectProduct)
-        .where(inArray(projectProduct.productId, [...ids])),
-    );
+    return projectsReached(db, reachFor(actor));
   }
 
   /** The project with exactly this slug, among those the actor reaches. */
@@ -781,7 +1146,7 @@ export function createService({
     if (found) return found;
     let named: Product | undefined;
     try {
-      named = resolveProduct(tx, slug, actor);
+      named = resolveNamedProduct(tx, slug, actor);
     } catch (error) {
       if (!(error instanceof NotFoundError)) throw error;
     }
@@ -810,7 +1175,7 @@ export function createService({
     const found = findProject(tx, ref, actor);
     if (found) return { project: found };
     try {
-      return { product: resolveProduct(tx, ref, actor) };
+      return { product: resolveNamedProduct(tx, ref, actor) };
     } catch (error) {
       if (!(error instanceof NotFoundError)) throw error;
     }
@@ -828,7 +1193,12 @@ export function createService({
     ref: string,
     actor: ActingActor,
   ): IssueRow {
-    const visible = amongVisible(issue.productId, visibleIdsOf(actor));
+    const visible = itemsReached(
+      db,
+      reachFor(actor),
+      issue.id,
+      issue.productId,
+    );
     const byId = tx
       .select()
       .from(issue)
@@ -878,8 +1248,8 @@ export function createService({
     return new Map<string, ActorRef>(rows.map((r) => [r.id, r]));
   }
 
-  /** Each row with its keys, labels, links, assignee and projects, in the order given. */
-  function hydrate(tx: Tx | Db, rows: IssueRow[]): Issue[] {
+  /** Each row with its keys, labels, links, assignee and the projects `actor` reaches, in the order given. */
+  function hydrate(tx: Tx | Db, rows: IssueRow[], actor: ActingActor): Issue[] {
     if (rows.length === 0) return [];
     const ids = rows.map((r) => r.id);
     const keys = new Map(
@@ -908,17 +1278,7 @@ export function createService({
       .where(inArray(issueLink.issueId, ids))
       .orderBy(sql`rowid`)
       .all();
-    const projects = tx
-      .select({
-        issueId: projectItem.issueId,
-        slug: project.slug,
-        name: project.name,
-      })
-      .from(projectItem)
-      .innerJoin(project, eq(project.id, projectItem.projectId))
-      .where(inArray(projectItem.issueId, ids))
-      .orderBy(asc(project.slug))
-      .all();
+    const projects = projectsSeenBy(tx, ids, actor);
     const assignees = actorRefs(
       tx,
       rows.map((r) => r.assigneeId),
@@ -941,8 +1301,98 @@ export function createService({
     }));
   }
 
-  const hydrateOne = (tx: Tx | Db, row: IssueRow) =>
-    hydrate(tx, [row])[0] as Issue;
+  /** The projects of these items the actor reaches, in slug order. */
+  const projectsSeenBy = (tx: Tx | Db, ids: string[], actor: ActingActor) =>
+    tx
+      .select({
+        issueId: projectItem.issueId,
+        slug: project.slug,
+        name: project.name,
+      })
+      .from(projectItem)
+      .innerJoin(project, eq(project.id, projectItem.projectId))
+      .where(and(inArray(projectItem.issueId, ids), reachableProjects(actor)))
+      .orderBy(asc(project.slug))
+      .all();
+
+  const hydrateOne = (tx: Tx | Db, row: IssueRow, actor: ActingActor) =>
+    hydrate(tx, [row], actor)[0] as Issue;
+
+  /** Why the actor reaches `row`, an item it reaches; see `ItemAccess`. */
+  function accessOf(
+    tx: Tx | Db,
+    actor: ActingActor,
+    row: IssueRow,
+  ): ItemAccess {
+    if (grantsProduct(actor, row.productId)) return "product";
+    const listed = projectIdsOf(actor) ?? [];
+    const inListed =
+      listed.length > 0 &&
+      tx
+        .select({ one: sql`1` })
+        .from(projectItem)
+        .where(
+          and(
+            eq(projectItem.issueId, row.id),
+            inArray(projectItem.projectId, [...listed]),
+          ),
+        )
+        .get() !== undefined;
+    return inListed ? "project" : "via_project";
+  }
+
+  /**
+   * Refuses, with `refusal` of the product's key and whom to ask, an actor
+   * whose key doesn't list the product and who isn't the product's owner.
+   */
+  function requireProductGrant(
+    tx: Tx | Db,
+    actor: ActingActor,
+    productId: string,
+    refusal: (productKey: string) => string,
+  ): void {
+    if (grantsProduct(actor, productId)) return;
+    const target = tx
+      .select()
+      .from(product)
+      .where(eq(product.id, productId))
+      .get() as Product;
+    if (target.ownerId === actor.id) return;
+    throw new ForbiddenScopeError(
+      `${refusal(target.key)} ${askForGrant(tx, target)}`,
+    );
+  }
+
+  /**
+   * Refuses `doing` on `row` when the actor reaches it only through a project
+   * drawing from its products: such a key reads the item and comments on it,
+   * and the 403 names the projects, the grants that would allow it and whom
+   * to ask.
+   */
+  function requireItemWrite(
+    tx: Tx | Db,
+    actor: ActingActor,
+    row: IssueRow,
+    doing: string,
+  ): void {
+    if (accessOf(tx, actor, row) !== "via_project") return;
+    const target = tx
+      .select()
+      .from(product)
+      .where(eq(product.id, row.productId))
+      .get() as Product;
+    const slugs = tx
+      .select({ slug: project.slug })
+      .from(projectItem)
+      .innerJoin(project, eq(project.id, projectItem.projectId))
+      .where(and(eq(projectItem.issueId, row.id), reachableProjects(actor)))
+      .orderBy(asc(project.slug))
+      .all()
+      .map((p) => p.slug);
+    throw new ForbiddenScopeError(
+      `${target.key}-${row.number} is visible to this key only through ${projectList(slugs)}, which lets it read the item and comment on it (add_comment) and nothing else: to ${doing}, the bot needs a key that lists ${grantsFor(target.key, slugs)}. ${askForGrant(tx, target)}`,
+    );
+  }
 
   /**
    * The actor `ref` names to assign: any actor by id, else the bot with this
@@ -1013,19 +1463,40 @@ export function createService({
       .where(
         and(
           eq(product.ownerId, actor.id),
-          amongVisible(product.id, visibleIdsOf(actor)),
+          amongProducts(product.id, productIdsOf(actor)),
         ),
       )
       .orderBy(asc(product.key))
       .all();
   }
 
-  /** The products the actor reaches, A to Z by key. */
-  function reachableProducts(tx: Tx | Db, actor: ActingActor): Product[] {
+  /** The products the actor's product grant covers, A to Z by key. */
+  function grantedProducts(tx: Tx | Db, actor: ActingActor): Product[] {
     return tx
       .select()
       .from(product)
-      .where(amongVisible(product.id, visibleIdsOf(actor)))
+      .where(amongProducts(product.id, productIdsOf(actor)))
+      .orderBy(asc(product.key))
+      .all();
+  }
+
+  /**
+   * The products the actor files issues on, A to Z by key: its own grant's,
+   * and those the projects it lists draw from; not those it names only
+   * through its implicit project read.
+   */
+  function fileableProducts(tx: Tx | Db, actor: ActingActor): Product[] {
+    const reach = reachFor(actor);
+    return tx
+      .select()
+      .from(product)
+      .where(
+        productsNamed(
+          db,
+          reach && { ...reach, implicitProjects: false },
+          product.id,
+        ),
+      )
       .orderBy(asc(product.key))
       .all();
   }
@@ -1043,7 +1514,7 @@ export function createService({
   ) {
     const own = ownProductsOf(tx, actor);
     if (own.length === 1) return own[0] as Product;
-    const choices = own.length > 1 ? own : reachableProducts(tx, actor);
+    const choices = own.length > 1 ? own : grantedProducts(tx, actor);
     const keys = choices.map((p) => p.key);
     const listed =
       keys.length === 0
@@ -1102,6 +1573,23 @@ export function createService({
       ...row,
       owner: row.ownerId === null ? null : (owners.get(row.ownerId) ?? null),
     }));
+  }
+
+  /** Each row as the actor reads it, in order: whole where its product grant covers it, else named only. */
+  function productReads(
+    actor: ActingActor,
+    rows: Product[],
+  ): (ProductView | NamedProduct)[] {
+    const granted = new Map(
+      productViews(
+        db,
+        rows.filter((r) => grantsProduct(actor, r.id)),
+      ).map((v) => [v.id, v]),
+    );
+    return rows.map(
+      (row) =>
+        granted.get(row.id) ?? { id: row.id, key: row.key, name: row.name },
+    );
   }
 
   function statusUpdateViews(
@@ -1180,7 +1668,18 @@ export function createService({
   ): ProjectView[] {
     if (rows.length === 0) return [];
     const projectIds = rows.map((r) => r.id);
-    const ids = visibleIdsOf(actor);
+    const reach = reachFor(actor);
+    const named =
+      reach === null
+        ? null
+        : new Set(
+            tx
+              .select({ id: product.id })
+              .from(product)
+              .where(productsNamed(db, reach, product.id))
+              .all()
+              .map((p) => p.id),
+          );
     const productsOf = new Map<
       string,
       { id: string; key: string; name: string }[]
@@ -1211,7 +1710,7 @@ export function createService({
       .where(
         and(
           inArray(projectItem.projectId, projectIds),
-          amongVisible(projectItem.productId, ids),
+          itemsReached(db, reach, projectItem.issueId, projectItem.productId),
         ),
       )
       .groupBy(projectItem.projectId, issue.status)
@@ -1240,7 +1739,7 @@ export function createService({
     ]);
     return rows.map((row) => {
       const all = productsOf.get(row.id) ?? [];
-      const products = all.filter((p) => ids === null || ids.includes(p.id));
+      const products = all.filter((p) => named === null || named.has(p.id));
       const latest = latestOf.get(row.id);
       return {
         ...row,
@@ -1407,10 +1906,15 @@ export function createService({
       .where(eq(product.externalRef, input.externalRef))
       .get();
     // before any key is checked for a clash, so a hidden product and a new one are refused alike
-    const limited = actor.scope?.products;
-    if (limited && !limited.some((p) => p.id === existing?.id)) {
+    const scope = actor.scope;
+    const limited = scope?.products;
+    if (scope && limited && !limited.some((p) => p.id === existing?.id)) {
       throw new ForbiddenScopeError(
-        `this key may not import a product outside ${reachOf(limited)}. Ask whoever minted the key for one that lists the product, or no product list.`,
+        scope.projects.length === 0
+          ? `this key may not import a product outside ${reachOf(scope)}. Ask whoever minted the key for one that lists the product, or no product list.`
+          : limited.length === 0
+            ? `this key may not import a product: it reaches only ${reachOf(scope)}, and an import needs a key that lists the product. Ask whoever minted the key for one that lists the product, or ${unlimitedKey(scope)}.`
+            : `this key may not import a product outside ${reachOf({ ...scope, projects: [] })}: its projects don't count, since an import needs a key that lists the product. Ask whoever minted the key for one that lists the product, or ${unlimitedKey(scope)}.`,
       );
     }
     if (!existing) {
@@ -1532,7 +2036,7 @@ export function createService({
         .where(eq(issue.sourceKey, row.sourceKey))
         .get();
       if (holder) {
-        const visible = visibleIdsOf(actor);
+        const visible = productIdsOf(actor);
         // source keys are unique across products, so the 409 itself still tells a scoped key the
         // key is taken somewhere; only a holder the key can see is named
         const who =
@@ -1758,6 +2262,21 @@ export function createService({
   type WrittenItem = Issue & { skippedLabels?: string[] };
 
   /**
+   * A create's product and project as the call named them, and `place`, which
+   * settles both for the write. A replay passes `settled`, the product its
+   * stored item is on, for the product the call left out, so no default read
+   * from current data refuses it.
+   */
+  type Placement = {
+    product?: Product;
+    project?: ProjectRow;
+    place: (settled?: Product) => { product: Product; project?: ProjectRow };
+  };
+
+  const storedProductId = (item: WrittenItem | LegacyStoredItem) =>
+    "productId" in item ? item.productId : item.projectId;
+
+  /**
    * The product's labels by these names; an `outsider` attaches only those the
    * product has, the rest are `skipped`, while anyone else creates the missing.
    */
@@ -1780,9 +2299,22 @@ export function createService({
   const withSkipped = (item: Issue, skipped: string[]): WrittenItem =>
     skipped.length === 0 ? item : { ...item, skippedLabels: skipped };
 
-  /** A stored replay from before items carried their product key and projects, brought to today's shape. */
-  function currentShape(item: WrittenItem | LegacyStoredItem): WrittenItem {
-    if ("productKey" in item) return item;
+  /**
+   * A created item as `actor` sees it now: its projects are those the caller
+   * reaches, since a replay may come from another key of the bot or after a
+   * scope edit; a stored replay from before items carried their product key
+   * and projects is brought to today's shape.
+   */
+  function currentShape(
+    item: WrittenItem | LegacyStoredItem,
+    actor: ActingActor,
+  ): WrittenItem {
+    if ("productKey" in item) {
+      const projects = projectsSeenBy(db, [item.id], actor).map(
+        ({ slug, name }) => ({ slug, name }),
+      );
+      return { ...item, projects };
+    }
     const { projectId, ...stored } = item;
     // the stored item has no type: the one migration 0015 gave the row
     const { type } = db
@@ -1790,7 +2322,7 @@ export function createService({
       .from(issue)
       .where(eq(issue.id, item.id))
       .get() as { type: IssueType };
-    return hydrateOne(db, { ...stored, productId: projectId, type });
+    return hydrateOne(db, { ...stored, productId: projectId, type }, actor);
   }
 
   /**
@@ -1801,7 +2333,8 @@ export function createService({
    * create). `assignee` left out assigns a todo to the product's owner, else
    * the caller. An idempotency key is checked against the input as sent, so
    * what `fallback`, `typeOf` and the default assignee read from current data
-   * can't turn a retry into a mismatch.
+   * can't turn a retry into a mismatch. `placement`, when given, replaces how
+   * the product is named and picked, and may put the item in a project.
    */
   function createItem(
     actor: ActingActor,
@@ -1811,10 +2344,12 @@ export function createService({
       asked,
       fallback,
       typeOf,
+      placement,
     }: {
       asked: IssueType | undefined;
       fallback?: (tx: Tx) => Product;
       typeOf: (target: Product) => IssueType;
+      placement?: (tx: Tx) => Placement;
     },
   ): WrittenItem {
     if (actor.kind === "human" && input.assignee != null) {
@@ -1830,10 +2365,8 @@ export function createService({
     const externalRef = optionalRef(input.externalRef);
     return currentShape(
       create(actor, options, "issue.create", (tx) => {
-        const named =
-          input.product === undefined
-            ? undefined
-            : resolveProduct(tx, input.product, actor);
+        const placed = placement?.(tx) ?? productPlacement(tx);
+        const named = placed.product;
         const assignee =
           input.assignee == null
             ? input.assignee
@@ -1845,40 +2378,51 @@ export function createService({
           priority: priority ?? 0,
           externalRef,
         };
+        // who may put an item where: run by the write and by a replay
+        const authorize = (settled?: Product) => {
+          const { product, project } = placed.place(settled);
+          const type = typeOf(product);
+          if (type === "todo" && actor.kind === "human") {
+            throw new ForbiddenError(
+              "a person files issues, not todos: file it as an issue, and the product's bot accepts it from triage",
+            );
+          }
+          if (type === "todo") {
+            requireOwner(
+              tx,
+              actor,
+              product.id,
+              (owner, key) =>
+                `${key} is owned by ${owner}, so only ${owner} adds its todos: file the work as an issue with file_issue (POST /items with type issue), and ${owner} accepts it from triage`,
+            );
+          }
+          return { product, project, type };
+        };
         return {
           request: {
             type: asked,
             productId: named?.id,
+            projectId: placed.project?.id,
             assigneeId: assignee,
             ...sent,
             labels: labelNames,
             links,
           },
-          // as issue.create hashed it before migration 0015, when every create named its product
-          legacyRequest: named && {
-            projectId: named.id,
-            ...sent,
-            assigneeId: assignee ?? null,
-            labels: labelNames,
-            links,
+          // as issue.create hashed it before migration 0015, when every create named its product and none a project
+          legacyRequest: named &&
+            placed.project === undefined && {
+              projectId: named.id,
+              ...sent,
+              assigneeId: assignee ?? null,
+              labels: labelNames,
+              links,
+            },
+          replay: (stored: WrittenItem | LegacyStoredItem) => {
+            authorize(findProduct(tx, storedProductId(stored), undefined));
+            resolveIssueRow(tx, stored.id, actor);
           },
           write: () => {
-            const product = named ?? (fallback as (tx: Tx) => Product)(tx);
-            const type = typeOf(product);
-            if (type === "todo" && actor.kind === "human") {
-              throw new ForbiddenError(
-                "a person files issues, not todos: file it as an issue, and the product's bot accepts it from triage",
-              );
-            }
-            if (type === "todo") {
-              requireOwner(
-                tx,
-                actor,
-                product.id,
-                (owner, key) =>
-                  `${key} is owned by ${owner}, so only ${owner} adds its todos: file the work as an issue with file_issue (POST /items with type issue), and ${owner} accepts it from triage`,
-              );
-            }
+            const { product, project: into, type } = authorize();
             if (type === "todo" && assignee === null) {
               throw new ValidationError(
                 "a todo always has an assignee: leave assignee out to assign it to the product's owner, or name a bot",
@@ -1928,14 +2472,154 @@ export function createService({
             );
             setLabels(tx, row, labels);
             setLinks(tx, row.id, links);
-            const created = hydrateOne(tx, row);
+            if (into !== undefined) {
+              tx.insert(projectItem)
+                .values({
+                  projectId: into.id,
+                  issueId: row.id,
+                  productId: product.id,
+                  addedBy: actor.id,
+                })
+                .run();
+              touchProject(tx, into.id);
+            }
+            const created = hydrateOne(tx, row, actor);
             return {
               result: withSkipped(created, skipped),
-              event: itemCreated(actor, created),
+              event:
+                into === undefined
+                  ? itemCreated(actor, created)
+                  : [
+                      itemCreated(actor, created),
+                      membership(
+                        actor,
+                        into,
+                        row,
+                        "project.item_added",
+                        created.key,
+                      ),
+                    ],
             };
           },
         };
       }),
+      actor,
+    );
+
+    /** The product `input.product` names among the actor's product grant, else the one `fallback` picks; no project. */
+    function productPlacement(tx: Tx): Placement {
+      const named =
+        input.product === undefined
+          ? undefined
+          : resolveProduct(tx, input.product, actor);
+      return {
+        product: named,
+        place: (settled) => ({
+          product: named ?? settled ?? (fallback as (tx: Tx) => Product)(tx),
+        }),
+      };
+    }
+  }
+
+  /**
+   * Where file_issue puts an issue: `product` and `project` as sent, resolved
+   * among what the actor may name and reaches, and checked against an
+   * idempotency key; `place` reads current data for what was left out.
+   */
+  function issuePlacement(
+    tx: Tx,
+    actor: ActingActor,
+    ref: string | undefined,
+    slug: string | undefined,
+  ): Placement {
+    const named =
+      ref === undefined ? undefined : resolveNamedProduct(tx, ref, actor);
+    if (named !== undefined) requireFilingGrant(tx, actor, named);
+    const into =
+      slug === undefined ? undefined : resolveProject(tx, slug, actor);
+    return {
+      product: named,
+      project: into,
+      place: (settled) => {
+        if (into !== undefined) {
+          return {
+            product: drawnProduct(tx, actor, into, named ?? settled),
+            project: into,
+          };
+        }
+        const product = named as Product;
+        if (grantsProduct(actor, product.id)) return { product };
+        return { product, project: onlyProject(tx, actor, product) };
+      },
+    };
+  }
+
+  /**
+   * The product of `into` the issue goes to: `named` when the project draws
+   * from it, else the project's one product. Of `into`'s products the actor
+   * files on those its product grant covers, or on all of them when `into` is
+   * one of its own projects, so the item stays one it reaches; a refusal names
+   * those and only counts the rest.
+   */
+  function drawnProduct(
+    tx: Tx,
+    actor: ActingActor,
+    into: ProjectRow,
+    named: Product | undefined,
+  ): Product {
+    const drawn = tx
+      .select(getTableColumns(product))
+      .from(product)
+      .innerJoin(projectProduct, eq(projectProduct.productId, product.id))
+      .where(eq(projectProduct.projectId, into.id))
+      .orderBy(product.key)
+      .all();
+    const ownProject = projectIdsOf(actor)?.includes(into.id) ?? true;
+    const fileable = ownProject
+      ? drawn
+      : drawn.filter((p) => grantsProduct(actor, p.id));
+    const keys = fileable.map((p) => p.key);
+    const others = drawn.length - fileable.length;
+    const drawsFrom = andList(
+      others === 0
+        ? keys
+        : [...keys, `${others} other product${others === 1 ? "" : "s"}`],
+    );
+    const sendOne = keys.length === 1 ? keys[0] : `one of ${andList(keys)}`;
+    if (named !== undefined) {
+      if (fileable.some((p) => p.id === named.id)) return named;
+      if (drawn.some((p) => p.id === named.id)) {
+        const slugs = projectsDrawingFrom(tx, actor, named.id).map(
+          (p) => p.slug,
+        );
+        throw new ValidationError(
+          `this key files on product ${named.key} only through ${projectList(slugs)}, not project ${into.slug}: send ${projectArgs(slugs)} with product ${named.key}, or send product with ${sendOne} and project ${into.slug}`,
+        );
+      }
+      throw new ValidationError(
+        drawn.length === 0
+          ? `project ${into.slug} draws from no product yet, so nothing is filed into it: file the issue on ${named.key} without project, then add it with add_to_project (POST /projects/{slug}/items)`
+          : `project ${into.slug} draws from ${drawsFrom}, not ${named.key}: send product with ${sendOne}, or a project that draws from ${named.key} (list_projects shows each one's products)`,
+      );
+    }
+    // a project the actor reaches but doesn't list draws from a product its grant covers
+    if (drawn.length === 1) return fileable[0] as Product;
+    throw new ValidationError(
+      drawn.length === 0
+        ? `project ${into.slug} draws from no product yet, so file_issue needs product: send the key (like TRL) of the product the issue is for, without project, then add the issue with add_to_project (POST /projects/{slug}/items)`
+        : `project ${into.slug} draws from ${drawsFrom}, so file_issue needs product: send product with ${others === 0 ? "one of them" : sendOne}`,
+    );
+  }
+
+  /** The key's one project, for an issue on a product it reaches only through projects; with several, a 422 listing them. */
+  function onlyProject(tx: Tx, actor: ActingActor, named: Product): ProjectRow {
+    const via = projectsDrawingFrom(tx, actor, named.id);
+    if (actor.scope?.projects.length === 1 && via.length === 1) {
+      return via[0] as ProjectRow;
+    }
+    const slugs = via.map((p) => p.slug);
+    throw new ValidationError(
+      `this key reaches product ${named.key} only through ${projectList(slugs)}, so file_issue needs project: resend with ${projectArgs(slugs)}`,
     );
   }
 
@@ -2070,11 +2754,11 @@ export function createService({
     ): ProductView {
       requireBot(actor, "create a product");
       requireAction(actor, "admin", "create a product");
-      const limited = actor.scope?.products;
+      const scope = actor.scope;
       // before the key is checked, so a taken key in a hidden product tells it nothing
-      if (limited) {
+      if (scope?.products) {
         throw new ForbiddenScopeError(
-          `this key may not create a product: it reaches only ${reachOf(limited)}. Ask whoever minted the key for one with no product list.`,
+          `this key may not create a product: it reaches only ${reachOf(scope)}. Ask whoever minted the key for ${unlimitedKey(scope)}.`,
         );
       }
       const fields = {
@@ -2220,17 +2904,23 @@ export function createService({
       });
     },
 
-    getProduct(actor: ActingActor, ref: string): ProductView {
+    /** A product the actor may name: one its products or projects reach. */
+    getProduct(actor: ActingActor, ref: string): ProductView | NamedProduct {
       requireAction(actor, "read", "read a product", () =>
-        resolveProduct(db, ref, actor),
+        resolveNamedProduct(db, ref, actor),
       );
-      return productView(db, resolveProduct(db, ref, actor));
+      return productReads(actor, [resolveNamedProduct(db, ref, actor)])[0] as
+        | ProductView
+        | NamedProduct;
     },
 
-    /** Newest first. */
-    listProducts(actor: ActingActor, query: PageQuery = {}): Page<ProductView> {
+    /** Newest first; the products the actor may name, with those its projects draw from. */
+    listProducts(
+      actor: ActingActor,
+      query: PageQuery = {},
+    ): Page<ProductView | NamedProduct> {
       requireAction(actor, "read", "list products");
-      const visible = [amongVisible(product.id, visibleIdsOf(actor))];
+      const visible = [productsNamed(db, reachFor(actor), product.id)];
       const found = page(
         product,
         "desc",
@@ -2245,7 +2935,7 @@ export function createService({
             .limit(limit)
             .all(),
       );
-      return { ...found, items: productViews(db, found.items) };
+      return { ...found, items: productReads(actor, found.items) };
     },
 
     /**
@@ -2258,6 +2948,11 @@ export function createService({
       input: ItemInput,
       options: WriteOptions = {},
     ): WrittenItem {
+      if (input.project !== undefined) {
+        throw new ValidationError(
+          "add_todo takes no project: add the todo without it, then add it to the project with add_to_project (POST /projects/{slug}/items); file_issue (POST /items) is what takes project",
+        );
+      }
       requireAction(actor, "issues", "add a todo", () =>
         input.product === undefined
           ? undefined
@@ -2270,24 +2965,35 @@ export function createService({
       });
     },
 
-    /** Files an issue on a product the caller reaches; it waits in triage until the product's bot accepts or cancels it. */
+    /**
+     * Files an issue on a product the caller may name; it waits in triage
+     * until the product's bot accepts or cancels it. With `project` it joins
+     * that project in the same write, and the product must be one the project
+     * draws from (left out, the project's one product). A key reaching the
+     * product only through projects files with `project`, which defaults to
+     * the key's one project when it names exactly one.
+     */
     fileIssue(
       actor: ActingActor,
       input: ItemInput,
       options: WriteOptions = {},
     ): WrittenItem {
-      const ref = input.product;
-      if (ref === undefined || ref.trim() === "") {
+      const ref = input.product?.trim() || undefined;
+      const slug = input.project?.trim() || undefined;
+      if (ref === undefined && slug === undefined) {
         throw new ValidationError(
-          "file_issue needs product: the key (like TRL) of the product the issue is for; list_products lists them",
+          "file_issue needs product: the key (like TRL) of the product the issue is for, or project: the slug (like launch-q4) of a project drawing from one product; list_products and list_projects list them",
         );
       }
       requireAction(actor, "issues", "file an issue", () =>
-        resolveProduct(db, ref, actor),
+        slug === undefined
+          ? resolveNamedProduct(db, ref as string, actor)
+          : resolveProject(db, slug, actor),
       );
       return createItem(actor, input, options, {
         asked: "issue",
         typeOf: () => "issue",
+        placement: (tx) => issuePlacement(tx, actor, ref, slug),
       });
     },
 
@@ -2335,6 +3041,12 @@ export function createService({
       requireBot(actor, "update an item");
       requireAction(actor, "issues", "update an item", () =>
         resolveIssueRow(db, ref, actor),
+      );
+      requireItemWrite(
+        db,
+        actor,
+        resolveIssueRow(db, ref, actor),
+        "update an item",
       );
       const next = {
         title:
@@ -2387,7 +3099,8 @@ export function createService({
         patch.links === undefined ? undefined : validLinks(patch.links);
       return commit((tx) => {
         const row = resolveIssueRow(tx, ref, actor);
-        const current = hydrateOne(tx, row);
+        requireItemWrite(tx, actor, row, "update an item");
+        const current = hydrateOne(tx, row, actor);
         const type = patch.type ?? row.type;
         if (type === "todo" && status === "triage") {
           throw new ValidationError(
@@ -2530,7 +3243,7 @@ export function createService({
         if (labels && "labels" in changes) setLabels(tx, row, labels);
         if (links && "links" in changes) setLinks(tx, row.id, links);
         return {
-          result: withSkipped(hydrateOne(tx, updatedRow), skipped),
+          result: withSkipped(hydrateOne(tx, updatedRow, actor), skipped),
           event: {
             actorId: actor.id,
             subjectType: "issue",
@@ -2722,17 +3435,20 @@ export function createService({
       const name = nonBlank(input.name, "name");
       return create(actor, options, "label.create", (tx) => {
         const target = resolveProduct(tx, input.productId, actor);
+        const authorize = () =>
+          requireOwner(
+            tx,
+            actor,
+            target.id,
+            (owner, key) =>
+              `${key} is owned by ${owner}, so only ${owner} creates its labels: ask ${owner} to create the label "${name}", or file or update the item without it, and a label ${key} lacks comes back in skippedLabels`,
+          );
         return {
           // projectId, as requests were stored before products were named
           request: { projectId: target.id, name },
+          replay: authorize,
           write: () => {
-            requireOwner(
-              tx,
-              actor,
-              target.id,
-              (owner, key) =>
-                `${key} is owned by ${owner}, so only ${owner} creates its labels: ask ${owner} to create the label "${name}", or file or update the item without it, and a label ${key} lacks comes back in skippedLabels`,
-            );
+            authorize();
             const twin = findLabel(tx, target.id, name);
             if (twin) {
               throw new ConflictError(
@@ -2802,6 +3518,9 @@ export function createService({
             leadId: lead,
             slug: slug ?? null,
             productIds: named && [...new Set(named)].sort(),
+          },
+          replay: (stored: ProjectRow) => {
+            resolveProject(tx, stored.slug, actor);
           },
           write: () => {
             const productIds = [
@@ -2924,14 +3643,22 @@ export function createService({
     },
 
     /** A project by exact slug, else a product by key: the meaning `project` had before projects. */
-    getProjectOrProduct(actor: ActingActor, ref: string): ProjectOrProduct {
+    getProjectOrProduct(
+      actor: ActingActor,
+      ref: string,
+    ): ProjectOrProduct<ProductView | NamedProduct> {
       requireAction(actor, "read", "read a project", () =>
         resolveProjectOrProduct(db, ref, actor),
       );
       const found = resolveProjectOrProduct(db, ref, actor);
       return "project" in found
         ? { kind: "project", project: projectView(db, found.project, actor) }
-        : { kind: "product", product: productView(db, found.product) };
+        : {
+            kind: "product",
+            product: productReads(actor, [found.product])[0] as
+              | ProductView
+              | NamedProduct,
+          };
     },
 
     /**
@@ -3053,13 +3780,20 @@ export function createService({
       requireProjectWrite(actor, "add items to a project", slug, takes);
       return commit((tx) => {
         const target = resolveProject(tx, slug, actor, takes);
-        const items = hydrate(tx, [
-          ...new Map(
-            itemRefs
-              .map((ref) => resolveIssueRow(tx, ref, actor))
-              .map((row) => [row.id, row]),
-          ).values(),
-        ]);
+        const items = hydrate(
+          tx,
+          [
+            ...new Map(
+              itemRefs
+                .map((ref) => resolveIssueRow(tx, ref, actor))
+                .map((row) => {
+                  requireItemWrite(tx, actor, row, "add it to a project");
+                  return [row.id, row] as const;
+                }),
+            ).values(),
+          ],
+          actor,
+        );
         const products = new Set(
           tx
             .select({ id: projectProduct.productId })
@@ -3087,6 +3821,17 @@ export function createService({
         const events: NewEvent[] = [];
         const added: string[] = [];
         const unchanged: string[] = [];
+        for (const item of items) {
+          if (!inProject.has(item.id) && !products.has(item.productId)) {
+            requireProductGrant(
+              tx,
+              actor,
+              item.productId,
+              (key) =>
+                `adding ${item.key} to project ${target.slug} would draw ${target.slug} from product ${key}: to add it, the bot needs a key that lists product ${key}.`,
+            );
+          }
+        }
         for (const item of items) {
           if (inProject.has(item.id)) {
             unchanged.push(item.key);
@@ -3130,13 +3875,41 @@ export function createService({
       requireProjectWrite(actor, "remove items from a project", slug, takes);
       return commit((tx) => {
         const target = resolveProject(tx, slug, actor, takes);
-        const items = hydrate(tx, [
-          ...new Map(
-            itemRefs
-              .map((ref) => resolveIssueRow(tx, ref, actor))
-              .map((row) => [row.id, row]),
-          ).values(),
-        ]);
+        const items = hydrate(
+          tx,
+          [
+            ...new Map(
+              itemRefs
+                .map((ref) => resolveIssueRow(tx, ref, actor))
+                .map((row) => {
+                  requireItemWrite(tx, actor, row, "remove it from a project");
+                  const isMember =
+                    tx
+                      .select({ one: sql`1` })
+                      .from(projectItem)
+                      .where(
+                        and(
+                          eq(projectItem.projectId, target.id),
+                          eq(projectItem.issueId, row.id),
+                        ),
+                      )
+                      .get() !== undefined;
+                  // a non-member is listed unchanged, which needs no grant
+                  if (isMember && !projectIdsOf(actor)?.includes(target.id)) {
+                    requireProductGrant(
+                      tx,
+                      actor,
+                      row.productId,
+                      (key) =>
+                        `${key}-${row.number} is in project ${target.slug}, which this key reads only through its products: to remove it from ${target.slug}, the bot needs a key that lists ${grantsFor(key, [target.slug])}.`,
+                    );
+                  }
+                  return [row.id, row] as const;
+                }),
+            ).values(),
+          ],
+          actor,
+        );
         const events: NewEvent[] = [];
         const removed: string[] = [];
         const unchanged: string[] = [];
@@ -3204,6 +3977,7 @@ export function createService({
                 ),
               )
               .all(),
+            actor,
           ).map((i) => [i.externalRef, i]),
         );
         const { numbers, renumbered } = importNumbers(
@@ -3267,7 +4041,11 @@ export function createService({
       requireAction(actor, "read", "read an item", () =>
         resolveIssueRow(db, ref, actor),
       );
-      return hydrateOne(db, resolveIssueRow(db, ref, actor));
+      const row = resolveIssueRow(db, ref, actor);
+      const item = hydrateOne(db, row, actor);
+      return actor.kind === "bot"
+        ? { ...item, access: accessOf(db, actor, row) }
+        : item;
     },
 
     /** The legacy list_issues: status open also lists issues waiting in triage, which did not exist when it was named. */
@@ -3282,7 +4060,7 @@ export function createService({
     listItems(actor: ActingActor, query: ItemQuery = {}): Page<Issue> {
       requireAction(actor, "read", "list items", () => {
         if (query.product !== undefined)
-          resolveProduct(db, query.product, actor);
+          resolveNamedProduct(db, query.product, actor);
         if (query.project !== undefined)
           resolveProject(db, query.project, actor);
       });
@@ -3291,10 +4069,13 @@ export function createService({
           ? undefined
           : resolveProject(db, query.project, actor);
       const filters = [
-        amongVisible(issue.productId, visibleIdsOf(actor)),
+        itemsReached(db, reachFor(actor), issue.id, issue.productId),
         query.product === undefined
           ? undefined
-          : eq(issue.productId, resolveProduct(db, query.product, actor).id),
+          : eq(
+              issue.productId,
+              resolveNamedProduct(db, query.product, actor).id,
+            ),
         inProject === undefined
           ? undefined
           : inArray(
@@ -3331,7 +4112,10 @@ export function createService({
             .limit(limit)
             .all(),
       );
-      return { items: hydrate(db, rows.items), nextCursor: rows.nextCursor };
+      return {
+        items: hydrate(db, rows.items, actor),
+        nextCursor: rows.nextCursor,
+      };
     },
 
     /** Oldest first, the order an item's thread reads in. */
@@ -3415,9 +4199,9 @@ export function createService({
       query: PageQuery = {},
     ): Page<Label> {
       requireAction(actor, "read", "list labels", () =>
-        resolveProduct(db, productRef, actor),
+        resolveLabeledProduct(db, productRef, actor),
       );
-      const target = resolveProduct(db, productRef, actor);
+      const target = resolveLabeledProduct(db, productRef, actor);
       return page(
         label,
         "asc",
@@ -3435,8 +4219,9 @@ export function createService({
     },
 
     /**
-     * The calling actor, as stored, with its photo URL, the products it owns
-     * and every product it reaches; actors are never deleted, so the row is there.
+     * The calling actor, as stored, with its photo URL, the products it owns,
+     * those it files on and the projects it reads through its products;
+     * actors are never deleted, so the row is there.
      */
     whoami(actor: ActingActor): Whoami {
       return {
@@ -3446,7 +4231,8 @@ export function createService({
             .get() as ActorWithHash,
         ),
         ownProducts: ownProductsOf(db, actor),
-        products: reachableProducts(db, actor),
+        products: fileableProducts(db, actor),
+        impliedProjects: implicitProjectsOf(db, actor).map((p) => p.slug),
         unreadMessages: messaging.unreadMessages(actor),
       };
     },
@@ -3512,7 +4298,7 @@ export function createService({
     ): Page<ActivityEntry> {
       requireAction(actor, "read", "read the activity feed", () => {
         if (query.product !== undefined)
-          resolveProduct(db, query.product, actor);
+          resolveNamedProduct(db, query.product, actor);
         if (query.project !== undefined)
           resolveProject(db, query.project, actor);
       });
@@ -3525,7 +4311,7 @@ export function createService({
       const named =
         query.product === undefined
           ? undefined
-          : resolveProduct(db, query.product, actor);
+          : resolveNamedProduct(db, query.product, actor);
       const group =
         query.project === undefined
           ? undefined
@@ -3537,24 +4323,8 @@ export function createService({
         groupId: group?.id ?? null,
         projectSlug: group?.slug ?? null,
       };
-      const ids = visibleIdsOf(actor);
       const where: (SQL | undefined)[] = [
-        ids === null
-          ? undefined
-          : or(
-              inArray(activityEvent.productId, [...ids]),
-              // a project's own events carry no product: visible with any of the project's products
-              and(
-                isNull(activityEvent.productId),
-                inArray(
-                  activityEvent.projectId,
-                  db
-                    .select({ id: projectProduct.projectId })
-                    .from(projectProduct)
-                    .where(inArray(projectProduct.productId, [...ids])),
-                ),
-              ),
-            ),
+        eventsReached(db, reachFor(actor)),
         filters.projectId === null
           ? undefined
           : eq(activityEvent.productId, filters.projectId),
@@ -3624,8 +4394,8 @@ export function createService({
         url: string;
         secret: string;
         kind?: WebhookSubscriptionKind;
-      } & FollowedProducts,
-    ): Promise<Webhook> {
+      } & Follows,
+    ): Promise<WebhookWritten> {
       const kind = input.kind ?? "activity";
       requireBot(
         actor,
@@ -3634,19 +4404,26 @@ export function createService({
       // an inbox webhook is messaging, which no key's actions limit
       if (kind === "activity") requireAction(actor, "read", "create a webhook");
       validSecret(input.secret);
-      const followed = followedRefs(input);
-      if (kind === "inbox" && followed !== undefined) {
+      if (kind === "inbox" && followsSent(input)) {
         throw new ValidationError(
-          `an inbox webhook follows no products: leave ${followed.field} out, and create a second webhook with kind activity for the products' events`,
+          "an inbox webhook follows no products or projects: leave products and projects out, and create a second webhook with kind activity for their events",
         );
       }
-      if (kind === "activity" && followed === undefined) {
+      const follows =
+        kind === "inbox"
+          ? { productIds: [], projectIds: [], productAlias: false }
+          : webhookFollows(actor, input);
+      const productIds = follows.productIds ?? [];
+      const projectIds = follows.projectIds ?? [];
+      if (
+        kind === "activity" &&
+        productIds.length === 0 &&
+        projectIds.length === 0
+      ) {
         throw new ValidationError(
-          "products is required: send the keys (like TRL) of the products whose events you want, or send kind inbox for the messages other bots send you",
+          `${followsSent(input) ? "products and projects name nothing" : "products or projects is required"}: send products with the keys (like TRL) of the products whose events you want, or projects with the slugs (like launch-q4) of projects (list_projects lists them), or send kind inbox for the messages other bots send you`,
         );
       }
-      const productIds =
-        followed === undefined ? [] : webhookProductIds(actor, followed);
       const refuseAtLimit = (from: Db | Tx) => {
         const count = countOwn(from, actor.id);
         if (count >= WEBHOOKS_PER_BOT_MAX) {
@@ -3695,11 +4472,14 @@ export function createService({
           const row = insertSubscription(tx, webhooks, {
             kind,
             actorId: actor.id,
+            apiKeyId: actor.keyId ?? null,
             url: url.href,
             secret: input.secret,
             productIds,
+            projectIds,
           });
-          return webhooksOf(tx, [row])[0] as Webhook;
+          const view = webhooksOf(tx, [row])[0] as Webhook;
+          return { ...view, productAlias: follows.productAlias };
         },
         { behavior: "immediate" },
       );
@@ -3735,22 +4515,31 @@ export function createService({
       return requireWebhookAction(actor, id, "read a webhook").view;
     },
 
-    /** Changes the URL or the followed products; any update, an empty one too, ends a pause. */
+    /** Changes the URL or the followed products and projects; any update, an empty one too, ends a pause. */
     async updateWebhook(
       actor: ActingActor,
       id: string,
-      patch: { url?: string } & FollowedProducts,
-    ): Promise<Webhook> {
+      patch: { url?: string } & Follows,
+    ): Promise<WebhookWritten> {
       requireBot(actor, "update a webhook");
-      const { kind } = requireWebhookAction(actor, id, "update a webhook").view;
-      const followed = followedRefs(patch);
-      if (kind === "inbox" && followed !== undefined) {
+      const current = requireWebhookAction(actor, id, "update a webhook").view;
+      if (current.kind === "inbox" && followsSent(patch)) {
         throw new ValidationError(
-          `webhook ${id} is an inbox webhook, which follows no products: leave ${followed.field} out, or create a webhook with kind activity for products`,
+          `webhook ${id} is an inbox webhook, which follows no products or projects: leave products and projects out, or create a webhook with kind activity for their events`,
         );
       }
-      const productIds =
-        followed === undefined ? undefined : webhookProductIds(actor, followed);
+      const follows = followsSent(patch)
+        ? webhookFollows(actor, patch)
+        : undefined;
+      const followsNothing =
+        follows !== undefined &&
+        (follows.productIds?.length ?? current.products.length) === 0 &&
+        (follows.projectIds?.length ?? current.projects.length) === 0;
+      if (followsNothing) {
+        throw new ValidationError(
+          "an activity webhook follows at least one product or project: send products with product keys (like TRL) or projects with project slugs (like launch-q4), or delete the webhook",
+        );
+      }
       const url =
         patch.url === undefined
           ? undefined
@@ -3758,8 +4547,8 @@ export function createService({
       return db.transaction(
         (tx) => {
           // again under the write lock: a delete during the DNS lookup is a 404, not an FK failure
-          const current = ownWebhook(actor, id, tx).view;
-          if (url !== undefined && url !== current.url) {
+          const { url: currentUrl } = ownWebhook(actor, id, tx).view;
+          if (url !== undefined && url !== currentUrl) {
             const twin = tx
               .select({ id: webhookSubscription.id })
               .from(webhookSubscription)
@@ -3785,13 +4574,16 @@ export function createService({
               .where(eq(webhookSubscription.id, id))
               .run();
           }
-          if (productIds !== undefined) setProducts(tx, id, productIds);
+          if (follows !== undefined) setFollows(tx, id, follows);
           resume(tx, id, webhooks.now());
           tx.update(webhookSubscription)
-            .set({ updatedAt: new Date() })
+            .set({ updatedAt: new Date(), ...managingKey(actor) })
             .where(eq(webhookSubscription.id, id))
             .run();
-          return ownWebhook(actor, id, tx).view;
+          return {
+            ...ownWebhook(actor, id, tx).view,
+            productAlias: follows?.productAlias ?? false,
+          };
         },
         { behavior: "immediate" },
       );
@@ -3812,6 +4604,7 @@ export function createService({
             .set({
               secretCipher: sealSecret(webhooks.key, id, secret),
               updatedAt: new Date(),
+              ...managingKey(actor),
             })
             .where(eq(webhookSubscription.id, id))
             .run();
@@ -3866,7 +4659,7 @@ export function createService({
         data: {
           webhookId: id,
           products: view.products,
-          projects: view.products,
+          projects: view.projects,
           ...(webhooks.publicUrl !== undefined && { url: webhooks.publicUrl }),
           message: "A test call from trail: your webhook is set up.",
         },

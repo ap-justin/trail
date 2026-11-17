@@ -121,7 +121,7 @@ test("a bot's photo calls leave another bot's photo as it was", async () => {
 
 test("a key limited to reading one project still sets and clears its own photo", async () => {
   const scoped = createBot(db, "reader", {
-    scope: { projects: [scopeProject.key], actions: ["read"] },
+    scope: { products: [scopeProject.key], actions: ["read"] },
   });
   const set = await putPhoto(JPEG, "image/jpeg", scoped.key);
   expect(set.status).toBe(200);

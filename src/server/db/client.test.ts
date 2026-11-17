@@ -41,6 +41,7 @@ test("migrate builds every table STRICT on an empty file", () => {
     { name: "actor_photo", strict: 1 },
     { name: "api_key", strict: 1 },
     { name: "api_key_product", strict: 1 },
+    { name: "api_key_project", strict: 1 },
     { name: "comment", strict: 1 },
     { name: "idempotency_key", strict: 1 },
     { name: "invite", strict: 1 },
@@ -62,6 +63,7 @@ test("migrate builds every table STRICT on an empty file", () => {
     { name: "webhook_delivery", strict: 1 },
     { name: "webhook_subscription", strict: 1 },
     { name: "webhook_subscription_product", strict: 1 },
+    { name: "webhook_subscription_project", strict: 1 },
   ]);
   db.$client.close();
 });

@@ -88,7 +88,7 @@ test("a todo without product is a 422 naming the products to pick from", async (
   );
 
   const scoped = createBot(db, "owns nothing", {
-    scope: { projects: [own.key] },
+    scope: { products: [own.key] },
   });
   const none = await request("POST", "/api/v1/items", {
     json: { type: "todo", title: "where?" },
@@ -214,7 +214,7 @@ test("PATCH /items/:key cancels an accepted issue or a todo only for the owner o
 test("an issue on a product the key doesn't reach is the 404 an unknown one is", async () => {
   const elsewhere = await newProduct("elsewhere");
   const scoped = createBot(db, "scoped filer", {
-    scope: { projects: [own.key] },
+    scope: { products: [own.key] },
   });
   const hidden = await request("POST", "/api/v1/items", {
     json: { type: "issue", product: elsewhere.key, title: "x" },
