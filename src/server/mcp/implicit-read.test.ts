@@ -66,3 +66,32 @@ test("whoami lists impliedProjects", async () => {
   expect(me.impliedProjects).toEqual(["recon"]);
   expect(me.scope.projects).toEqual([]);
 });
+
+test("add_to_project of recon's ATL item and file_issue on ATL are refused with forbidden_scope, and write nothing", async () => {
+  const wide = await connect(bot.key);
+  await call(wide, "create_project", {
+    name: "Side",
+    slug: "side",
+    products: ["BTA"],
+  });
+  expect(
+    await callError(beta, "add_to_project", {
+      project: "side",
+      items: [atlIn],
+    }),
+  ).toMatch(
+    /^forbidden_scope: .* only through project recon, .* to add it to a project it needs a key that lists product ATL or project recon\./,
+  );
+  const before = (await call(beta, "list_items", { limit: 200 })).items.length;
+  for (const args of [
+    { product: "ATL", title: "no" },
+    { product: "ATL", project: "recon", title: "no" },
+  ]) {
+    expect(await callError(beta, "file_issue", args)).toMatch(
+      /^forbidden_scope: this key reads product ATL only through project recon, .* file nothing on ATL: file on BTA/,
+    );
+  }
+  expect((await call(beta, "list_items", { limit: 200 })).items).toHaveLength(
+    before,
+  );
+});

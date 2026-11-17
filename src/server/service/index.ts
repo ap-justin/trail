@@ -774,6 +774,18 @@ export function createService({
     return withinScope(actor, hook) && (reads || hook.kind === "inbox");
   }
 
+  /**
+   * The `apiKeyId` a write records on an activity webhook: the key making it,
+   * whose reach deliveries are checked against from then on. It passed
+   * `canManage`, so it reaches what the webhook follows. Inbox webhooks are
+   * never checked and record nothing.
+   */
+  function managingKey(actor: ActingActor, hook: Webhook) {
+    return hook.kind === "activity" && actor.keyId
+      ? { apiKeyId: actor.keyId }
+      : {};
+  }
+
   /** The 409 for a URL the bot already uses: names the webhook only when this key can manage it. */
   function twinConflict(
     actor: ActingActor,
@@ -4433,7 +4445,7 @@ export function createService({
           if (follows !== undefined) setFollows(tx, id, follows);
           resume(tx, id, webhooks.now());
           tx.update(webhookSubscription)
-            .set({ updatedAt: new Date() })
+            .set({ updatedAt: new Date(), ...managingKey(actor, current) })
             .where(eq(webhookSubscription.id, id))
             .run();
           return {
@@ -4452,7 +4464,11 @@ export function createService({
       secret: string,
     ): Webhook {
       requireBot(actor, "rotate a webhook's secret");
-      requireWebhookAction(actor, id, "rotate a webhook's secret");
+      const current = requireWebhookAction(
+        actor,
+        id,
+        "rotate a webhook's secret",
+      ).view;
       validSecret(secret);
       return db.transaction(
         (tx) => {
@@ -4460,6 +4476,7 @@ export function createService({
             .set({
               secretCipher: sealSecret(webhooks.key, id, secret),
               updatedAt: new Date(),
+              ...managingKey(actor, current),
             })
             .where(eq(webhookSubscription.id, id))
             .run();

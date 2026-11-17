@@ -81,3 +81,39 @@ test("GET /whoami lists impliedProjects beside a scope of explicit grants", asyn
   expect(me.body.impliedProjects).toEqual(["recon"]);
   expect(me.body.scope.projects).toEqual([]);
 });
+
+test("a BTA-only key can't add recon's ATL item to a project, nor file on ATL, with or without project recon: 403 forbidden_scope that writes nothing", async () => {
+  await seed("POST", "/api/v1/projects", {
+    name: "Side",
+    slug: "side",
+    products: ["BTA"],
+  });
+  const added = await call("POST", "/projects/side/items", btaKey, {
+    items: [atlIn],
+  });
+  expect(added.status).toBe(403);
+  expect(added.body.error).toEqual({
+    code: "forbidden_scope",
+    message: `${atlIn} is visible to this key only through project recon, which lets it read the item and comment on it (add_comment) and nothing else: to add it to a project it needs a key that lists product ATL or project recon. Ask tester, the owner of ATL, for that grant.`,
+  });
+  const stored = await request("GET", `/api/v1/items/${atlIn}`);
+  expect(
+    ((await stored.json()) as Body).projects.map((p: Body) => p.slug),
+  ).toEqual(["recon"]);
+  const before = (await call("GET", "/items?limit=200", btaKey)).body.items
+    .length;
+  for (const json of [
+    { type: "issue", product: "ATL", title: "no" },
+    { type: "issue", product: "ATL", project: "recon", title: "no" },
+  ]) {
+    const filed = await call("POST", "/items", btaKey, json);
+    expect(filed.status, JSON.stringify(json)).toBe(403);
+    expect(filed.body.error.code).toBe("forbidden_scope");
+    expect(filed.body.error.message).toMatch(
+      /^this key reads product ATL only through project recon, .* file nothing on ATL: file on BTA/,
+    );
+  }
+  expect(
+    (await call("GET", "/items?limit=200", btaKey)).body.items,
+  ).toHaveLength(before);
+});

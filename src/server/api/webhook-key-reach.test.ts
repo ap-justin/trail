@@ -1,8 +1,7 @@
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { beforeEach, expect, test } from "vitest";
 import {
   activityEvent,
-  apiKey,
   product,
   project,
   projectProduct,
@@ -10,7 +9,6 @@ import {
   webhookSubscription,
 } from "../db/schema.js";
 import { createBot, editKeyScope, revokeKey } from "../service/keys.js";
-import { keyRefusal } from "../service/webhooks.js";
 import { setupTestApp, testWebhookSettings } from "../test-app.js";
 import { createWebhookWorker } from "../webhooks/worker.js";
 
@@ -114,7 +112,7 @@ test("revoking the key that made a webhook skips its queued deliveries and those
   revokeKey(db, prefixOf(key));
   await retitle(atl, "after the revoke");
   expect(await sentNowTo(url)).toBe(0);
-  const revoked = "not sent: the key that made this webhook is revoked";
+  const revoked = "not sent: this webhook's key is revoked";
   expect(historyOf(id)).toEqual([
     ["trail.issue.updated", "failed", 0, revoked],
     ["trail.item.updated", "failed", 0, revoked],
@@ -153,11 +151,13 @@ test("a project taken off the key skips the deliveries of a webhook following it
 test("a product taken off the key skips the deliveries of a webhook following it, naming the product", async () => {
   const key = botWith({ products: ["ATL", "BTA"] });
   const { id, url } = await follow({ products: ["ATL"] }, key);
+  await retitle(atl, "queued while the key had ATL");
+  expect(await sentNowTo(url)).toBe(2);
   await retitle(atl, "queued before the edit");
   editKeyScope(db, prefixOf(key), { removeProducts: ["ATL"] });
   expect(await sentNowTo(url)).toBe(0);
   const lost = "not sent: this webhook's key no longer reaches ATL";
-  expect(historyOf(id)).toEqual([
+  expect(historyOf(id).slice(2)).toEqual([
     ["trail.issue.updated", "failed", 0, lost],
     ["trail.item.updated", "failed", 0, lost],
   ]);
@@ -193,6 +193,31 @@ test("a key that read a project through its product skips the webhook following 
     .run();
   expect(await sentNowTo(url)).toBe(0);
   const lost = "not sent: this webhook's key no longer reaches joint";
+  expect(historyOf(id).slice(2)).toEqual([
+    ["trail.issue.updated", "failed", 0, lost],
+    ["trail.item.updated", "failed", 0, lost],
+  ]);
+});
+
+test("a key listing only a project gets that project's deliveries and none outside it, and none once the project leaves its scope", async () => {
+  const key = botWith({ projects: ["solo"] });
+  const { id, url } = await follow({ projects: ["solo"] }, key);
+  await retitle(soloItem, "read through solo alone");
+  expect(await sentNowTo(url)).toBe(2);
+  expect(historyOf(id).every(([, status]) => status === "delivered")).toBe(
+    true,
+  );
+  // an event outside solo, of a product the key lists none of, is never queued for it
+  await retitle(atl, "outside solo");
+  expect(await sentNowTo(url)).toBe(0);
+  expect(historyOf(id)).toHaveLength(2);
+  await retitle(soloItem, "queued before the edit");
+  editKeyScope(db, prefixOf(key), {
+    removeProjects: ["solo"],
+    addProjects: ["recon"],
+  });
+  expect(await sentNowTo(url)).toBe(0);
+  const lost = "not sent: this webhook's key no longer reaches solo";
   expect(historyOf(id).slice(2)).toEqual([
     ["trail.issue.updated", "failed", 0, lost],
     ["trail.item.updated", "failed", 0, lost],
@@ -254,25 +279,53 @@ test("an inbox webhook gets its messages after the key that made it is revoked",
   expect(await sentNowTo(made.body.url)).toBe(1);
 });
 
-test("the check refuses an event the key doesn't reach, naming its product, and passes one it does", async () => {
+test("a delivery of an event outside the key's reach is skipped naming its product while the followed product's is sent", async () => {
   const key = botWith({ products: ["ATL"] });
-  const { id } = await follow({ products: ["ATL"] }, key);
-  const keyId = db
-    .select({ id: apiKey.id })
-    .from(apiKey)
-    .where(eq(apiKey.prefix, prefixOf(key)))
-    .get()?.id as string;
-  const eventOf = (subjectId: string) =>
-    db
+  const { id, url } = await follow({ products: ["ATL"] }, key);
+  // a product's own event: the worker's left-the-project check passes it over
+  const eventOf = async (product: string) => {
+    const updated = await ok("PATCH", `/products/${product}`, {
+      description: `described ${++urls}`,
+    });
+    return db
       .select()
       .from(activityEvent)
-      .where(eq(activityEvent.subjectId, subjectId))
+      .where(
+        and(
+          eq(activityEvent.subjectId, updated.id),
+          eq(activityEvent.action, "product.updated"),
+        ),
+      )
+      .orderBy(desc(activityEvent.seq))
       .get() as typeof activityEvent.$inferSelect;
-  const itemId = async (product: string) =>
-    (await ok("POST", "/items", { type: "todo", product, title: "checked" }))
-      .id as string;
-  expect(keyRefusal(db, keyId, id, eventOf(await itemId("ATL")))).toBeNull();
-  expect(keyRefusal(db, keyId, id, eventOf(await itemId("BTA")))).toBe(
-    "not sent: this webhook's key no longer reaches BTA",
-  );
+  };
+  const reached = await eventOf("ATL");
+  const outside = await eventOf("BTA");
+  // the subscription follows ATL alone, so no event of BTA is ever queued for it
+  db.insert(webhookDelivery)
+    .values({
+      subscriptionId: id,
+      eventId: outside.id,
+      seq: outside.seq,
+      type: "trail.product.updated",
+      nextAttemptAt: new Date(),
+    })
+    .run();
+  expect(await sentNowTo(url)).toBe(2);
+  const outcomes = db
+    .select()
+    .from(webhookDelivery)
+    .where(eq(webhookDelivery.subscriptionId, id))
+    .orderBy(webhookDelivery.seq)
+    .all()
+    .map((d) => [d.eventId, d.status, d.lastError]);
+  expect(outcomes).toEqual([
+    [reached.id, "delivered", null],
+    [reached.id, "delivered", null],
+    [
+      outside.id,
+      "failed",
+      "not sent: this webhook's key no longer reaches BTA",
+    ],
+  ]);
 });

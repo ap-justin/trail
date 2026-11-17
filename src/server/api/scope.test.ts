@@ -558,8 +558,8 @@ test("whoami reports the calling key's scope, null where it is unrestricted", as
     },
     ownProducts: [],
     products: [{ key: a.key, name: "A" }],
-    // the projects drawing from A that earlier tests made; implicit-read.test.ts covers the list
-    impliedProjects: expect.any(Array),
+    // the projects drawing from A that earlier tests left: the gate project and the one the issues-only key created
+    impliedProjects: ["gate-project", expect.stringMatching(/^p\d+$/)],
     unreadMessages: 0,
     photoUrl: null,
     title: null,

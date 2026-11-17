@@ -376,16 +376,16 @@ export function setFollows(
     .run();
 }
 
-const KEY_REVOKED = "not sent: the key that made this webhook is revoked";
+const KEY_REVOKED = "not sent: this webhook's key is revoked";
 const keyLost = (what: string) =>
   `not sent: this webhook's key no longer reaches ${what}`;
 
 /**
- * Why the key that made a subscription may not send it `event` now, as the
- * delivery's lastError; null when it may. Read as the key stands: revoked, or
- * its scope no longer reaching a product or project the subscription follows,
- * or the event (by the reach rules every read uses). An unrestricted key only
- * fails revoked. Bots alone hold keys, so the reach is a bot's.
+ * Why the key that last created or changed a subscription may not send it
+ * `event` now, as the delivery's lastError; null when it may. Read as the key
+ * stands: revoked, or its scope no longer reaching a product or project the
+ * subscription follows, or the event (by the reach rules every read uses). An
+ * unrestricted key only fails revoked. Bots alone hold keys, so the reach is a bot's.
  */
 export function keyRefusal(
   db: Db,
