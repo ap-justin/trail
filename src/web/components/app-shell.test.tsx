@@ -500,6 +500,15 @@ describe("main nav", () => {
     }
   });
 
+  // label-sized tabs: a heavier current label would widen its tab and shift its neighbours
+  test("the current tab is marked in ink, not weight, like the sidebar", () => {
+    renderShell(owner);
+    for (const tab of within(tabNav()).getAllByRole("link")) {
+      expect(tab).toHaveClass("aria-[current]:text-foreground");
+      expect(tab).not.toHaveClass("aria-[current]:font-medium");
+    }
+  });
+
   test("under the Products label, one row per visible product: key in mono, then name", () => {
     renderShell(owner);
     const row = within(productsNav()).getByRole("link", { name: "TRL trail" });

@@ -52,12 +52,12 @@ test("an invited account is a member with exactly its products, and gets an acto
   const mine = addProject();
   addProject();
   invite("ada", mine.id);
-  const cookie = await signIn("ada", { githubId: 42, name: "Ada Lovelace" });
+  const cookie = await signIn("ada", { githubId: 42, name: "Sam Rivera" });
   expect(
     db.select().from(actor).where(eq(actor.githubId, 42)).get(),
   ).toMatchObject({
     kind: "human",
-    displayName: "Ada Lovelace",
+    displayName: "Sam Rivera",
     githubLogin: "ada",
   });
   expect(await viewerOf(cookie)).toEqual({
@@ -65,7 +65,7 @@ test("an invited account is a member with exactly its products, and gets an acto
     login: "ada",
     actor: {
       id: expect.any(String),
-      displayName: "Ada Lovelace",
+      displayName: "Sam Rivera",
       githubId: 42,
       githubLogin: "ada",
     },

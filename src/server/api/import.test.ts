@@ -17,7 +17,7 @@ const payload = {
       title: "carry over",
       status: "In Progress",
       createdAt: "2026-01-02T03:04:05.000Z",
-      sourceAuthor: "Ada",
+      sourceAuthor: "Sam",
       labels: ["Bug"],
       comments: [
         {
@@ -68,7 +68,7 @@ test("POST /import upserts the project and answers the per-kind counts", async (
     assigneeId: bot.actor.id,
     status: "in_progress",
     createdAt: "2026-01-02T03:04:05.000Z",
-    sourceAuthor: "Ada",
+    sourceAuthor: "Sam",
     completedAt: null,
   });
   const comments = (await (

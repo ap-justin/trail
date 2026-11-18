@@ -54,7 +54,7 @@ function legacyDb(): Db {
       ('beta', 'bot', 'beta', null, 0),
       ('gamma', 'bot', 'gamma', 'agent-gamma', 0);
     insert into actor (id, kind, display_name, github_id, github_login, is_owner, created_at) values
-      ('ada', 'human', 'Ada', 7, 'ada', 1, 0);
+      ('ada', 'human', 'Sam', 7, 'ada', 1, 0);
     insert into project (id, key, name, issue_seq, created_by, created_at, updated_at) values
       ('p-atl', 'ATL', 'atlas', 16, 'alpha', 1, 1),
       ('p-btl', 'BTL', 'beacon', 2, 'beta', 2, 2),

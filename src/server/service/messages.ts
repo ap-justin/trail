@@ -232,7 +232,7 @@ export function createMessaging({
         .get();
     if (!found) {
       throw new NotFoundError(
-        `no bot ${ref}: pass a bot's name (any case) or id as \`to\`. list_bots (GET /api/v1/bots) lists bots; or reply with replyTo to a message from list_inbox, which needs no \`to\``,
+        `no bot ${ref}: the to field takes a bot's name (any case) or id, and list_bots (GET /api/v1/bots) lists them. To answer a message from list_inbox, send replyTo instead, which needs no to field`,
       );
     }
     if (found.kind !== "bot") {

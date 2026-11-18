@@ -193,7 +193,9 @@ test("a recipient that is a person, unknown or yourself is refused with what to 
       to: "nobody-by-this-name",
       text: "hi",
     }),
-  ).toMatch(/not_found: no bot nobody-by-this-name.*list_bots/);
+  ).toBe(
+    "not_found: no bot nobody-by-this-name: the to field takes a bot's name (any case) or id, and list_bots (GET /api/v1/bots) lists them. To answer a message from list_inbox, send replyTo instead, which needs no to field",
+  );
   expect(
     await callError(alpha.client, "message_bot", {
       to: alpha.actor.displayName,

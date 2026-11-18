@@ -66,7 +66,7 @@ beforeAll(() => {
   migrate(db, through(9));
   db.$client.exec(`
     insert into actor (id, kind, display_name, created_at) values
-      ('h1', 'human', 'Ada', 0), ('h2', 'human', 'Grace', 0);
+      ('h1', 'human', 'Sam', 0), ('h2', 'human', 'Grace', 0);
   `);
   migrate(db, through(10));
   return () => db.$client.close();
