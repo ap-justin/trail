@@ -11,7 +11,9 @@ const sha = "3f9c2a1";
 
 test("one token gets no hint however long the body; two do", () => {
   expect(buildLogHint(`Pushed ${sha}`, "rest")).toBeUndefined();
-  expect(buildLogHint(bodyOf(2000, `Landed in ${sha}`), "rest")).toBeUndefined();
+  expect(
+    buildLogHint(bodyOf(2000, `Landed in ${sha}`), "rest"),
+  ).toBeUndefined();
   expect(
     buildLogHint(bodyOf(2000, `Landed in ${sha} and b71e04d9`), "rest"),
   ).toMatch(/build log: 2 commit SHAs\./);
