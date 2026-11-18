@@ -22,6 +22,8 @@ const BACKOFF_CAP_MINUTES = 60;
 const FETCH_TIMEOUT_MS = 10_000;
 /** GitHub's wait after a rate-limit answer that names no time. */
 const RATE_LIMIT_FALLBACK_MS = MINUTE;
+/** How long a 401 to the token pauses fetching, and so the most a replaced token waits. */
+const TOKEN_REJECTED_PAUSE_MS = 60 * MINUTE;
 const POLL_MS = 5_000;
 
 /** What a read shows of a pull request: null before its first successful fetch. */
@@ -73,7 +75,9 @@ export type PullRequestOptions = {
  * lastReadAt at most hourly, and the table is the queue a timer drains, a few
  * fetches a minute one at a time, for rows read in the last day whose state is
  * stale and whose backoff has passed. A rate-limit answer pauses all fetching
- * until GitHub says to resume.
+ * until GitHub says to resume, and a 401 to the token pauses it an hour: GitHub
+ * answers 401 to every request a bad token makes, so neither is the pull
+ * request's failure.
  */
 export function createPullRequests(options: PullRequestOptions) {
   const { db, token } = options;
@@ -85,7 +89,7 @@ export function createPullRequests(options: PullRequestOptions) {
 
   /** when each fetch of the last minute started */
   let started: number[] = [];
-  /** no fetch starts before this; GitHub's rate limit set it */
+  /** no fetch starts before this; a rate limit or a rejected token set it */
   let pausedUntil = 0;
   let running: Promise<void> | null = null;
   let timer: NodeJS.Timeout | null = null;
@@ -195,6 +199,7 @@ export function createPullRequests(options: PullRequestOptions) {
     | { state: GithubPullRequestState }
     | { failed: string }
     | { limitedUntil: number }
+    | { rejectedUntil: number }
   > {
     const [, owner, repo, number] = PULL_URL.exec(url) ?? [];
     try {
@@ -216,6 +221,8 @@ export function createPullRequests(options: PullRequestOptions) {
         await res.body?.cancel();
         const limitedUntil = rateLimitedUntil(res, now());
         if (limitedUntil !== null) return { limitedUntil };
+        if (res.status === 401 && token)
+          return { rejectedUntil: now() + TOKEN_REJECTED_PAUSE_MS };
         return { failed: `GitHub answered ${res.status}` };
       }
       const pull = pullSchema.safeParse(await res.json());
@@ -259,6 +266,13 @@ export function createPullRequests(options: PullRequestOptions) {
       pausedUntil = Math.max(pausedUntil, result.limitedUntil);
       console.warn(
         `GitHub rate limit: pull request states wait until ${new Date(pausedUntil).toISOString()}`,
+      );
+      return;
+    }
+    if ("rejectedUntil" in result) {
+      pausedUntil = Math.max(pausedUntil, result.rejectedUntil);
+      console.warn(
+        `GitHub rejected GITHUB_TOKEN: pull request states wait until ${new Date(pausedUntil).toISOString()}`,
       );
       return;
     }

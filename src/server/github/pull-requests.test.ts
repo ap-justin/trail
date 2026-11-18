@@ -556,6 +556,63 @@ test("a 200 whose body is not JSON fails its pull request and backs off", async 
   db.$client.close();
 });
 
+test("with a token, a 401 stops all fetching for an hour and fails no pull request", async () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const calls: string[] = [];
+  let status = 200;
+  const { db, states, rowOf } = isolated(async (input) => {
+    calls.push(String(input));
+    return status === 200
+      ? Response.json({ state: "open" })
+      : new Response(TOKEN, { status });
+  }, TOKEN);
+  const urls = [pullUrl(), pullUrl()];
+  states.read(urls);
+  await states.tick();
+  expect(calls).toHaveLength(2);
+  const cached = urls.map(rowOf);
+
+  status = 401;
+  clock += 11 * MINUTE;
+  await states.tick();
+  expect(calls).toHaveLength(3);
+  expect(urls.map(rowOf)).toEqual(cached);
+  expect(warn).toHaveBeenCalledTimes(1);
+  const line = warn.mock.calls.flat().map(String).join(" ");
+  expect(line).toContain("GitHub rejected GITHUB_TOKEN");
+  expect(line).toContain(new Date(clock + 60 * MINUTE).toISOString());
+  expect(line).not.toContain(TOKEN);
+
+  // counted as a failure, the rejected pull request would wait 2 minutes more
+  status = 200;
+  clock += 60 * MINUTE - 1;
+  await states.tick();
+  expect(calls).toHaveLength(3);
+  clock += 1;
+  await states.tick();
+  expect(calls).toHaveLength(5);
+  expect(urls.map((url) => rowOf(url).failures)).toEqual([0, 0]);
+  db.$client.close();
+});
+
+test("without a token, a 401 fails its own pull request only", async () => {
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  const calls: string[] = [];
+  const { db, states, rowOf } = isolated(async (input) => {
+    calls.push(String(input));
+    return new Response(null, { status: 401 });
+  });
+  const urls = [pullUrl(), pullUrl()];
+  states.read(urls);
+  await states.tick();
+  expect(calls).toHaveLength(1);
+  clock += MINUTE;
+  await states.tick();
+  expect(calls).toHaveLength(2);
+  expect(urls.map((url) => rowOf(url).failures)).toEqual([1, 1]);
+  db.$client.close();
+});
+
 test("the most recently read pull request is fetched first", async () => {
   const calls: string[] = [];
   const { db, states } = isolated(async (input) => {
