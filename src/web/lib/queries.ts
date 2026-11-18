@@ -206,7 +206,7 @@ export function createQueryClient(config: QueryClientConfig = {}) {
   // the feed and Working now never refetch on focus, so when `/me` grants or takes away a
   // project, this re-reads both: the feed's rows and filter options come from `/feed`, and
   // no `work` event follows a membership change. A read asked after this `/me` one already
-  // follows the access it reports, as the feed's `access` event asks for them
+  // follows the access it reports, as the feed's `access` handler asks for them after it
   let projectsSeen: string | undefined;
   const followProjects = (meRead: object) => {
     const me = client.getQueryData(meQuery.queryKey);
