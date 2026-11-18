@@ -57,7 +57,6 @@ beforeAll(() => {
   return () => db.$client.close();
 });
 
-// every test leaves the table as it found it
 afterEach(() => {
   db.$client.exec("delete from github_pull_request");
 });

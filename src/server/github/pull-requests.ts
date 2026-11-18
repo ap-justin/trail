@@ -26,7 +26,7 @@ const READ_WINDOW_MS = 24 * 60 * MINUTE;
 /** A read restamps lastReadAt only once the stamp is this old. */
 const READ_STAMP_MS = 60 * MINUTE;
 // GitHub allows 5000 requests an hour with a token (about 83 a minute), and 60 an hour per IP
-// without: 20 a minute leaves the token's quota room for its other use, and 1 a minute is the 60 exactly
+// without: 20 a minute leaves the token's quota room for its other use, and 1 a minute is exactly the 60 an hour
 const FETCHES_PER_MINUTE = { token: 20, anonymous: 1 } as const;
 /** After n failed fetches in a row, the next waits min(2^n, 60) minutes from the last. */
 const BACKOFF_CAP_MINUTES = 60;
