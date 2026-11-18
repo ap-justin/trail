@@ -604,6 +604,10 @@ function CommentWell({
   const buttonRef = useRef<HTMLButtonElement>(null);
   const lines = useRenderedLines(contentRef);
   const [open, setOpen] = useState(false);
+  // Chrome and Firefox focus a link on mousedown (on touch, the compat mousedown after pointerup,
+  // so pointer events can't tell); a focus whose target holds the pressed node came from that press.
+  // A node, not a flag: a text drag released outside the body never sends the mouseup that clears it
+  const pressed = useRef<EventTarget | null>(null);
   // the body shrinks above the button on Show less; where scroll anchoring doesn't hold it,
   // the button would end up above the viewport with focus still on it
   const wasOpen = useRef(open);
@@ -633,7 +637,7 @@ function CommentWell({
       <div>
         {/* indented past the avatar at lg, so the body lines up with the name; collapsed,
             4 lines with the last one fading out (no motion: the height swaps instantly) */}
-        {/* biome-ignore lint/a11y/noStaticElementInteractions: not a control; it catches focus bubbling from a link the clamp hides, which still takes Tab, and opens the body */}
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: not a control; it opens the body when focus moves in without a press (Tab onto a link the clamp hides), and its mouse handlers only note the pressed node so a clicked link stays put */}
         <div
           id={bodyId}
           className={cn(
@@ -642,7 +646,23 @@ function CommentWell({
               !open &&
               "max-h-[4lh] overflow-hidden mask-b-from-[calc(100%-1lh)]",
           )}
-          onFocus={long ? () => setOpen(true) : undefined}
+          onMouseDown={(e) => {
+            pressed.current = e.target;
+          }}
+          onMouseUp={() => {
+            pressed.current = null;
+          }}
+          onFocus={
+            long
+              ? (e) => {
+                  const target = pressed.current;
+                  if (target instanceof Node && e.target.contains(target)) {
+                    return;
+                  }
+                  setOpen(true);
+                }
+              : undefined
+          }
         >
           {/* measured unclamped, so opening and closing never changes the count */}
           <div ref={contentRef}>

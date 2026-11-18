@@ -447,6 +447,55 @@ describe("long comments", () => {
     expect(button).toHaveAttribute("aria-expanded", "true");
   });
 
+  function renderVisibleLink() {
+    renderComments(
+      `See [the spec](https://example.com/spec).\n\n${paragraphs(6)}`,
+    );
+    const link = screen.getByRole("link", { name: "the spec" });
+    // jsdom can't open a new tab and logs "Not implemented" when asked to
+    link.addEventListener("click", (e) => e.preventDefault());
+    return {
+      button: screen.getByRole("button", { name: /^Show more/ }),
+      link,
+    };
+  }
+
+  test("clicking a link in the visible lines focuses it and leaves the comment collapsed", async () => {
+    const user = userEvent.setup();
+    const { button, link } = renderVisibleLink();
+    await user.click(link);
+    expect(link).toHaveFocus();
+    expect(button).toHaveAttribute("aria-expanded", "false");
+  });
+
+  test("tapping a link in the visible lines leaves the comment collapsed", async () => {
+    const user = userEvent.setup();
+    const { button, link } = renderVisibleLink();
+    // touch sends pointerup before the compat mousedown that focuses the link
+    await user.pointer({ keys: "[TouchA]", target: link });
+    expect(link).toHaveFocus();
+    expect(button).toHaveAttribute("aria-expanded", "false");
+  });
+
+  test("a press that ends outside the body doesn't stop Tab opening it", async () => {
+    const user = userEvent.setup();
+    renderComments(
+      `${paragraphs(6)}\n\nSee [the spec](https://example.com/spec).`,
+    );
+    const button = screen.getByRole("button", { name: /^Show more/ });
+    const link = screen.getByRole("link", { name: "the spec" });
+    await user.pointer([
+      { keys: "[MouseLeft>]", target: screen.getByText("Paragraph 1.") },
+      { target: button },
+      { keys: "[/MouseLeft]" },
+    ]);
+    for (let i = 0; i < 50 && document.activeElement !== link; i++) {
+      await user.tab();
+    }
+    expect(link).toHaveFocus();
+    expect(button).toHaveAttribute("aria-expanded", "true");
+  });
+
   test("Show less scrolls its button into view; mounting and Show more do not", async () => {
     const user = userEvent.setup();
     const scrolled = vi.spyOn(Element.prototype, "scrollIntoView");
