@@ -9,6 +9,7 @@ function registeredSchemas() {
   const schemas = new Map<string, unknown>();
   const server = {
     registerTool: (name: string, config: { inputSchema: unknown }) => {
+      if (schemas.has(name)) throw new Error(`tool registered twice: ${name}`);
       schemas.set(name, config.inputSchema);
     },
   } as unknown as McpServer;
@@ -21,7 +22,9 @@ function registeredSchemas() {
 test("every request registers the tools with the same input schemas", () => {
   const first = registeredSchemas();
   const second = registeredSchemas();
-  expect(first.size).toBeGreaterThan(30);
+  expect(first.size).toBeGreaterThan(0);
+  expect(second.size).toBe(first.size);
+  expect([...second.keys()].sort()).toEqual([...first.keys()].sort());
   for (const [name, schema] of second) {
     expect(schema, name).toBe(first.get(name));
   }
