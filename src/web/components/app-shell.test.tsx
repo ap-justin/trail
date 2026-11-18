@@ -504,19 +504,22 @@ describe("main nav", () => {
   test.each([
     ["tab bar", tabNav],
     ["sidebar", sidebarNav],
-  ])("the current %s item has the same font weight as the others", async (_, nav) => {
-    renderShell(owner);
-    // collected before the CSS lands: it hides whichever nav the viewport doesn't show
-    const links = within(nav()).getAllByRole("link");
-    const current = links.find((link) => link.hasAttribute("aria-current"));
-    const other = links.find((link) => !link.hasAttribute("aria-current"));
-    expect(current).toBeDefined();
-    expect(other).toBeDefined();
-    onTestFinished(await applyCompiledCss(document.body));
-    expect(getComputedStyle(current as Element).fontWeight).toBe(
-      getComputedStyle(other as Element).fontWeight,
-    );
-  });
+  ])(
+    "the current %s item has the same font weight as the others",
+    async (_, nav) => {
+      renderShell(owner);
+      // collected before the CSS lands: it hides whichever nav the viewport doesn't show
+      const links = within(nav()).getAllByRole("link");
+      const current = links.find((link) => link.hasAttribute("aria-current"));
+      const other = links.find((link) => !link.hasAttribute("aria-current"));
+      expect(current).toBeDefined();
+      expect(other).toBeDefined();
+      onTestFinished(await applyCompiledCss(document.body));
+      expect(getComputedStyle(current as Element).fontWeight).toBe(
+        getComputedStyle(other as Element).fontWeight,
+      );
+    },
+  );
 
   test("under the Products label, one row per visible product: key in mono, then name", () => {
     renderShell(owner);
