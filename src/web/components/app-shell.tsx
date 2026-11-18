@@ -424,7 +424,7 @@ function TabBar({
           aria-current={sectionCurrent(item.section, section, productKey, {
             tab: true,
           })}
-          className="flex min-w-11 flex-auto flex-col items-center justify-center gap-0.5 px-1 text-xs text-muted-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring aria-[current]:text-foreground"
+          className="my-1 flex min-w-11 flex-auto flex-col items-center justify-center gap-0.5 rounded-md px-1 text-xs text-muted-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring aria-[current]:bg-accent aria-[current]:text-foreground"
         >
           <item.icon aria-hidden="true" className="size-4" />
           {item.label}

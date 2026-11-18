@@ -118,6 +118,37 @@ test("after a refresh each pull request link shows its state: open, draft, merge
   expect(first?.headers.get("authorization")).toBe(`Bearer ${TOKEN}`);
 });
 
+test("a link ending in a tab, a slash, a query or a fragment is its pull request, fetched and cached once", async () => {
+  const pr = pullUrl();
+  answer(pr, { state: "open" });
+  const suffixed = [
+    `${pr}/files`,
+    `${pr}/`,
+    `${pr}#issuecomment-4242`,
+    `${pr}/files?w=1#diff-abc`,
+  ];
+  const key = await itemWith([pr, ...suffixed]);
+  await linksOf(key);
+  await pullRequests.tick();
+  const checkedAt = new Date(clock).toISOString();
+  expect((await linksOf(key)).map((l) => l.pr)).toEqual(
+    [pr, ...suffixed].map(() => ({ state: "open", checkedAt })),
+  );
+  expect(sentFor(pr)).toHaveLength(1);
+});
+
+test("a url that only looks like a pull request is not one", async () => {
+  const { db, states } = isolated(async () => Response.json({ state: "open" }));
+  const read = states.read([
+    "https://github.com/example-org/widget/pull/12x",
+    "https://github.com/example-org/widget/pull/0",
+    "https://github.com/example-org/widget/pulls/12",
+    "https://github.com/example-org/widget/pull/",
+  ]);
+  expect(read.size).toBe(0);
+  db.$client.close();
+});
+
 test("a link in any case matches its pull request", async () => {
   const pr = pullUrl("Widget");
   answer(pr.toLowerCase(), { state: "open" });
@@ -146,9 +177,15 @@ test("a read answers the cached state while a refresh is still waiting on GitHub
   const { pr, key, checkedAt } = await refreshedItem("open");
   clock += 11 * MINUTE;
   let release: (res: Response) => void = () => {};
-  answers.set(apiUrl(pr), () => new Promise((done) => (release = done)));
+  let enter: () => void = () => {};
+  const fetchEntered = new Promise<void>((entered) => (enter = entered));
+  answers.set(apiUrl(pr), () => {
+    enter();
+    return new Promise((done) => (release = done));
+  });
   await linksOf(key);
   const refreshing = pullRequests.tick();
+  await fetchEntered;
   expect(sentFor(pr)).toHaveLength(2);
   expect((await linksOf(key))[0]?.pr).toEqual({ state: "open", checkedAt });
   release(Response.json({ state: "closed", merged: true }));
@@ -157,6 +194,26 @@ test("a read answers the cached state while a refresh is still waiting on GitHub
     state: "merged",
     checkedAt: new Date(clock).toISOString(),
   });
+});
+
+test("a closed pull request is fetched again and can reopen; a merged one is not", async () => {
+  const { pr, key } = await refreshedItem("closed");
+  const stateAfter = async (body: unknown) => {
+    answer(pr, body);
+    clock += 11 * MINUTE;
+    await linksOf(key);
+    await pullRequests.tick();
+    return (await linksOf(key))[0]?.pr;
+  };
+  expect(await stateAfter({ state: "open" })).toMatchObject({ state: "open" });
+  expect(await stateAfter({ state: "closed", merged: true })).toMatchObject({
+    state: "merged",
+  });
+  const fetched = sentFor(pr).length;
+  expect(await stateAfter({ state: "open" })).toMatchObject({
+    state: "merged",
+  });
+  expect(sentFor(pr)).toHaveLength(fetched);
 });
 
 test("the state is refreshed once it is over 10 minutes old, not before", async () => {
@@ -631,8 +688,11 @@ test("the most recently read pull request is fetched first", async () => {
 test("a tick while a pass is running shares that pass and starts no second fetch", async () => {
   const calls: string[] = [];
   let release: (res: Response) => void = () => {};
+  let enter: () => void = () => {};
+  const fetchEntered = new Promise<void>((entered) => (enter = entered));
   const { db, states } = isolated((input) => {
     calls.push(String(input));
+    enter();
     return new Promise((done) => (release = done));
   }, TOKEN);
   const pr = pullUrl();
@@ -640,6 +700,7 @@ test("a tick while a pass is running shares that pass and starts no second fetch
   const first = states.tick();
   const second = states.tick();
   expect(second).toBe(first);
+  await fetchEntered;
   release(Response.json({ state: "open" }));
   await Promise.all([first, second]);
   expect(calls).toEqual([apiUrl(pr)]);
@@ -649,6 +710,7 @@ test("a tick while a pass is running shares that pass and starts no second fetch
   states.read([pr]);
   const third = states.tick();
   expect(third).not.toBe(first);
+  expect(calls).toHaveLength(2);
   release(Response.json({ state: "open" }));
   await third;
   expect(calls).toHaveLength(2);
@@ -672,4 +734,31 @@ test("a repo named only with dots is no pull request link and is never fetched",
     "https://api.github.com/repos/example-org/.github/pulls/1",
   ]);
   db.$client.close();
+});
+
+test("start() twice polls once: one fetch per poll interval, none after stop()", async () => {
+  vi.useFakeTimers();
+  try {
+    const calls: string[] = [];
+    const { db, states } = isolated(async (input) => {
+      calls.push(String(input));
+      return Response.json({ state: "open" });
+    }, TOKEN);
+    const pr = pullUrl();
+    states.read([pr]);
+    states.start();
+    states.start();
+    // each poll finds the pull request stale again: the state is over 10 minutes old by then
+    for (const polls of [1, 2, 3]) {
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(calls).toHaveLength(polls);
+      clock += 11 * MINUTE;
+    }
+    await states.stop();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(calls).toHaveLength(3);
+    db.$client.close();
+  } finally {
+    vi.useRealTimers();
+  }
 });

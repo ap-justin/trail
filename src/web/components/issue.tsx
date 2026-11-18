@@ -340,7 +340,7 @@ type PullRequestState = NonNullable<ItemLink["pr"]>["state"] | "unknown";
 
 // the server's matcher in src/server/github/pull-requests.ts, kept apart so no server code ships
 const pullRequestUrl =
-  /^https:\/\/github\.com\/[a-z0-9-]+\/(?!\.+\/)[a-z0-9._-]+\/pull\/[1-9]\d*$/i;
+  /^https:\/\/github\.com\/[a-z0-9-]+\/(?!\.+\/)[a-z0-9._-]+\/pull\/[1-9]\d*(?:[/?#].*)?$/is;
 
 /** A pull request link's state; null for any other link. */
 function pullRequestState(link: ItemLink): PullRequestState | null {
@@ -610,6 +610,10 @@ function CommentWell({
   // from a press and opens nothing. A node, not a flag: a text drag released outside the body never
   // sends the mouseup that clears it
   const pressed = useRef<EventTarget | null>(null);
+  // coming back to the window (from the tab a link opened) re-focuses the element that had focus,
+  // which is no Tab either; the element that lost focus along with the window is remembered so its
+  // focus on return opens nothing
+  const leftWithWindow = useRef<EventTarget | null>(null);
   // the body shrinks above the button on Show less; where scroll anchoring doesn't hold it,
   // the button would end up above the viewport with focus still on it
   const wasOpen = useRef(open);
@@ -639,14 +643,14 @@ function CommentWell({
       <div>
         {/* indented past the avatar at lg, so the body lines up with the name; collapsed,
             4 lines with the last one fading out (no motion: the height swaps instantly) */}
-        {/* biome-ignore lint/a11y/noStaticElementInteractions: not a control; it opens the body when focus moves in without a press (Tab onto a link the clamp hides), and its mouse handlers only note the pressed node so a clicked link stays put */}
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: not a control; it opens the body when focus moves in without a press (Tab onto a link the clamp hides), and its mouse and blur handlers only note which node was pressed or left with the window so a clicked link stays put */}
         <div
           id={bodyId}
           className={cn(
             "lg:pl-7",
             long &&
               !open &&
-              "max-h-[4lh] overflow-hidden mask-b-from-[calc(100%-1lh)]",
+              "max-h-[4lh] overflow-clip mask-b-from-[calc(100%-1lh)]",
           )}
           onMouseDown={(e) => {
             pressed.current = e.target;
@@ -654,9 +658,15 @@ function CommentWell({
           onMouseUp={() => {
             pressed.current = null;
           }}
+          onBlur={(e) => {
+            leftWithWindow.current = document.hasFocus() ? null : e.target;
+          }}
           onFocus={
             long
               ? (e) => {
+                  const returning = leftWithWindow.current === e.target;
+                  leftWithWindow.current = null;
+                  if (returning) return;
                   const target = pressed.current;
                   if (target instanceof Node && e.target.contains(target)) {
                     return;

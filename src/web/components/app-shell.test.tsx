@@ -500,6 +500,32 @@ describe("main nav", () => {
     }
   });
 
+  test.each([
+    ["tab bar", tabNav],
+    ["sidebar", sidebarNav],
+  ])(
+    "the current %s item has the accent background and radius",
+    async (_, nav) => {
+      renderShell(owner);
+      const links = within(nav()).getAllByRole("link");
+      const current = links.find((link) => link.hasAttribute("aria-current"));
+      const other = links.find((link) => !link.hasAttribute("aria-current"));
+      onTestFinished(await applyCompiledCss(document.body));
+      const style = (el?: Element) => getComputedStyle(el as Element);
+      expect(style(current).backgroundColor).not.toBe(
+        style(other).backgroundColor,
+      );
+      expect(style(current).backgroundColor).toBe(
+        style(sidebarNav().querySelector("[aria-current]") as Element)
+          .backgroundColor,
+      );
+      expect(style(current).borderRadius).toBe(
+        style(sidebarNav().querySelector("[aria-current]") as Element)
+          .borderRadius,
+      );
+    },
+  );
+
   // tabs are label-sized, so a heavier current label would widen its tab and shift its neighbours; the sidebar marks current the same way
   test.each([
     ["tab bar", tabNav],

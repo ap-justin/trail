@@ -1,4 +1,15 @@
-import { and, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  lt,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "../db/client.js";
 import {
@@ -32,19 +43,20 @@ export type PullRequestState = {
   checkedAt: Date;
 } | null;
 
+// after /pull/<n> a copied link may carry a tab (/files), a trailing slash, a query or a #fragment
 const PULL_URL =
-  /^https:\/\/github\.com\/([a-z0-9-]+)\/([a-z0-9._-]+)\/pull\/([1-9]\d*)$/;
+  /^(https:\/\/github\.com\/([a-z0-9-]+)\/([a-z0-9._-]+)\/pull\/([1-9]\d*))(?:[/?#].*)?$/s;
 
 /**
- * The canonical (lowercase) url of a GitHub pull request link, or null for any
- * other url. GitHub's own names are case-insensitive, so any case matches.
+ * The canonical url of a GitHub pull request link, or null for any other url:
+ * lowercase and ending at /pull/<n>, whatever follows it. GitHub's own names
+ * are case-insensitive, so any case matches.
  */
 function pullRequestUrl(url: string): string | null {
-  const canonical = url.toLowerCase();
-  const match = PULL_URL.exec(canonical);
+  const match = PULL_URL.exec(url.toLowerCase());
   // a repo of only dots would make the API path climb out of the owner
-  if (!match || /^\.+$/.test(match[2] ?? "")) return null;
-  return canonical;
+  if (!match || /^\.+$/.test(match[3] ?? "")) return null;
+  return match[1] ?? null;
 }
 
 /** The fields of GitHub's pull request object the state comes from. */
@@ -146,7 +158,7 @@ export function createPullRequests(options: PullRequestOptions) {
     return states;
   }
 
-  /** Up to `limit` urls read in the last day, stale, and past their backoff; the most recently read first. */
+  /** Up to `limit` unmerged urls read in the last day, stale, and past their backoff; the most recently read first. */
   function due(at: number, limit: number): string[] {
     const backoffMinutes = sql`case when ${githubPullRequest.failures} >= 6 then ${BACKOFF_CAP_MINUTES} else 1 << ${githubPullRequest.failures} end`;
     return db
@@ -155,6 +167,11 @@ export function createPullRequests(options: PullRequestOptions) {
       .where(
         and(
           gt(githubPullRequest.lastReadAt, new Date(at - READ_WINDOW_MS)),
+          // a merged pull request never changes; a closed one can reopen, so it is fetched again
+          or(
+            isNull(githubPullRequest.state),
+            ne(githubPullRequest.state, "merged"),
+          ),
           or(
             isNull(githubPullRequest.checkedAt),
             lt(githubPullRequest.checkedAt, new Date(at - FRESH_MS)),
@@ -201,7 +218,7 @@ export function createPullRequests(options: PullRequestOptions) {
     | { limitedUntil: number }
     | { rejectedUntil: number }
   > {
-    const [, owner, repo, number] = PULL_URL.exec(url) ?? [];
+    const [, , owner, repo, number] = PULL_URL.exec(url) ?? [];
     try {
       const res = await fetchImpl(
         `https://api.github.com/repos/${owner}/${repo}/pulls/${number}`,

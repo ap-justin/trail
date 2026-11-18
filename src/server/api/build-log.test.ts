@@ -117,7 +117,7 @@ test("the hint counts distinct commits: a short and full SHA pair is one", () =>
 test("the hint names the way to link the pull request on each surface", () => {
   const body = `Pushed ${sha} and 0a1b2c3d4e.`;
   expect(buildLogHint(body, "rest")).toMatch(
-    /PATCH \/items\/\{key\} with addLinks/,
+    /PATCH \/items\/\{key\} and addLinks/,
   );
   expect(buildLogHint(body, "mcp")).toMatch(/update_item addLinks/);
 });

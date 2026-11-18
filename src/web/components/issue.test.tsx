@@ -1,4 +1,11 @@
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
@@ -138,6 +145,21 @@ describe("links", () => {
   const pull = (n: number) => `https://github.com/example/trail/pull/${n}`;
   const checkedAt = "2026-11-12T10:00:00.000Z";
 
+  test.each(["/files", "/", "#issuecomment-4242", "/files?w=1#diff-abc"])(
+    "a pull request link ending in %s the server sent no state for reads State unknown",
+    (suffix) => {
+      renderIssue({
+        issue: {
+          status: "ready",
+          data: issue({ links: [{ url: pull(12) + suffix, title: "PR" }] }),
+        },
+      });
+      expect(
+        within(screen.getByRole("region", { name: "Links" })).getByRole("link"),
+      ).toHaveAccessibleName(/^Pull request State unknown PR/);
+    },
+  );
+
   test.each([
     ["open", "Open", "lucide-git-pull-request"],
     ["draft", "Draft", "lucide-git-pull-request-draft"],
@@ -250,11 +272,9 @@ describe("links", () => {
   });
 
   test.each([
-    "https://github.com/example/trail/pull/7/files",
     "https://github.com/example/trail/pull/0",
     "https://github.com/example/../pull/7",
     "http://github.com/example/trail/pull/7",
-    "https://github.com/example/trail/pull/7?diff=split",
   ])("a pr-less link to %s is not read as a pull request", (url) => {
     renderIssue({
       issue: {
@@ -378,7 +398,7 @@ describe("long comments", () => {
     const body = document.getElementById(
       button.getAttribute("aria-controls") ?? "",
     );
-    expect(body).toHaveClass("max-h-[4lh]", "overflow-hidden");
+    expect(body).toHaveClass("max-h-[4lh]", "overflow-clip");
     expect(body).toHaveTextContent("Paragraph 6.");
   });
 
@@ -466,6 +486,29 @@ describe("long comments", () => {
     await user.click(link);
     expect(link).toHaveFocus();
     expect(button).toHaveAttribute("aria-expanded", "false");
+  });
+
+  test("coming back to the window with focus on a link in the visible lines leaves the comment collapsed", async () => {
+    const user = userEvent.setup();
+    const { button, link } = renderVisibleLink();
+    await user.click(link);
+    // the link opened a new tab: the window loses focus, then regains it and re-focuses the link
+    const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    fireEvent.focusOut(link);
+    hasFocus.mockReturnValue(true);
+    fireEvent.focusIn(link);
+    expect(button).toHaveAttribute("aria-expanded", "false");
+  });
+
+  test("a link that lost focus inside the window still opens the comment when Tab returns to it", async () => {
+    const user = userEvent.setup();
+    const { button, link } = renderVisibleLink();
+    await user.click(link);
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    act(() => link.blur());
+    expect(button).toHaveAttribute("aria-expanded", "false");
+    act(() => link.focus());
+    expect(button).toHaveAttribute("aria-expanded", "true");
   });
 
   test("tapping a link in the visible lines leaves the comment collapsed", async () => {
