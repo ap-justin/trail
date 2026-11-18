@@ -9,7 +9,8 @@ function bodyOf(length: number, lead: string) {
 }
 
 const sha = "3f9c2a1";
-const longRunUrl = "https://github.com/example-org/widget/actions/runs/1234567890";
+const longRunUrl =
+  "https://github.com/example-org/widget/actions/runs/1234567890";
 
 test("bodyOf pads to exactly the length asked for", () => {
   expect(bodyOf(2000, `Landed in ${sha} and b71e04d9`)).toHaveLength(2000);
