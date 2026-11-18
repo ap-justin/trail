@@ -378,7 +378,7 @@ describe("long comments", () => {
     Array.from({ length: n }, (_, i) => `Paragraph ${i + 1}.`).join("\n\n");
 
   function renderComments(...bodies: string[]) {
-    renderIssue({
+    return renderIssue({
       issue: {
         status: "ready",
         data: issue({
@@ -473,13 +473,14 @@ describe("long comments", () => {
   });
 
   function renderVisibleLink() {
-    renderComments(
+    const view = renderComments(
       `See [the spec](https://example.com/spec).\n\n${paragraphs(6)}`,
     );
     const link = screen.getByRole("link", { name: "the spec" });
     // jsdom can't open a new tab and logs "Not implemented" when asked to
     link.addEventListener("click", (e) => e.preventDefault());
     return {
+      view,
       button: screen.getByRole("button", { name: /^Show more/ }),
       link,
     };
@@ -514,6 +515,65 @@ describe("long comments", () => {
     expect(button).toHaveAttribute("aria-expanded", "false");
     act(() => link.focus());
     expect(button).toHaveAttribute("aria-expanded", "true");
+  });
+
+  test("after the window comes back with focus elsewhere, Tab onto the link that left with it opens the comment", async () => {
+    const user = userEvent.setup();
+    const { button, link } = renderVisibleLink();
+    await user.click(link);
+    // the window loses focus to the address bar, then Tab comes back in onto the next control
+    const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    act(() => link.blur());
+    hasFocus.mockReturnValue(true);
+    act(() => button.focus());
+    expect(button).toHaveAttribute("aria-expanded", "false");
+    await user.tab({ shift: true });
+    expect(link).toHaveFocus();
+    expect(button).toHaveAttribute("aria-expanded", "true");
+  });
+
+  // the return listener ends with its AbortSignal; the focusin signals handed to document, in order
+  function watchReturnListeners() {
+    const signals: AbortSignal[] = [];
+    const add = document.addEventListener.bind(document);
+    vi.spyOn(document, "addEventListener").mockImplementation(
+      (type: string, listener: unknown, options?: unknown) => {
+        const signal = (options as AddEventListenerOptions | undefined)?.signal;
+        if (type === "focusin" && signal) signals.push(signal);
+        add(
+          type,
+          listener as EventListener,
+          options as AddEventListenerOptions,
+        );
+      },
+    );
+    return signals;
+  }
+
+  test("unmounting a comment with the window-return listener pending removes the listener", async () => {
+    const user = userEvent.setup();
+    const { view, link } = renderVisibleLink();
+    await user.click(link);
+    const signals = watchReturnListeners();
+    vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    fireEvent.focusOut(link);
+    expect(signals).toHaveLength(1);
+    expect(signals[0]?.aborted).toBe(false);
+    view.unmount();
+    expect(signals[0]?.aborted).toBe(true);
+  });
+
+  test("a second window-leave replaces the pending return listener instead of stacking another", async () => {
+    const user = userEvent.setup();
+    const { link } = renderVisibleLink();
+    await user.click(link);
+    const signals = watchReturnListeners();
+    vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    fireEvent.focusOut(link);
+    fireEvent.focusOut(link);
+    expect(signals).toHaveLength(2);
+    expect(signals[0]?.aborted).toBe(true);
+    expect(signals[1]?.aborted).toBe(false);
   });
 
   test("tapping a link in the visible lines leaves the comment collapsed", async () => {

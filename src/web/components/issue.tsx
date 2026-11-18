@@ -11,6 +11,7 @@ import {
   type FormEvent,
   type ReactNode,
   type RefObject,
+  useEffect,
   useId,
   useLayoutEffect,
   useRef,
@@ -614,6 +615,9 @@ function CommentWell({
   // which is no Tab either; the element that lost focus along with the window is remembered so its
   // focus on return opens nothing
   const leftWithWindow = useRef<EventTarget | null>(null);
+  // the document listener that ends the remembering; one at a time, and gone with the comment
+  const windowReturn = useRef<AbortController | null>(null);
+  useEffect(() => () => windowReturn.current?.abort(), []);
   // the body shrinks above the button on Show less; where scroll anchoring doesn't hold it,
   // the button would end up above the viewport with focus still on it
   const wasOpen = useRef(open);
@@ -660,22 +664,39 @@ function CommentWell({
             pressed.current = null;
           }}
           onBlur={(e) => {
-            leftWithWindow.current = document.hasFocus() ? null : e.target;
+            if (document.hasFocus()) {
+              leftWithWindow.current = null;
+              return;
+            }
+            const left = e.target;
+            leftWithWindow.current = left;
+            // only the first focus after the window comes back can be the return; focus landing
+            // anywhere else (a click elsewhere, Tab in from the address bar) ends the remembering,
+            // so a later Tab onto this element opens. Capture runs before React's root listener
+            windowReturn.current?.abort();
+            windowReturn.current = new AbortController();
+            document.addEventListener(
+              "focusin",
+              (next) => {
+                if (next.target !== left) leftWithWindow.current = null;
+              },
+              {
+                capture: true,
+                once: true,
+                signal: windowReturn.current.signal,
+              },
+            );
           }}
-          onFocus={
-            long
-              ? (e) => {
-                  const returning = leftWithWindow.current === e.target;
-                  leftWithWindow.current = null;
-                  if (returning) return;
-                  const target = pressed.current;
-                  if (target instanceof Node && e.target.contains(target)) {
-                    return;
-                  }
-                  setOpen(true);
-                }
-              : undefined
-          }
+          onFocus={(e) => {
+            const returning = leftWithWindow.current === e.target;
+            leftWithWindow.current = null;
+            if (returning || !long) return;
+            const target = pressed.current;
+            if (target instanceof Node && e.target.contains(target)) {
+              return;
+            }
+            setOpen(true);
+          }}
         >
           {/* measured unclamped, so opening and closing never changes the count */}
           <div ref={contentRef}>
