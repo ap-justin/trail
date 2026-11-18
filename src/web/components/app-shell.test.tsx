@@ -495,8 +495,9 @@ describe("main nav", () => {
   test("each tab sizes to its label, padded, at least 44px wide", () => {
     renderShell(owner);
     for (const tab of within(tabNav()).getAllByRole("link")) {
-      expect(tab).toHaveClass("flex-auto", "px-1", "min-w-11");
+      expect(tab).toHaveClass("flex-auto", "min-w-11");
       expect(tab).not.toHaveClass("flex-1");
+      expect(tab.firstElementChild).toHaveClass("px-1");
     }
   });
 
@@ -516,20 +517,55 @@ describe("main nav", () => {
       expect(other).toBeDefined();
       expect(sidebarCurrent).not.toBeNull();
       if (nav === tabNav) expect(current).not.toBe(sidebarCurrent);
+      // a tab draws its background on the surface inside the link, a sidebar row on the link itself
+      const drawn = (link?: Element) =>
+        nav === tabNav ? link?.firstElementChild : link;
       onTestFinished(await applyCompiledCss(document.body));
       const style = (el?: Element | null) => getComputedStyle(el as Element);
-      expect(style(current).backgroundColor).not.toBe(
-        style(other).backgroundColor,
+      expect(style(drawn(current)).backgroundColor).not.toBe(
+        style(drawn(other)).backgroundColor,
       );
-      expect(style(current).backgroundColor).toBe(
-        style(sidebarCurrent).backgroundColor,
+      expect(style(drawn(current)).borderRadius).not.toMatch(/^(0|0px)?$/);
+      // the sidebar row is the reference the tab bar is held to, so it is held to the tokens
+      // (--accent, --radius-md in globals.css); comparing it with itself could not fail
+      const expected =
+        nav === tabNav
+          ? {
+              backgroundColor: style(sidebarCurrent).backgroundColor,
+              borderRadius: style(sidebarCurrent).borderRadius,
+            }
+          : { backgroundColor: "oklch(0.93 0.004 215)", borderRadius: "6px" };
+      expect(style(drawn(current)).backgroundColor).toBe(
+        expected.backgroundColor,
       );
-      expect(style(current).borderRadius).not.toMatch(/^(0|0px)?$/);
-      expect(style(current).borderRadius).toBe(
-        style(sidebarCurrent).borderRadius,
-      );
+      expect(style(drawn(current)).borderRadius).toBe(expected.borderRadius);
     },
   );
+
+  // a margin on the link would leave strips of the 56px bar that no tap reaches; the inset belongs to the drawn surface inside it
+  test("the current tab's link spans the bar's height while its background sits inset", async () => {
+    renderShell(owner);
+    const links = within(tabNav()).getAllByRole("link");
+    const current = links.find((link) => link.hasAttribute("aria-current"));
+    expect(current).toBeDefined();
+    const link = current as HTMLElement;
+    const surface = link.firstElementChild;
+    onTestFinished(await applyCompiledCss(document.body));
+    const style = (el?: Element | null) => getComputedStyle(el as Element);
+    for (const tab of links) {
+      expect(style(tab).marginTop).toMatch(/^(0|0px)?$/);
+      expect(style(tab).marginBottom).toMatch(/^(0|0px)?$/);
+      expect(style(tab).alignSelf).not.toMatch(/start|end|center/);
+    }
+    expect(style(link).backgroundColor).toMatch(
+      /^(transparent|rgba\(0, 0, 0, 0\))?$/,
+    );
+    expect(style(link).paddingTop).not.toMatch(/^(0|0px)?$/);
+    expect(style(link).paddingBottom).not.toMatch(/^(0|0px)?$/);
+    expect(style(surface).backgroundColor).toBe(
+      style(sidebarNav().querySelector("[aria-current]")).backgroundColor,
+    );
+  });
 
   // tabs are label-sized, so a heavier current label would widen its tab and shift its neighbours; the sidebar marks current the same way
   test.each([
