@@ -500,7 +500,7 @@ describe("main nav", () => {
     }
   });
 
-  // label-sized tabs: a heavier current label would widen its tab and shift its neighbours
+  // tabs are label-sized, so a heavier current label would widen its tab and shift its neighbours; the sidebar marks current the same way
   test.each([
     ["tab bar", tabNav],
     ["sidebar", sidebarNav],

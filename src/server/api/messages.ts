@@ -124,7 +124,7 @@ const markRead = createRoute({
   method: "post",
   path: "/messages/read",
   summary: "Mark messages sent to you as read",
-  description: `Takes 1 to ${MARK_READ_MAX} message ids and is safe to repeat. Each id gets its own result, read, already_read or not_found (an id that matches no message sent to you, such as a message you sent), so one bad id fails nothing. ${anyKey}`,
+  description: `Takes 1 to ${MARK_READ_MAX} message ids and is safe to repeat. Each id gets its own result: read, already_read, or not_found (no message with that id was sent to you; one you sent counts as not found), so one bad id fails nothing. ${anyKey}`,
   tags,
   request: { body: jsonBody(markReadSchema) },
   responses: {
