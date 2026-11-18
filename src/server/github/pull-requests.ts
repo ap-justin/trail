@@ -26,7 +26,7 @@ const READ_WINDOW_MS = 24 * 60 * MINUTE;
 /** A read restamps lastReadAt only once the stamp is this old. */
 const READ_STAMP_MS = 60 * MINUTE;
 // GitHub allows 5000 requests an hour with a token (about 83 a minute), and 60 an hour per IP
-// without: 20 a minute leaves the token's quota room for its other use, 1 a minute stays under 60
+// without: 20 a minute leaves the token's quota room for its other use, and 1 a minute is the 60 exactly
 const FETCHES_PER_MINUTE = { token: 20, anonymous: 1 } as const;
 /** After n failed fetches in a row, the next waits min(2^n, 60) minutes from the last. */
 const BACKOFF_CAP_MINUTES = 60;
@@ -49,8 +49,8 @@ const PULL_URL =
 
 /**
  * The canonical url of a GitHub pull request link, or null for any other url:
- * lowercase and ending at /pull/<n>, whatever follows it. GitHub's own names
- * are case-insensitive, so any case matches.
+ * lowercase and cut at /pull/<n>, dropping a tab, slash, query or #fragment
+ * after it. GitHub's own names are case-insensitive, so any case matches.
  */
 function pullRequestUrl(url: string): string | null {
   const match = PULL_URL.exec(url.toLowerCase());
@@ -86,7 +86,8 @@ export type PullRequestOptions = {
  * A read never waits on GitHub: it answers from the cache and stamps
  * lastReadAt at most hourly, and the table is the queue a timer drains, a few
  * fetches a minute one at a time, for rows read in the last day whose state is
- * stale and whose backoff has passed. A rate-limit answer pauses all fetching
+ * stale and whose backoff has passed; a merged row is never fetched again,
+ * since its state can't change. A rate-limit answer pauses all fetching
  * until GitHub says to resume, and a 401 to the token pauses it an hour: GitHub
  * answers 401 to every request a bad token makes, so neither is the pull
  * request's failure.

@@ -36,7 +36,8 @@ const serverSchema = databaseSchema
     BETTER_AUTH_URL: optional.pipe(z.url().optional()),
     GITHUB_CLIENT_ID: optional,
     GITHUB_CLIENT_SECRET: optional,
-    // reads the state of pull requests item links name from GitHub's API; without it, public repos only
+    // sent to GitHub's API for the state of pull requests item links name: with it, private repos
+    // the token can read and a faster fetch rate; without it, public repos only
     GITHUB_TOKEN: optional,
     // the sign-in email's From, e.g. `trail <trail@mail.example.com>`, on a domain Resend has verified
     EMAIL_FROM: optional,
