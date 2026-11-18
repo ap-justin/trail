@@ -13,6 +13,7 @@ import {
   WORK_WAIT_MAX_MS,
 } from "@/lib/use-live-feed";
 import {
+  feedPage,
   meView,
   notFound,
   renderApp,
@@ -424,6 +425,68 @@ describe("an access event", () => {
     expect(strip()).toBeNull();
     expect(productLink(/beta/)).toBeNull();
     expect(productLink(/alpha/)).toBeInTheDocument();
+  });
+
+  test.each([
+    ["unchanged", [alphaProduct]],
+    ["granted", [alphaProduct, betaProduct]],
+  ])(
+    "an access event with products %s reads Working now once",
+    async (_, products) => {
+      const at: Access = { products: [alphaProduct], entries: [] };
+      const { queryClient, reads, stream } = await openWithAccess(at);
+      const before = { ...reads };
+      at.products = products;
+      sendAccess(stream);
+      await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+      expect(reads).toEqual({
+        me: before.me + 1,
+        workingNow: before.workingNow + 1,
+      });
+    },
+  );
+
+  test("an access event that changes products reads Working now and the feed once each when /me answers last", async () => {
+    const at: Access = { products: [alphaProduct], entries: [] };
+    const { queryClient, stream } = await openWithAccess(at);
+    const reads = { me: 0, workingNow: 0, feed: 0 };
+    let releaseMe = () => {};
+    const meHeld = new Promise<void>((resolve) => {
+      releaseMe = resolve;
+    });
+    server.use(
+      http.get("/api/web/me", async () => {
+        reads.me += 1;
+        await meHeld;
+        return HttpResponse.json({
+          ...meView("member"),
+          products: [alphaProduct, betaProduct],
+        });
+      }),
+      http.get("/api/web/working-now", () => {
+        reads.workingNow += 1;
+        return HttpResponse.json({
+          total: 0,
+          entries: [],
+        } satisfies WebWorkingNowView);
+      }),
+      http.get("/api/web/feed", () => {
+        reads.feed += 1;
+        return HttpResponse.json(feedPage([statusEntry("e1", minutesAgo(5))]));
+      }),
+    );
+    sendAccess(stream);
+    // both answered while /me is still out
+    await waitFor(() => {
+      expect(reads.workingNow).toBeGreaterThan(0);
+      expect(reads.feed).toBeGreaterThan(0);
+    });
+    await flushRequests();
+    releaseMe();
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    await flushRequests();
+    expect(reads).toEqual({ me: 1, workingNow: 1, feed: 1 });
+    expect(productLink(/beta/)).toBeInTheDocument();
   });
 
   test("an access event clears the read a work event was waiting to make", async () => {

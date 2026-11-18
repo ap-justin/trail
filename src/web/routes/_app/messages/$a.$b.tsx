@@ -1,5 +1,5 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { AppPage, useChrome } from "@/app/chrome";
 import { NotFoundPage } from "@/app/not-found-page";
 import {
@@ -12,6 +12,13 @@ import { paths } from "@/lib/paths";
 import { conversationQuery } from "@/lib/queries";
 
 export const Route = createFileRoute("/_app/messages/$a/$b")({
+  // one URL, and so one cache entry, per pair: the lower id first, by code unit, as the
+  // server orders a pair's bots and the conversation list links them
+  beforeLoad: ({ params: { a, b } }) => {
+    if (b < a) {
+      throw redirect({ to: "/messages/$a/$b", params: { a: b, b: a } });
+    }
+  },
   component: ConversationRoute,
 });
 

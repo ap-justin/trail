@@ -1,6 +1,7 @@
 import {
   infiniteQueryOptions,
   MutationCache,
+  type Query,
   QueryCache,
   QueryClient,
   type QueryClientConfig,
@@ -196,11 +197,18 @@ export function createQueryClient(config: QueryClientConfig = {}) {
       void client.invalidateQueries({ queryKey: keys.me });
     }
   };
+  // the order each query's read in flight, or last read, was asked in; a read restarted
+  // while in flight keeps its first ask's place
+  let asks = 0;
+  const askedAt = new WeakMap<object, number>();
+  const askedAfter = (query: object, earlier: object) =>
+    (askedAt.get(query) ?? 0) > (askedAt.get(earlier) ?? 0);
   // the feed and Working now never refetch on focus, so when `/me` grants or takes away a
   // project, this re-reads both: the feed's rows and filter options come from `/feed`, and
-  // no `work` event follows a membership change
+  // no `work` event follows a membership change. A read asked after this `/me` one already
+  // follows the access it reports, as the feed's `access` handler asks for them after it
   let projectsSeen: string | undefined;
-  const followProjects = () => {
+  const followProjects = (meRead: object) => {
     const me = client.getQueryData(meQuery.queryKey);
     if (!me || !isMember(me)) return;
     const projects = me.products
@@ -208,19 +216,32 @@ export function createQueryClient(config: QueryClientConfig = {}) {
       .toSorted()
       .join("\u0000");
     if (projectsSeen !== undefined && projects !== projectsSeen) {
-      void client.invalidateQueries({ queryKey: ["feed"] });
-      void client.invalidateQueries({ queryKey: keys.workingNow });
+      const askedBeforeMe = (query: Query) => !askedAfter(query, meRead);
+      void client.invalidateQueries({
+        queryKey: ["feed"],
+        predicate: askedBeforeMe,
+      });
+      void client.invalidateQueries({
+        queryKey: keys.workingNow,
+        predicate: askedBeforeMe,
+      });
     }
     projectsSeen = projects;
   };
+  const queryCache = new QueryCache({
+    onError: recheckSession,
+    onSuccess: (_data, query) => {
+      if (query.queryKey[0] === keys.me[0]) followProjects(query);
+    },
+  });
+  queryCache.subscribe((event) => {
+    if (event.type === "updated" && event.action.type === "fetch") {
+      askedAt.set(event.query, ++asks);
+    }
+  });
   const client = new QueryClient({
     ...config,
-    queryCache: new QueryCache({
-      onError: recheckSession,
-      onSuccess: (_data, query) => {
-        if (query.queryKey[0] === keys.me[0]) followProjects();
-      },
-    }),
+    queryCache,
     mutationCache: new MutationCache({ onError: recheckSession }),
     defaultOptions: {
       ...config.defaultOptions,

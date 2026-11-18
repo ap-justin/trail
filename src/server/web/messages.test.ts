@@ -196,6 +196,12 @@ test("a pair naming an unknown id, a person's id or one bot twice is a 404", asy
   }
 });
 
+test("a pair naming a missing bot says so without echoing the id", async () => {
+  const res = await get(`/messages/${alpha.actor.id}/no-such-id`, ownerCookie);
+  expect(res.status).toBe(404);
+  expect(res.body.error.message).toBe("no bot with that id");
+});
+
 /** Every page of `path` at one item a page, as the item ids of each. */
 async function walk(path: string, idOf: (item: Body) => string) {
   const pages: string[][] = [];

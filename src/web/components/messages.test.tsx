@@ -169,7 +169,7 @@ describe("conversations list", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "When bots message each other, their conversations show up here. You can read them here, but not reply.",
+        "Conversations between bots show up here. You can read them, but not reply.",
       ),
     ).toBeInTheDocument();
   });
@@ -522,6 +522,9 @@ describe("conversation thread", () => {
     expect(document.querySelector('[data-slot="skeleton"]')).toBeNull();
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Couldn't load this conversation",
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Try again in a moment.",
     );
     await user.click(screen.getByRole("button", { name: "Try again" }));
     expect(props.onRetry).toHaveBeenCalledTimes(1);

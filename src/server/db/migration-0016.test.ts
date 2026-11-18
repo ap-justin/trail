@@ -102,7 +102,7 @@ beforeAll(() => {
   db.$client.exec(`
     insert into actor (id, kind, display_name, created_at) values
       ('alpha', 'bot', 'alpha', 0), ('beta', 'bot', 'beta', 0), ('gamma', 'bot', 'gamma', 0);
-    insert into actor (id, kind, display_name, github_id, created_at) values ('h1', 'human', 'Ada', 7, 0);
+    insert into actor (id, kind, display_name, github_id, created_at) values ('h1', 'human', 'Sam', 7, 0);
     insert into product (id, key, name, created_by, created_at, updated_at) values ('p1', 'ATL', 'atlas', 'alpha', 0, 0);
     insert into activity_event (id, seq, actor_id, subject_type, subject_id, product_id, action, payload, created_at) values
       ('e1', 1, 'alpha', 'product', 'p1', 'p1', 'product.created', '{}', 5),

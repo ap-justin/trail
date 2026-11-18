@@ -19,6 +19,7 @@ import {
   listKeys,
   renameBot,
   revokeKey,
+  setBotLabel,
   setBotTitle,
 } from "./service/keys.js";
 import {
@@ -48,6 +49,11 @@ const usage = `Usage:
   trail bot title <bot-id-label-or-name> --clear
                                    set a bot's title, 1 to ${BOT_TITLE_MAX} characters, shown
                                    beside its name; or remove it
+  trail bot label <bot-id-label-or-name> <agent-id>
+  trail bot label <bot-id-label-or-name> --clear
+                                   set a bot's label, unique among bots and
+                                   case-sensitive, unlike names; or remove
+                                   it; its keys stay
   trail key create <bot-id-or-label> [<scope>] [--key-only]
                                    mint another key for an existing bot
   trail key scope <prefix> [--add-product <key>] [--remove-product <key>]
@@ -77,7 +83,7 @@ const usage = `Usage:
   --actions <actions> scope: limit the key to these of read, issues, comments,
                       status_updates and admin, like read,issues,comments
   --key-only          print only the key on stdout; the rest goes to stderr
-  --clear             bot title: remove the title instead of setting one
+  --clear             bot title, bot label: remove it instead of setting one
   --add-product <key>, --remove-product <key>, --add-project <slug>,
   --remove-project <slug>
                       key scope: the products and projects to add or take off;
@@ -563,6 +569,36 @@ const botTitle: Command<{ bot: string; title: string | null }> = {
   },
 };
 
+const botLabel: Command<{ bot: string; label: string | null }> = {
+  flags: ["clear"],
+  parse(args, flags) {
+    if (args.length === 0)
+      throw new UsageError("missing <bot-id-label-or-name>");
+    if (args.length > 2) {
+      throw new UsageError(
+        `expected <bot-id-label-or-name> <agent-id>, got ${args.length} arguments; quote a value containing spaces`,
+      );
+    }
+    const [bot, label] = args as [string, string | undefined];
+    if (flags.clear) {
+      if (label !== undefined) {
+        throw new UsageError("'bot label --clear' takes no <agent-id>");
+      }
+      return { bot, label: null };
+    }
+    if (label === undefined) {
+      throw new UsageError("missing <agent-id>, or --clear to remove it");
+    }
+    return { bot, label };
+  },
+  run(db, { bot, label }, io) {
+    const set = setBotLabel(db, bot, label);
+    io.stdout.write(
+      `actor  ${set.id}\nname   ${set.name}\nfrom   ${set.oldLabel ?? "-"}\nto     ${set.newLabel ?? "-"}\n`,
+    );
+  },
+};
+
 /** Rows as columns padded to their widest cell, the last left unpadded. */
 function printTable(io: CliIo, rows: string[][]): void {
   const widths = rows[0]?.map((_, i) =>
@@ -634,6 +670,7 @@ const commands: Record<string, Command<unknown> | undefined> = {
   "bot create": botCreate,
   "bot rename": botRename,
   "bot title": botTitle,
+  "bot label": botLabel,
   "key create": keyCreate,
   "key list": keyList,
   "key revoke": keyRevoke,

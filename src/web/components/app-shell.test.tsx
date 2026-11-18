@@ -490,6 +490,37 @@ describe("main nav", () => {
     }
   });
 
+  // equal-width tabs put the owner's six labels edge to edge at 320; jsdom has no layout,
+  // so this pins the classes that keep them apart (measured: 8px between labels at 320)
+  test("each tab sizes to its label, padded, at least 44px wide", () => {
+    renderShell(owner);
+    for (const tab of within(tabNav()).getAllByRole("link")) {
+      expect(tab).toHaveClass("flex-auto", "px-1", "min-w-11");
+      expect(tab).not.toHaveClass("flex-1");
+    }
+  });
+
+  // tabs are label-sized, so a heavier current label would widen its tab and shift its neighbours; the sidebar marks current the same way
+  test.each([
+    ["tab bar", tabNav],
+    ["sidebar", sidebarNav],
+  ])(
+    "the current %s item has the same font weight as the others",
+    async (_, nav) => {
+      renderShell(owner);
+      // collected before the CSS lands: it hides whichever nav the viewport doesn't show
+      const links = within(nav()).getAllByRole("link");
+      const current = links.find((link) => link.hasAttribute("aria-current"));
+      const other = links.find((link) => !link.hasAttribute("aria-current"));
+      expect(current).toBeDefined();
+      expect(other).toBeDefined();
+      onTestFinished(await applyCompiledCss(document.body));
+      expect(getComputedStyle(current as Element).fontWeight).toBe(
+        getComputedStyle(other as Element).fontWeight,
+      );
+    },
+  );
+
   test("under the Products label, one row per visible product: key in mono, then name", () => {
     renderShell(owner);
     const row = within(productsNav()).getByRole("link", { name: "TRL trail" });

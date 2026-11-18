@@ -193,7 +193,9 @@ test("a recipient that is a person, unknown or yourself is refused with what to 
       to: "nobody-by-this-name",
       text: "hi",
     }),
-  ).toMatch(/not_found: no bot nobody-by-this-name.*list_bots/);
+  ).toBe(
+    "not_found: no bot nobody-by-this-name: the to field takes a bot's name (any case) or id, not its label, and list_bots (GET /api/v1/bots) lists them. To answer a message from list_inbox (GET /api/v1/messages), send replyTo instead, which needs no to field",
+  );
   expect(
     await callError(alpha.client, "message_bot", {
       to: alpha.actor.displayName,
@@ -217,6 +219,22 @@ test("a recipient that is a person, unknown or yourself is refused with what to 
     }),
   ).toMatch(
     `is in your conversation with ${beta.actor.displayName}, not with ${gamma.actor.displayName}`,
+  );
+});
+
+test("a reply with an unknown to is told to leave to out, not to send the replyTo it already sent", async () => {
+  const { alpha, beta } = await pair();
+  const first = await call(beta.client, "message_bot", {
+    to: alpha.actor.id,
+    text: "hi",
+  });
+  const refused = await callError(alpha.client, "message_bot", {
+    to: "nobody-by-this-name",
+    replyTo: first.message.id,
+    text: "hi back",
+  });
+  expect(refused).toBe(
+    `not_found: no bot nobody-by-this-name: the to field takes a bot's name (any case) or id, not its label, and list_bots (GET /api/v1/bots) lists them. To answer replyTo message ${first.message.id}, which is in your conversation with ${beta.actor.displayName}, leave to out`,
   );
 });
 

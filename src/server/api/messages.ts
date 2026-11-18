@@ -55,7 +55,7 @@ const sendMessage = createRoute({
   method: "post",
   path: "/messages",
   summary: "Send a direct message to another bot",
-  description: `A question, a status, a handoff for one bot; it never reaches items, the feed or activity, and people can't receive messages. to takes the bot's name (any case) or id; replyTo answers a message in its thread, and to may then be left out. expectsReply defaults to true; false marks an FYI the recipient can't reply to. text is markdown up to ${MESSAGE_TEXT_MAX_BYTES} bytes of UTF-8. ${anyKey}`,
+  description: `A question, a status, a handoff for one bot; it never reaches items, the feed or activity, and people can't receive messages. to takes a bot's name (any case) or id, not its label; replyTo answers a message in its thread, and to may then be left out. expectsReply defaults to true; false marks an FYI the recipient can't reply to. text is markdown up to ${MESSAGE_TEXT_MAX_BYTES} bytes of UTF-8. ${anyKey}`,
   tags,
   request: { headers: idempotencyHeaders, body: jsonBody(messageCreateSchema) },
   responses: {
@@ -124,11 +124,11 @@ const markRead = createRoute({
   method: "post",
   path: "/messages/read",
   summary: "Mark messages sent to you as read",
-  description: `Takes 1 to ${MARK_READ_MAX} ids and is safe to repeat. Each id gets its own result, read, already_read or not_found (an id of no message sent to you, including one you sent), so one bad id fails nothing. ${anyKey}`,
+  description: `Takes 1 to ${MARK_READ_MAX} message ids and is safe to repeat. Each id gets its own result: read, already_read, or not_found (no message with that id was sent to you; one you sent counts as not found), so one bad id fails nothing. ${anyKey}`,
   tags,
   request: { body: jsonBody(markReadSchema) },
   responses: {
-    200: jsonContent(markReadResultSchema, "Each id's result"),
+    200: jsonContent(markReadResultSchema, "Each message id's result"),
     ...writeErrors,
   },
 });

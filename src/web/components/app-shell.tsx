@@ -416,13 +416,15 @@ function TabBar({
       className="fixed inset-x-0 bottom-0 z-10 flex h-14 bg-frame lg:hidden"
     >
       {navItems(viewer.isOwner, true).map((item) => (
+        // sized to the label with the leftover shared, not equal shares: six equal tabs at
+        // 320px are narrower than "Messages", so labels would run together
         <AppLink
           key={item.section}
           href={item.href}
           aria-current={sectionCurrent(item.section, section, productKey, {
             tab: true,
           })}
-          className="flex flex-1 flex-col items-center justify-center gap-0.5 text-xs text-muted-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring aria-[current]:font-medium aria-[current]:text-foreground"
+          className="flex min-w-11 flex-auto flex-col items-center justify-center gap-0.5 px-1 text-xs text-muted-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring aria-[current]:text-foreground"
         >
           <item.icon aria-hidden="true" className="size-4" />
           {item.label}

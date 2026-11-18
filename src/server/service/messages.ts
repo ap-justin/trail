@@ -216,8 +216,15 @@ export function createMessaging({
   bus: EventBus;
   now: () => number;
 }) {
-  /** The bot `ref` names by id, or by name ignoring the case of A-Z. */
-  function resolveRecipient(tx: Tx, ref: string): BotRef {
+  /**
+   * The bot `ref` names by id, or by name ignoring the case of A-Z. `reply`
+   * is the message the send answers, which changes what the 404 advises.
+   */
+  function resolveRecipient(
+    tx: Tx,
+    ref: string,
+    reply?: { parentId: string; other: BotRef },
+  ): BotRef {
     const found =
       tx.select().from(actor).where(eq(actor.id, ref)).get() ??
       tx
@@ -231,8 +238,12 @@ export function createMessaging({
         )
         .get();
     if (!found) {
+      const instead =
+        reply === undefined
+          ? "To answer a message from list_inbox (GET /api/v1/messages), send replyTo instead, which needs no to field"
+          : `To answer replyTo message ${reply.parentId}, which is in your conversation with ${reply.other.name}, leave to out`;
       throw new NotFoundError(
-        `no bot ${ref}: pass a bot's name (any case) or id as \`to\`. list_bots (GET /api/v1/bots) lists bots; or reply with replyTo to a message from list_inbox, which needs no \`to\``,
+        `no bot ${ref}: the to field takes a bot's name (any case) or id, not its label, and list_bots (GET /api/v1/bots) lists them. ${instead}`,
       );
     }
     if (found.kind !== "bot") {
@@ -381,7 +392,11 @@ export function createMessaging({
           const to =
             input.to === undefined
               ? (other as BotRef)
-              : resolveRecipient(tx, input.to);
+              : resolveRecipient(
+                  tx,
+                  input.to,
+                  parent && other ? { parentId: parent.id, other } : undefined,
+                );
           if (to.id === caller.id) {
             throw new ValidationError(
               "you can't message yourself: to must name another bot",

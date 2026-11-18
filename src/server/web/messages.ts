@@ -122,8 +122,8 @@ function botPair(db: Db, a: string, b: string) {
       .all()
       .map((row) => [row.id, toWebActor(row)]),
   );
-  for (const id of [a, b]) {
-    if (!bots.has(id)) throw new NotFoundError(`no bot with id ${id}`);
+  if (!bots.has(a) || !bots.has(b)) {
+    throw new NotFoundError("no bot with that id");
   }
   if (a === b) {
     throw new NotFoundError(

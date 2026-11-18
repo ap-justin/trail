@@ -49,13 +49,13 @@ function linearProject(): ImportPayload {
         labels: ["Bug", "Backend"],
         links: [{ url: "https://github.com/o/r/pull/1", title: "PR 1" }],
         createdAt: "2026-01-02T03:04:05.000Z",
-        sourceAuthor: "Ada",
+        sourceAuthor: "Sam",
         comments: [
           {
             externalRef: `${ref}-c1`,
             body: "looks right",
             createdAt: "2026-01-03T00:00:00.000Z",
-            sourceAuthor: "Grace",
+            sourceAuthor: "Kim",
           },
           {
             externalRef: `${ref}-c2`,
@@ -84,7 +84,7 @@ function linearProject(): ImportPayload {
         body: "on schedule",
         health: "on_track",
         createdAt: "2026-01-08T00:00:00.000Z",
-        sourceAuthor: "Ada",
+        sourceAuthor: "Lee",
       },
     ],
   };
@@ -236,7 +236,7 @@ test("imported rows keep their source createdAt, completedAt and author, credite
   expect(first).toMatchObject({
     createdAt: new Date("2026-01-02T03:04:05.000Z"),
     completedAt: null,
-    sourceAuthor: "Ada",
+    sourceAuthor: "Sam",
     createdBy: bot.id,
     priority: 2,
     estimate: 3,
@@ -252,7 +252,7 @@ test("imported rows keep their source createdAt, completedAt and author, credite
     {
       body: "looks right",
       authorId: bot.id,
-      sourceAuthor: "Grace",
+      sourceAuthor: "Kim",
       createdAt: new Date("2026-01-03T00:00:00.000Z"),
     },
     { body: "merged", authorId: bot.id, sourceAuthor: null },
@@ -264,7 +264,7 @@ test("imported rows keep their source createdAt, completedAt and author, credite
       body: "on schedule",
       health: "on_track",
       authorId: bot.id,
-      sourceAuthor: "Ada",
+      sourceAuthor: "Lee",
       createdAt: new Date("2026-01-08T00:00:00.000Z"),
     },
   ]);
