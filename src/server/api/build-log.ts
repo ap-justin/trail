@@ -14,9 +14,6 @@
 const TOKEN =
   /\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b|https?:\/\/github\.com\/[^/\s]+\/[^/\s]+\/actions\/runs\/\d+\S*|\b\d{9,}\b|\b((?:agt|run|req)_(?=[A-Za-z]*\d)[A-Za-z0-9]{8,})\b|\b([0-9a-f]{7,40})\b/g;
 
-/** One token anywhere in a body this long is enough. */
-const LONG_BODY = 600;
-
 type Kind = "sha" | "ci" | "agent";
 
 /** Who reads the hint: a REST caller or an MCP client, each told its own way to link a PR. */
@@ -45,7 +42,8 @@ function kindOf(match: RegExpExecArray): Kind | null {
 
 /**
  * The hint a created comment carries when its body reads like a build log: 2
- * or more tokens, or 1 in a long body. Undefined otherwise; the
+ * or more tokens, however long the body. One token is a normal comment, even a
+ * long closing note naming the commit it landed in. Undefined otherwise; the
  * comment is saved as sent either way.
  */
 export function buildLogHint(
@@ -58,7 +56,7 @@ export function buildLogHint(
     if (kind !== null) counts[kind]++;
   }
   const total = counts.sha + counts.ci + counts.agent;
-  if (total === 0 || (total < 2 && body.length <= LONG_BODY)) return undefined;
+  if (total < 2) return undefined;
   const found = (Object.keys(NAMES) as Kind[])
     .filter((kind) => counts[kind] > 0)
     .map((kind) => {

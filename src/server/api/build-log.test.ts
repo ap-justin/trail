@@ -9,53 +9,61 @@ function bodyOf(length: number, lead: string) {
 
 const sha = "3f9c2a1";
 
-test("one token in a body of exactly 600 characters gets no hint; at 601 it does", () => {
-  const at600 = bodyOf(600, `Pushed ${sha}`);
-  const at601 = bodyOf(601, `Pushed ${sha}`);
-  expect([at600.length, at601.length]).toEqual([600, 601]);
-  expect(buildLogHint(at600, "rest")).toBeUndefined();
-  expect(buildLogHint(at601, "rest")).toMatch(/build log: 1 commit SHA\./);
+test("one token gets no hint however long the body; two do", () => {
+  expect(buildLogHint(`Pushed ${sha}`, "rest")).toBeUndefined();
+  expect(buildLogHint(bodyOf(2000, `Landed in ${sha}`), "rest")).toBeUndefined();
+  expect(
+    buildLogHint(bodyOf(2000, `Landed in ${sha} and b71e04d9`), "rest"),
+  ).toMatch(/build log: 2 commit SHAs\./);
 });
+
+// a second, always-counted token, so a test can ask whether the first one counted
+const other = "b71e04d9";
 
 test("a commit SHA is 7 to 40 hex characters: 40 counts, 41 does not", () => {
   const forty = "a1".repeat(20);
   const fortyOne = `${forty}b`;
-  expect(buildLogHint(bodyOf(601, `Head ${forty}`), "rest")).toMatch(
-    /1 commit SHA\./,
+  expect(buildLogHint(`Head ${forty} and ${other}`, "rest")).toMatch(
+    /2 commit SHAs\./,
   );
-  expect(buildLogHint(bodyOf(601, `Head ${fortyOne}`), "rest")).toBeUndefined();
-  expect(buildLogHint(bodyOf(601, "Head a1b2c3"), "rest")).toBeUndefined();
+  // a word that doesn't count leaves `other` alone, which is one token
+  expect(buildLogHint(`Head ${fortyOne} and ${other}`, "rest")).toBeUndefined();
+  expect(buildLogHint(`Head a1b2c3 and ${other}`, "rest")).toBeUndefined();
 });
 
 test("a hex word with no digit or no letter is not a commit SHA", () => {
   const lettersOnly = "Only defaced and facade, deadbeef and abcdefab changed.";
-  expect(buildLogHint(bodyOf(601, lettersOnly), "rest")).toBeUndefined();
+  expect(buildLogHint(`${lettersOnly} ${other}`, "rest")).toBeUndefined();
   expect(
-    buildLogHint(bodyOf(601, "Only 12345678 and 7654321 rows"), "rest"),
+    buildLogHint(`Only 12345678 and 7654321 rows, ${other}`, "rest"),
   ).toBeUndefined();
   // a real SHA in the same place counts
-  expect(buildLogHint(bodyOf(601, `Only ${sha} changed`), "rest")).toMatch(
-    /1 commit SHA\./,
+  expect(buildLogHint(`Only ${sha} changed, ${other}`, "rest")).toMatch(
+    /2 commit SHAs\./,
   );
 });
 
 test("an uppercase hex word is not a commit SHA", () => {
-  expect(buildLogHint(bodyOf(601, "Head 3F9C2A1"), "rest")).toBeUndefined();
+  expect(buildLogHint(`Head 3F9C2A1 and ${other}`, "rest")).toBeUndefined();
 });
 
-test("a single agent run id in a long body gets a hint; in a short one it does not", () => {
+test("agent run ids count, one alone does not", () => {
   const id = "agt_7Hk2pQ9xR4";
-  expect(buildLogHint(bodyOf(601, `Done in ${id}`), "rest")).toMatch(
-    /1 agent run id\./,
+  expect(buildLogHint(`Done in ${id} and ${other}`, "rest")).toMatch(
+    /1 commit SHA, 1 agent run id\./,
   );
-  expect(buildLogHint(`Done in ${id}`, "rest")).toBeUndefined();
+  expect(buildLogHint(bodyOf(2000, `Done in ${id}`), "rest")).toBeUndefined();
 });
 
 test("a run URL counts once, even with a run id too short to count on its own", () => {
   const url = "https://github.com/example-org/widget/actions/runs/1234567890";
   const short = "https://github.com/example-org/widget/actions/runs/4521";
-  expect(buildLogHint(bodyOf(601, url), "rest")).toMatch(/: 1 CI run\./);
-  expect(buildLogHint(bodyOf(601, short), "rest")).toMatch(/: 1 CI run\./);
+  expect(buildLogHint(`${url} then ${other}`, "rest")).toMatch(
+    /1 commit SHA, 1 CI run\./,
+  );
+  expect(buildLogHint(`${short} then ${other}`, "rest")).toMatch(
+    /1 commit SHA, 1 CI run\./,
+  );
   expect(buildLogHint(`${short} and ${url}`, "rest")).toMatch(/: 2 CI runs\./);
 });
 

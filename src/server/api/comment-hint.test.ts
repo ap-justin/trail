@@ -52,12 +52,15 @@ test("a body with two commit SHAs is saved and gets a hint naming them and the n
   expect(await savedBodies()).toContain(body);
 });
 
-test("a long body with one run URL gets a hint", async () => {
-  const body = `CI is green: ${runUrl}\n${"Every step passed as expected. ".repeat(20)}`;
-  expect(body.length).toBeGreaterThan(600);
-  const created = await comment(body);
-  expect(created.hint).toMatch(/1 CI run\b/);
-  expect(await savedBodies()).toContain(body);
+test("a long body with one SHA gets no hint; with two it does", async () => {
+  const note = `Landed in 3f9c2a1.\n${"Every step passed as expected. ".repeat(20)}`;
+  expect(note.length).toBeGreaterThan(600);
+  const one = await comment(note);
+  expect(one).not.toHaveProperty("hint");
+  const two = await comment(`${note}\nFollow-up in b71e04d9.`);
+  expect(two.hint).toMatch(/2 commit SHAs/);
+  const saved = await savedBodies();
+  expect(saved).toContain(note);
 });
 
 test("a short body with one token gets no hint", async () => {
@@ -84,8 +87,7 @@ test("agent run ids and bare run ids count; plain words and numbers don't", asyn
 test("trail's own ids are not commit SHAs, however many a comment quotes", async () => {
   const one = `Blocked until the message ${newId()} is answered.`;
   expect(await comment(one)).not.toHaveProperty("hint");
-  const many = `Waiting on ${newId()}, ${newId()} and ${newId()}; ${"Nothing else is open on this work. ".repeat(20)}`;
-  expect(many.length).toBeGreaterThan(600);
+  const many = `Waiting on ${newId()}, ${newId()} and ${newId()}.`;
   expect(await comment(many)).not.toHaveProperty("hint");
   expect(
     (await comment(`Message ${newId()} names 3f9c2a1 and b71e04d9.`)).hint,
