@@ -207,7 +207,6 @@ export function useLiveFeed(
       await queryClient.fetchQuery({
         queryKey: keys.feed(filter),
         queryFn: () => api.feed(filter),
-        staleTime: 0,
       });
       return false;
     } catch (error) {
@@ -247,12 +246,18 @@ export function useLiveFeed(
     setFreshIds(new Set());
     received.current = new Set();
     queryClient.removeQueries({ type: "inactive" });
+    // `/me` asked first, so the cache counts the feed and Working now reads below as already
+    // following the access it reports, and doesn't read them a second time
+    void queryClient.invalidateQueries({ queryKey: keys.me });
     void queryClient.resetQueries({
       queryKey: keys.feed(current),
       exact: true,
     });
     void queryClient.resetQueries({ queryKey: keys.workingNow, exact: true });
-    readEverything();
+    // everything else, `/me` left in flight: a restart would ask it again
+    void queryClient.invalidateQueries({
+      predicate: (query) => query.queryKey[0] !== keys.me[0],
+    });
     void readFeedGone(live);
   });
   const onActor = useEffectEvent((update: ActorUpdate) => {

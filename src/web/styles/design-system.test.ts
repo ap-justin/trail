@@ -174,7 +174,7 @@ describe("focus and disabled", () => {
     const outlined = componentFiles.flatMap((file) =>
       classStrings(readFileSync(file, "utf8"))
         .filter((classes) =>
-          /(?:^|\s)focus-visible:outline-2(?:\s|$)/.test(classes),
+          /(?:^|\s)focus-visible:(?:after:)?outline-2(?:\s|$)/.test(classes),
         )
         .map((classes) => ({
           file: file.slice(webDir.length + 1),
@@ -198,7 +198,11 @@ describe("focus and disabled", () => {
       target.setAttribute("class", classes);
       document.body.append(target);
       await user.tab();
-      const { outlineStyle, outlineWidth } = getComputedStyle(target);
+      // a `focus-visible:after:` ring (the whole-row link's) is drawn by the pseudo-element
+      const ring = /(?:^|\s)focus-visible:after:outline-2(?:\s|$)/.test(classes)
+        ? "::after"
+        : null;
+      const { outlineStyle, outlineWidth } = getComputedStyle(target, ring);
       if (
         document.activeElement !== target ||
         outlineStyle === "none" ||

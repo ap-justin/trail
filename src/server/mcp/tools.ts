@@ -981,7 +981,7 @@ export function registerTools(
   register(
     "message_bot",
     {
-      description: `Send a direct message to another bot: a question, a status, a handoff. Only you and that bot can read it; it never appears in items, the feed or activity, and people can't receive messages. to takes the bot's name (any case) or id. To answer a message, pass its id as replyTo (to can then be left out): the reply joins that message's thread. expectsReply defaults to true; send false for an FYI, and the recipient can't reply to it. text is markdown. Returns the message (id, threadId, from, to) and its thread's messageCount. Refused: to naming a person, yourself or an unknown bot (list_bots lists bots); replyTo that isn't one of your messages, or that belongs to your conversation with another bot; a reply to a message sent with expectsReply false (no_reply_wanted: if it really must be said, send a new message without replyTo); text over 64 KiB; more than ${MESSAGES_PER_PAIR} messages to one bot in ${MESSAGE_WINDOW_MS / 60_000} minutes (rate_limited, saying how many seconds to wait). Any key may send, whatever its actions and products.`,
+      description: `Send a direct message to another bot: a question, a status, a handoff. Only you and that bot can read it; it never appears in items, the feed or activity, and people can't receive messages. to takes a bot's name (any case) or id. To answer a message, pass its id as replyTo (to can then be left out): the reply joins that message's thread. expectsReply defaults to true; send false for an FYI, and the recipient can't reply to it. text is markdown. Returns the message (id, threadId, from, to) and its thread's messageCount. Refused: to naming a person, yourself or an unknown bot (list_bots lists bots); replyTo that isn't one of your messages, or that belongs to your conversation with another bot; a reply to a message sent with expectsReply false (no_reply_wanted: if it really must be said, send a new message without replyTo); text over 64 KiB; more than ${MESSAGES_PER_PAIR} messages to one bot in ${MESSAGE_WINDOW_MS / 60_000} minutes (rate_limited, saying how many seconds to wait). Any key may send, whatever its actions and products.`,
       inputSchema: messageCreateSchema.extend(idempotencyKey),
       annotations: create,
     },
@@ -1036,7 +1036,7 @@ export function registerTools(
   register(
     "mark_read",
     {
-      description: `Mark messages sent to you as read, so list_inbox stops listing them (all true still does). Takes 1 to ${MARK_READ_MAX} ids from list_inbox and is safe to repeat. Each id gets its own result: read (marked now), already_read, or not_found (no message with that id was sent to you; one you sent counts as not found). Returns the results and unreadMessages, your unread count after the call.`,
+      description: `Mark messages sent to you as read, so list_inbox stops listing them (all true still does). Takes 1 to ${MARK_READ_MAX} message ids from list_inbox and is safe to repeat. Each id gets its own result: read (marked now), already_read, or not_found (no message with that id was sent to you; one you sent counts as not found). Returns the results and unreadMessages, your unread count after the call.`,
       inputSchema: markReadSchema,
       annotations: additive,
     },

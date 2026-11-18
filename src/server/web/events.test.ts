@@ -386,44 +386,40 @@ test("a member who renamed on GitHub keeps receiving its products' entries", asy
 const signOut = (cookie: string) =>
   request("POST", "/api/auth/sign-out", { key: null, cookie, json: {} });
 
+// a removed invite ends the stream at its access event, not at a heartbeat: the test below
+// "removing a member sends their open stream an access event and then ends it" holds that
 test.each([
   [
     "the member signs out",
     async () => {
       const cookie = await addMember("signs-out", []);
-      return { cookie, revoke: () => signOut(cookie), told: [] };
+      return { cookie, revoke: () => signOut(cookie) };
     },
   ],
   [
     "the owner signs out",
     async () => {
       const cookie = await signIn(owner);
-      return { cookie, revoke: () => signOut(cookie), told: [] };
-    },
-  ],
-  [
-    "the member's invite is removed",
-    async () => {
-      const cookie = await addMember("uninvited", []);
-      const revoke = () =>
-        request("DELETE", "/api/web/people/uninvited", {
-          key: null,
-          cookie: ownerCookie,
-        });
-      return { cookie, revoke, told: [accessMessage] };
+      return { cookie, revoke: () => signOut(cookie) };
     },
   ],
 ])("the stream ends at the next heartbeat once %s", async (_, setup) => {
-  const { cookie, revoke, told } = await setup();
+  const { cookie, revoke } = await setup();
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   const stream = await openStream(cookie);
   await vi.advanceTimersByTimeAsync(15_000);
   expect(await stream.next()).toEqual({ comment: "heartbeat" });
   expect((await revoke()).status).toBeLessThan(300);
-  for (const message of told)
-    expect(await stream.next()).toStrictEqual(message);
+  let read = false;
+  const upcoming = stream.next().then((message) => {
+    read = true;
+    return message;
+  });
+  // timers are faked, so only a stream that ends or writes on its own settles this
+  for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
+  expect(read, "the stream ended or wrote before the heartbeat").toBe(false);
   await vi.advanceTimersByTimeAsync(15_000);
-  expect(await stream.next()).toBeNull();
+  expect(await upcoming).toBeNull();
 });
 
 test("a signed-out member's stream ends within 15 seconds while bots keep writing elsewhere", async () => {

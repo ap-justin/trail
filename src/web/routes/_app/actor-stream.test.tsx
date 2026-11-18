@@ -122,9 +122,8 @@ describe("the shell's actor stream", () => {
   test("a re-mount after a retry reads nothing the feed's stream covered", async () => {
     const { reads, router, stream } = await openIssue();
     stream.open();
-    const retried = closeAndRetry(stream);
-    retried.open();
-    await waitFor(() => expect(reads.issue).toBe(2));
+    // the retry never opens: the drop is still unread when the feed takes the stream over
+    closeAndRetry(stream);
 
     serveFeed([statusEntry("e3", new Date().toISOString())]);
     await router.navigate({ to: "/" });

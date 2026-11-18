@@ -426,6 +426,25 @@ describe("an access event", () => {
     expect(productLink(/alpha/)).toBeInTheDocument();
   });
 
+  test.each([
+    ["unchanged", [alphaProduct]],
+    ["granted", [alphaProduct, betaProduct]],
+  ])(
+    "an access event with products %s reads Working now once",
+    async (_, products) => {
+      const at: Access = { products: [alphaProduct], entries: [] };
+      const { queryClient, reads, stream } = await openWithAccess(at);
+      const before = { ...reads };
+      at.products = products;
+      sendAccess(stream);
+      await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+      expect(reads).toEqual({
+        me: before.me + 1,
+        workingNow: before.workingNow + 1,
+      });
+    },
+  );
+
   test("an access event clears the read a work event was waiting to make", async () => {
     const at: Access = { products: [alphaProduct], entries: [] };
     const { reads, stream } = await openWithAccess(at);

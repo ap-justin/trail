@@ -216,6 +216,36 @@ describe("a conversation", () => {
     ]);
   });
 
+  test("a pair named in either order is one conversation, read once", async () => {
+    signedInAs("owner");
+    const asked = serveConversation([
+      { bots: [alpha, beta], items: [message()], nextCursor: null },
+    ]);
+    serveConversations([{ items: [conversation()], nextCursor: null }]);
+    const { router } = renderApp("/messages/a-alpha/a-beta");
+    await screen.findByRole("list", { name: "Messages" });
+    await act(() => router.navigate({ to: "/messages" }));
+    await screen.findByRole("link", { name: "Alpha and Beta" });
+
+    await act(() =>
+      router.navigate({
+        to: "/messages/$a/$b",
+        params: { a: "a-beta", b: "a-alpha" },
+      }),
+    );
+    await screen.findByRole("list", { name: "Messages" });
+    expect(router.state.location.pathname).toBe("/messages/a-alpha/a-beta");
+    expect(asked.map((url) => url.pathname)).toEqual([
+      "/api/web/messages/a-alpha/a-beta",
+    ]);
+
+    // the reversed URL never entered history, so Back leaves the pair instead of bouncing off it
+    await act(async () => router.history.back());
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe("/messages"),
+    );
+  });
+
   test("coming back to the window re-reads the loaded pages only once they've gone stale", async () => {
     signedInAs("owner");
     const asked = serveConversation([

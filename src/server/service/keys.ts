@@ -198,6 +198,17 @@ function mintKey(tx: Tx, actorId: string, scope: KeyScopeInput): string {
   return key;
 }
 
+function botLabelled(tx: Tx, label: string): Actor | undefined {
+  return tx
+    .select()
+    .from(actor)
+    .where(and(eq(actor.kind, "bot"), eq(actor.label, label)))
+    .get();
+}
+
+const labelTaken = (holder: Actor) =>
+  `label "${holder.label}" is already on bot "${holder.displayName}" (${holder.id}): one label names one bot`;
+
 /**
  * Creates a bot and its key, scoped to `options.scope`. The key is returned
  * once and never stored. A bot's name (ignoring the case of A-Z), and its
@@ -227,17 +238,11 @@ export function createBot(
           `a bot named "${twin.displayName}" already exists (${twin.id}), and bot names match ignoring the case of A-Z: pick another name than "${name}", or mint that bot another key with \`trail key create ${twin.label ?? twin.id}\``,
         );
       }
-      if (label !== null) {
-        const holder = tx
-          .select()
-          .from(actor)
-          .where(and(eq(actor.kind, "bot"), eq(actor.label, label)))
-          .get();
-        if (holder) {
-          throw new ConflictError(
-            `label "${label}" is already on bot "${holder.displayName}" (${holder.id}): one label names one bot, so mint that bot another key with \`trail key create ${label}\``,
-          );
-        }
+      const holder = label === null ? undefined : botLabelled(tx, label);
+      if (holder) {
+        throw new ConflictError(
+          `${labelTaken(holder)}, so mint that bot another key with \`trail key create ${label}\``,
+        );
       }
       const created = tx
         .insert(actor)
@@ -355,6 +360,41 @@ export function setBotTitle(
       const bot = botByRef(tx, botRef, "only bots have titles");
       tx.update(actor).set({ title }).where(eq(actor.id, bot.id)).run();
       return { id: bot.id, oldTitle: bot.title, newTitle: title };
+    },
+    { behavior: "immediate" },
+  );
+}
+
+/**
+ * Sets a bot's label, trimmed, or clears it with null; `botRef` finds the bot
+ * as `renameBot`'s does. Labels are unique among bots, as in `createBot`, and
+ * people are refused: only bots have labels.
+ */
+export function setBotLabel(
+  db: Db,
+  botRef: string,
+  newLabel: string | null,
+): {
+  id: string;
+  name: string;
+  oldLabel: string | null;
+  newLabel: string | null;
+} {
+  const label = newLabel === null ? null : labelOf(newLabel);
+  return db.transaction(
+    (tx) => {
+      const bot = botByRef(tx, botRef, "only bots have labels");
+      const holder = label === null ? undefined : botLabelled(tx, label);
+      if (holder && holder.id !== bot.id) {
+        throw new ConflictError(labelTaken(holder));
+      }
+      tx.update(actor).set({ label }).where(eq(actor.id, bot.id)).run();
+      return {
+        id: bot.id,
+        name: bot.displayName,
+        oldLabel: bot.label,
+        newLabel: label,
+      };
     },
     { behavior: "immediate" },
   );

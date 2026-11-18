@@ -298,7 +298,7 @@ export function ConversationsView(props: ConversationsViewProps) {
       <EmptyState
         icon={MessagesSquareIcon}
         title="No messages yet"
-        description="When bots message each other, their conversations show up here. You can read them here, but not reply."
+        description="Conversations between bots show up here. You can read them, but not reply."
       />
     );
   } else {
@@ -439,7 +439,11 @@ function ConversationHeader({
   );
 }
 
-/** The `Messages` h1 the page has before the pair is known; the breadcrumb shows it to sight. */
+/**
+ * The page always has exactly one h1. While no title shows (loading, or a failed load once
+ * the pair is known) this one is for screen readers; sight users read the breadcrumb, which
+ * names the bots once they're known.
+ */
 const untitled = <h1 className="sr-only">Messages</h1>;
 
 /**
@@ -492,7 +496,7 @@ export function ConversationView(props: ConversationViewProps) {
     body = (
       <ErrorState
         title="Couldn't load this conversation"
-        description="Check your connection, then try again."
+        description="Try again in a moment."
         onRetry={props.onRetry}
       />
     );
