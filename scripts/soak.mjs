@@ -1,5 +1,6 @@
 // Soak check: runs the built server (`pnpm build` first) under load and prints heap used at intervals.
-// Not part of CI. Usage: node scripts/soak.mjs [--minutes 10] [--interval 30] [--snapshots <dir>]
+// Not part of CI. Usage: node scripts/soak.mjs [--minutes 10] [--interval 30] [--bots 15] [--only rest|mcp|live] [--snapshots <dir>]
+// The live streams need SOAK_WEB_COOKIE, a signed-in person's session cookie; without it that load is skipped.
 // The load: bots on REST and MCP (MCP calls often dropped mid-flight), items linking pull requests
 // of a fake GitHub, webhooks to a local receiver that is sometimes slow or down, and people's live
 // event streams that open and drop. Everything stays on 127.0.0.1; GitHub is never called.
