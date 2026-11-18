@@ -9,9 +9,15 @@ import { leaks, server } from "./server";
 configure({ asyncUtilTimeout: 5000 });
 // jsdom does not implement scrolling; the router calls it on navigation and jsdom logs "Not implemented" without it
 window.scrollTo = () => {};
-// jsdom has none of these; the feed watches its top with an IntersectionObserver and the
-// theme reads the system setting. A test that needs a dark system replaces matchMedia.
+// jsdom has none of these; the feed watches its top with an IntersectionObserver, a comment
+// re-measures with a ResizeObserver and the theme reads the system setting. A test that
+// needs a dark system replaces matchMedia.
 Element.prototype.scrollIntoView = () => {};
+window.ResizeObserver = class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+} as unknown as typeof ResizeObserver;
 window.IntersectionObserver = class {
   observe() {}
   unobserve() {}

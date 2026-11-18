@@ -1309,7 +1309,7 @@ export function createService({
   }
 
   /** The items with each pull request link's cached state as its pr, which also queues a refresh of a stale one. */
-  function withPullRequests<T extends Issue>(items: T[]): T[] {
+  function withPullRequests<T extends Pick<Issue, "links">>(items: T[]): T[] {
     const states = pullRequests.read(
       items.flatMap((item) => item.links.map((l) => l.url)),
     );
@@ -1321,7 +1321,7 @@ export function createService({
     }));
   }
 
-  const withPullRequest = <T extends Issue>(item: T) =>
+  const withPullRequest = <T extends Pick<Issue, "links">>(item: T) =>
     withPullRequests([item])[0] as T;
 
   /** The projects of these items the actor reaches, in slug order. */
@@ -4071,6 +4071,11 @@ export function createService({
       return actor.kind === "bot"
         ? { ...item, access: accessOf(db, actor, row) }
         : item;
+    },
+
+    /** These links of an item the caller has already found visible, each pull request link with its cached state as pr, as `getItem` gives them. */
+    withPullRequestLinks(links: Issue["links"]): Issue["links"] {
+      return withPullRequest({ links }).links;
     },
 
     /** The legacy list_issues: status open also lists issues waiting in triage, which did not exist when it was named. */

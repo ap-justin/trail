@@ -1802,7 +1802,7 @@ export const webItemSchema = z.object({
   priority: z.int(),
   estimate: z.number().nullable(),
   labels: z.array(z.string()),
-  links: z.array(linkSchema),
+  links: z.array(itemLinkSchema),
   assignee: webActorSchema
     .nullable()
     .meta({ description: "Null: unassigned, which a todo never is." }),

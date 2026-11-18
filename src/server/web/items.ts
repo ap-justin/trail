@@ -14,6 +14,7 @@ import {
   webItemSchema,
 } from "../../shared/schemas.js";
 import { jsonBody, jsonContent } from "../api/routes.js";
+import { toLink } from "../api/serialize.js";
 import type { Db } from "../db/client.js";
 import {
   issue,
@@ -111,9 +112,10 @@ export function visibleItem(db: Db, member: Member, ref: string) {
   };
 }
 
-/** The item `visibleItem` found, for display, with its projects and timeline. */
+/** The item `visibleItem` found, for display, with its projects, timeline and pull request states. */
 export function itemView(
   db: Db,
+  service: Service,
   { row, key, product: productRef }: ReturnType<typeof visibleItem>,
 ): WebItemView {
   const links = db
@@ -144,7 +146,7 @@ export function itemView(
     priority: row.priority,
     estimate: row.estimate,
     labels: labelsOf(db, [row.id])(row.id),
-    links,
+    links: service.withPullRequestLinks(links).map(toLink),
     assignee: row.assigneeId === null ? null : actorOf(row.assigneeId),
     creator: actorOf(row.createdBy),
     sourceAuthor: row.sourceAuthor,
@@ -258,7 +260,10 @@ export function itemRoutes(db: Db, service: Service) {
         title,
         description,
       });
-      return c.json(itemView(db, visibleItem(db, member, created.key)), 201);
+      return c.json(
+        itemView(db, service, visibleItem(db, member, created.key)),
+        201,
+      );
     })
     .openapi(createComment, (c) => {
       const member = c.var.member;
@@ -293,7 +298,11 @@ export function itemRoutes(db: Db, service: Service) {
     })
     .openapi(getItem, (c) =>
       c.json(
-        itemView(db, visibleItem(db, c.var.member, c.req.valid("param").key)),
+        itemView(
+          db,
+          service,
+          visibleItem(db, c.var.member, c.req.valid("param").key),
+        ),
         200,
       ),
     );
