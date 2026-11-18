@@ -55,7 +55,7 @@ function linearProject(): ImportPayload {
             externalRef: `${ref}-c1`,
             body: "looks right",
             createdAt: "2026-01-03T00:00:00.000Z",
-            sourceAuthor: "Grace",
+            sourceAuthor: "Kim",
           },
           {
             externalRef: `${ref}-c2`,
@@ -84,7 +84,7 @@ function linearProject(): ImportPayload {
         body: "on schedule",
         health: "on_track",
         createdAt: "2026-01-08T00:00:00.000Z",
-        sourceAuthor: "Sam",
+        sourceAuthor: "Lee",
       },
     ],
   };
@@ -252,7 +252,7 @@ test("imported rows keep their source createdAt, completedAt and author, credite
     {
       body: "looks right",
       authorId: bot.id,
-      sourceAuthor: "Grace",
+      sourceAuthor: "Kim",
       createdAt: new Date("2026-01-03T00:00:00.000Z"),
     },
     { body: "merged", authorId: bot.id, sourceAuthor: null },
@@ -264,7 +264,7 @@ test("imported rows keep their source createdAt, completedAt and author, credite
       body: "on schedule",
       health: "on_track",
       authorId: bot.id,
-      sourceAuthor: "Sam",
+      sourceAuthor: "Lee",
       createdAt: new Date("2026-01-08T00:00:00.000Z"),
     },
   ]);

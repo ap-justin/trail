@@ -66,7 +66,7 @@ beforeAll(() => {
   migrate(db, through(9));
   db.$client.exec(`
     insert into actor (id, kind, display_name, created_at) values
-      ('h1', 'human', 'Sam', 0), ('h2', 'human', 'Grace', 0);
+      ('h1', 'human', 'Sam', 0), ('h2', 'human', 'Kim', 0);
   `);
   migrate(db, through(10));
   return () => db.$client.close();
@@ -168,7 +168,7 @@ test("an actor has one photo at most, of an actor that exists", () => {
 test("a photo can be deleted, and goes with its actor", () => {
   // its own actor, so deleting it leaves h1 and h2 for the tests that use them
   db.$client.exec(
-    "insert into actor (id, kind, display_name, created_at) values ('h3', 'human', 'Edsger', 0)",
+    "insert into actor (id, kind, display_name, created_at) values ('h3', 'human', 'Lee', 0)",
   );
   insertPhoto(db, { actorId: "h1" });
   insertPhoto(db, { actorId: "h3" });

@@ -58,7 +58,7 @@ function legacyDb(file: string): Db {
     insert into actor (id, kind, display_name, label, created_at) values
       ('b1', 'bot', 'builder', 'bot_1', 0);
     insert into actor (id, kind, display_name, github_id, github_login, is_owner, created_at) values
-      ('h1', 'human', 'Sam', 7, 'ada', 1, 0);
+      ('h1', 'human', 'Sam', 7, 'sam', 1, 0);
     insert into project (id, key, name, created_by, created_at, updated_at) values ('p1', 'TRL', 'trail', 'b1', 0, 0);
   `);
   migrate(legacy, through(14));
@@ -108,7 +108,7 @@ test("actors from before 0014 keep their data and carry no title", () => {
       display_name: "Sam",
       label: null,
       github_id: 7,
-      github_login: "ada",
+      github_login: "sam",
       is_owner: 1,
       title: null,
     },
@@ -162,7 +162,7 @@ test("a human never carries a title", () => {
     errorCode(() =>
       db.$client
         .prepare(
-          "insert into actor (id, kind, display_name, title, created_at) values ('h2', 'human', 'Grace', 'Admiral', 0)",
+          "insert into actor (id, kind, display_name, title, created_at) values ('h2', 'human', 'Kim', 'Captain', 0)",
         )
         .run(),
     ),

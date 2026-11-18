@@ -54,30 +54,30 @@ function legacyDb(): Db {
       ('beta', 'bot', 'beta', null, 0),
       ('gamma', 'bot', 'gamma', 'agent-gamma', 0);
     insert into actor (id, kind, display_name, github_id, github_login, is_owner, created_at) values
-      ('ada', 'human', 'Sam', 7, 'ada', 1, 0);
+      ('sam', 'human', 'Sam', 7, 'sam', 1, 0);
     insert into project (id, key, name, issue_seq, created_by, created_at, updated_at) values
       ('p-atl', 'ATL', 'atlas', 16, 'alpha', 1, 1),
       ('p-btl', 'BTL', 'beacon', 2, 'beta', 2, 2),
-      ('p-ctl', 'CTL', 'cobalt', 2, 'ada', 3, 3);
+      ('p-ctl', 'CTL', 'cobalt', 2, 'sam', 3, 3);
     insert into issue (id, project_id, number, title, status, assignee_id, created_by, created_at, updated_at, completed_at) values
       ('i-atl-12', 'p-atl', 12, 'owner, unassigned', 'open', null, 'alpha', 10, 10, null),
       ('i-atl-13', 'p-atl', 13, 'owner, assigned', 'in_progress', 'gamma', 'alpha', 11, 11, null),
       ('i-atl-14', 'p-atl', 14, 'other bot', 'open', null, 'gamma', 12, 12, null),
-      ('i-atl-15', 'p-atl', 15, 'person', 'open', null, 'ada', 13, 13, null),
+      ('i-atl-15', 'p-atl', 15, 'person', 'open', null, 'sam', 13, 13, null),
       ('i-atl-16', 'p-atl', 16, 'owner, done', 'done', null, 'alpha', 14, 15, 15),
       ('i-btl-1', 'p-btl', 1, 'owner', 'open', null, 'beta', 20, 20, null),
       ('i-btl-2', 'p-btl', 2, 'another product''s owner', 'open', null, 'alpha', 21, 21, null),
       ('i-ctl-1', 'p-ctl', 1, 'no owner, a bot', 'open', null, 'gamma', 30, 30, null),
-      ('i-ctl-2', 'p-ctl', 2, 'no owner, its creator', 'canceled', null, 'ada', 31, 32, 32);
+      ('i-ctl-2', 'p-ctl', 2, 'no owner, its creator', 'canceled', null, 'sam', 31, 32, 32);
     insert into label (id, project_id, name, created_at) values ('l-bug', 'p-atl', 'bug', 5);
     insert into issue_label (issue_id, label_id, project_id) values ('i-atl-14', 'l-bug', 'p-atl');
-    insert into comment (id, issue_id, author_id, body, created_at) values ('c1', 'i-atl-14', 'ada', 'seen it', 50);
+    insert into comment (id, issue_id, author_id, body, created_at) values ('c1', 'i-atl-14', 'sam', 'seen it', 50);
     insert into project_status_update (id, project_id, author_id, body, health, created_at) values
       ('su1', 'p-atl', 'alpha', 'on course', 'on_track', 60);
     insert into api_key (id, actor_id, prefix, hash, created_at, actions) values
       ('k1', 'gamma', 'trl_k1', '${"0".repeat(64)}', 0, '["read","issues"]');
     insert into api_key_project (api_key_id, project_id) values ('k1', 'p-atl'), ('k1', 'p-ctl');
-    insert into invite (id, username, invited_by, created_at) values (1, 'grace', 'ada', 0);
+    insert into invite (id, username, invited_by, created_at) values (1, 'kim', 'sam', 0);
     insert into project_member (invite_id, project_id, created_at) values (1, 'p-btl', 70);
     insert into webhook_subscription (id, actor_id, url, secret_cipher, created_at, updated_at) values
       ('w1', 'gamma', 'https://example.com/hook', 'cipher', 0, 0);
@@ -87,7 +87,7 @@ function legacyDb(): Db {
       ('e2', 2, 'alpha', 'project', 'p-atl', 'p-atl', 'project.updated', '{}', 2),
       ('e3', 3, 'gamma', 'issue', 'i-atl-14', 'p-atl', 'issue.created', '{"title":"other bot"}', 12),
       ('e4', 4, 'alpha', 'status_update', 'su1', 'p-atl', 'status_update.created', '{}', 60),
-      ('e5', 5, 'ada', 'project', 'p-ctl', 'p-ctl', 'project.imported', '{}', 3);
+      ('e5', 5, 'sam', 'project', 'p-ctl', 'p-ctl', 'project.imported', '{}', 3);
     insert into webhook_delivery (id, subscription_id, event_id, seq, type, status, next_attempt_at, created_at) values
       ('d1', 'w1', 'e1', 1, 'trail.project.created', 'delivered', 0, 1);
     insert into idempotency_key (actor_id, key, scope, request_hash, response, created_at) values
@@ -96,7 +96,7 @@ function legacyDb(): Db {
       ('alpha', 'k-label', 'label.create', 'h', '{"id":"l-bug","projectId":"p-atl","name":"bug"}', 0),
       ('alpha', 'k-update', 'status_update.create', 'h', '{"id":"su1","projectId":"p-atl","body":"on course"}', 0),
       ('alpha', 'k-product', 'project.create', 'h', '{"id":"p-atl","key":"ATL"}', 0),
-      ('ada', 'k-comment', 'comment.create', 'h', '{"id":"c1","issueId":"i-atl-14"}', 0);
+      ('sam', 'k-comment', 'comment.create', 'h', '{"id":"c1","issueId":"i-atl-14"}', 0);
   `);
   migrate(db);
   return db;
@@ -169,7 +169,7 @@ test("products keep their ids, keys and sequences, and items their ids and numbe
       key: "CTL",
       name: "cobalt",
       issue_seq: 2,
-      created_by: "ada",
+      created_by: "sam",
       created_at: 3,
     },
   ]);
@@ -233,7 +233,7 @@ test("labels, comments and status updates stay on the same rows", () => {
     { issue_id: "i-atl-14", label_id: "l-bug", product_id: "p-atl" },
   ]);
   expect(rows(db, "select id, issue_id, author_id, body from comment")).toEqual(
-    [{ id: "c1", issue_id: "i-atl-14", author_id: "ada", body: "seen it" }],
+    [{ id: "c1", issue_id: "i-atl-14", author_id: "sam", body: "seen it" }],
   );
   expect(
     rows(
@@ -337,7 +337,7 @@ test("stored project events become product events; other events and sent deliver
     {
       id: "e5",
       seq: 5,
-      actor_id: "ada",
+      actor_id: "sam",
       subject_type: "product",
       subject_id: "p-ctl",
       product_id: "p-ctl",
@@ -381,7 +381,7 @@ test("a stored create response replays in the row shape this build reads", () =>
     "alpha k-label": { id: "l-bug", productId: "p-atl", name: "bug" },
     "alpha k-update": { id: "su1", productId: "p-atl", body: "on course" },
     "alpha k-product": { id: "p-atl", key: "ATL" },
-    "ada k-comment": { id: "c1", issueId: "i-atl-14" },
+    "sam k-comment": { id: "c1", issueId: "i-atl-14" },
   });
 });
 

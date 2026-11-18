@@ -51,23 +51,23 @@ const invite = (username: string, ...projectIds: string[]) => {
 test("an invited account is a member with exactly its products, and gets an actor on sign-in", async () => {
   const mine = addProject();
   addProject();
-  invite("ada", mine.id);
-  const cookie = await signIn("ada", { githubId: 42, name: "Sam Rivera" });
+  invite("sam", mine.id);
+  const cookie = await signIn("sam", { githubId: 42, name: "Sam Rivera" });
   expect(
     db.select().from(actor).where(eq(actor.githubId, 42)).get(),
   ).toMatchObject({
     kind: "human",
     displayName: "Sam Rivera",
-    githubLogin: "ada",
+    githubLogin: "sam",
   });
   expect(await viewerOf(cookie)).toEqual({
     kind: "member",
-    login: "ada",
+    login: "sam",
     actor: {
       id: expect.any(String),
       displayName: "Sam Rivera",
       githubId: 42,
-      githubLogin: "ada",
+      githubLogin: "sam",
     },
     products: [{ id: mine.id, key: mine.key, name: "p" }],
   });
@@ -86,11 +86,11 @@ test("an account neither owner nor invited is not_invited, with its login and no
 });
 
 test("a GitHub login matches the invite and the owner ignoring case", async () => {
-  invite("grace");
-  expect(await viewerOf(await signIn("Grace"))).toMatchObject({
+  invite("kim");
+  expect(await viewerOf(await signIn("Kim"))).toMatchObject({
     kind: "member",
-    login: "grace",
-    actor: { githubLogin: "grace" },
+    login: "kim",
+    actor: { githubLogin: "kim" },
   });
   expect(
     await viewerOf(
