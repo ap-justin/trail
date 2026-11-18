@@ -1,4 +1,11 @@
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
@@ -138,6 +145,21 @@ describe("links", () => {
   const pull = (n: number) => `https://github.com/example/trail/pull/${n}`;
   const checkedAt = "2026-11-12T10:00:00.000Z";
 
+  test.each(["/files", "/", "#issuecomment-4242", "/files?w=1#diff-abc"])(
+    "a pull request link ending in %s the server sent no state for reads State unknown",
+    (suffix) => {
+      renderIssue({
+        issue: {
+          status: "ready",
+          data: issue({ links: [{ url: pull(12) + suffix, title: "PR" }] }),
+        },
+      });
+      expect(
+        within(screen.getByRole("region", { name: "Links" })).getByRole("link"),
+      ).toHaveAccessibleName(/^Pull request State unknown PR/);
+    },
+  );
+
   test.each([
     ["open", "Open", "lucide-git-pull-request"],
     ["draft", "Draft", "lucide-git-pull-request-draft"],
@@ -250,11 +272,13 @@ describe("links", () => {
   });
 
   test.each([
-    "https://github.com/example/trail/pull/7/files",
     "https://github.com/example/trail/pull/0",
     "https://github.com/example/../pull/7",
     "http://github.com/example/trail/pull/7",
-    "https://github.com/example/trail/pull/7?diff=split",
+    "https://github.com/example/trail/pull/12x",
+    "https://github.com/example/trail/pull/12.diff",
+    "https://github.com/example/trail/pulls/12",
+    "https://github.com/example/trail/pull/",
   ])("a pr-less link to %s is not read as a pull request", (url) => {
     renderIssue({
       issue: {
@@ -354,7 +378,7 @@ describe("long comments", () => {
     Array.from({ length: n }, (_, i) => `Paragraph ${i + 1}.`).join("\n\n");
 
   function renderComments(...bodies: string[]) {
-    renderIssue({
+    return renderIssue({
       issue: {
         status: "ready",
         data: issue({
@@ -400,7 +424,8 @@ describe("long comments", () => {
     expect(screen.queryByRole("button", { name: /^Show / })).toBeNull();
   });
 
-  // a real ResizeObserver fires whenever the clamp changes a watched box's height
+  // a real ResizeObserver fires when the measured content resizes (a narrower column, a font
+  // landing); relayout() fires it on demand, so a test can show opening and closing leave the count alone
   const relayout = () =>
     act(() => {
       for (const callback of resized) callback();
@@ -448,13 +473,14 @@ describe("long comments", () => {
   });
 
   function renderVisibleLink() {
-    renderComments(
+    const view = renderComments(
       `See [the spec](https://example.com/spec).\n\n${paragraphs(6)}`,
     );
     const link = screen.getByRole("link", { name: "the spec" });
     // jsdom can't open a new tab and logs "Not implemented" when asked to
     link.addEventListener("click", (e) => e.preventDefault());
     return {
+      view,
       button: screen.getByRole("button", { name: /^Show more/ }),
       link,
     };
@@ -466,6 +492,88 @@ describe("long comments", () => {
     await user.click(link);
     expect(link).toHaveFocus();
     expect(button).toHaveAttribute("aria-expanded", "false");
+  });
+
+  test("coming back to the window with focus on a link in the visible lines leaves the comment collapsed", async () => {
+    const user = userEvent.setup();
+    const { button, link } = renderVisibleLink();
+    await user.click(link);
+    // the link opened a new tab: the window loses focus, then regains it and re-focuses the link
+    const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    fireEvent.focusOut(link);
+    hasFocus.mockReturnValue(true);
+    fireEvent.focusIn(link);
+    expect(button).toHaveAttribute("aria-expanded", "false");
+  });
+
+  test("a link that lost focus inside the window still opens the comment when Tab returns to it", async () => {
+    const user = userEvent.setup();
+    const { button, link } = renderVisibleLink();
+    await user.click(link);
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    act(() => link.blur());
+    expect(button).toHaveAttribute("aria-expanded", "false");
+    act(() => link.focus());
+    expect(button).toHaveAttribute("aria-expanded", "true");
+  });
+
+  test("after the window comes back with focus elsewhere, Tab onto the link that left with it opens the comment", async () => {
+    const user = userEvent.setup();
+    const { button, link } = renderVisibleLink();
+    await user.click(link);
+    // the window loses focus to the address bar, then Tab comes back in onto the next control
+    const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    act(() => link.blur());
+    hasFocus.mockReturnValue(true);
+    act(() => button.focus());
+    expect(button).toHaveAttribute("aria-expanded", "false");
+    await user.tab({ shift: true });
+    expect(link).toHaveFocus();
+    expect(button).toHaveAttribute("aria-expanded", "true");
+  });
+
+  // the return listener ends with its AbortSignal; the focusin signals handed to document, in order
+  function watchReturnListeners() {
+    const signals: AbortSignal[] = [];
+    const add = document.addEventListener.bind(document);
+    vi.spyOn(document, "addEventListener").mockImplementation(
+      (type: string, listener: unknown, options?: unknown) => {
+        const signal = (options as AddEventListenerOptions | undefined)?.signal;
+        if (type === "focusin" && signal) signals.push(signal);
+        add(
+          type,
+          listener as EventListener,
+          options as AddEventListenerOptions,
+        );
+      },
+    );
+    return signals;
+  }
+
+  test("unmounting a comment with the window-return listener pending removes the listener", async () => {
+    const user = userEvent.setup();
+    const { view, link } = renderVisibleLink();
+    await user.click(link);
+    const signals = watchReturnListeners();
+    vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    fireEvent.focusOut(link);
+    expect(signals).toHaveLength(1);
+    expect(signals[0]?.aborted).toBe(false);
+    view.unmount();
+    expect(signals[0]?.aborted).toBe(true);
+  });
+
+  test("a second window-leave replaces the pending return listener instead of stacking another", async () => {
+    const user = userEvent.setup();
+    const { link } = renderVisibleLink();
+    await user.click(link);
+    const signals = watchReturnListeners();
+    vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    fireEvent.focusOut(link);
+    fireEvent.focusOut(link);
+    expect(signals).toHaveLength(2);
+    expect(signals[0]?.aborted).toBe(true);
+    expect(signals[1]?.aborted).toBe(false);
   });
 
   test("tapping a link in the visible lines leaves the comment collapsed", async () => {

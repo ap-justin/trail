@@ -8,7 +8,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, expect, test } from "vitest";
+import { afterAll, afterEach, beforeAll, expect, test } from "vitest";
 import { type Db, migrate, openDatabase } from "./client.js";
 import { githubPullRequest } from "./schema.js";
 
@@ -57,6 +57,10 @@ beforeAll(() => {
   return () => db.$client.close();
 });
 
+afterEach(() => {
+  db.$client.exec("delete from github_pull_request");
+});
+
 const insertRaw = (fields: Record<string, unknown>) => () => {
   const row = { url: PR, last_read_at: 1, ...fields };
   const columns = Object.keys(row);
@@ -95,7 +99,6 @@ test("a link read for the first time is unfetched: no state, no checks, no failu
     lastReadAt: read,
   });
   expect(errorCode(insertRaw({}))).toBe("SQLITE_CONSTRAINT_PRIMARYKEY");
-  db.$client.exec("delete from github_pull_request");
 });
 
 test.each([
@@ -135,7 +138,6 @@ test.each([
   expect(errorCode(insertRaw({ url }))).toBe(
     ok ? "no error" : "SQLITE_CONSTRAINT_CHECK",
   );
-  db.$client.exec("delete from github_pull_request");
 });
 
 test("each state, once fetched, is accepted", () => {
@@ -152,7 +154,6 @@ test("each state, once fetched, is accepted", () => {
       ),
     ).toBe("no error");
   }
-  db.$client.exec("delete from github_pull_request");
 });
 
 test("the refresh queue reads links read in the last day off the last_read_at index", () => {

@@ -1,4 +1,15 @@
-import { and, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  lt,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "../db/client.js";
 import {
@@ -15,7 +26,7 @@ const READ_WINDOW_MS = 24 * 60 * MINUTE;
 /** A read restamps lastReadAt only once the stamp is this old. */
 const READ_STAMP_MS = 60 * MINUTE;
 // GitHub allows 5000 requests an hour with a token (about 83 a minute), and 60 an hour per IP
-// without: 20 a minute leaves the token's quota room for its other use, 1 a minute stays under 60
+// without: 20 a minute leaves the token's quota room for its other use, and 1 a minute is exactly the 60 an hour
 const FETCHES_PER_MINUTE = { token: 20, anonymous: 1 } as const;
 /** After n failed fetches in a row, the next waits min(2^n, 60) minutes from the last. */
 const BACKOFF_CAP_MINUTES = 60;
@@ -32,19 +43,20 @@ export type PullRequestState = {
   checkedAt: Date;
 } | null;
 
+// after /pull/<n> a copied link may carry a tab (/files), a trailing slash, a query or a #fragment
 const PULL_URL =
-  /^https:\/\/github\.com\/([a-z0-9-]+)\/([a-z0-9._-]+)\/pull\/([1-9]\d*)$/;
+  /^(https:\/\/github\.com\/([a-z0-9-]+)\/([a-z0-9._-]+)\/pull\/([1-9]\d*))(?:[/?#].*)?$/s;
 
 /**
- * The canonical (lowercase) url of a GitHub pull request link, or null for any
- * other url. GitHub's own names are case-insensitive, so any case matches.
+ * The canonical url of a GitHub pull request link, or null for any other url:
+ * lowercase and cut at /pull/<n>, dropping a tab, slash, query or #fragment
+ * after it. GitHub's own names are case-insensitive, so any case matches.
  */
 function pullRequestUrl(url: string): string | null {
-  const canonical = url.toLowerCase();
-  const match = PULL_URL.exec(canonical);
+  const match = PULL_URL.exec(url.toLowerCase());
   // a repo of only dots would make the API path climb out of the owner
-  if (!match || /^\.+$/.test(match[2] ?? "")) return null;
-  return canonical;
+  if (!match || /^\.+$/.test(match[3] ?? "")) return null;
+  return match[1] ?? null;
 }
 
 /** The fields of GitHub's pull request object the state comes from. */
@@ -74,7 +86,8 @@ export type PullRequestOptions = {
  * A read never waits on GitHub: it answers from the cache and stamps
  * lastReadAt at most hourly, and the table is the queue a timer drains, a few
  * fetches a minute one at a time, for rows read in the last day whose state is
- * stale and whose backoff has passed. A rate-limit answer pauses all fetching
+ * stale and whose backoff has passed; a merged row is never fetched again,
+ * since its state can't change. A rate-limit answer pauses all fetching
  * until GitHub says to resume, and a 401 to the token pauses it an hour: GitHub
  * answers 401 to every request a bad token makes, so neither is the pull
  * request's failure.
@@ -146,7 +159,7 @@ export function createPullRequests(options: PullRequestOptions) {
     return states;
   }
 
-  /** Up to `limit` urls read in the last day, stale, and past their backoff; the most recently read first. */
+  /** Up to `limit` unmerged urls read in the last day, stale, and past their backoff; the most recently read first. */
   function due(at: number, limit: number): string[] {
     const backoffMinutes = sql`case when ${githubPullRequest.failures} >= 6 then ${BACKOFF_CAP_MINUTES} else 1 << ${githubPullRequest.failures} end`;
     return db
@@ -155,6 +168,11 @@ export function createPullRequests(options: PullRequestOptions) {
       .where(
         and(
           gt(githubPullRequest.lastReadAt, new Date(at - READ_WINDOW_MS)),
+          // a merged pull request never changes; a closed one can reopen, so it is fetched again
+          or(
+            isNull(githubPullRequest.state),
+            ne(githubPullRequest.state, "merged"),
+          ),
           or(
             isNull(githubPullRequest.checkedAt),
             lt(githubPullRequest.checkedAt, new Date(at - FRESH_MS)),
@@ -201,7 +219,7 @@ export function createPullRequests(options: PullRequestOptions) {
     | { limitedUntil: number }
     | { rejectedUntil: number }
   > {
-    const [, owner, repo, number] = PULL_URL.exec(url) ?? [];
+    const [, , owner, repo, number] = PULL_URL.exec(url) ?? [];
     try {
       const res = await fetchImpl(
         `https://api.github.com/repos/${owner}/${repo}/pulls/${number}`,

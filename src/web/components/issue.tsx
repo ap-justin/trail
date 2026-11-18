@@ -11,6 +11,7 @@ import {
   type FormEvent,
   type ReactNode,
   type RefObject,
+  useEffect,
   useId,
   useLayoutEffect,
   useRef,
@@ -340,7 +341,7 @@ type PullRequestState = NonNullable<ItemLink["pr"]>["state"] | "unknown";
 
 // the server's matcher in src/server/github/pull-requests.ts, kept apart so no server code ships
 const pullRequestUrl =
-  /^https:\/\/github\.com\/[a-z0-9-]+\/(?!\.+\/)[a-z0-9._-]+\/pull\/[1-9]\d*$/i;
+  /^https:\/\/github\.com\/[a-z0-9-]+\/(?!\.+\/)[a-z0-9._-]+\/pull\/[1-9]\d*(?:[/?#].*)?$/is;
 
 /** A pull request link's state; null for any other link. */
 function pullRequestState(link: ItemLink): PullRequestState | null {
@@ -610,6 +611,13 @@ function CommentWell({
   // from a press and opens nothing. A node, not a flag: a text drag released outside the body never
   // sends the mouseup that clears it
   const pressed = useRef<EventTarget | null>(null);
+  // coming back to the window (from the tab a link opened) re-focuses the element that had focus,
+  // which is no Tab either; the element that lost focus along with the window is remembered so its
+  // focus on return opens nothing
+  const leftWithWindow = useRef<EventTarget | null>(null);
+  // the document listener that ends the remembering; one at a time, and gone with the comment
+  const windowReturn = useRef<AbortController | null>(null);
+  useEffect(() => () => windowReturn.current?.abort(), []);
   // the body shrinks above the button on Show less; where scroll anchoring doesn't hold it,
   // the button would end up above the viewport with focus still on it
   const wasOpen = useRef(open);
@@ -639,13 +647,14 @@ function CommentWell({
       <div>
         {/* indented past the avatar at lg, so the body lines up with the name; collapsed,
             4 lines with the last one fading out (no motion: the height swaps instantly) */}
-        {/* biome-ignore lint/a11y/noStaticElementInteractions: not a control; it opens the body when focus moves in without a press (Tab onto a link the clamp hides), and its mouse handlers only note the pressed node so a clicked link stays put */}
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: not a control; it opens the body when focus moves in without a press (Tab onto a link the clamp hides), and its mouse and blur handlers only note which node was pressed or left with the window so a clicked link stays put */}
         <div
           id={bodyId}
           className={cn(
             "lg:pl-7",
             long &&
               !open &&
+              // hidden, not clip: find-in-page scrolls a hidden box to show a match; a clip box can't scroll
               "max-h-[4lh] overflow-hidden mask-b-from-[calc(100%-1lh)]",
           )}
           onMouseDown={(e) => {
@@ -654,17 +663,40 @@ function CommentWell({
           onMouseUp={() => {
             pressed.current = null;
           }}
-          onFocus={
-            long
-              ? (e) => {
-                  const target = pressed.current;
-                  if (target instanceof Node && e.target.contains(target)) {
-                    return;
-                  }
-                  setOpen(true);
-                }
-              : undefined
-          }
+          onBlur={(e) => {
+            if (document.hasFocus()) {
+              leftWithWindow.current = null;
+              return;
+            }
+            const left = e.target;
+            leftWithWindow.current = left;
+            // only the first focus after the window comes back can be the return; focus landing
+            // anywhere else (a click elsewhere, Tab in from the address bar) ends the remembering,
+            // so a later Tab onto this element opens. Capture runs before React's root listener
+            windowReturn.current?.abort();
+            windowReturn.current = new AbortController();
+            document.addEventListener(
+              "focusin",
+              (next) => {
+                if (next.target !== left) leftWithWindow.current = null;
+              },
+              {
+                capture: true,
+                once: true,
+                signal: windowReturn.current.signal,
+              },
+            );
+          }}
+          onFocus={(e) => {
+            const returning = leftWithWindow.current === e.target;
+            leftWithWindow.current = null;
+            if (returning || !long) return;
+            const target = pressed.current;
+            if (target instanceof Node && e.target.contains(target)) {
+              return;
+            }
+            setOpen(true);
+          }}
         >
           {/* measured unclamped, so opening and closing never changes the count */}
           <div ref={contentRef}>

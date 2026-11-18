@@ -46,7 +46,7 @@ test("a body with two commit SHAs is saved and gets a hint naming them and the n
   const created = await comment(body);
   expect(created.body).toBe(body);
   expect(created.hint).toMatch(/build log: 2 commit SHAs/);
-  expect(created.hint).toMatch(/PATCH \/items\/\{key\} with addLinks/);
+  expect(created.hint).toMatch(/PATCH \/items\/\{key\} and addLinks/);
   expect(created.hint).not.toMatch(/update_item/);
   expect(created.hint).toMatch(/status, a decision or a blocker/);
   expect(await savedBodies()).toContain(body);
@@ -86,6 +86,24 @@ test("agent run ids and bare run ids count; plain words and numbers don't", asyn
   ).not.toHaveProperty("hint");
 });
 
+test("a run_ id and an http:// run URL each count as a token", async () => {
+  expect(
+    (await comment("Retried as run_x7Kq92mZ after run_b4Tn81vWc.")).hint,
+  ).toMatch(/2 agent run ids/);
+  expect(
+    (
+      await comment(
+        "Failed at http://github.com/example/trail/actions/runs/123 then http://github.com/example/trail/actions/runs/456.",
+      )
+    ).hint,
+  ).toMatch(/2 CI runs/);
+});
+
+test("the hint tells how to link the PR and that trail shows its state there", async () => {
+  const hint = (await comment("Pushed 3f9c2a1 and then b71e04d9.")).hint;
+  expect(hint).toMatch(/link the PR with .+ \(trail shows its state there\)/);
+});
+
 test("trail's own ids are not commit SHAs, however many a comment quotes", async () => {
   const one = `Blocked until the message ${newId()} is answered.`;
   expect(await comment(one)).not.toHaveProperty("hint");
@@ -113,7 +131,7 @@ test("the legacy comment route answers the hint too", async () => {
   expect(res.status).toBe(201);
   const { hint } = (await res.json()) as { hint?: string };
   expect(hint).toMatch(/2 commit SHAs/);
-  expect(hint).toMatch(/PATCH \/items\/\{key\} with addLinks/);
+  expect(hint).toMatch(/PATCH \/items\/\{key\} and addLinks/);
 });
 
 test("the comment answer documents hint in the OpenAPI spec", async () => {

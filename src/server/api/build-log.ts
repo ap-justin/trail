@@ -20,7 +20,7 @@ type Kind = "sha" | "ci" | "agent";
 export type Surface = "rest" | "mcp";
 
 const LINK_PR: Record<Surface, string> = {
-  rest: "PATCH /items/{key} with addLinks",
+  rest: "PATCH /items/{key} and addLinks",
   mcp: "update_item addLinks",
 };
 
@@ -87,5 +87,5 @@ export function buildLogHint(
       return `${counts[kind]} ${counts[kind] === 1 ? one : many}`;
     })
     .join(", ");
-  return `This comment looks like a build log: ${found}. It is saved. That detail belongs on the pull request: link the PR with ${LINK_PR[surface]}, where trail shows its state, and keep the comment to status, a decision or a blocker.`;
+  return `This comment looks like a build log: ${found}. It is saved. That detail belongs on the pull request: link the PR with ${LINK_PR[surface]} (trail shows its state there), and keep the comment to status, a decision or a blocker.`;
 }
