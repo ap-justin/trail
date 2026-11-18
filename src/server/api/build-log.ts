@@ -45,7 +45,7 @@ function kindOf(match: RegExpExecArray): Kind | null {
 
 /**
  * The hint a created comment carries when its body reads like a build log: 2
- * or more tokens, or 1 in a body over 600 characters. Undefined otherwise; the
+ * or more tokens, or 1 in a long body. Undefined otherwise; the
  * comment is saved as sent either way.
  */
 export function buildLogHint(
@@ -66,5 +66,5 @@ export function buildLogHint(
       return `${counts[kind]} ${counts[kind] === 1 ? one : many}`;
     })
     .join(", ");
-  return `This comment looks like a build log: ${found}. It is saved, but that detail belongs on the pull request: link the PR with ${LINK_PR[surface]}, where trail shows its state, and keep the comment to status, a decision or a blocker.`;
+  return `This comment looks like a build log: ${found}. It is saved. That detail belongs on the pull request: link the PR with ${LINK_PR[surface]}, where trail shows its state, and keep the comment to status, a decision or a blocker.`;
 }
