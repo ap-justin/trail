@@ -11,6 +11,8 @@ describe("KeyPill", () => {
       "text-2xs",
       "rounded-sm",
       "bg-muted",
+      "ring-1",
+      "ring-border",
       "text-muted-foreground",
       "shrink-0",
       "whitespace-nowrap",
