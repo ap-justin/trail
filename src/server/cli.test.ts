@@ -1268,7 +1268,9 @@ test("bot label --clear removes the label, and a bot without one prints -", () =
   expect(labelOf(key)).toBeNull();
   // the freed label can go on another bot
   const other = createdKey(run("bot", "create", "Next Holder").stdout);
-  expect(run("bot", "label", "Next Holder", "clear-me").code).toBe(0);
+  const labelled = run("bot", "label", "Next Holder", "clear-me");
+  expect(labelled.code).toBe(0);
+  expect(labelled.stdout).toContain("\nfrom   -\nto     clear-me\n");
   expect(labelOf(other)).toBe("clear-me");
 });
 

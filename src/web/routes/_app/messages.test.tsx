@@ -246,6 +246,35 @@ describe("a conversation", () => {
     );
   });
 
+  test("a cold load of the reversed URL lands on the lower id first, read once", async () => {
+    signedInAs("owner");
+    const asked = serveConversation([
+      { bots: [alpha, beta], items: [message()], nextCursor: null },
+    ]);
+    const { router } = renderApp("/messages/a-beta/a-alpha");
+    await screen.findByRole("list", { name: "Messages" });
+    expect(router.state.location.pathname).toBe("/messages/a-alpha/a-beta");
+    expect(asked.map((url) => url.pathname)).toEqual([
+      "/api/web/messages/a-alpha/a-beta",
+    ]);
+  });
+
+  test.each([
+    ["B-bot", "a-bot"],
+    ["a-bot", "B-bot"],
+  ])("ids %s and %s order by code unit, uppercase first", async (a, b) => {
+    signedInAs("owner");
+    const asked = serveConversation([
+      { bots: [alpha, beta], items: [message()], nextCursor: null },
+    ]);
+    const { router } = renderApp(`/messages/${a}/${b}`);
+    await screen.findByRole("list", { name: "Messages" });
+    expect(router.state.location.pathname).toBe("/messages/B-bot/a-bot");
+    expect(asked.map((url) => url.pathname)).toEqual([
+      "/api/web/messages/B-bot/a-bot",
+    ]);
+  });
+
   test("coming back to the window re-reads the loaded pages only once they've gone stale", async () => {
     signedInAs("owner");
     const asked = serveConversation([
