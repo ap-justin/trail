@@ -12,7 +12,7 @@
  *   letter and a digit, so neither a plain number nor a word like "defaced" is one
  */
 const TOKEN =
-  /\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b|https?:\/\/github\.com\/[^/\s]+\/[^/\s]+\/actions\/runs\/\d+\S*|\b\d{9,}\b|\b((?:agt|run|req)_(?=[A-Za-z]*\d)[A-Za-z0-9]{8,})\b|\b([0-9a-f]{7,40})\b/g;
+  /\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b|https?:\/\/github\.com\/[^/\s]+\/[^/\s]+\/actions\/runs\/(\d+)\S*|\b\d{9,}\b|\b((?:agt|run|req)_(?=[A-Za-z]*\d)[A-Za-z0-9]{8,})\b|\b([0-9a-f]{7,40})\b/g;
 
 type Kind = "sha" | "ci" | "agent";
 
@@ -30,31 +30,54 @@ const NAMES: Record<Kind, [one: string, many: string]> = {
   agent: ["agent run id", "agent run ids"],
 };
 
-function kindOf(match: RegExpExecArray): Kind | null {
-  const [, uuid, agentId, hex] = match;
+/** The token a match is, keyed by what it names: a commit's hex, a run id, an agent id. */
+function tokenOf(match: RegExpExecArray): { kind: Kind; id: string } | null {
+  const [whole, uuid, urlRunId, agentId, hex] = match;
   if (uuid !== undefined) return null;
-  if (agentId !== undefined) return "agent";
+  if (urlRunId !== undefined) return { kind: "ci", id: urlRunId };
+  if (agentId !== undefined) return { kind: "agent", id: agentId };
   if (hex !== undefined) {
-    return /[a-f]/.test(hex) && /\d/.test(hex) ? "sha" : null;
+    return /[a-f]/.test(hex) && /\d/.test(hex)
+      ? { kind: "sha", id: hex }
+      : null;
   }
-  return "ci";
+  return { kind: "ci", id: whole };
+}
+
+/** A SHA that is a prefix of another in the set is the same commit, abbreviated. */
+function distinctCommits(shas: Set<string>): number {
+  const all = [...shas];
+  return all.filter(
+    (sha) => !all.some((longer) => longer !== sha && longer.startsWith(sha)),
+  ).length;
 }
 
 /**
  * The hint a created comment carries when its body reads like a build log: 2
- * or more tokens, however long the body. One token is a normal comment, even a
- * long closing note naming the commit it landed in. Undefined otherwise; the
+ * or more tokens, however long the body. A token counts once per distinct
+ * commit, run or id, so naming one commit twice, or as a short SHA linked to
+ * its full one, is still one token. One token is a normal comment, even a long
+ * closing note naming the commit it landed in. Undefined otherwise; the
  * comment is saved as sent either way.
  */
 export function buildLogHint(
   body: string,
   surface: Surface,
 ): string | undefined {
-  const counts: Record<Kind, number> = { sha: 0, ci: 0, agent: 0 };
+  const ids: Record<Kind, Set<string>> = {
+    sha: new Set(),
+    ci: new Set(),
+    agent: new Set(),
+  };
   for (const match of body.matchAll(TOKEN)) {
-    const kind = kindOf(match);
-    if (kind !== null) counts[kind]++;
+    const token = tokenOf(match);
+    if (token !== null) ids[token.kind].add(token.id);
   }
+  const counts: Record<Kind, number> = {
+    sha: distinctCommits(ids.sha),
+    ci: ids.ci.size,
+    agent: ids.agent.size,
+  };
   const total = counts.sha + counts.ci + counts.agent;
   if (total < 2) return undefined;
   const found = (Object.keys(NAMES) as Kind[])

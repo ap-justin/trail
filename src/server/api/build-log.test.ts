@@ -69,6 +69,41 @@ test("a run URL counts once, even with a run id too short to count on its own", 
   expect(buildLogHint(`${short} and ${url}`, "rest")).toMatch(/: 2 CI runs\./);
 });
 
+// the full SHA `sha` abbreviates
+const fullSha = `${sha}${"e8b0d4c6a2f".repeat(3)}`;
+
+test("a commit linked from its short SHA to its full one counts once", () => {
+  const note = `Landed in [\`${sha}\`](https://github.com/acme/app/commit/${fullSha}).`;
+  expect(buildLogHint(note, "rest")).toBeUndefined();
+});
+
+test("the same commit SHA twice counts once", () => {
+  expect(
+    buildLogHint(`Landed in ${sha}. Check with git show ${sha}.`, "rest"),
+  ).toBeUndefined();
+});
+
+test("a run URL, its own bare run id or the same URL again count once", () => {
+  const url = "https://github.com/example-org/widget/actions/runs/1234567890";
+  expect(
+    buildLogHint(`${url} passed; run 1234567890 is green`, "rest"),
+  ).toBeUndefined();
+  expect(buildLogHint(`${url} passed, see ${url}`, "rest")).toBeUndefined();
+});
+
+test("the same agent run id twice counts once", () => {
+  const id = "agt_7Hk2pQ9xR4";
+  expect(
+    buildLogHint(`Done in ${id}; logs under ${id}`, "rest"),
+  ).toBeUndefined();
+});
+
+test("the hint counts distinct commits: a short and full SHA pair is one", () => {
+  expect(
+    buildLogHint(`Landed in ${sha} (${fullSha}), reverted ${other}`, "rest"),
+  ).toMatch(/: 2 commit SHAs\./);
+});
+
 test("the hint names the way to link the pull request on each surface", () => {
   const body = `Pushed ${sha} and 0a1b2c3d4e.`;
   expect(buildLogHint(body, "rest")).toMatch(
