@@ -51,8 +51,9 @@ const usage = `Usage:
                                    beside its name; or remove it
   trail bot label <bot-id-label-or-name> <agent-id>
   trail bot label <bot-id-label-or-name> --clear
-                                   set a bot's label, unique among bots; or
-                                   remove it; its keys stay
+                                   set a bot's label, unique among bots and
+                                   case-sensitive, unlike names; or remove
+                                   it; its keys stay
   trail key create <bot-id-or-label> [<scope>] [--key-only]
                                    mint another key for an existing bot
   trail key scope <prefix> [--add-product <key>] [--remove-product <key>]

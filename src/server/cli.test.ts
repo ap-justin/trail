@@ -1254,7 +1254,7 @@ test.each([
 
 const labelOf = (key: string) => withDb((db) => resolveKey(db, key))?.label;
 
-test("bot label --clear removes the label, and a bot without one prints -", () => {
+test("bot label --clear removes the label and frees it for another bot", () => {
   const key = createdKey(
     run("bot", "create", "Cleared Bot", "--label", "clear-me").stdout,
   );
@@ -1339,6 +1339,80 @@ test("bot label refuses a person and an unknown bot with exit 1, and a blank lab
   expect(blank.code).toBe(2);
   expect(blank.stderr).toMatch(/^trail: label must not be empty\n/);
   expect(labelOf(key)).toBe("blank-agent");
+});
+
+test("bot label --clear on a bot with no label exits 0, printing - on both sides", () => {
+  const key = createdKey(run("bot", "create", "Never Labelled").stdout);
+  const id = withDb((db) => resolveKey(db, key))?.id as string;
+  const { code, stdout, stderr } = run("bot", "label", id, "--clear");
+  expect(stderr).toBe("");
+  expect(code).toBe(0);
+  expect(stdout).toBe(
+    `actor  ${id}\nname   Never Labelled\nfrom   -\nto     -\n`,
+  );
+  expect(labelOf(key)).toBeNull();
+});
+
+test("bot label refuses an ambiguous ref with exit 1, changing nothing", () => {
+  const labelled = createdKey(
+    run("bot", "create", "Amb Label L", "--label", "amb-label").stdout,
+  );
+  const named = createdKey(run("bot", "create", "amb-label").stdout);
+  const { code, stdout, stderr } = run("bot", "label", "amb-label", "either");
+  expect(code).toBe(1);
+  expect(stdout).toBe("");
+  expect(stderr).toMatch(/^trail: "amb-label" matches more than one bot/);
+  expect(labelOf(labelled)).toBe("amb-label");
+  expect(labelOf(named)).toBeNull();
+});
+
+test("bot label: the old label stops resolving once changed, and the new one resolves", () => {
+  const key = createdKey(
+    run("bot", "create", "Renamed Label", "--label", "before-agent").stdout,
+  );
+  expect(run("bot", "label", "before-agent", "after-agent").code).toBe(0);
+  const stale = run("bot", "label", "before-agent", "again-agent");
+  expect(stale.code).toBe(1);
+  expect(stale.stdout).toBe("");
+  expect(stale.stderr).toMatch(
+    /^trail: no bot with id, label or name before-agent/,
+  );
+  expect(labelOf(key)).toBe("after-agent");
+  expect(run("bot", "label", "after-agent", "again-agent").code).toBe(0);
+  expect(labelOf(key)).toBe("again-agent");
+});
+
+test("labels are case-sensitive: Held-Case and held-case sit on two bots, and a ref matches exactly", () => {
+  const lower = createdKey(
+    run("bot", "create", "Lower Case Holder", "--label", "held-case").stdout,
+  );
+  const other = createdKey(run("bot", "create", "Upper Case Wanter").stdout);
+  const set = run("bot", "label", "Upper Case Wanter", "Held-Case");
+  expect(set.stderr).toBe("");
+  expect(set.code).toBe(0);
+  expect(labelOf(lower)).toBe("held-case");
+  expect(labelOf(other)).toBe("Held-Case");
+  // each label resolves to its own bot, not the other's
+  const viaUpper = run("bot", "label", "Held-Case", "--clear");
+  expect(viaUpper.stdout).toContain("name   Upper Case Wanter\n");
+  expect(labelOf(lower)).toBe("held-case");
+  const wrongCase = run("bot", "label", "HELD-CASE", "--clear");
+  expect(wrongCase.code).toBe(1);
+  expect(wrongCase.stderr).toMatch(
+    /^trail: no bot with id, label or name HELD-CASE/,
+  );
+  expect(labelOf(lower)).toBe("held-case");
+});
+
+test("--help names both bot label forms and says labels are case-sensitive", () => {
+  const { stdout } = run("--help");
+  expect(stdout).toMatch(
+    /^ {2}trail bot label <bot-id-label-or-name> <agent-id>$/m,
+  );
+  expect(stdout).toMatch(
+    /^ {2}trail bot label <bot-id-label-or-name> --clear$/m,
+  );
+  expect(stdout).toMatch(/case-sensitive, unlike names/);
 });
 
 test("--help prints usage on stdout and exits 0, naming key scope and --projects", () => {

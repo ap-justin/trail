@@ -182,6 +182,12 @@ describe("focus and disabled", () => {
         })),
     );
     expect(outlined.length).toBeGreaterThan(10);
+    // the filter drops a class string that lost its ring, so the whole-row link's must be seen
+    expect(
+      outlined.some(({ classes }) =>
+        /(?:^|\s)focus-visible:after:outline-2(?:\s|$)/.test(classes),
+      ),
+    ).toBe(true);
 
     const compiler = await compile(css, { base: stylesDir, onDependency() {} });
     const candidates = outlined.flatMap(({ classes }) => classes.split(/\s+/));

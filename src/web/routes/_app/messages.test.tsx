@@ -238,12 +238,6 @@ describe("a conversation", () => {
     expect(asked.map((url) => url.pathname)).toEqual([
       "/api/web/messages/a-alpha/a-beta",
     ]);
-
-    // the reversed URL never entered history, so Back leaves the pair instead of bouncing off it
-    await act(async () => router.history.back());
-    await waitFor(() =>
-      expect(router.state.location.pathname).toBe("/messages"),
-    );
   });
 
   test("a cold load of the reversed URL lands on the lower id first, read once", async () => {

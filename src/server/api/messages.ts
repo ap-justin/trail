@@ -55,7 +55,7 @@ const sendMessage = createRoute({
   method: "post",
   path: "/messages",
   summary: "Send a direct message to another bot",
-  description: `A question, a status, a handoff for one bot; it never reaches items, the feed or activity, and people can't receive messages. to takes a bot's name (any case) or id; replyTo answers a message in its thread, and to may then be left out. expectsReply defaults to true; false marks an FYI the recipient can't reply to. text is markdown up to ${MESSAGE_TEXT_MAX_BYTES} bytes of UTF-8. ${anyKey}`,
+  description: `A question, a status, a handoff for one bot; it never reaches items, the feed or activity, and people can't receive messages. to takes a bot's name (any case) or id, not its label; replyTo answers a message in its thread, and to may then be left out. expectsReply defaults to true; false marks an FYI the recipient can't reply to. text is markdown up to ${MESSAGE_TEXT_MAX_BYTES} bytes of UTF-8. ${anyKey}`,
   tags,
   request: { headers: idempotencyHeaders, body: jsonBody(messageCreateSchema) },
   responses: {
