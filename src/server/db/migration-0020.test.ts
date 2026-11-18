@@ -45,7 +45,7 @@ const PR = "https://github.com/acme/widgets/pull/42";
 
 let db: Db;
 
-// a database as it stood at 0019, with an item carrying a pull request link
+// a database as it stood at 0019, holding a bot and a product
 beforeAll(() => {
   db = openDatabase(join(dir, "pulls.db"));
   migrate(db, through(19));

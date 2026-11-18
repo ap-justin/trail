@@ -604,9 +604,11 @@ function CommentWell({
   const buttonRef = useRef<HTMLButtonElement>(null);
   const lines = useRenderedLines(contentRef);
   const [open, setOpen] = useState(false);
-  // Chrome and Firefox focus a link on mousedown (on touch, the compat mousedown after pointerup,
-  // so pointer events can't tell); a focus whose target holds the pressed node came from that press.
-  // A node, not a flag: a text drag released outside the body never sends the mouseup that clears it
+  // focus moving into a collapsed body with no press behind it opens it: Tab onto a link the clamp
+  // hides. Chrome and Firefox focus a link on mousedown (on touch, the compat mousedown after
+  // pointerup, so pointer events can't tell), so a focus whose target holds the pressed node came
+  // from a press and opens nothing. A node, not a flag: a text drag released outside the body never
+  // sends the mouseup that clears it
   const pressed = useRef<EventTarget | null>(null);
   // the body shrinks above the button on Show less; where scroll anchoring doesn't hold it,
   // the button would end up above the viewport with focus still on it
@@ -675,7 +677,7 @@ function CommentWell({
             type="button"
             aria-expanded={open}
             aria-controls={bodyId}
-            aria-label={`${action} of ${entry.actor.name}'s comment`}
+            aria-label={`${action} of the comment by ${entry.actor.name}`}
             onClick={() => setOpen(!open)}
             className="inline-flex h-11 items-center gap-1 rounded-sm pr-1 font-medium text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring max-lg:-mb-1.5 max-lg:focus-visible:-outline-offset-2 lg:mt-0.5 lg:ml-7 lg:h-7 lg:px-1 lg:focus-visible:outline-offset-2"
           >

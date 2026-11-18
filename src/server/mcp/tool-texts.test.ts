@@ -57,13 +57,13 @@ test("update_item's links and addLinks say a pull request goes there and trail s
 
 /** What a status update holds: where things stand, not what was done. */
 function expectStatusGuidance(text: string | undefined, where: string) {
-  expect(text, where).toMatch(/where the project stands/);
+  expect(text, where).toMatch(/where the product or project stands/);
   expect(text, where).toMatch(/risks/);
   expect(text, where).toMatch(/what's next/);
   expect(text, where).toMatch(/not a changelog/);
 }
 
-test("post_status_update says where the project stands, not a changelog", async () => {
+test("post_status_update says where the product or project stands, not a changelog", async () => {
   const tool = await toolDescriptions();
   expectStatusGuidance(
     tool("post_status_update").description,

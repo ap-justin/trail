@@ -371,7 +371,7 @@ describe("long comments", () => {
   test("a comment of 6 or more lines collapses behind Show more", () => {
     renderComments(paragraphs(6));
     const button = screen.getByRole("button", {
-      name: "Show more of Alpha's comment",
+      name: "Show more of the comment by Alpha",
     });
     expect(button).toHaveTextContent("Show more");
     expect(button).toHaveAttribute("aria-expanded", "false");
@@ -418,7 +418,7 @@ describe("long comments", () => {
     await user.click(button);
     relayout();
     expect(button).toHaveAttribute("aria-expanded", "true");
-    expect(button).toHaveAccessibleName("Show less of Alpha's comment");
+    expect(button).toHaveAccessibleName("Show less of the comment by Alpha");
     expect(button).toHaveTextContent("Show less");
     expect(button).toHaveFocus();
     expect(body).not.toHaveClass("max-h-[4lh]");

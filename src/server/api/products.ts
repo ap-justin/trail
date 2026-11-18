@@ -101,7 +101,7 @@ const updateProduct = createRoute({
 });
 
 export const STATUS_UPDATE_HOLDS =
-  "A status update says where the project stands, its risks and what's next, not a changelog.";
+  "A status update says where the product or project stands, its risks and what's next, not a changelog.";
 
 const postStatusUpdate = createRoute({
   method: "post",

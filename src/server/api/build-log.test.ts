@@ -33,7 +33,7 @@ test("a hex word with no digit or no letter is not a commit SHA", () => {
   expect(
     buildLogHint(bodyOf(601, "Only 12345678 and 7654321 rows"), "rest"),
   ).toBeUndefined();
-  // the same body with real SHAs is live
+  // a real SHA in the same place counts
   expect(buildLogHint(bodyOf(601, `Only ${sha} changed`), "rest")).toMatch(
     /1 commit SHA\./,
   );

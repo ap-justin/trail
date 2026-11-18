@@ -133,7 +133,7 @@ const noGitHubApi: typeof fetch = async (input) => {
   throw new Error(`test fetch to GitHub's API without a stub: ${input}`);
 };
 
-/** Pull request states over `db` for a service built in a test: nothing refreshes them, and a fetch is an error. */
+/** Pull request states over `db` for a service built in a test: nothing refreshes them, and a fetch throws, which the refresher logs as a warning and counts as a failure. */
 export const testPullRequests = (db: Db) =>
   createPullRequests({ db, fetch: noGitHubApi });
 
@@ -168,7 +168,7 @@ export function setupTestApp({
   authNow?: () => number;
   /** the built SPA directory `createApp` serves; none by default */
   webDir?: string;
-  /** the GitHub token, fetch and clock of pull request refreshes, which run only on `pullRequests.tick()`; by default a fetch is an error */
+  /** the GitHub token, fetch and clock of pull request refreshes, which run only on `pullRequests.tick()`; by default a fetch throws, which the refresher logs as a warning and counts as a failure */
   pullRequests?: Pick<PullRequestOptions, "token" | "fetch" | "now">;
 } = {}) {
   /** every sign-in email sent, in order; none leaves the process */
