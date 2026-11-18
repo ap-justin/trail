@@ -99,7 +99,7 @@ describe("session", () => {
       screen.getByRole("combobox", { name: "Filter by product" }),
     );
     expect(
-      await screen.findByRole("option", { name: "TRL trail" }),
+      await screen.findByRole("option", { name: "trail TRL" }),
     ).toBeInTheDocument();
   });
 

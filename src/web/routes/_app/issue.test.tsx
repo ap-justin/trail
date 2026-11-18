@@ -23,7 +23,7 @@ describe("issue page shell", () => {
     ).toHaveAttribute("href", "/products/TRL");
     const products = screen.getByRole("navigation", { name: "Products" });
     expect(
-      within(products).getByRole("link", { name: "TRL trail" }),
+      within(products).getByRole("link", { name: "trail TRL" }),
     ).toHaveAttribute("aria-current", "location");
   });
 

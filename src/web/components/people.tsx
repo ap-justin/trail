@@ -12,7 +12,7 @@ import {
 } from "react";
 import { ActorAvatar, avatarSizes } from "@/components/actor";
 import { ErrorState, ListSkeleton } from "@/components/states";
-import { KeyText } from "@/components/text";
+import { KeyPill } from "@/components/text";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -119,8 +119,8 @@ function PersonAvatar({ person }: { person: PersonView }) {
 function ProductChip({ product }: { product: WebProductRefView }) {
   return (
     <Badge variant="tag" data-product-chip>
-      <KeyText className="text-current">{product.key}</KeyText>
-      {` ${product.name}`}
+      {`${product.name} `}
+      <KeyPill>{product.key}</KeyPill>
     </Badge>
   );
 }
@@ -160,8 +160,8 @@ function ProductChecklist({
                 )
               }
             />
-            <KeyText className="text-foreground">{product.key}</KeyText>{" "}
-            {product.name}
+            <span className="min-w-0 truncate">{product.name}</span>{" "}
+            <KeyPill>{product.key}</KeyPill>
           </label>
         );
       })}

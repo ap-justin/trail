@@ -29,7 +29,7 @@ import {
   TypeIcon,
   typeLabel,
 } from "@/components/status";
-import { KeyText, LabelChip } from "@/components/text";
+import { KeyPill, KeyText, LabelChip } from "@/components/text";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import type {
@@ -288,11 +288,11 @@ function Properties({ issue }: { issue: WebItemView }) {
             className={cn(
               textLinkFocus,
               textLinkTap,
-              "flex items-center gap-2 hover:underline",
+              "flex min-w-0 items-center gap-2 hover:underline",
             )}
           >
-            <KeyText className="text-foreground">{issue.product.key}</KeyText>{" "}
-            {issue.product.name}
+            <span className="truncate">{issue.product.name}</span>{" "}
+            <KeyPill>{issue.product.key}</KeyPill>
           </AppLink>
         </Property>
         <Property label="Projects" itemClassName="lg:self-start">

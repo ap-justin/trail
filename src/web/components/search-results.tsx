@@ -7,7 +7,7 @@ import {
 import { AppLink } from "@/components/app-link";
 import { EmptyState, SkeletonBlock } from "@/components/states";
 import { StatusIcon } from "@/components/status";
-import { KeyText } from "@/components/text";
+import { KeyPill, KeyText } from "@/components/text";
 import type { SearchView } from "@/lib/api-types";
 import { paths } from "@/lib/paths";
 
@@ -116,16 +116,16 @@ function SearchResultsBody({ results }: { results: Results }) {
         <li key={product.key}>
           <AppLink
             href={paths.product(product.key)}
-            // spans with no space between would be read as one word: "TRLtrail"
-            aria-label={`${product.key} ${product.name}`}
+            // spans with no space between would be read as one word: "trailTRL"
+            aria-label={`${product.name} ${product.key}`}
             className={row}
           >
             <PackageIcon
               aria-hidden="true"
               className="size-3.5 shrink-0 text-muted-foreground"
             />
-            <KeyText>{product.key}</KeyText>
             <span className="truncate">{product.name}</span>
+            <KeyPill>{product.key}</KeyPill>
           </AppLink>
         </li>
       ))}

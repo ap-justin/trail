@@ -6,7 +6,7 @@ import {
   SlidersHorizontalIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { KeyText } from "@/components/text";
+import { KeyPill } from "@/components/text";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -167,7 +167,7 @@ export function FiltersSheet({
 }
 
 /**
- * "All products" or one of `products`, key in mono before the name. Lists exactly the
+ * "All products" or one of `products`, the name then its key as a pill. Lists exactly the
  * products it is given: on a project page, the ones the viewer can see.
  */
 export function ProductSelect({
@@ -192,7 +192,13 @@ export function ProductSelect({
       options={products.map((p) => ({
         value: p.key,
         label: p.name,
-        before: <KeyText className="text-foreground">{p.key}</KeyText>,
+        // the space keeps the option's name "trail TRL"; flex drops it visually
+        after: (
+          <>
+            {" "}
+            <KeyPill>{p.key}</KeyPill>
+          </>
+        ),
       }))}
       value={value}
       onChange={(key) => onChange(key)}

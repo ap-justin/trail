@@ -588,9 +588,9 @@ describe("main nav", () => {
     },
   );
 
-  test("under the Products label, one row per visible product: key in mono, then name", () => {
+  test("under the Products label, one row per visible product: name, then its key as a pill", () => {
     renderShell(owner);
-    const row = within(productsNav()).getByRole("link", { name: "TRL trail" });
+    const row = within(productsNav()).getByRole("link", { name: "trail TRL" });
     expect(row).toHaveAttribute("href", "/products/TRL");
     expect(within(row).getByText("TRL")).toHaveClass("font-mono");
     expect(
@@ -627,7 +627,7 @@ describe("where the page sits", () => {
       within(sidebarNav()).getByRole("link", { name: "Products" }),
     ).not.toHaveAttribute("aria-current");
     expect(
-      within(productsNav()).getByRole("link", { name: "TRL trail" }),
+      within(productsNav()).getByRole("link", { name: "trail TRL" }),
     ).toHaveAttribute("aria-current", "page");
     expect(
       within(tabNav()).getByRole("link", { name: "Products" }),
@@ -637,10 +637,10 @@ describe("where the page sits", () => {
   test("an item page marks its product's row and the Products tab as its location", () => {
     renderAt({ section: null, productKey: "TRL" });
     expect(
-      within(productsNav()).getByRole("link", { name: "TRL trail" }),
+      within(productsNav()).getByRole("link", { name: "trail TRL" }),
     ).toHaveAttribute("aria-current", "location");
     expect(
-      within(productsNav()).getByRole("link", { name: "OPB OpenBot" }),
+      within(productsNav()).getByRole("link", { name: "OpenBot OPB" }),
     ).not.toHaveAttribute("aria-current");
     expect(
       within(sidebarNav()).getByRole("link", { name: "Products" }),

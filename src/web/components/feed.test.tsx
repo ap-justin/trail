@@ -311,7 +311,7 @@ describe("feed states", () => {
     test("names the product as a link alongside imported and with", () => {
       const row = importRow({ issues: 12, comments: 1 });
       expect(
-        within(row).getByRole("link", { name: "TRL trail" }),
+        within(row).getByRole("link", { name: "trail TRL" }),
       ).toBeVisible();
       expect(within(row).getByText("imported")).toBeInTheDocument();
       expect(within(row).getByText("with")).toBeInTheDocument();
@@ -549,12 +549,12 @@ describe("status update rows", () => {
     expect(row.querySelector("[data-product-column]")).toBeEmptyDOMElement();
   });
 
-  test("a product update names the product by key and name, and carries the key at the right", () => {
+  test("a product update names the product by name and key, and carries the key at the right", () => {
     renderFeed({ entries: [productStatusUpdateEntry("e1", minutesAgo(1))] });
     const row = rowFor("e1");
     expect(row).toHaveTextContent("posted a status update on product");
     expect(
-      within(row).getByRole("link", { name: "OPB OpenBot" }),
+      within(row).getByRole("link", { name: "OpenBot OPB" }),
     ).toHaveAttribute("href", "/products/OPB");
     expect(row.querySelector("[data-product-column]")).toHaveTextContent(
       /^OPB$/,
@@ -621,7 +621,7 @@ describe("filters", () => {
     ).toHaveTextContent("Issues");
   });
 
-  test("the product menu lists only the products given, key then name", async () => {
+  test("the product menu lists only the products given, name then key", async () => {
     const user = userEvent.setup();
     const props = renderFeed({
       filters: {
@@ -639,10 +639,10 @@ describe("filters", () => {
     const options = await screen.findAllByRole("option");
     expect(options.map((o) => o.textContent)).toEqual([
       "All products",
-      "TRL trail",
-      "OPB OpenBot",
+      "trail TRL",
+      "OpenBot OPB",
     ]);
-    await user.click(screen.getByRole("option", { name: "OPB OpenBot" }));
+    await user.click(screen.getByRole("option", { name: "OpenBot OPB" }));
     expect(props.onProductFilterChange).toHaveBeenCalledWith("OPB");
   });
 
@@ -784,7 +784,7 @@ describe("Filters on the phone", () => {
     ).toHaveTextContent("Alpha");
     expect(
       within(sheet).getByRole("combobox", { name: "Product" }),
-    ).toHaveTextContent(/TRL\s*trail/);
+    ).toHaveTextContent("trail");
     expect(
       within(sheet).getByRole("combobox", { name: "Project" }),
     ).toHaveTextContent("Human UI launch");

@@ -15,7 +15,7 @@ import {
   typeLabel,
 } from "@/components/status";
 import { Age } from "@/components/status-updates";
-import { KeyText, LabelChip } from "@/components/text";
+import { KeyPill, KeyText, LabelChip } from "@/components/text";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -391,7 +391,7 @@ function Labels({
 
 const itemNoun = (count: number) => (count === 1 ? "item" : "items");
 
-/** `TRL trail 8 items`: a product group's heading, key in mono. */
+/** `trail TRL 8 items`: a product group's heading, its key as a pill after the name. */
 export function GroupHeading({
   product,
   count,
@@ -401,8 +401,8 @@ export function GroupHeading({
 }) {
   return (
     <span className="flex min-w-0 items-center gap-2">
-      <KeyText className="text-foreground">{product.key}</KeyText>{" "}
       <span className="truncate font-medium">{product.name}</span>{" "}
+      <KeyPill>{product.key}</KeyPill>{" "}
       <span className="shrink-0 text-xs font-normal whitespace-nowrap text-muted-foreground">
         {count} {itemNoun(count)}
       </span>

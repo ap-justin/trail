@@ -22,6 +22,31 @@ export function KeyText({
   );
 }
 
+/**
+ * A product key after the product's name: a small muted mono pill that never truncates or
+ * wraps, so the name beside it (`min-w-0 truncate`) is what gives way. Mono on `bg-muted`,
+ * where `LabelChip` is sans on `bg-accent`, so it reads as a key and not a label.
+ */
+export function KeyPill({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <span
+      data-key-pill
+      className={cn(
+        "shrink-0 rounded-sm bg-muted px-1.5 font-mono text-2xs font-medium whitespace-nowrap text-muted-foreground",
+        className,
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
 /** An issue label: the neutral tag chip. */
 export function LabelChip({
   name,
