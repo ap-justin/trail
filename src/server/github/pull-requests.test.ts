@@ -137,16 +137,21 @@ test("a link ending in a tab, a slash, a query or a fragment is its pull request
   expect(sentFor(pr)).toHaveLength(1);
 });
 
-test("a url that only looks like a pull request is not one", async () => {
+test.each([
+  "https://github.com/example-org/widget/pull/12x",
+  "https://github.com/example-org/widget/pull/12.diff",
+  "https://github.com/example-org/widget/pull/12.patch",
+  "https://github.com/example-org/widget/pull/012",
+  "https://github.com/example-org/widget/pull/0",
+  "https://github.com/example-org/widget/pulls/12",
+  "https://github.com/example-org/widget/pull/",
+])("%s only looks like a pull request and is not one", async (url) => {
   const { db, states } = isolated(async () => Response.json({ state: "open" }));
-  const read = states.read([
-    "https://github.com/example-org/widget/pull/12x",
-    "https://github.com/example-org/widget/pull/0",
-    "https://github.com/example-org/widget/pulls/12",
-    "https://github.com/example-org/widget/pull/",
-  ]);
-  expect(read.size).toBe(0);
-  db.$client.close();
+  try {
+    expect(states.read([url]).size).toBe(0);
+  } finally {
+    db.$client.close();
+  }
 });
 
 test("a link in any case matches its pull request", async () => {
@@ -738,16 +743,18 @@ test("a repo named only with dots is no pull request link and is never fetched",
 
 test("start() twice polls once: one fetch per poll interval, none after stop()", async () => {
   vi.useFakeTimers();
+  const calls: string[] = [];
+  const { db, states } = isolated(async (input) => {
+    calls.push(String(input));
+    return Response.json({ state: "open" });
+  }, TOKEN);
   try {
-    const calls: string[] = [];
-    const { db, states } = isolated(async (input) => {
-      calls.push(String(input));
-      return Response.json({ state: "open" });
-    }, TOKEN);
     const pr = pullUrl();
     states.read([pr]);
+    const idle = vi.getTimerCount();
     states.start();
     states.start();
+    expect(vi.getTimerCount()).toBe(idle + 1);
     // each poll finds the pull request stale again: the state is over 10 minutes old by then
     for (const polls of [1, 2, 3]) {
       await vi.advanceTimersByTimeAsync(5_000);
@@ -755,10 +762,12 @@ test("start() twice polls once: one fetch per poll interval, none after stop()",
       clock += 11 * MINUTE;
     }
     await states.stop();
+    expect(vi.getTimerCount()).toBe(idle);
     await vi.advanceTimersByTimeAsync(60_000);
     expect(calls).toHaveLength(3);
-    db.$client.close();
   } finally {
+    await states.stop();
+    db.$client.close();
     vi.useRealTimers();
   }
 });

@@ -275,6 +275,10 @@ describe("links", () => {
     "https://github.com/example/trail/pull/0",
     "https://github.com/example/../pull/7",
     "http://github.com/example/trail/pull/7",
+    "https://github.com/example/trail/pull/12x",
+    "https://github.com/example/trail/pull/12.diff",
+    "https://github.com/example/trail/pulls/12",
+    "https://github.com/example/trail/pull/",
   ])("a pr-less link to %s is not read as a pull request", (url) => {
     renderIssue({
       issue: {

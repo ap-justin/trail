@@ -507,21 +507,26 @@ describe("main nav", () => {
     "the current %s item has the accent background and radius",
     async (_, nav) => {
       renderShell(owner);
+      // everything is collected before the CSS lands: it hides whichever nav the viewport doesn't show
       const links = within(nav()).getAllByRole("link");
       const current = links.find((link) => link.hasAttribute("aria-current"));
       const other = links.find((link) => !link.hasAttribute("aria-current"));
+      const sidebarCurrent = sidebarNav().querySelector("[aria-current]");
+      expect(current).toBeDefined();
+      expect(other).toBeDefined();
+      expect(sidebarCurrent).not.toBeNull();
+      if (nav === tabNav) expect(current).not.toBe(sidebarCurrent);
       onTestFinished(await applyCompiledCss(document.body));
-      const style = (el?: Element) => getComputedStyle(el as Element);
+      const style = (el?: Element | null) => getComputedStyle(el as Element);
       expect(style(current).backgroundColor).not.toBe(
         style(other).backgroundColor,
       );
       expect(style(current).backgroundColor).toBe(
-        style(sidebarNav().querySelector("[aria-current]") as Element)
-          .backgroundColor,
+        style(sidebarCurrent).backgroundColor,
       );
+      expect(style(current).borderRadius).not.toMatch(/^(0|0px)?$/);
       expect(style(current).borderRadius).toBe(
-        style(sidebarNav().querySelector("[aria-current]") as Element)
-          .borderRadius,
+        style(sidebarCurrent).borderRadius,
       );
     },
   );
