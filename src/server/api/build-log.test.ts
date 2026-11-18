@@ -3,16 +3,25 @@ import { buildLogHint } from "./build-log.js";
 
 /** `lead` followed by filler with no token in it, exactly `length` characters long. */
 function bodyOf(length: number, lead: string) {
-  const filler = " nothing else is open on this work".repeat(30);
+  const unit = " nothing else is open on this work";
+  const filler = unit.repeat(Math.ceil(length / unit.length));
   return (lead + filler).slice(0, length);
 }
 
 const sha = "3f9c2a1";
+const longRunUrl = "https://github.com/example-org/widget/actions/runs/1234567890";
+
+test("bodyOf pads to exactly the length asked for", () => {
+  expect(bodyOf(2000, `Landed in ${sha} and b71e04d9`)).toHaveLength(2000);
+});
 
 test("one token gets no hint however long the body; two do", () => {
   expect(buildLogHint(`Pushed ${sha}`, "rest")).toBeUndefined();
   expect(
     buildLogHint(bodyOf(2000, `Landed in ${sha}`), "rest"),
+  ).toBeUndefined();
+  expect(
+    buildLogHint(bodyOf(2000, `Green in ${longRunUrl}`), "rest"),
   ).toBeUndefined();
   expect(
     buildLogHint(bodyOf(2000, `Landed in ${sha} and b71e04d9`), "rest"),

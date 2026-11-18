@@ -53,14 +53,16 @@ test("a body with two commit SHAs is saved and gets a hint naming them and the n
 });
 
 test("a long body with one SHA gets no hint; with two it does", async () => {
-  const note = `Landed in 3f9c2a1.\n${"Every step passed as expected. ".repeat(20)}`;
-  expect(note.length).toBeGreaterThan(600);
+  const note = `Landed in 3f9c2a1.\n${"Every step passed as expected. ".repeat(70)}`;
+  expect(note.length).toBeGreaterThan(2000);
   const one = await comment(note);
   expect(one).not.toHaveProperty("hint");
-  const two = await comment(`${note}\nFollow-up in b71e04d9.`);
+  const twoBody = `${note}\nFollow-up in b71e04d9.`;
+  const two = await comment(twoBody);
   expect(two.hint).toMatch(/2 commit SHAs/);
   const saved = await savedBodies();
   expect(saved).toContain(note);
+  expect(saved).toContain(twoBody);
 });
 
 test("a short body with one token gets no hint", async () => {
