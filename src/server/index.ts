@@ -6,6 +6,7 @@ import { createAuth } from "./auth/auth.js";
 import { loadConfig } from "./config.js";
 import { migrate, openDatabase } from "./db/client.js";
 import { createEventBus } from "./events/bus.js";
+import { createPullRequests } from "./github/pull-requests.js";
 import { webhookSettings } from "./service/webhooks.js";
 import { onShutdownSignal } from "./shutdown.js";
 import { LiveStreams } from "./web/events.js";
@@ -43,15 +44,18 @@ const webhooks = webhookSettings(deriveSecretKey(config.BETTER_AUTH_SECRET), {
   signal: draining.signal,
 });
 const webhookWorker = createWebhookWorker({ db, bus, settings: webhooks });
+const pullRequests = createPullRequests({ db, token: config.GITHUB_TOKEN });
 const server = serve(
   {
-    fetch: createApp({ db, bus, auth, streams, webDir, webhooks }).fetch,
+    fetch: createApp({ db, bus, auth, streams, webDir, webhooks, pullRequests })
+      .fetch,
     port: config.PORT,
   },
   (info) => {
     console.log(`trail listening on :${info.port}`);
     // after the first listen: a restart sends what the outbox still holds
     webhookWorker.start();
+    pullRequests.start();
   },
 );
 // serve() types an http2 server too, which only a createServer option yields
@@ -67,6 +71,7 @@ onShutdownSignal({
   onClosed: async () => {
     await streams.end();
     await webhookWorker.stop();
+    await pullRequests.stop();
     db.$client.close();
   },
   // plus shutdown-sync-timeout, under shutdown-timeout in litestream.yml, or the drain is killed mid-way

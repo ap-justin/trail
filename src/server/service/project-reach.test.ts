@@ -6,7 +6,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 import { migrate, openDatabase } from "../db/client.js";
 import { issue, projectProduct } from "../db/schema.js";
 import { createEventBus } from "../events/bus.js";
-import { testWebhooks } from "../test-app.js";
+import { testPullRequests, testWebhooks } from "../test-app.js";
 import { ForbiddenScopeError, NotFoundError } from "./errors.js";
 import { createService } from "./index.js";
 import {
@@ -29,6 +29,7 @@ const service = createService({
   db,
   bus: createEventBus(),
   webhooks: testWebhooks,
+  pullRequests: testPullRequests(db),
 });
 
 // the operator's unrestricted bot seeds everything

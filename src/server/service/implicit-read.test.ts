@@ -14,7 +14,7 @@ import {
 import { migrate, openDatabase } from "../db/client.js";
 import { projectProduct } from "../db/schema.js";
 import { createEventBus } from "../events/bus.js";
-import { testWebhooks } from "../test-app.js";
+import { testPullRequests, testWebhooks } from "../test-app.js";
 import { ForbiddenScopeError, NotFoundError } from "./errors.js";
 import { createService, type IssuePatch } from "./index.js";
 import { authenticateKey, createBot, type KeyScopeInput } from "./keys.js";
@@ -32,6 +32,7 @@ const service = createService({
   db,
   bus: createEventBus(),
   webhooks: testWebhooks,
+  pullRequests: testPullRequests(db),
 });
 
 // the operator's unrestricted bot seeds everything; alpha owns ATL and beta BTA

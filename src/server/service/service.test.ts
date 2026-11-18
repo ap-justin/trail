@@ -12,7 +12,12 @@ import {
 } from "vitest";
 import { migrate, openDatabase } from "../db/client.js";
 import { type ActivityEvent, createEventBus } from "../events/bus.js";
-import { atFakeTime, projectKey, testWebhooks } from "../test-app.js";
+import {
+  atFakeTime,
+  projectKey,
+  testPullRequests,
+  testWebhooks,
+} from "../test-app.js";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors.js";
 import {
   createService,
@@ -37,7 +42,12 @@ afterAll(() => {
 });
 
 const bus = createEventBus();
-const service = createService({ db, bus, webhooks: testWebhooks });
+const service = createService({
+  db,
+  bus,
+  webhooks: testWebhooks,
+  pullRequests: testPullRequests(db),
+});
 let published: ActivityEvent[] = [];
 bus.subscribe((e) => published.push(e));
 beforeEach(() => {

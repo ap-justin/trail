@@ -520,6 +520,62 @@ export const issueLink = sqliteTable(
   ],
 );
 
+export const githubPullRequestStates = [
+  "open",
+  "draft",
+  "merged",
+  "closed",
+] as const;
+export type GithubPullRequestState = (typeof githubPullRequestStates)[number];
+
+// https://github.com/<owner>/<repo>/pull/<n>: six slashes, no empty segment, no query, fragment
+// or whitespace, and a number of digits only with no leading zero
+const githubPullUrlShape = (column: AnySQLiteColumn) => {
+  const col = c(column);
+  return sql`${col} glob 'https://github.com/?*/?*/pull/[1-9]*' and length(${col}) - length(replace(${col}, '/', '')) = 6 and rtrim(${col}, '0123456789') glob '*/pull/' and ${col} not glob ('*[?#' || char(9, 10, 13, 32) || ']*')`;
+};
+
+/**
+ * GitHub's state of a pull request some item links to, keyed by its canonical
+ * URL and shared by every item that links it. No foreign key to issue_link:
+ * a link's url is free text, and one pull request may be linked from many items.
+ */
+export const githubPullRequest = sqliteTable(
+  "github_pull_request",
+  {
+    url: text("url").primaryKey(),
+    // null until the first successful fetch
+    state: text("state", { enum: githubPullRequestStates }),
+    // the last successful fetch
+    checkedAt: integer("checked_at", { mode: "timestamp_ms" }),
+    // the last fetch, successful or not
+    attemptedAt: integer("attempted_at", { mode: "timestamp_ms" }),
+    // fetches failed since the last success; drives the backoff
+    failures: integer("failures").notNull().default(0),
+    // when an item showing this link was last read; the refresh queue skips links nobody is reading
+    lastReadAt: integer("last_read_at", { mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (t) => [
+    check("github_pull_request_url_check", githubPullUrlShape(t.url)),
+    check(
+      "github_pull_request_state_check",
+      oneOf(t.state, githubPullRequestStates),
+    ),
+    check(
+      "github_pull_request_checked_check",
+      sql`(${c(t.state)} is null) = (${c(t.checkedAt)} is null)`,
+    ),
+    check(
+      "github_pull_request_attempted_check",
+      sql`${c(t.attemptedAt)} is not null or (${c(t.checkedAt)} is null and ${c(t.failures)} = 0)`,
+    ),
+    check("github_pull_request_failures_check", sql`${c(t.failures)} >= 0`),
+    index("github_pull_request_last_read_idx").on(t.lastReadAt),
+  ],
+);
+
 export const productStatusUpdate = sqliteTable(
   "product_status_update",
   {

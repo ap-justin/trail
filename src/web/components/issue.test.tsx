@@ -1,6 +1,6 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   IssueBreadcrumb,
   IssueView,
@@ -9,6 +9,7 @@ import {
 import {
   alpha,
   beta,
+  commentEntry,
   humanUi,
   issue,
   maya,
@@ -132,6 +133,406 @@ describe("links", () => {
         .map((a) => a.getAttribute("href")),
     ).toEqual(["https://github.com/example/trail/pull/31"]);
     expect(links.querySelector('[href^="javascript:"]')).toBeNull();
+  });
+
+  const pull = (n: number) => `https://github.com/example/trail/pull/${n}`;
+  const checkedAt = "2026-11-12T10:00:00.000Z";
+
+  test.each([
+    ["open", "Open", "lucide-git-pull-request"],
+    ["draft", "Draft", "lucide-git-pull-request-draft"],
+    ["merged", "Merged", "lucide-git-merge"],
+    ["closed", "Closed", "lucide-git-pull-request-closed"],
+  ] as const)(
+    "a %s pull request reads %s with its glyph, in a name that says Pull request",
+    (state, word, glyph) => {
+      renderIssue({
+        issue: {
+          status: "ready",
+          data: issue({
+            links: [
+              { url: pull(7), title: "Invite API", pr: { state, checkedAt } },
+            ],
+          }),
+        },
+      });
+      const links = screen.getByRole("region", { name: "Links" });
+      const link = within(links).getByRole("link", {
+        name: `Pull request ${word} Invite API github.com/example/trail/pull/7`,
+      });
+      expect(within(link).getByText(word)).toBeInTheDocument();
+      const icon = link.querySelector("svg");
+      expect(icon).toHaveClass(glyph);
+      expect(icon).toHaveAttribute("aria-hidden", "true");
+    },
+  );
+
+  test("a pull request trail has no state for yet, or one the server left unread, reads State unknown", () => {
+    renderIssue({
+      issue: {
+        status: "ready",
+        data: issue({
+          links: [
+            { url: pull(8), title: "Private repo PR", pr: null },
+            { url: pull(9), title: "Unread PR" },
+          ],
+        }),
+      },
+    });
+    const links = screen.getByRole("region", { name: "Links" });
+    const rows = within(links).getAllByRole("link");
+    expect(rows.map((a) => a.textContent)).toEqual([
+      "Pull request State unknown Private repo PR github.com/example/trail/pull/8",
+      "Pull request State unknown Unread PR github.com/example/trail/pull/9",
+    ]);
+    for (const row of rows) {
+      expect(row.querySelector("svg")).toHaveClass("lucide-git-pull-request");
+    }
+  });
+
+  test("hovering a pull request row underlines its title only, not the state word or URL", () => {
+    renderIssue({
+      issue: {
+        status: "ready",
+        data: issue({
+          links: [
+            {
+              url: pull(7),
+              title: "Invite API",
+              pr: { state: "merged", checkedAt },
+            },
+          ],
+        }),
+      },
+    });
+    const link = within(
+      screen.getByRole("region", { name: "Links" }),
+    ).getByRole("link");
+    expect(link).toHaveClass("group");
+    expect(link).not.toHaveClass("hover:underline");
+    expect(within(link).getByText("Invite API")).toHaveClass(
+      "group-hover:underline",
+    );
+    expect(within(link).getByText("Merged")).not.toHaveClass(
+      "group-hover:underline",
+    );
+    expect(
+      within(link).getByText("github.com/example/trail/pull/7"),
+    ).not.toHaveClass("group-hover:underline");
+  });
+
+  test("several pull requests stack in the order they were added, each with its own state", () => {
+    renderIssue({
+      issue: {
+        status: "ready",
+        data: issue({
+          links: [
+            { url: pull(31), title: "B", pr: { state: "merged", checkedAt } },
+            { url: pull(29), title: "A", pr: { state: "closed", checkedAt } },
+          ],
+        }),
+      },
+    });
+    const links = screen.getByRole("region", { name: "Links" });
+    const rows = within(links).getAllByRole("link");
+    expect(rows.map((a) => a.getAttribute("href"))).toEqual([
+      pull(31),
+      pull(29),
+    ]);
+    expect(rows.map((a) => a.textContent)).toEqual([
+      "Pull request Merged B github.com/example/trail/pull/31",
+      "Pull request Closed A github.com/example/trail/pull/29",
+    ]);
+    expect(rows[0]?.querySelector("svg")).toHaveClass("lucide-git-merge");
+    expect(rows[1]?.querySelector("svg")).toHaveClass(
+      "lucide-git-pull-request-closed",
+    );
+  });
+
+  test.each([
+    "https://github.com/example/trail/pull/7/files",
+    "https://github.com/example/trail/pull/0",
+    "https://github.com/example/../pull/7",
+    "http://github.com/example/trail/pull/7",
+    "https://github.com/example/trail/pull/7?diff=split",
+  ])("a pr-less link to %s is not read as a pull request", (url) => {
+    renderIssue({
+      issue: {
+        status: "ready",
+        data: issue({ links: [{ url, title: "Not a PR" }] }),
+      },
+    });
+    const links = screen.getByRole("region", { name: "Links" });
+    expect(within(links).getByText("Not a PR")).toBeInTheDocument();
+    expect(within(links).queryByText("State unknown")).toBeNull();
+  });
+
+  test("a pr-less pull request url in any case reads State unknown", () => {
+    renderIssue({
+      issue: {
+        status: "ready",
+        data: issue({
+          links: [
+            { url: "https://GitHub.com/Example/Trail/pull/7", title: "Shouty" },
+          ],
+        }),
+      },
+    });
+    const links = screen.getByRole("region", { name: "Links" });
+    expect(within(links).getByText("State unknown")).toBeInTheDocument();
+  });
+
+  test("a link that is not a pull request keeps its plain row, with no state line", () => {
+    renderIssue({
+      issue: {
+        status: "ready",
+        data: issue({
+          links: [
+            { url: "https://example.com/spec", title: "Spec" },
+            { url: "https://github.com/example/trail/issues/4", title: "Bug" },
+          ],
+        }),
+      },
+    });
+    const links = screen.getByRole("region", { name: "Links" });
+    expect(within(links).queryByText(/Pull request/)).toBeNull();
+    expect(
+      within(links).queryByText(/^(Open|Draft|Merged|Closed|State unknown)$/),
+    ).toBeNull();
+    const spec = within(links).getByText("Spec").closest("a");
+    expect(spec?.querySelector("svg")).toHaveClass("text-muted-foreground");
+    expect(
+      within(spec as HTMLElement).getByText("example.com/spec"),
+    ).toHaveClass("font-mono");
+  });
+});
+
+describe("long comments", () => {
+  const line = 19;
+  let linesPerBlock = 1;
+  let subpixel = 0;
+  let resized: (() => void)[] = [];
+  const realObserver = window.ResizeObserver;
+  let lineHeight: HTMLStyleElement;
+
+  // jsdom has no layout: each paragraph or list item renders `linesPerBlock` lines of 19px,
+  // and a box carrying the clamp renders no taller than 4 of them
+  beforeEach(() => {
+    linesPerBlock = 1;
+    subpixel = 0;
+    resized = [];
+    lineHeight = document.createElement("style");
+    lineHeight.textContent = `[data-entry-id] * { line-height: ${line}px; }`;
+    document.head.append(lineHeight);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: HTMLElement) {
+        const blocks = this.querySelectorAll("p, li").length;
+        const height = blocks * linesPerBlock * line + subpixel;
+        return DOMRect.fromRect({
+          height: this.classList.contains("max-h-[4lh]")
+            ? Math.min(height, 4 * line)
+            : height,
+        });
+      },
+    );
+    window.ResizeObserver = class {
+      constructor(callback: () => void) {
+        resized.push(callback);
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+  });
+  afterEach(() => {
+    lineHeight.remove();
+    vi.restoreAllMocks();
+    window.ResizeObserver = realObserver;
+  });
+
+  const paragraphs = (n: number) =>
+    Array.from({ length: n }, (_, i) => `Paragraph ${i + 1}.`).join("\n\n");
+
+  function renderComments(...bodies: string[]) {
+    renderIssue({
+      issue: {
+        status: "ready",
+        data: issue({
+          timeline: bodies.map((body, i) =>
+            commentEntry(`c${i}`, `2026-11-1${i}T10:00:00.000Z`, {
+              comment: { id: `cc${i}`, body, sourceAuthor: null },
+            }),
+          ),
+        }),
+      },
+    });
+  }
+
+  test("a comment of 6 or more lines collapses behind Show more", () => {
+    renderComments(paragraphs(6));
+    const button = screen.getByRole("button", {
+      name: "Show more of the comment by Alpha",
+    });
+    expect(button).toHaveTextContent("Show more");
+    expect(button).toHaveAttribute("aria-expanded", "false");
+    const body = document.getElementById(
+      button.getAttribute("aria-controls") ?? "",
+    );
+    expect(body).toHaveClass("max-h-[4lh]", "overflow-hidden");
+    expect(body).toHaveTextContent("Paragraph 6.");
+  });
+
+  test("a comment of 5 lines or fewer renders in full with no control", () => {
+    renderComments(paragraphs(5), paragraphs(1));
+    expect(screen.queryByRole("button", { name: /^Show / })).toBeNull();
+    expect(document.querySelector(".max-h-\\[4lh\\]")).toBeNull();
+  });
+
+  test("a body a fraction of a pixel under 6 lines still counts as 6", () => {
+    subpixel = -0.4;
+    renderComments(paragraphs(6));
+    expect(screen.getByRole("button", { name: /^Show more/ })).toBeVisible();
+  });
+
+  test("a body more than half a pixel under 6 lines is 5 lines and renders in full", () => {
+    subpixel = -0.6;
+    renderComments(paragraphs(6));
+    expect(screen.queryByRole("button", { name: /^Show / })).toBeNull();
+  });
+
+  // a real ResizeObserver fires whenever the clamp changes a watched box's height
+  const relayout = () =>
+    act(() => {
+      for (const callback of resized) callback();
+    });
+
+  test("Show more opens the body, flips the label and aria-expanded, and keeps focus; Show less closes it", async () => {
+    const user = userEvent.setup();
+    renderComments(paragraphs(7));
+    relayout();
+    const button = screen.getByRole("button", { name: /^Show more/ });
+    const body = document.getElementById(
+      button.getAttribute("aria-controls") ?? "",
+    );
+
+    await user.click(button);
+    relayout();
+    expect(button).toHaveAttribute("aria-expanded", "true");
+    expect(button).toHaveAccessibleName("Show less of the comment by Alpha");
+    expect(button).toHaveTextContent("Show less");
+    expect(button).toHaveFocus();
+    expect(body).not.toHaveClass("max-h-[4lh]");
+
+    await user.keyboard("{Enter}");
+    relayout();
+    expect(button).toBeInTheDocument();
+    expect(button).toHaveAttribute("aria-expanded", "false");
+    expect(body).toHaveClass("max-h-[4lh]");
+    await user.keyboard(" ");
+    expect(button).toHaveAttribute("aria-expanded", "true");
+    expect(button).toHaveFocus();
+  });
+
+  test("tabbing onto a link the clamp hides opens the comment", async () => {
+    const user = userEvent.setup();
+    renderComments(
+      `${paragraphs(6)}\n\nSee [the spec](https://example.com/spec).`,
+    );
+    const button = screen.getByRole("button", { name: /^Show more/ });
+    const link = screen.getByRole("link", { name: "the spec" });
+    for (let i = 0; i < 50 && document.activeElement !== link; i++) {
+      await user.tab();
+    }
+    expect(link).toHaveFocus();
+    expect(button).toHaveAttribute("aria-expanded", "true");
+  });
+
+  function renderVisibleLink() {
+    renderComments(
+      `See [the spec](https://example.com/spec).\n\n${paragraphs(6)}`,
+    );
+    const link = screen.getByRole("link", { name: "the spec" });
+    // jsdom can't open a new tab and logs "Not implemented" when asked to
+    link.addEventListener("click", (e) => e.preventDefault());
+    return {
+      button: screen.getByRole("button", { name: /^Show more/ }),
+      link,
+    };
+  }
+
+  test("clicking a link in the visible lines focuses it and leaves the comment collapsed", async () => {
+    const user = userEvent.setup();
+    const { button, link } = renderVisibleLink();
+    await user.click(link);
+    expect(link).toHaveFocus();
+    expect(button).toHaveAttribute("aria-expanded", "false");
+  });
+
+  test("tapping a link in the visible lines leaves the comment collapsed", async () => {
+    const user = userEvent.setup();
+    const { button, link } = renderVisibleLink();
+    // touch sends pointerup before the compat mousedown that focuses the link
+    await user.pointer({ keys: "[TouchA]", target: link });
+    expect(link).toHaveFocus();
+    expect(button).toHaveAttribute("aria-expanded", "false");
+  });
+
+  test("a press that ends outside the body doesn't stop Tab opening it", async () => {
+    const user = userEvent.setup();
+    renderComments(
+      `${paragraphs(6)}\n\nSee [the spec](https://example.com/spec).`,
+    );
+    const button = screen.getByRole("button", { name: /^Show more/ });
+    const link = screen.getByRole("link", { name: "the spec" });
+    await user.pointer([
+      { keys: "[MouseLeft>]", target: screen.getByText("Paragraph 1.") },
+      { target: button },
+      { keys: "[/MouseLeft]" },
+    ]);
+    for (let i = 0; i < 50 && document.activeElement !== link; i++) {
+      await user.tab();
+    }
+    expect(link).toHaveFocus();
+    expect(button).toHaveAttribute("aria-expanded", "true");
+  });
+
+  test("Show less scrolls its button into view; mounting and Show more do not", async () => {
+    const user = userEvent.setup();
+    const scrolled = vi.spyOn(Element.prototype, "scrollIntoView");
+    renderComments(paragraphs(7));
+    const button = screen.getByRole("button", { name: /^Show more/ });
+    expect(scrolled).not.toHaveBeenCalled();
+
+    await user.click(button);
+    expect(scrolled).not.toHaveBeenCalled();
+
+    await user.click(button);
+    expect(scrolled).toHaveBeenCalledTimes(1);
+    expect(scrolled).toHaveBeenCalledWith({ block: "nearest" });
+    expect(scrolled.mock.contexts[0]).toBe(button);
+  });
+
+  test("each comment keeps its own state: opening one leaves the others", async () => {
+    const user = userEvent.setup();
+    renderComments(paragraphs(6), paragraphs(2), paragraphs(8));
+    const [first, last] = screen.getAllByRole("button", {
+      name: /^Show more/,
+    });
+    await user.click(first as HTMLElement);
+    expect(first).toHaveAttribute("aria-expanded", "true");
+    expect(last).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getAllByRole("button", { name: /^Show / })).toHaveLength(2);
+  });
+
+  test("re-measures when the body resizes: a comment that wraps past 5 lines gains the control", () => {
+    renderComments(paragraphs(3));
+    expect(screen.queryByRole("button", { name: /^Show / })).toBeNull();
+    linesPerBlock = 2;
+    relayout();
+    expect(screen.getByRole("button", { name: /^Show more/ })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
   });
 });
 

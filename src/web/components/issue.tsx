@@ -1,5 +1,21 @@
-import { FolderIcon, GitPullRequestIcon } from "lucide-react";
-import { type FormEvent, type ReactNode, useId, useState } from "react";
+import {
+  ChevronDownIcon,
+  ChevronUpIcon,
+  FolderIcon,
+  GitMergeIcon,
+  GitPullRequestClosedIcon,
+  GitPullRequestDraftIcon,
+  GitPullRequestIcon,
+} from "lucide-react";
+import {
+  type FormEvent,
+  type ReactNode,
+  type RefObject,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { ActorAvatar, ActorName } from "@/components/actor";
 import { AppLink, textLinkFocus, textLinkTap } from "@/components/app-link";
 import { Markdown } from "@/components/markdown";
@@ -319,6 +335,81 @@ function Properties({ issue }: { issue: WebItemView }) {
 
 const webScheme = /^https?:\/\//i;
 
+type ItemLink = WebItemView["links"][number];
+type PullRequestState = NonNullable<ItemLink["pr"]>["state"] | "unknown";
+
+// the server's matcher in src/server/github/pull-requests.ts, kept apart so no server code ships
+const pullRequestUrl =
+  /^https:\/\/github\.com\/[a-z0-9-]+\/(?!\.+\/)[a-z0-9._-]+\/pull\/[1-9]\d*$/i;
+
+/** A pull request link's state; null for any other link. */
+function pullRequestState(link: ItemLink): PullRequestState | null {
+  if (link.pr) return link.pr.state;
+  // null: trail has not read it yet; absent on a pull request url: the server sent none
+  if (link.pr === null || pullRequestUrl.test(link.url)) return "unknown";
+  return null;
+}
+
+/** Glyph and word share one ink, so the state never rests on colour alone. */
+const pullRequestStates: Record<
+  PullRequestState,
+  { Glyph: typeof GitPullRequestIcon; word: string; ink: string }
+> = {
+  open: {
+    Glyph: GitPullRequestIcon,
+    word: "Open",
+    ink: "font-medium text-foreground",
+  },
+  draft: {
+    Glyph: GitPullRequestDraftIcon,
+    word: "Draft",
+    ink: "font-medium text-muted-foreground",
+  },
+  merged: {
+    Glyph: GitMergeIcon,
+    word: "Merged",
+    ink: "font-medium text-success",
+  },
+  closed: {
+    Glyph: GitPullRequestClosedIcon,
+    word: "Closed",
+    ink: "font-medium text-destructive",
+  },
+  unknown: {
+    Glyph: GitPullRequestIcon,
+    word: "State unknown",
+    ink: "text-muted-foreground",
+  },
+};
+
+/**
+ * A pull request link: the state line, the title (wrapping), the URL. The `{" "}`s render
+ * nothing between flex items but keep the words apart in the link's accessible name.
+ */
+function PullRequestBody({
+  link,
+  state,
+}: {
+  link: ItemLink;
+  state: PullRequestState;
+}) {
+  const { Glyph, word, ink } = pullRequestStates[state];
+  return (
+    <>
+      <Glyph aria-hidden="true" className={cn("size-4 shrink-0", ink)} />
+      <span className="flex min-w-0 flex-col">
+        <span className={cn("text-xs leading-4", ink)}>
+          <span className="sr-only">Pull request</span> {word}
+        </span>{" "}
+        <span className="mt-px group-hover:underline">{link.title}</span>{" "}
+        <KeyText className="truncate">
+          {link.url.replace(webScheme, "")}
+        </KeyText>
+      </span>
+    </>
+  );
+}
+
 function Links({ links }: { links: WebItemView["links"] }) {
   const headingId = useId();
   if (links.length === 0) return null;
@@ -333,21 +424,29 @@ function Links({ links }: { links: WebItemView["links"] }) {
       <ul>
         {links.map((link) => {
           const web = webScheme.test(link.url);
-          const body = (
+          const state = pullRequestState(link);
+          const body = state ? (
+            <PullRequestBody link={link} state={state} />
+          ) : (
             <>
               <GitPullRequestIcon
                 aria-hidden="true"
                 className="size-4 shrink-0 text-muted-foreground"
               />
               <span className="flex min-w-0 flex-col">
-                <span className="truncate">{link.title}</span>
+                <span className="truncate group-hover:underline">
+                  {link.title}
+                </span>
                 <KeyText className="truncate">
                   {link.url.replace(webScheme, "")}
                 </KeyText>
               </span>
             </>
           );
-          const row = "flex min-h-11 items-center gap-2 py-1.5 lg:min-h-0";
+          // a pull request's glyph sits on its 16px state line, above the title and URL
+          const row = state
+            ? "grid grid-cols-[--spacing(4)_minmax(0,1fr)] gap-x-2 py-1.5 max-lg:min-h-11"
+            : "flex min-h-11 items-center gap-2 py-1.5 lg:min-h-0";
           return (
             <li key={link.url}>
               {web ? (
@@ -357,7 +456,7 @@ function Links({ links }: { links: WebItemView["links"] }) {
                   rel="noopener noreferrer"
                   className={cn(
                     row,
-                    "rounded-md hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                    "group rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
                   )}
                 >
                   {body}
@@ -467,11 +566,62 @@ function EntryTime({ iso, className }: { iso: string; className?: string }) {
   );
 }
 
+/**
+ * How many whole lines tall `ref`'s element renders, in its own line height; null until
+ * measured. Re-measured whenever the element resizes (a narrower column, a font landing).
+ */
+function useRenderedLines(ref: RefObject<HTMLElement | null>): number | null {
+  const [lines, setLines] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const measure = () => {
+      const lineHeight = Number.parseFloat(
+        getComputedStyle(element).lineHeight,
+      );
+      // half a pixel absorbs subpixel rounding, so exactly n lines never reads as n - 1
+      const height = element.getBoundingClientRect().height + 0.5;
+      setLines(Math.floor(height / lineHeight));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [ref]);
+  return lines;
+}
+
+/** Past this many lines a comment collapses to 4 (`max-h-[4lh]`), so a collapse hides 2 or more. */
+const fullLines = 5;
+
 function CommentWell({
   entry,
 }: {
   entry: Extract<EntryView, { kind: "comment" }>;
 }) {
+  const bodyId = useId();
+  const contentRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const lines = useRenderedLines(contentRef);
+  const [open, setOpen] = useState(false);
+  // focus moving into a collapsed body with no press behind it opens it: Tab onto a link the clamp
+  // hides. Chrome and Firefox focus a link on mousedown (on touch, the compat mousedown after
+  // pointerup, so pointer events can't tell), so a focus whose target holds the pressed node came
+  // from a press and opens nothing. A node, not a flag: a text drag released outside the body never
+  // sends the mouseup that clears it
+  const pressed = useRef<EventTarget | null>(null);
+  // the body shrinks above the button on Show less; where scroll anchoring doesn't hold it,
+  // the button would end up above the viewport with focus still on it
+  const wasOpen = useRef(open);
+  useLayoutEffect(() => {
+    if (wasOpen.current && !open) {
+      buttonRef.current?.scrollIntoView({ block: "nearest" });
+    }
+    wasOpen.current = open;
+  }, [open]);
+  const long = lines !== null && lines > fullLines;
+  const action = open ? "Show less" : "Show more";
+  const Chevron = open ? ChevronUpIcon : ChevronDownIcon;
   return (
     <li
       data-entry-id={entry.id}
@@ -486,8 +636,56 @@ function CommentWell({
         )}
         <EntryTime iso={entry.createdAt} className="ml-auto" />
       </div>
-      {/* indented past the avatar at lg, so the body lines up with the name */}
-      <Markdown className="lg:pl-7">{entry.comment.body}</Markdown>
+      <div>
+        {/* indented past the avatar at lg, so the body lines up with the name; collapsed,
+            4 lines with the last one fading out (no motion: the height swaps instantly) */}
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: not a control; it opens the body when focus moves in without a press (Tab onto a link the clamp hides), and its mouse handlers only note the pressed node so a clicked link stays put */}
+        <div
+          id={bodyId}
+          className={cn(
+            "lg:pl-7",
+            long &&
+              !open &&
+              "max-h-[4lh] overflow-hidden mask-b-from-[calc(100%-1lh)]",
+          )}
+          onMouseDown={(e) => {
+            pressed.current = e.target;
+          }}
+          onMouseUp={() => {
+            pressed.current = null;
+          }}
+          onFocus={
+            long
+              ? (e) => {
+                  const target = pressed.current;
+                  if (target instanceof Node && e.target.contains(target)) {
+                    return;
+                  }
+                  setOpen(true);
+                }
+              : undefined
+          }
+        >
+          {/* measured unclamped, so opening and closing never changes the count */}
+          <div ref={contentRef}>
+            <Markdown>{entry.comment.body}</Markdown>
+          </div>
+        </div>
+        {long && (
+          <button
+            ref={buttonRef}
+            type="button"
+            aria-expanded={open}
+            aria-controls={bodyId}
+            aria-label={`${action} of the comment by ${entry.actor.name}`}
+            onClick={() => setOpen(!open)}
+            className="inline-flex h-11 items-center gap-1 rounded-sm pr-1 font-medium text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring max-lg:-mb-1.5 max-lg:focus-visible:-outline-offset-2 lg:mt-0.5 lg:ml-7 lg:h-7 lg:px-1 lg:focus-visible:outline-offset-2"
+          >
+            {action}
+            <Chevron aria-hidden="true" className="size-3.5" />
+          </button>
+        )}
+      </div>
     </li>
   );
 }

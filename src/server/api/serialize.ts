@@ -3,6 +3,7 @@ import type {
   ActorView,
   BotView,
   CommentView,
+  CreatedCommentView,
   ImportResultView,
   InboxEntryView,
   IssueView,
@@ -39,6 +40,7 @@ import type {
 } from "../service/index.js";
 import { type KeyScope, scopeView } from "../service/keys.js";
 import { MESSAGE_PREVIEW_CHARS } from "../service/messages.js";
+import { buildLogHint, type Surface } from "./build-log.js";
 
 // One function per resource, each listing its wire keys, so a new column reaches the wire only on purpose.
 
@@ -90,6 +92,20 @@ export function toProject(row: Project): ProjectView {
   };
 }
 
+/** A link as an item shows it: pr only on a pull request link. */
+export function toLink(l: Issue["links"][number]): IssueView["links"][number] {
+  return {
+    url: l.url,
+    title: l.title,
+    ...(l.pr !== undefined && {
+      pr: l.pr && {
+        state: l.pr.state,
+        checkedAt: l.pr.checkedAt.toISOString(),
+      },
+    }),
+  };
+}
+
 export function toIssue(row: Issue): IssueView {
   return {
     id: row.id,
@@ -107,7 +123,7 @@ export function toIssue(row: Issue): IssueView {
     priority: row.priority,
     estimate: row.estimate,
     labels: row.labels,
-    links: row.links.map((l) => ({ url: l.url, title: l.title })),
+    links: row.links.map(toLink),
     assignee: row.assignee,
     assigneeId: row.assigneeId,
     externalRef: row.externalRef,
@@ -155,6 +171,15 @@ export function toComment(row: Comment): CommentView {
     sourceAuthor: row.sourceAuthor,
     createdAt: row.createdAt.toISOString(),
   };
+}
+
+/** A comment as its create answers it: with hint when its body reads like a build log. */
+export function toCreatedComment(
+  row: Comment,
+  surface: Surface,
+): CreatedCommentView {
+  const hint = buildLogHint(row.body, surface);
+  return hint === undefined ? toComment(row) : { ...toComment(row), hint };
 }
 
 export function toStatusUpdate(row: StatusUpdate): StatusUpdateView {

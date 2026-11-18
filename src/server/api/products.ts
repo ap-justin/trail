@@ -100,10 +100,14 @@ const updateProduct = createRoute({
   },
 });
 
+export const STATUS_UPDATE_HOLDS =
+  "A status update says where the product or project stands, its risks and what's next, not a changelog.";
+
 const postStatusUpdate = createRoute({
   method: "post",
   path: "/products/{key}/status-updates",
   summary: "Post a product status update: a body and a health",
+  description: STATUS_UPDATE_HOLDS,
   tags,
   request: {
     params: productParam,

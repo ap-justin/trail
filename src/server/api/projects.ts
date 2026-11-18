@@ -24,6 +24,7 @@ import type {
 } from "../service/index.js";
 import { deprecations } from "./deprecations.js";
 import { createRouter } from "./env.js";
+import { STATUS_UPDATE_HOLDS } from "./products.js";
 import {
   conflictError,
   forbiddenError,
@@ -189,8 +190,7 @@ const postStatusUpdate = createRoute({
   method: "post",
   path: "/projects/{ref}/status-updates",
   summary: "Post a project status update: a body and a health",
-  description:
-    "Needs the status_updates action on a key that reaches one of the project's products. externalRef is refused here with a 422, since only a product's update keeps one: send the Idempotency-Key header to make the post safe to retry. Deprecated: a product key that matches no slug posts on that product, carrying deprecated; use POST /products/{key}/status-updates.",
+  description: `${STATUS_UPDATE_HOLDS} Needs the status_updates action on a key that reaches one of the project's products. externalRef is refused here with a 422, since only a product's update keeps one: send the Idempotency-Key header to make the post safe to retry. Deprecated: a product key that matches no slug posts on that product, carrying deprecated; use POST /products/{key}/status-updates.`,
   tags,
   request: {
     params: projectParam,

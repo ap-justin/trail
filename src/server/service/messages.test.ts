@@ -4,8 +4,8 @@ import { setupTestApp } from "../test-app.js";
 import { NotFoundError } from "./errors.js";
 import { createService } from "./index.js";
 
-const { db, bus, webhooks, addBot } = setupTestApp();
-const service = createService({ db, bus, webhooks });
+const { db, bus, webhooks, pullRequests, addBot } = setupTestApp();
+const service = createService({ db, bus, webhooks, pullRequests });
 
 type Bot = ReturnType<typeof addBot>["actor"];
 const send = (from: Bot, to: Bot, text: string, replyTo?: string) =>
