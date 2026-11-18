@@ -398,7 +398,7 @@ describe("long comments", () => {
     const body = document.getElementById(
       button.getAttribute("aria-controls") ?? "",
     );
-    expect(body).toHaveClass("max-h-[4lh]", "overflow-clip");
+    expect(body).toHaveClass("max-h-[4lh]", "overflow-hidden");
     expect(body).toHaveTextContent("Paragraph 6.");
   });
 
@@ -420,7 +420,8 @@ describe("long comments", () => {
     expect(screen.queryByRole("button", { name: /^Show / })).toBeNull();
   });
 
-  // a real ResizeObserver fires whenever the clamp changes a watched box's height
+  // a real ResizeObserver fires when the measured content resizes (a narrower column, a font
+  // landing); relayout() fires it on demand, so a test can show opening and closing leave the count alone
   const relayout = () =>
     act(() => {
       for (const callback of resized) callback();

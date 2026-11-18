@@ -650,7 +650,8 @@ function CommentWell({
             "lg:pl-7",
             long &&
               !open &&
-              "max-h-[4lh] overflow-clip mask-b-from-[calc(100%-1lh)]",
+              // hidden, not clip: find-in-page scrolls a hidden box to show a match; a clip box can't scroll
+              "max-h-[4lh] overflow-hidden mask-b-from-[calc(100%-1lh)]",
           )}
           onMouseDown={(e) => {
             pressed.current = e.target;
