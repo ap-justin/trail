@@ -190,6 +190,37 @@ describe("links", () => {
     }
   });
 
+  test("hovering a pull request row underlines its title only, not the state word or URL", () => {
+    renderIssue({
+      issue: {
+        status: "ready",
+        data: issue({
+          links: [
+            {
+              url: pull(7),
+              title: "Invite API",
+              pr: { state: "merged", checkedAt },
+            },
+          ],
+        }),
+      },
+    });
+    const link = within(
+      screen.getByRole("region", { name: "Links" }),
+    ).getByRole("link");
+    expect(link).toHaveClass("group");
+    expect(link).not.toHaveClass("hover:underline");
+    expect(within(link).getByText("Invite API")).toHaveClass(
+      "group-hover:underline",
+    );
+    expect(within(link).getByText("Merged")).not.toHaveClass(
+      "group-hover:underline",
+    );
+    expect(
+      within(link).getByText("github.com/example/trail/pull/7"),
+    ).not.toHaveClass("group-hover:underline");
+  });
+
   test("several pull requests stack in the order they were added, each with its own state", () => {
     renderIssue({
       issue: {
@@ -203,13 +234,52 @@ describe("links", () => {
       },
     });
     const links = screen.getByRole("region", { name: "Links" });
-    expect(
-      within(links)
-        .getAllByRole("link")
-        .map((a) => a.getAttribute("href")),
-    ).toEqual([pull(31), pull(29)]);
-    expect(within(links).getByText("Merged")).toBeInTheDocument();
-    expect(within(links).getByText("Closed")).toBeInTheDocument();
+    const rows = within(links).getAllByRole("link");
+    expect(rows.map((a) => a.getAttribute("href"))).toEqual([
+      pull(31),
+      pull(29),
+    ]);
+    expect(rows.map((a) => a.textContent)).toEqual([
+      "Pull request Merged B github.com/example/trail/pull/31",
+      "Pull request Closed A github.com/example/trail/pull/29",
+    ]);
+    expect(rows[0]?.querySelector("svg")).toHaveClass("lucide-git-merge");
+    expect(rows[1]?.querySelector("svg")).toHaveClass(
+      "lucide-git-pull-request-closed",
+    );
+  });
+
+  test.each([
+    "https://github.com/example/trail/pull/7/files",
+    "https://github.com/example/trail/pull/0",
+    "https://github.com/example/../pull/7",
+    "http://github.com/example/trail/pull/7",
+    "https://github.com/example/trail/pull/7?diff=split",
+  ])("a pr-less link to %s is not read as a pull request", (url) => {
+    renderIssue({
+      issue: {
+        status: "ready",
+        data: issue({ links: [{ url, title: "Not a PR" }] }),
+      },
+    });
+    const links = screen.getByRole("region", { name: "Links" });
+    expect(within(links).getByText("Not a PR")).toBeInTheDocument();
+    expect(within(links).queryByText("State unknown")).toBeNull();
+  });
+
+  test("a pr-less pull request url in any case reads State unknown", () => {
+    renderIssue({
+      issue: {
+        status: "ready",
+        data: issue({
+          links: [
+            { url: "https://GitHub.com/Example/Trail/pull/7", title: "Shouty" },
+          ],
+        }),
+      },
+    });
+    const links = screen.getByRole("region", { name: "Links" });
+    expect(within(links).getByText("State unknown")).toBeInTheDocument();
   });
 
   test("a link that is not a pull request keeps its plain row, with no state line", () => {
@@ -240,13 +310,16 @@ describe("links", () => {
 describe("long comments", () => {
   const line = 19;
   let linesPerBlock = 1;
+  let subpixel = 0;
   let resized: (() => void)[] = [];
   const realObserver = window.ResizeObserver;
   let lineHeight: HTMLStyleElement;
 
-  // jsdom has no layout: each paragraph or list item renders `linesPerBlock` lines of 19px
+  // jsdom has no layout: each paragraph or list item renders `linesPerBlock` lines of 19px,
+  // and a box carrying the clamp renders no taller than 4 of them
   beforeEach(() => {
     linesPerBlock = 1;
+    subpixel = 0;
     resized = [];
     lineHeight = document.createElement("style");
     lineHeight.textContent = `[data-entry-id] * { line-height: ${line}px; }`;
@@ -254,7 +327,12 @@ describe("long comments", () => {
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
       function (this: HTMLElement) {
         const blocks = this.querySelectorAll("p, li").length;
-        return DOMRect.fromRect({ height: blocks * linesPerBlock * line });
+        const height = blocks * linesPerBlock * line + subpixel;
+        return DOMRect.fromRect({
+          height: this.classList.contains("max-h-[4lh]")
+            ? Math.min(height, 4 * line)
+            : height,
+        });
       },
     );
     window.ResizeObserver = class {
@@ -310,15 +388,35 @@ describe("long comments", () => {
     expect(document.querySelector(".max-h-\\[4lh\\]")).toBeNull();
   });
 
+  test("a body a fraction of a pixel under 6 lines still counts as 6", () => {
+    subpixel = -0.4;
+    renderComments(paragraphs(6));
+    expect(screen.getByRole("button", { name: /^Show more/ })).toBeVisible();
+  });
+
+  test("a body more than half a pixel under 6 lines is 5 lines and renders in full", () => {
+    subpixel = -0.6;
+    renderComments(paragraphs(6));
+    expect(screen.queryByRole("button", { name: /^Show / })).toBeNull();
+  });
+
+  // a real ResizeObserver fires whenever the clamp changes a watched box's height
+  const relayout = () =>
+    act(() => {
+      for (const callback of resized) callback();
+    });
+
   test("Show more opens the body, flips the label and aria-expanded, and keeps focus; Show less closes it", async () => {
     const user = userEvent.setup();
     renderComments(paragraphs(7));
+    relayout();
     const button = screen.getByRole("button", { name: /^Show more/ });
     const body = document.getElementById(
       button.getAttribute("aria-controls") ?? "",
     );
 
     await user.click(button);
+    relayout();
     expect(button).toHaveAttribute("aria-expanded", "true");
     expect(button).toHaveAccessibleName("Show less of Alpha's comment");
     expect(button).toHaveTextContent("Show less");
@@ -326,11 +424,43 @@ describe("long comments", () => {
     expect(body).not.toHaveClass("max-h-[4lh]");
 
     await user.keyboard("{Enter}");
+    relayout();
+    expect(button).toBeInTheDocument();
     expect(button).toHaveAttribute("aria-expanded", "false");
     expect(body).toHaveClass("max-h-[4lh]");
     await user.keyboard(" ");
     expect(button).toHaveAttribute("aria-expanded", "true");
     expect(button).toHaveFocus();
+  });
+
+  test("tabbing onto a link the clamp hides opens the comment", async () => {
+    const user = userEvent.setup();
+    renderComments(
+      `${paragraphs(6)}\n\nSee [the spec](https://example.com/spec).`,
+    );
+    const button = screen.getByRole("button", { name: /^Show more/ });
+    const link = screen.getByRole("link", { name: "the spec" });
+    for (let i = 0; i < 50 && document.activeElement !== link; i++) {
+      await user.tab();
+    }
+    expect(link).toHaveFocus();
+    expect(button).toHaveAttribute("aria-expanded", "true");
+  });
+
+  test("Show less scrolls its button into view; mounting and Show more do not", async () => {
+    const user = userEvent.setup();
+    const scrolled = vi.spyOn(Element.prototype, "scrollIntoView");
+    renderComments(paragraphs(7));
+    const button = screen.getByRole("button", { name: /^Show more/ });
+    expect(scrolled).not.toHaveBeenCalled();
+
+    await user.click(button);
+    expect(scrolled).not.toHaveBeenCalled();
+
+    await user.click(button);
+    expect(scrolled).toHaveBeenCalledTimes(1);
+    expect(scrolled).toHaveBeenCalledWith({ block: "nearest" });
+    expect(scrolled.mock.contexts[0]).toBe(button);
   });
 
   test("each comment keeps its own state: opening one leaves the others", async () => {
@@ -349,9 +479,7 @@ describe("long comments", () => {
     renderComments(paragraphs(3));
     expect(screen.queryByRole("button", { name: /^Show / })).toBeNull();
     linesPerBlock = 2;
-    act(() => {
-      for (const callback of resized) callback();
-    });
+    relayout();
     expect(screen.getByRole("button", { name: /^Show more/ })).toHaveAttribute(
       "aria-expanded",
       "false",

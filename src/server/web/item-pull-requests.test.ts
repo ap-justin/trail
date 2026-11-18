@@ -1,4 +1,6 @@
+import { eq } from "drizzle-orm";
 import { beforeEach, expect, test } from "vitest";
+import { githubPullRequest } from "../db/schema.js";
 import { setupTestApp } from "../test-app.js";
 import { type Body, webSeed } from "./test-seed.js";
 
@@ -8,7 +10,7 @@ let clock = Date.parse("2026-11-18T09:00:00.000Z");
 /** What the fake GitHub answers per API url; an unknown url is a 404. */
 const answers = new Map<string, () => Response | Promise<Response>>();
 
-const { request, signIn, owner, addProject, addMember, pullRequests } =
+const { db, request, signIn, owner, addProject, addMember, pullRequests } =
   setupTestApp({
     pullRequests: {
       // with a token, every pull request of a test is fetched in one tick
@@ -40,10 +42,17 @@ const apiUrl = (url: string) =>
 const answer = (url: string, body: unknown) =>
   answers.set(apiUrl(url), () => Response.json(body));
 
-async function itemWith(urls: string[]) {
-  const p = addProject("Pulls");
+async function itemWith(urls: string[], p = addProject("Pulls")) {
   return seed.item(p.key, "issue", { links: urls.map((url) => ({ url })) });
 }
+
+/** When a read last stamped this pull request's cache row; null with no row. */
+const lastRead = (url: string) =>
+  db
+    .select({ at: githubPullRequest.lastReadAt })
+    .from(githubPullRequest)
+    .where(eq(githubPullRequest.url, url))
+    .get()?.at ?? null;
 
 async function linksOf(key: string, cookie = ownerCookie): Promise<Body[]> {
   const { status, body } = await seed.get(`/items/${key}`, cookie);
@@ -94,9 +103,15 @@ test("a read answers the cached state while a refresh is still waiting on GitHub
   const checkedAt = new Date(clock).toISOString();
   clock += 11 * MINUTE;
   let release: (res: Response) => void = () => {};
-  answers.set(apiUrl(pr), () => new Promise((done) => (release = done)));
+  let entered: () => void = () => {};
+  const fetchEntered = new Promise<void>((resolve) => (entered = resolve));
+  answers.set(apiUrl(pr), () => {
+    entered();
+    return new Promise((done) => (release = done));
+  });
   await linksOf(key);
   const refreshing = pullRequests.tick();
+  await fetchEntered;
   expect((await linksOf(key))[0]?.pr).toEqual({ state: "open", checkedAt });
   release(Response.json({ state: "closed", merged: true }));
   await refreshing;
@@ -106,20 +121,33 @@ test("a read answers the cached state while a refresh is still waiting on GitHub
   });
 });
 
-test("an item the viewer can't see is the same 404, and the read does not queue its pull request", async () => {
+test("a member of the item's project reads its pull request state, and the read keeps the link refreshed", async () => {
   const pr = pullUrl();
-  const fetched: string[] = [];
-  answers.set(apiUrl(pr), () => {
-    fetched.push(pr);
-    return Response.json({ state: "open" });
+  answer(pr, { state: "open", draft: true });
+  const p = addProject("Shared");
+  const key = await itemWith([pr], p);
+  const member = await addMember("pr-reader", [p.id]);
+  await pullRequests.tick();
+  const created = lastRead(pr);
+  clock += 2 * 60 * MINUTE;
+  expect((await linksOf(key, member))[0]?.pr).toEqual({
+    state: "draft",
+    checkedAt: new Date(clock - 2 * 60 * MINUTE).toISOString(),
   });
+  expect(lastRead(pr)?.getTime()).toBe(clock);
+  expect(created?.getTime()).toBeLessThan(clock);
+});
+
+test("an item the viewer can't see is the same 404, and the read leaves its pull request unstamped", async () => {
+  const pr = pullUrl();
   const key = await itemWith([pr]);
-  // past the day the bot's create answer keeps it refreshed for
-  clock += 25 * 60 * MINUTE;
+  const stamped = lastRead(pr);
+  expect(stamped).not.toBeNull();
+  // an hour on: a permitted read restamps the row (the member test above)
+  clock += 60 * MINUTE;
   const outsider = await addMember("outsider", []);
   const { status, body } = await seed.get(`/items/${key}`, outsider);
   expect(status).toBe(404);
   expect(body.error.message).toBe(`no item ${key}`);
-  await pullRequests.tick();
-  expect(fetched).toEqual([]);
+  expect(lastRead(pr)).toEqual(stamped);
 });

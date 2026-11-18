@@ -401,7 +401,7 @@ function PullRequestBody({
         <span className={cn("text-xs leading-4", ink)}>
           <span className="sr-only">Pull request</span> {word}
         </span>{" "}
-        <span className="mt-px">{link.title}</span>{" "}
+        <span className="mt-px group-hover:underline">{link.title}</span>{" "}
         <KeyText className="truncate">
           {link.url.replace(webScheme, "")}
         </KeyText>
@@ -434,7 +434,9 @@ function Links({ links }: { links: WebItemView["links"] }) {
                 className="size-4 shrink-0 text-muted-foreground"
               />
               <span className="flex min-w-0 flex-col">
-                <span className="truncate">{link.title}</span>
+                <span className="truncate group-hover:underline">
+                  {link.title}
+                </span>
                 <KeyText className="truncate">
                   {link.url.replace(webScheme, "")}
                 </KeyText>
@@ -454,7 +456,7 @@ function Links({ links }: { links: WebItemView["links"] }) {
                   rel="noopener noreferrer"
                   className={cn(
                     row,
-                    "rounded-md hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                    "group rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
                   )}
                 >
                   {body}
@@ -599,8 +601,18 @@ function CommentWell({
 }) {
   const bodyId = useId();
   const contentRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
   const lines = useRenderedLines(contentRef);
   const [open, setOpen] = useState(false);
+  // the body shrinks above the button on Show less; where scroll anchoring doesn't hold it,
+  // the button would end up above the viewport with focus still on it
+  const wasOpen = useRef(open);
+  useLayoutEffect(() => {
+    if (wasOpen.current && !open) {
+      buttonRef.current?.scrollIntoView({ block: "nearest" });
+    }
+    wasOpen.current = open;
+  }, [open]);
   const long = lines !== null && lines > fullLines;
   const action = open ? "Show less" : "Show more";
   const Chevron = open ? ChevronUpIcon : ChevronDownIcon;
@@ -621,6 +633,7 @@ function CommentWell({
       <div>
         {/* indented past the avatar at lg, so the body lines up with the name; collapsed,
             4 lines with the last one fading out (no motion: the height swaps instantly) */}
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: not a control; it catches focus bubbling from a link the clamp hides, which still takes Tab, and opens the body */}
         <div
           id={bodyId}
           className={cn(
@@ -629,6 +642,7 @@ function CommentWell({
               !open &&
               "max-h-[4lh] overflow-hidden mask-b-from-[calc(100%-1lh)]",
           )}
+          onFocus={long ? () => setOpen(true) : undefined}
         >
           {/* measured unclamped, so opening and closing never changes the count */}
           <div ref={contentRef}>
@@ -637,6 +651,7 @@ function CommentWell({
         </div>
         {long && (
           <button
+            ref={buttonRef}
             type="button"
             aria-expanded={open}
             aria-controls={bodyId}
