@@ -64,8 +64,8 @@ const TOOLS = [
   "whoami",
 ];
 
-// zod-to-openapi keeps every schema derived from one that went through any .openapi(...) call,
-// named or not, in a process-wide map for good, and /mcp registers the tools on every POST: a
+// zod-to-openapi keeps every schema .openapi(...) returns, and every extend/optional/min called
+// on one, in a process-wide map for good, and /mcp registers the tools on every POST: a
 // schema built per call is a schema never freed
 test("every request registers the tools with the same input schemas", () => {
   const first = registeredSchemas();

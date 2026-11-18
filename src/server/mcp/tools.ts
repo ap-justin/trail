@@ -276,12 +276,11 @@ const inputSchemas = new Map<string, z.ZodObject>();
 
 /**
  * The tool's input schema with its argument help, built on the first call and
- * reused: zod-to-openapi keeps every schema derived (`extend`, `optional`,
- * `min`…) from one that went through any `.openapi(...)` call, named or
- * metadata-only, in a process-wide map for good, so a schema built per
- * request is a schema never freed. (`.describe()` alone doesn't leak; zod's
- * registry is weak.) `build` runs once per process, so it must not read
- * per-request state such as `actor` or `service`.
+ * reused: zod-to-openapi keeps every schema `.openapi(...)` returns, and every
+ * `extend`, `optional`, `min`… called on one, in a process-wide map for good,
+ * so a schema built per request is a schema never freed. (`.describe()` alone
+ * doesn't leak; zod's registry is weak.) `build` runs once per process, so it
+ * must not read per-request state such as `actor` or `service`.
  */
 function inputSchemaOf<Schema extends z.ZodObject>(
   name: string,
