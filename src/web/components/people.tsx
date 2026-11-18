@@ -169,7 +169,7 @@ function ProductChecklist({
   );
 }
 
-/** Named by its visible label, then what it holds: "Products they can see TRL trail". */
+/** Named by its visible label, then what it holds: "Products they can see trail TRL". */
 function ProductPicker({
   products,
   selected,

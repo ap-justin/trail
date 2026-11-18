@@ -104,7 +104,7 @@ const HIDDEN_PRODUCTS = "Items from products you can't see are not shown.";
 
 /**
  * Lead, Target, Health and Products as a ledger. `aside` (1024px and up): a 72px label
- * column, the lead's title under the name, each product's key and name. `inline`
+ * column, the lead's title under the name, each product's name and key. `inline`
  * (below): Lead and Target alone in 36px rows on an 80px column, the title in line;
  * Health rides the heading there and the groups name the products.
  */
