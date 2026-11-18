@@ -847,6 +847,24 @@ describe("a title heading in the top bar at lg", () => {
   });
 });
 
+describe("the heading under the top bar below lg", () => {
+  test("a product's long name ends in an ellipsis and its key pill stays whole", async () => {
+    const { container } = renderTitled(
+      <ProductHeading key="p" product={{ key: "ALPHA", name: longName }} />,
+    );
+    onTestFinished(await applyCompiledCss(container));
+    const header = container.querySelector("header") as HTMLElement;
+    const h1 = screen
+      .getAllByRole("heading", { level: 1, hidden: true })
+      .find((el) => !header.contains(el)) as HTMLElement;
+    expect(getComputedStyle(h1).minWidth).toBe("0px");
+    expectEllipsis(within(h1).getByText(longName));
+    const pill = within(h1).getByText("ALPHA");
+    expect(pill).toHaveAttribute("data-key-pill");
+    expect(getComputedStyle(pill).flexShrink).toBe("0");
+  });
+});
+
 // jsdom matches media queries against its 1024px window: lg, not xl
 test("at 1024px a long issue breadcrumb fits its bar column: Products drops, the name truncates, the key stays whole", async () => {
   expect(window.innerWidth).toBe(1024);

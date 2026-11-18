@@ -585,7 +585,7 @@ export function AppShell({
             <div className="flex items-center gap-2 px-4 pt-3 lg:hidden">
               <ShellHeading
                 kind={headingKind}
-                className="text-base font-medium"
+                className="min-w-0 text-base font-medium"
               >
                 {heading}
               </ShellHeading>
