@@ -1,4 +1,5 @@
 import { beforeAll, expect, test } from "vitest";
+import { newId } from "../db/id.js";
 import { projectKey, setupTestApp } from "../test-app.js";
 
 const { request } = setupTestApp();
@@ -45,7 +46,8 @@ test("a body with two commit SHAs is saved and gets a hint naming them and the n
   const created = await comment(body);
   expect(created.body).toBe(body);
   expect(created.hint).toMatch(/build log: 2 commit SHAs/);
-  expect(created.hint).toMatch(/update_item addLinks/);
+  expect(created.hint).toMatch(/PATCH \/items\/\{key\} with addLinks/);
+  expect(created.hint).not.toMatch(/update_item/);
   expect(created.hint).toMatch(/status, a decision or a blocker/);
   expect(await savedBodies()).toContain(body);
 });
@@ -79,6 +81,17 @@ test("agent run ids and bare run ids count; plain words and numbers don't", asyn
   ).not.toHaveProperty("hint");
 });
 
+test("trail's own ids are not commit SHAs, however many a comment quotes", async () => {
+  const one = `Blocked until the message ${newId()} is answered.`;
+  expect(await comment(one)).not.toHaveProperty("hint");
+  const many = `Waiting on ${newId()}, ${newId()} and ${newId()}; ${"Nothing else is open on this work. ".repeat(20)}`;
+  expect(many.length).toBeGreaterThan(600);
+  expect(await comment(many)).not.toHaveProperty("hint");
+  expect(
+    (await comment(`Message ${newId()} names 3f9c2a1 and b71e04d9.`)).hint,
+  ).toMatch(/build log: 2 commit SHAs\./);
+});
+
 test("a replay under the same Idempotency-Key answers the same hint and saves once", async () => {
   const body = "Rebased onto 9e8d7c6b and 0a1b2c3d4e.";
   const headers = { "idempotency-key": "hint-replay-1" };
@@ -94,9 +107,9 @@ test("the legacy comment route answers the hint too", async () => {
     json: { body: "Head is now 5c4b3a2f1e after 6d5c4b3a." },
   });
   expect(res.status).toBe(201);
-  expect(((await res.json()) as { hint?: string }).hint).toMatch(
-    /2 commit SHAs/,
-  );
+  const { hint } = (await res.json()) as { hint?: string };
+  expect(hint).toMatch(/2 commit SHAs/);
+  expect(hint).toMatch(/PATCH \/items\/\{key\} with addLinks/);
 });
 
 test("the comment answer documents hint in the OpenAPI spec", async () => {

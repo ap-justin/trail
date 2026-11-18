@@ -12,12 +12,16 @@ const MINUTE = 60_000;
 const FRESH_MS = 10 * MINUTE;
 /** Only pull requests on an item read within this long are refreshed. */
 const READ_WINDOW_MS = 24 * 60 * MINUTE;
+/** A read restamps lastReadAt only once the stamp is this old. */
+const READ_STAMP_MS = 60 * MINUTE;
 // GitHub allows 5000 requests an hour with a token (about 83 a minute), and 60 an hour per IP
 // without: 20 a minute leaves the token's quota room for its other use, 1 a minute stays under 60
 const FETCHES_PER_MINUTE = { token: 20, anonymous: 1 } as const;
 /** After n failed fetches in a row, the next waits min(2^n, 60) minutes from the last. */
 const BACKOFF_CAP_MINUTES = 60;
 const FETCH_TIMEOUT_MS = 10_000;
+/** GitHub's wait after a rate-limit answer that names no time. */
+const RATE_LIMIT_FALLBACK_MS = MINUTE;
 const POLL_MS = 5_000;
 
 /** What a read shows of a pull request: null before its first successful fetch. */
@@ -66,9 +70,10 @@ export type PullRequestOptions = {
 /**
  * GitHub pull request states for item links, cached in github_pull_request.
  * A read never waits on GitHub: it answers from the cache and stamps
- * lastReadAt, and the table is the queue a timer drains, a few fetches a
- * minute, for rows read in the last day whose state is stale and whose
- * backoff has passed.
+ * lastReadAt at most hourly, and the table is the queue a timer drains, a few
+ * fetches a minute one at a time, for rows read in the last day whose state is
+ * stale and whose backoff has passed. A rate-limit answer pauses all fetching
+ * until GitHub says to resume.
  */
 export function createPullRequests(options: PullRequestOptions) {
   const { db, token } = options;
@@ -80,6 +85,8 @@ export function createPullRequests(options: PullRequestOptions) {
 
   /** when each fetch of the last minute started */
   let started: number[] = [];
+  /** no fetch starts before this; GitHub's rate limit set it */
+  let pausedUntil = 0;
   let running: Promise<void> | null = null;
   let timer: NodeJS.Timeout | null = null;
   const abort = new AbortController();
@@ -115,8 +122,15 @@ export function createPullRequests(options: PullRequestOptions) {
           states.set(url, { state: row.state, checkedAt: row.checkedAt });
         }
       }
+      // a write waits on the write lock, and the read window needs no finer stamp
+      const at = now();
+      const stale = unique.filter(
+        (url) =>
+          (rows.get(url)?.lastReadAt.getTime() ?? 0) <= at - READ_STAMP_MS,
+      );
+      if (stale.length === 0) return states;
       db.insert(githubPullRequest)
-        .values(unique.map((url) => ({ url, lastReadAt: new Date(now()) })))
+        .values(stale.map((url) => ({ url, lastReadAt: new Date(at) })))
         .onConflictDoUpdate({
           target: githubPullRequest.url,
           set: { lastReadAt: sql`excluded.last_read_at` },
@@ -153,10 +167,35 @@ export function createPullRequests(options: PullRequestOptions) {
       .map((row) => row.url);
   }
 
+  /**
+   * When a rate-limited answer lets fetching resume, or null for any other
+   * answer. GitHub rate-limits with a 429, or a 403 naming the limit in its
+   * headers; a 403 without them is a refusal of this one pull request.
+   */
+  function rateLimitedUntil(res: Response, at: number): number | null {
+    const retryAfter = res.headers.get("retry-after");
+    const exhausted = res.headers.get("x-ratelimit-remaining") === "0";
+    if (
+      res.status !== 429 &&
+      !(res.status === 403 && (retryAfter || exhausted))
+    )
+      return null;
+    const waits: number[] = [];
+    const seconds = Number(retryAfter);
+    if (retryAfter && Number.isFinite(seconds)) waits.push(at + seconds * 1000);
+    const reset = Number(res.headers.get("x-ratelimit-reset"));
+    if (exhausted && reset > 0) waits.push(reset * 1000);
+    return waits.length > 0 ? Math.max(...waits) : at + RATE_LIMIT_FALLBACK_MS;
+  }
+
   /** The state GitHub gives, or why there is none; the reason never carries the token. */
   async function fetchState(
     url: string,
-  ): Promise<{ state: GithubPullRequestState } | { failed: string }> {
+  ): Promise<
+    | { state: GithubPullRequestState }
+    | { failed: string }
+    | { limitedUntil: number }
+  > {
     const [, owner, repo, number] = PULL_URL.exec(url) ?? [];
     try {
       const res = await fetchImpl(
@@ -175,6 +214,8 @@ export function createPullRequests(options: PullRequestOptions) {
       );
       if (!res.ok) {
         await res.body?.cancel();
+        const limitedUntil = rateLimitedUntil(res, now());
+        if (limitedUntil !== null) return { limitedUntil };
         return { failed: `GitHub answered ${res.status}` };
       }
       const pull = pullSchema.safeParse(await res.json());
@@ -187,7 +228,7 @@ export function createPullRequests(options: PullRequestOptions) {
 
   function record(
     url: string,
-    result: Awaited<ReturnType<typeof fetchState>>,
+    result: { state: GithubPullRequestState } | { failed: string },
     at: number,
   ) {
     const attemptedAt = new Date(at);
@@ -214,6 +255,13 @@ export function createPullRequests(options: PullRequestOptions) {
     const result = await fetchState(url);
     // a shutdown cut the fetch: nothing was learned about the pull request
     if (abort.signal.aborted) return;
+    if ("limitedUntil" in result) {
+      pausedUntil = Math.max(pausedUntil, result.limitedUntil);
+      console.warn(
+        `GitHub rate limit: pull request states wait until ${new Date(pausedUntil).toISOString()}`,
+      );
+      return;
+    }
     try {
       record(url, result, now());
     } catch (error) {
@@ -225,7 +273,7 @@ export function createPullRequests(options: PullRequestOptions) {
     const at = now();
     started = started.filter((t) => at - t < MINUTE);
     const room = perMinute - started.length;
-    if (room <= 0 || abort.signal.aborted) return;
+    if (room <= 0 || at < pausedUntil || abort.signal.aborted) return;
     let urls: string[];
     try {
       urls = due(at, room);
@@ -233,8 +281,12 @@ export function createPullRequests(options: PullRequestOptions) {
       console.error("pull request refresh failed", error);
       return;
     }
-    for (const _ of urls) started.push(at);
-    await Promise.all(urls.map(refresh));
+    // one at a time, as GitHub asks, so a rate-limit answer stops the rest
+    for (const url of urls) {
+      if (now() < pausedUntil || abort.signal.aborted) return;
+      started.push(at);
+      await refresh(url);
+    }
   }
 
   /** Fetches what is due within the per-minute limit; resolves when those fetches are recorded. One pass at a time; never rejects. */

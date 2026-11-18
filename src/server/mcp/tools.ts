@@ -31,6 +31,7 @@ import {
 } from "../../shared/schemas.js";
 import { deprecations } from "../api/deprecations.js";
 import { COMMENT_HOLDS, TODO_OR_ISSUE } from "../api/items.js";
+import { STATUS_UPDATE_HOLDS } from "../api/products.js";
 import { LABEL_CREATORS } from "../api/routes.js";
 import {
   deprecated,
@@ -430,6 +431,7 @@ export function registerTools(
               { ...input, issueId: ref.value },
               { idempotencyKey: idempotency_key },
             ),
+            "mcp",
           ),
           ref.note,
         );
@@ -675,8 +677,7 @@ export function registerTools(
   register(
     "post_status_update",
     {
-      description:
-        "Post a dated status update with its health (on_track, at_risk or off_track) on exactly one of a product (its key) or a project (its slug): where the project stands, its risks and what's next, not a changelog. Needs the status_updates action on a key reaching the product, or one of the project's products. externalRef is kept on a product's update only, and refused on a project's: send idempotency_key there to make the post safe to retry.",
+      description: `Post a dated status update with its health (on_track, at_risk or off_track) on exactly one of a product (its key) or a project (its slug). ${STATUS_UPDATE_HOLDS} Needs the status_updates action on a key reaching the product, or one of the project's products. externalRef is kept on a product's update only, and refused on a project's: send idempotency_key there to make the post safe to retry.`,
       inputSchema: statusUpdateCreateSchema.extend({
         ...statusTarget,
         ...idempotencyKey,

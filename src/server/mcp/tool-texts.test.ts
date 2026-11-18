@@ -55,11 +55,32 @@ test("update_item's links and addLinks say a pull request goes there and trail s
   }
 });
 
+/** What a status update holds: where things stand, not what was done. */
+function expectStatusGuidance(text: string | undefined, where: string) {
+  expect(text, where).toMatch(/where the project stands/);
+  expect(text, where).toMatch(/risks/);
+  expect(text, where).toMatch(/what's next/);
+  expect(text, where).toMatch(/not a changelog/);
+}
+
 test("post_status_update says where the project stands, not a changelog", async () => {
   const tool = await toolDescriptions();
-  const description = tool("post_status_update").description;
-  expect(description).toMatch(/where the project stands/);
-  expect(description).toMatch(/risks/);
-  expect(description).toMatch(/what's next/);
-  expect(description).toMatch(/not a changelog/);
+  expectStatusGuidance(
+    tool("post_status_update").description,
+    "post_status_update",
+  );
+});
+
+test("POST status-update routes, product and project, carry the same guidance", async () => {
+  const spec = (await (
+    await request("GET", "/api/v1/openapi.json", { key: null })
+  ).json()) as {
+    paths: Record<string, { post?: { description?: string } }>;
+  };
+  for (const path of [
+    "/products/{key}/status-updates",
+    "/projects/{ref}/status-updates",
+  ]) {
+    expectStatusGuidance(spec.paths[path]?.post?.description, path);
+  }
 });

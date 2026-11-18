@@ -40,7 +40,7 @@ import type {
 } from "../service/index.js";
 import { type KeyScope, scopeView } from "../service/keys.js";
 import { MESSAGE_PREVIEW_CHARS } from "../service/messages.js";
-import { buildLogHint } from "./build-log.js";
+import { buildLogHint, type Surface } from "./build-log.js";
 
 // One function per resource, each listing its wire keys, so a new column reaches the wire only on purpose.
 
@@ -168,9 +168,12 @@ export function toComment(row: Comment): CommentView {
   };
 }
 
-/** A comment as add_comment answers it: with hint when its body reads like a build log. */
-export function toCreatedComment(row: Comment): CreatedCommentView {
-  const hint = buildLogHint(row.body);
+/** A comment as its create answers it: with hint when its body reads like a build log. */
+export function toCreatedComment(
+  row: Comment,
+  surface: Surface,
+): CreatedCommentView {
+  const hint = buildLogHint(row.body, surface);
   return hint === undefined ? toComment(row) : { ...toComment(row), hint };
 }
 

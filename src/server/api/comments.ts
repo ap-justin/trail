@@ -85,6 +85,7 @@ export function commentRoutes(service: Service) {
               { ...c.req.valid("json"), issueId: c.req.valid("param").id },
               { idempotencyKey: c.req.valid("header")["idempotency-key"] },
             ),
+            "rest",
           ),
           deprecations.comments,
         ),

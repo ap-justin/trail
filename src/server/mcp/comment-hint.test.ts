@@ -42,6 +42,7 @@ test("a build-log body is saved and the result carries the hint", async () => {
   expect(created.hint).toMatch(
     /build log: 1 commit SHA, 1 CI run\. .*update_item addLinks/,
   );
+  expect(created.hint).not.toMatch(/PATCH/);
   expect(await bodies()).toContain(body);
 });
 

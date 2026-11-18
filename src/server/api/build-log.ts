@@ -2,6 +2,8 @@
  * Whether a comment body reads like a build log, by counting the tokens build
  * logs are made of. Leftmost match wins and consumes its text, so a run URL's
  * digits aren't counted again as a bare run id; the alternatives are:
+ * - a UUID, counted as nothing: trail's own ids are UUIDs, and their 8- and
+ *   12-hex groups would otherwise read as commit SHAs
  * - a GitHub Actions run URL: github.com/<owner>/<repo>/actions/runs/<digits>
  * - a bare run id: a whole word of 9 or more digits
  * - an agent, run or request id: agt_, run_ or req_ and 8+ letters and digits
@@ -10,12 +12,20 @@
  *   letter and a digit, so neither a plain number nor a word like "defaced" is one
  */
 const TOKEN =
-  /https?:\/\/github\.com\/[^/\s]+\/[^/\s]+\/actions\/runs\/\d+\S*|\b\d{9,}\b|\b((?:agt|run|req)_(?=[A-Za-z]*\d)[A-Za-z0-9]{8,})\b|\b([0-9a-f]{7,40})\b/g;
+  /\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b|https?:\/\/github\.com\/[^/\s]+\/[^/\s]+\/actions\/runs\/\d+\S*|\b\d{9,}\b|\b((?:agt|run|req)_(?=[A-Za-z]*\d)[A-Za-z0-9]{8,})\b|\b([0-9a-f]{7,40})\b/g;
 
 /** One token anywhere in a body this long is enough. */
 const LONG_BODY = 600;
 
 type Kind = "sha" | "ci" | "agent";
+
+/** Who reads the hint: a REST caller or an MCP client, each told its own way to link a PR. */
+export type Surface = "rest" | "mcp";
+
+const LINK_PR: Record<Surface, string> = {
+  rest: "PATCH /items/{key} with addLinks",
+  mcp: "update_item addLinks",
+};
 
 const NAMES: Record<Kind, [one: string, many: string]> = {
   sha: ["commit SHA", "commit SHAs"],
@@ -24,7 +34,8 @@ const NAMES: Record<Kind, [one: string, many: string]> = {
 };
 
 function kindOf(match: RegExpExecArray): Kind | null {
-  const [, agentId, hex] = match;
+  const [, uuid, agentId, hex] = match;
+  if (uuid !== undefined) return null;
   if (agentId !== undefined) return "agent";
   if (hex !== undefined) {
     return /[a-f]/.test(hex) && /\d/.test(hex) ? "sha" : null;
@@ -33,11 +44,14 @@ function kindOf(match: RegExpExecArray): Kind | null {
 }
 
 /**
- * The hint an add_comment answer carries when its body reads like a build
- * log: 2 or more tokens, or 1 in a body over 600 characters. Undefined
- * otherwise; the comment is saved as sent either way.
+ * The hint a created comment carries when its body reads like a build log: 2
+ * or more tokens, or 1 in a body over 600 characters. Undefined otherwise; the
+ * comment is saved as sent either way.
  */
-export function buildLogHint(body: string): string | undefined {
+export function buildLogHint(
+  body: string,
+  surface: Surface,
+): string | undefined {
   const counts: Record<Kind, number> = { sha: 0, ci: 0, agent: 0 };
   for (const match of body.matchAll(TOKEN)) {
     const kind = kindOf(match);
@@ -52,5 +66,5 @@ export function buildLogHint(body: string): string | undefined {
       return `${counts[kind]} ${counts[kind] === 1 ? one : many}`;
     })
     .join(", ");
-  return `This comment looks like a build log: ${found}. It is saved, but that detail belongs on the pull request: link the PR with update_item addLinks, where trail shows its state, and keep the comment to status, a decision or a blocker.`;
+  return `This comment looks like a build log: ${found}. It is saved, but that detail belongs on the pull request: link the PR with ${LINK_PR[surface]}, where trail shows its state, and keep the comment to status, a decision or a blocker.`;
 }

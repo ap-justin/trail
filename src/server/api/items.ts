@@ -196,6 +196,7 @@ export function itemRoutes(service: Service) {
             { ...c.req.valid("json"), issueId: c.req.valid("param").key },
             { idempotencyKey: c.req.valid("header")["idempotency-key"] },
           ),
+          "rest",
         ),
         201,
       ),
