@@ -5,6 +5,7 @@ import { createApi } from "./api/index.js";
 import type { TrailAuth } from "./auth/auth.js";
 import type { Db } from "./db/client.js";
 import type { EventBus } from "./events/bus.js";
+import type { PullRequests } from "./github/pull-requests.js";
 import { mcpRoutes } from "./mcp/index.js";
 import { photoRoutes } from "./photos.js";
 import { createService, type WebhookSettings } from "./service/index.js";
@@ -19,6 +20,7 @@ export function createApp({
   streams,
   webDir,
   webhooks,
+  pullRequests,
 }: {
   db: Db;
   bus: EventBus;
@@ -27,10 +29,12 @@ export function createApp({
   streams: LiveStreams;
   /** how webhooks are sealed, vetted and sent */
   webhooks: WebhookSettings;
+  /** the GitHub pull request states item links show */
+  pullRequests: PullRequests;
   /** the built SPA (dist/web); without it only the API answers */
   webDir?: string;
 }) {
-  const service = createService({ db, bus, webhooks });
+  const service = createService({ db, bus, webhooks, pullRequests });
   const app = new Hono({
     // a bot configured with `.../mcp/` reaches the endpoint, not a 404 behind
     // the key check; trimTrailingSlash only redirects GET and HEAD

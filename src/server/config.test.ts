@@ -88,3 +88,13 @@ test.each(["", " ", "abc", "80a", "1.5", "-1", "65536"])(
     expect(() => loadConfig({ ...required, PORT: value })).toThrow("PORT");
   },
 );
+
+test("GITHUB_TOKEN is optional, and empty reads as unset", () => {
+  expect(loadConfig({ ...required, GITHUB_TOKEN: "t0ken" }).GITHUB_TOKEN).toBe(
+    "t0ken",
+  );
+  expect(loadConfig({ ...required, GITHUB_TOKEN: "" }).GITHUB_TOKEN).toBe(
+    undefined,
+  );
+  expect(loadConfig(required).GITHUB_TOKEN).toBe(undefined);
+});

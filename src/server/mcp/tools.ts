@@ -30,13 +30,14 @@ import {
   webhookUpdateSchema,
 } from "../../shared/schemas.js";
 import { deprecations } from "../api/deprecations.js";
-import { TODO_OR_ISSUE } from "../api/items.js";
+import { COMMENT_HOLDS, TODO_OR_ISSUE } from "../api/items.js";
 import { LABEL_CREATORS } from "../api/routes.js";
 import {
   deprecated,
   toActivityEvent,
   toBot,
   toComment,
+  toCreatedComment,
   toImportResult,
   toInboxEntry,
   toIssue,
@@ -411,8 +412,7 @@ export function registerTools(
   register(
     "add_comment",
     {
-      description:
-        "Add a comment to an item, a todo or an issue, named by its key like TRL-12, including one this key reads only through a project (access via_project). On an issue in triage, comment to ask the filer a question before you accept or cancel it.",
+      description: `Add a comment to an item, a todo or an issue, named by its key like TRL-12, including one this key reads only through a project (access via_project). ${COMMENT_HOLDS} The result carries hint when the body reads like a build log. On an issue in triage, comment to ask the filer a question before you accept or cancel it.`,
       inputSchema: commentCreateSchema.extend({
         item: aliasedItem,
         issueId: issueIdAlias,
@@ -424,7 +424,7 @@ export function registerTools(
       run("add_comment", () => {
         const ref = itemArg(item, issueId);
         return noted(
-          toComment(
+          toCreatedComment(
             service.addComment(
               actor,
               { ...input, issueId: ref.value },
@@ -676,7 +676,7 @@ export function registerTools(
     "post_status_update",
     {
       description:
-        "Post a dated status update with its health (on_track, at_risk or off_track) on exactly one of a product (its key) or a project (its slug). Needs the status_updates action on a key reaching the product, or one of the project's products. externalRef is kept on a product's update only, and refused on a project's: send idempotency_key there to make the post safe to retry.",
+        "Post a dated status update with its health (on_track, at_risk or off_track) on exactly one of a product (its key) or a project (its slug): where the project stands, its risks and what's next, not a changelog. Needs the status_updates action on a key reaching the product, or one of the project's products. externalRef is kept on a product's update only, and refused on a project's: send idempotency_key there to make the post safe to retry.",
       inputSchema: statusUpdateCreateSchema.extend({
         ...statusTarget,
         ...idempotencyKey,

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, test } from "vitest";
 import { migrate, openDatabase } from "../db/client.js";
 import { createEventBus } from "../events/bus.js";
-import { testWebhooks } from "../test-app.js";
+import { testPullRequests, testWebhooks } from "../test-app.js";
 import {
   ForbiddenError,
   ForbiddenScopeError,
@@ -27,6 +27,7 @@ const service = createService({
   db,
   bus: createEventBus(),
   webhooks: testWebhooks,
+  pullRequests: testPullRequests(db),
 });
 
 // the operator's unrestricted bot seeds everything and owns every product

@@ -5,9 +5,13 @@ import { afterAll, vi } from "vitest";
 import { createApp } from "./app.js";
 import { type AuthConfig, createAuth } from "./auth/auth.js";
 import type { MailMessage } from "./auth/mail.js";
-import { migrate, openDatabase } from "./db/client.js";
+import { type Db, migrate, openDatabase } from "./db/client.js";
 import { invite, product, productMember } from "./db/schema.js";
 import { type ActivityEvent, createEventBus } from "./events/bus.js";
+import {
+  createPullRequests,
+  type PullRequestOptions,
+} from "./github/pull-requests.js";
 import { createBot } from "./service/keys.js";
 import { type WebhookSettings, webhookSettings } from "./service/webhooks.js";
 import { LiveStreams } from "./web/events.js";
@@ -125,6 +129,14 @@ function fakeGitHub() {
 // never answers, so an unrelated sign-in neither stores a photo nor logs a failed fetch
 const noAvatar: typeof fetch = () => new Promise(() => {});
 
+const noGitHubApi: typeof fetch = async (input) => {
+  throw new Error(`test fetch to GitHub's API without a stub: ${input}`);
+};
+
+/** Pull request states over `db` for a service built in a test: nothing refreshes them, and a fetch is an error. */
+export const testPullRequests = (db: Db) =>
+  createPullRequests({ db, fetch: noGitHubApi });
+
 /** The `name=value` of the session cookie a response sets, or "". */
 export const sessionCookie = (res: Response) =>
   res.headers
@@ -143,6 +155,7 @@ export function setupTestApp({
   authNow,
   webDir,
   webhooks: webhookOverrides = {},
+  pullRequests: pullRequestOverrides = {},
 }: {
   auth?: Partial<AuthConfig>;
   /** replaces how webhooks resolve hosts and send; by default every name resolves to a public address and nothing is sent */
@@ -155,6 +168,8 @@ export function setupTestApp({
   authNow?: () => number;
   /** the built SPA directory `createApp` serves; none by default */
   webDir?: string;
+  /** the GitHub token, fetch and clock of pull request refreshes, which run only on `pullRequests.tick()`; by default a fetch is an error */
+  pullRequests?: Pick<PullRequestOptions, "token" | "fetch" | "now">;
 } = {}) {
   /** every sign-in email sent, in order; none leaves the process */
   const mail: MailMessage[] = [];
@@ -181,7 +196,20 @@ export function setupTestApp({
   });
   const streams = new LiveStreams();
   const webhooks = testWebhookSettings(webhookOverrides);
-  const app = createApp({ db, bus, auth, streams, webDir, webhooks });
+  const pullRequests = createPullRequests({
+    db,
+    fetch: noGitHubApi,
+    ...pullRequestOverrides,
+  });
+  const app = createApp({
+    db,
+    bus,
+    auth,
+    streams,
+    webDir,
+    webhooks,
+    pullRequests,
+  });
   const bot = createBot(db, "tester");
   const github = fakeGitHub();
 
@@ -422,6 +450,7 @@ export function setupTestApp({
     addProject,
     addMember,
     webhooks,
+    pullRequests,
     published,
     request,
     owner: TEST_OWNER,

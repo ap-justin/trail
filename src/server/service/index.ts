@@ -38,6 +38,10 @@ import {
   webhookSubscription,
 } from "../db/schema.js";
 import type { ActivityEvent, EventBus } from "../events/bus.js";
+import type {
+  PullRequestState,
+  PullRequests,
+} from "../github/pull-requests.js";
 import { checkWebhookUrl, UnsafeUrlError } from "../webhooks/address.js";
 import { openSecret, sealSecret } from "../webhooks/secret.js";
 import { sendWebhook } from "../webhooks/send.js";
@@ -174,7 +178,8 @@ export type Issue = IssueRow & {
   key: string;
   productKey: string;
   labels: string[];
-  links: Link[];
+  /** pr: a pull request link's cached state, see `withPullRequests` */
+  links: (Link & { pr?: PullRequestState })[];
   assignee: ActorRef | null;
   projects: { slug: string; name: string }[];
   /** On a bot's get_item: why its key reaches the item; see `ItemAccess`. */
@@ -568,10 +573,12 @@ export function createService({
   db,
   bus,
   webhooks,
+  pullRequests,
 }: {
   db: Db;
   bus: EventBus;
   webhooks: WebhookSettings;
+  pullRequests: PullRequests;
 }) {
   const pings = createPingLimiter(() => webhooks.now());
   const messaging = createMessaging({ db, bus, now: () => webhooks.now() });
@@ -1300,6 +1307,22 @@ export function createService({
         .map(({ slug, name }) => ({ slug, name })),
     }));
   }
+
+  /** The items with each pull request link's cached state as its pr, which also queues a refresh of a stale one. */
+  function withPullRequests<T extends Issue>(items: T[]): T[] {
+    const states = pullRequests.read(
+      items.flatMap((item) => item.links.map((l) => l.url)),
+    );
+    return items.map((item) => ({
+      ...item,
+      links: item.links.map((l) =>
+        states.has(l.url) ? { ...l, pr: states.get(l.url) ?? null } : l,
+      ),
+    }));
+  }
+
+  const withPullRequest = <T extends Issue>(item: T) =>
+    withPullRequests([item])[0] as T;
 
   /** The projects of these items the actor reaches, in slug order. */
   const projectsSeenBy = (tx: Tx | Db, ids: string[], actor: ActingActor) =>
@@ -2363,7 +2386,7 @@ export function createService({
     const labelNames = validLabelNames(input.labels ?? []);
     const links = validLinks(input.links ?? []);
     const externalRef = optionalRef(input.externalRef);
-    return currentShape(
+    const created = currentShape(
       create(actor, options, "issue.create", (tx) => {
         const placed = placement?.(tx) ?? productPlacement(tx);
         const named = placed.product;
@@ -2505,6 +2528,7 @@ export function createService({
       }),
       actor,
     );
+    return withPullRequest(created);
 
     /** The product `input.product` names among the actor's product grant, else the one `fallback` picks; no project. */
     function productPlacement(tx: Tx): Placement {
@@ -3097,7 +3121,7 @@ export function createService({
         patch.labels === undefined ? undefined : validLabelNames(patch.labels);
       const replacementLinks =
         patch.links === undefined ? undefined : validLinks(patch.links);
-      return commit((tx) => {
+      const updated = commit((tx) => {
         const row = resolveIssueRow(tx, ref, actor);
         requireItemWrite(tx, actor, row, "update an item");
         const current = hydrateOne(tx, row, actor);
@@ -3254,6 +3278,7 @@ export function createService({
           },
         };
       });
+      return withPullRequest(updated);
     },
 
     addComment(
@@ -4042,7 +4067,7 @@ export function createService({
         resolveIssueRow(db, ref, actor),
       );
       const row = resolveIssueRow(db, ref, actor);
-      const item = hydrateOne(db, row, actor);
+      const item = withPullRequest(hydrateOne(db, row, actor));
       return actor.kind === "bot"
         ? { ...item, access: accessOf(db, actor, row) }
         : item;
@@ -4113,7 +4138,7 @@ export function createService({
             .all(),
       );
       return {
-        items: hydrate(db, rows.items, actor),
+        items: withPullRequests(hydrate(db, rows.items, actor)),
         nextCursor: rows.nextCursor,
       };
     },

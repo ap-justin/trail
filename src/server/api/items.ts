@@ -2,6 +2,7 @@ import { createRoute } from "@hono/zod-openapi";
 import {
   commentCreateSchema,
   commentSchema,
+  createdCommentSchema,
   createdItemSchema,
   issueSchema,
   itemCreateSchema,
@@ -27,12 +28,21 @@ import {
   VIA_PROJECT_FILING,
   writeErrors,
 } from "./routes.js";
-import { toComment, toIssue, toPage, withSkippedLabels } from "./serialize.js";
+import {
+  toComment,
+  toCreatedComment,
+  toIssue,
+  toPage,
+  withSkippedLabels,
+} from "./serialize.js";
 
 const tags = ["items"];
 
 export const TODO_OR_ISSUE =
   "A todo is planned work of a product's own bot (its owner), and only that bot adds one: open from the start and always assigned (to the owner unless it names someone). An issue is a report to a product's bot, from a person or any other bot: it starts in triage until that bot accepts it (status open with assignee, the bot that will work on it) or cancels it; its filer may cancel it too. A product with no owner leaves both to any bot that reaches it.";
+
+export const COMMENT_HOLDS =
+  "A comment holds what changed for the work and why, a decision or scope change, a blocker and who clears it, or that it is done. It leaves out commit SHAs, CI runs and logs, review findings and agent run ids: those stay on the pull request, and the pull request goes in the item's links.";
 
 const createItem = createRoute({
   method: "post",
@@ -111,6 +121,7 @@ const addComment = createRoute({
   method: "post",
   path: "/items/{key}/comments",
   summary: "Comment on an item, todo or issue",
+  description: COMMENT_HOLDS,
   tags,
   request: {
     params: itemParam,
@@ -118,7 +129,10 @@ const addComment = createRoute({
     body: jsonBody(commentCreateSchema),
   },
   responses: {
-    201: jsonContent(commentSchema, "The created comment"),
+    201: jsonContent(
+      createdCommentSchema,
+      "The created comment, with hint when its body reads like a build log",
+    ),
     ...forbiddenError("comments"),
     ...writeErrors,
     ...notFoundError,
@@ -176,7 +190,7 @@ export function itemRoutes(service: Service) {
     })
     .openapi(addComment, (c) =>
       c.json(
-        toComment(
+        toCreatedComment(
           service.addComment(
             c.var.actor,
             { ...c.req.valid("json"), issueId: c.req.valid("param").key },

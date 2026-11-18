@@ -59,6 +59,23 @@ const id = z.string().min(1);
 const timestamp = z.iso
   .datetime()
   .meta({ example: "2026-11-08T09:00:00.000Z" });
+const itemLinkSchema = linkSchema
+  .extend({
+    pr: z
+      .object({
+        state: z.enum(["open", "draft", "merged", "closed"]),
+        checkedAt: timestamp.meta({
+          description: "When trail last read the state from GitHub.",
+        }),
+      })
+      .nullable()
+      .optional()
+      .meta({
+        description:
+          "On a GitHub pull request link (https://github.com/<owner>/<repo>/pull/<n>): its state as trail last read it from GitHub, refreshed in the background once over 10 minutes old; null until the first read succeeds, which never happens on a private repo the server has no token for. Other links have no pr.",
+      }),
+  })
+  .openapi("ItemLink");
 
 export const errorSchema = z
   .object({
@@ -165,7 +182,7 @@ export const issueSchema = z
     priority,
     estimate: estimate.nullable(),
     labels: z.array(z.string()).meta({ description: "Names, A to Z." }),
-    links: z.array(linkSchema),
+    links: z.array(itemLinkSchema),
     assignee: actorRefSchema.nullable(),
     assigneeId: id.nullable(),
     externalRef: z.string().nullable(),
@@ -236,6 +253,16 @@ export const commentSchema = z
     createdAt: timestamp,
   })
   .openapi("Comment");
+
+/** The answer to add_comment: the comment, with hint when its body reads like a build log. */
+export const createdCommentSchema = commentSchema
+  .extend({
+    hint: z.string().optional().meta({
+      description:
+        "Present when the body reads like a build log (commit SHAs, CI runs, agent run ids): what was found and where it belongs instead. The comment is saved either way.",
+    }),
+  })
+  .openapi("CreatedComment");
 
 export const statusUpdateSchema = z
   .object({
@@ -782,6 +809,8 @@ const labelNames = z
   .meta({
     description: `Label names. ${LABEL_NAMES}`,
   });
+const PULL_REQUEST_LINKS =
+  "A pull request for the work goes here, and trail shows its state (open, draft, merged or closed) as the link's pr.";
 const links = z
   .array(
     z.strictObject({
@@ -1101,7 +1130,7 @@ const itemPatchFields = {
     description: `Replaces the item's labels; [] removes them all. ${LABEL_NAMES}`,
   }),
   links: links.optional().meta({
-    description: "Replaces the item's links; [] removes them all.",
+    description: `Replaces the item's links; [] removes them all. ${PULL_REQUEST_LINKS}`,
   }),
   addLabels: labelNames.optional().meta({
     description: `Labels to add, keeping the item's others, even those another bot added a moment ago. ${LABEL_NAMES} Not with labels.`,
@@ -1111,8 +1140,7 @@ const itemPatchFields = {
       "Labels to remove, by name ignoring the case of A-Z; a name the item lacks is ignored. Not with labels.",
   }),
   addLinks: links.optional().meta({
-    description:
-      "Links to add, keeping the item's others. A url already on the item takes the title sent here, or keeps its own when none is sent. Not with links.",
+    description: `Links to add, keeping the item's others. A url already on the item takes the title sent here, or keeps its own when none is sent. Not with links. ${PULL_REQUEST_LINKS}`,
   }),
   removeLinks: z.array(z.string().min(1).max(2048)).max(50).optional().meta({
     description:
@@ -1407,6 +1435,7 @@ export type NamedProductView = z.infer<typeof namedProductSchema>;
 export type ProjectView = z.infer<typeof projectSchema>;
 export type IssueView = z.infer<typeof issueSchema>;
 export type CommentView = z.infer<typeof commentSchema>;
+export type CreatedCommentView = z.infer<typeof createdCommentSchema>;
 export type StatusUpdateView = z.infer<typeof statusUpdateSchema>;
 export type LabelView = z.infer<typeof labelSchema>;
 export type ActorView = z.infer<typeof actorSchema>;

@@ -4,7 +4,12 @@ import { join } from "node:path";
 import { afterAll, expect, test } from "vitest";
 import { migrate, openDatabase } from "../db/client.js";
 import { createEventBus } from "../events/bus.js";
-import { atFakeTime, projectKey, testWebhooks } from "../test-app.js";
+import {
+  atFakeTime,
+  projectKey,
+  testPullRequests,
+  testWebhooks,
+} from "../test-app.js";
 import {
   createService,
   type ImportComment,
@@ -26,6 +31,7 @@ const service = createService({
   db,
   bus: createEventBus(),
   webhooks: testWebhooks,
+  pullRequests: testPullRequests(db),
 });
 const bot = createBot(db, "migrator").actor;
 
