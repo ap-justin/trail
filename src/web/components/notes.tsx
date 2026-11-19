@@ -14,8 +14,8 @@ export type NotesSectionProps = {
   notes: Loadable<WebItemRowView[]>;
   /** Null until the page first counts its items; nothing renders until then. */
   counts: WebItemCountsView["notes"] | null;
-  /** Lists the archived notes in the page's own item list. */
-  onShowArchived: () => void;
+  /** Lists the page's current or archived notes in its own item list. */
+  onShowNotes: (status: "current" | "archived") => void;
   onRetry: () => void;
   now: Date;
   className?: string;
@@ -23,12 +23,13 @@ export type NotesSectionProps = {
 
 /**
  * A product's or project's current notes under the work list: key, title and age a row,
- * then the way to the archived ones. Nothing at all when it has no notes.
+ * a line saying so when the list stopped short of the count, then the way to the archived
+ * ones. Nothing at all when it has no notes.
  */
 export function NotesSection({
   notes,
   counts,
-  onShowArchived,
+  onShowNotes,
   onRetry,
   now,
   className,
@@ -37,6 +38,9 @@ export function NotesSection({
   const headingRef = useRef<HTMLHeadingElement>(null);
   const current = counts?.current ?? 0;
   if (current + (counts?.archived ?? 0) === 0) return null;
+  // the notes read stops at its page cap (`ITEM_PAGES_MAX` in lib/queries.ts) while the
+  // count is the true total
+  const shown = notes.status === "ready" ? notes.data.length : current;
   return (
     <section aria-labelledby={headingId} className={className}>
       <AsideHeading
@@ -57,14 +61,28 @@ export function NotesSection({
         }}
         now={now}
       />
+      {shown < current && (
+        <>
+          <p className="pt-2 text-muted-foreground max-lg:px-4 lg:px-2">
+            Showing {shown.toLocaleString("en-US")} of{" "}
+            {current.toLocaleString("en-US")} {current === 1 ? "note" : "notes"}
+          </p>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onShowNotes("current")}
+            className={SHOW_NOTES_BUTTON}
+          >
+            Show all notes
+          </Button>
+        </>
+      )}
       {counts && counts.archived > 0 && (
         <Button
           variant="ghost"
           size="sm"
-          onClick={onShowArchived}
-          // the word on the note keys, 8px into the box past its 1px border: 16px in below lg,
-          // 8px at lg with the box on the rows' edge
-          className="mt-1 px-1.75 font-normal text-muted-foreground max-lg:mx-2"
+          onClick={() => onShowNotes("archived")}
+          className={cn("mt-1", SHOW_NOTES_BUTTON)}
         >
           Show {counts.archived} archived{" "}
           {counts.archived === 1 ? "note" : "notes"}
@@ -73,6 +91,11 @@ export function NotesSection({
     </section>
   );
 }
+
+// the word on the note keys, 8px into the box past its 1px border: 16px in below lg,
+// 8px at lg with the box on the rows' edge
+const SHOW_NOTES_BUTTON =
+  "px-1.75 font-normal text-muted-foreground max-lg:mx-2";
 
 const NOTE_ROW_BOX =
   "flex min-h-11 items-center gap-2.5 border-b border-rule py-2 max-lg:mx-4 lg:min-h-0 lg:px-2";

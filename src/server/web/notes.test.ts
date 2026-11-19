@@ -328,3 +328,98 @@ test("turning a todo into a note shows its type and status change, not the prior
       .map((e: Body) => e.kind),
   ).toEqual(["status_changed", "type_changed", "item_created"]);
 });
+
+test("an edit that only changes a note's about adds one timeline entry naming the items added and removed, and only counts other products' items", async () => {
+  const own = addProject("Aboutness");
+  const writer = addBot("about writer");
+  const [kept, dropped, gained] = await atFakeTimeAsync([
+    () => item(own.key, "todo"),
+    () => item(own.key, "issue"),
+    () => item(own.key, "todo"),
+  ]);
+  const created = await request("POST", "/api/v1/items", {
+    json: {
+      type: "note",
+      product: own.key,
+      title: "moving about",
+      about: [kept, dropped],
+    },
+    key: writer.key,
+  });
+  expect(created.status, await created.clone().text()).toBe(201);
+  const note = ((await created.json()) as Body).key as string;
+  const edit = await request("PATCH", `/api/v1/items/${note}`, {
+    json: { about: [kept, gained, keys.secret] },
+    key: writer.key,
+  });
+  expect(edit.status, await edit.clone().text()).toBe(200);
+
+  const reader = await addMember("aboutreader", [own.id]);
+  const page = await get(`/items/${note}`, reader);
+  expect(page.body.timeline.map((e: Body) => e.kind)).toEqual([
+    "item_created",
+    "about_changed",
+  ]);
+  expect(page.body.timeline[1]).toMatchObject({
+    actor: { name: "about writer" },
+    item: { key: note },
+    added: [gained],
+    removed: [dropped],
+    others: { from: 0, to: 1 },
+  });
+  expect(JSON.stringify(page.body.timeline)).not.toContain(keys.secret);
+});
+
+test("an edit changing a note's status and about shows the status change, then the about change, in the note's timeline order", async () => {
+  const own = addProject("Mixed");
+  const writer = addBot("mixed writer");
+  const [first, second] = await atFakeTimeAsync([
+    () => item(own.key, "todo"),
+    () => item(own.key, "todo"),
+  ]);
+  let note = "";
+  await atFakeTimeAsync([
+    async () => {
+      const res = await request("POST", "/api/v1/items", {
+        json: {
+          type: "note",
+          product: own.key,
+          title: "mixed",
+          about: [first],
+        },
+        key: writer.key,
+      });
+      expect(res.status, await res.clone().text()).toBe(201);
+      note = ((await res.json()) as Body).key as string;
+    },
+    async () => {
+      const res = await request("PATCH", `/api/v1/items/${note}`, {
+        json: { status: "archived", about: [second] },
+        key: writer.key,
+      });
+      expect(res.status, await res.clone().text()).toBe(200);
+    },
+  ]);
+  const reader = await addMember("mixedreader", [own.id]);
+  const commented = await request("POST", `/api/web/items/${note}/comments`, {
+    key: null,
+    cookie: reader,
+    json: { body: "after the edit" },
+  });
+  expect(commented.status).toBe(201);
+
+  const page = await get(`/items/${note}`, reader);
+  expect(page.body.timeline.map((e: Body) => e.kind)).toEqual([
+    "item_created",
+    "status_changed",
+    "about_changed",
+    "comment",
+  ]);
+  expect(page.body.timeline[2]).toMatchObject({
+    added: [second],
+    removed: [first],
+    others: { from: 0, to: 0 },
+  });
+  const ids = page.body.timeline.map((e: Body) => e.id);
+  expect(new Set(ids).size).toBe(ids.length);
+});

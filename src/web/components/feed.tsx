@@ -644,6 +644,9 @@ function sentenceFor(entry: EntryView): Sentence | null {
         verb: muted("updated project"),
         subject: projectSubject(entry.project),
       };
+    // an item's timeline only: the feed never lists it
+    case "about_changed":
+      return null;
     default:
       // typechecks only while every known kind has a case; at runtime, a kind the server added later lands here
       entry satisfies never;

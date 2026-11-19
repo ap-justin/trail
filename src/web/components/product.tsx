@@ -308,9 +308,9 @@ export function ProductView(props: ProductViewProps) {
           <NotesSection
             notes={props.notes}
             counts={props.noteCounts}
-            onShowArchived={() => {
+            onShowNotes={(status) => {
               listRef.current?.focus();
-              onFiltersChange({ type: "note", status: "archived" });
+              onFiltersChange({ type: "note", status });
             }}
             onRetry={props.onRetryNotes}
             now={now}

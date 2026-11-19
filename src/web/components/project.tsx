@@ -368,9 +368,9 @@ function ProjectBody(
           <NotesSection
             notes={props.notes}
             counts={props.noteCounts}
-            onShowArchived={() => {
+            onShowNotes={(status) => {
               listRef.current?.focus();
-              onFiltersChange({ ...filters, type: "note", status: "archived" });
+              onFiltersChange({ ...filters, type: "note", status });
             }}
             onRetry={props.onRetryNotes}
             now={now}

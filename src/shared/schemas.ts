@@ -1902,6 +1902,27 @@ export const entrySchema = z
       removed: z.array(z.string()),
     }),
     z.object({ ...onItem, kind: z.literal("link_added"), link: linkSchema }),
+    z
+      .object({
+        ...onItem,
+        kind: z.literal("about_changed"),
+        added: z.array(z.string()).meta({
+          description:
+            "Keys of the items in the note's product the edit made it about, in key order.",
+        }),
+        removed: z.array(z.string()).meta({
+          description:
+            "Keys of the items in the note's product it is no longer about, in key order.",
+        }),
+        others: z.object({ from: z.int(), to: z.int() }).meta({
+          description:
+            "How many items it was and is about in products the entry doesn't name, before and after the edit; equal when only named items changed.",
+        }),
+      })
+      .meta({
+        description:
+          "On an item's timeline only, never in the feed: a note's edit changed the items it is about.",
+      }),
     z.object({
       ...onItem,
       kind: z.literal("assignee_changed"),

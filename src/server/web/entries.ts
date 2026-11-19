@@ -443,9 +443,30 @@ function projectRefs(db: Db, ids: string[]): (id: string) => WebProjectRefView {
   return (id) => byId.get(id) as WebProjectRefView;
 }
 
+/** A note's `issue.updated` payload when the edit changed the items it is about. */
+type AboutChanges = {
+  about?: Change<string[]>;
+  aboutOthers?: Change<number>;
+};
+
+/**
+ * The items an about change added and removed. The payload names only the
+ * note's own product's items, which whoever reads the note's page sees; the
+ * rest it only counts.
+ */
+function aboutChange({ about, aboutOthers }: AboutChanges) {
+  if (!about || !aboutOthers) return undefined;
+  return {
+    added: about.to.filter((k) => !about.from.includes(k)),
+    removed: about.from.filter((k) => !about.to.includes(k)),
+    others: aboutOthers,
+  };
+}
+
 /**
  * An item's timeline, oldest first: its filing, its comments, the changes the
- * feed shows and its being added to or removed from projects.
+ * feed shows, a note's changes to the items it is about and its being added
+ * to or removed from projects.
  */
 export function timelineOf(
   db: Db,
@@ -489,6 +510,7 @@ export function timelineOf(
   const actorOf = actorsById(db, [
     target.createdBy,
     ...comments.map((c) => c.authorId),
+    ...changes.map((e) => e.actorId),
   ]);
   const creator = actorOf(target.createdBy);
   const base = { product: productRef, item: itemRef };
@@ -515,7 +537,26 @@ export function timelineOf(
       }),
     ),
     // the item as it reads now, whatever its title was then
-    ...entriesOf(db, changes).map((e) => ({ ...e, ...base }) as EntryView),
+    ...entriesByEvent(db, changes).flatMap((entries, i) => {
+      const event = changes[i] as ActivityEvent;
+      const about = aboutChange(event.payload as AboutChanges);
+      return [
+        ...entries.map((e) => ({ ...e, ...base }) as EntryView),
+        ...(about
+          ? [
+              {
+                id: `${event.id}:about`,
+                kind: "about_changed" as const,
+                createdAt: event.createdAt.toISOString(),
+                actor: actorOf(event.actorId),
+                ...base,
+                project: null,
+                ...about,
+              },
+            ]
+          : []),
+      ];
+    }),
   ];
   // stable: at one instant the filing comes first, then comments, then changes
   return entries.sort(

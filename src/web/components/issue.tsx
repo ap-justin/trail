@@ -579,6 +579,52 @@ const createdPhrase: Record<WebItemType, string> = {
   note: "wrote this note",
 };
 
+const countOfItems = (n: number) => `${n} ${n === 1 ? "item" : "items"}`;
+
+/** The entry counts other products' items and never names them. */
+function othersClause({ from, to }: { from: number; to: number }) {
+  if (from === to) return null;
+  if (from === 0) return `added ${countOfItems(to)} in other products`;
+  if (to === 0) return `removed ${countOfItems(from)} in other products`;
+  return `went from ${from} to ${countOfItems(to)} in other products`;
+}
+
+/**
+ * "changed what this note is about: added ATL-3, ATL-5; removed ATL-1". The line is a flex
+ * row, so each word run and key carries its own comma or semicolon, and the gap never
+ * parts them.
+ */
+function aboutPhrase(entry: Extract<EntryView, { kind: "about_changed" }>) {
+  const others = othersClause(entry.others);
+  const clauses = [
+    ...(entry.added.length > 0 ? [{ words: "added", keys: entry.added }] : []),
+    ...(entry.removed.length > 0
+      ? [{ words: "removed", keys: entry.removed }]
+      : []),
+    ...(others === null ? [] : [{ words: others, keys: [] }]),
+  ];
+  return (
+    <>
+      changed what this note is about{clauses.length > 0 && ":"}{" "}
+      {clauses.map(({ words, keys }, c) => {
+        const end = c < clauses.length - 1 && ";";
+        return [
+          <span key={words}>
+            {words}
+            {keys.length === 0 && end}{" "}
+          </span>,
+          ...keys.map((key, k) => (
+            <span key={key}>
+              <KeyText className="text-foreground">{key}</KeyText>
+              {k < keys.length - 1 ? "," : end}{" "}
+            </span>
+          )),
+        ];
+      })}
+    </>
+  );
+}
+
 /** The words after the actor in a one-line timeline entry. */
 function changePhrase(entry: EntryView): ReactNode {
   switch (entry.kind) {
@@ -623,6 +669,8 @@ function changePhrase(entry: EntryView): ReactNode {
       );
     case "link_added":
       return <>added a link {strong(entry.link.title)}</>;
+    case "about_changed":
+      return aboutPhrase(entry);
     case "assignee_changed":
       return entry.to ? (
         <>

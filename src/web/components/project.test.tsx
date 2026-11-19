@@ -821,6 +821,40 @@ describe("notes", () => {
     ).toBeInTheDocument();
   });
 
+  test("a notes list cut short of the count says how many show, and Show all notes keeps the product filter", async () => {
+    const user = userEvent.setup();
+    const p = renderProject({
+      filters: { ...NO_PROJECT_FILTERS, product: "TRL" },
+      items: { status: "ready", data: withNotes() },
+      noteCounts: { current: 2134, archived: 1 },
+      notes: { status: "ready", data: notes },
+    });
+    const section = screen.getByRole("region", { name: /^Notes/ });
+    expect(
+      within(section).getByText("Showing 1 of 2,134 notes"),
+    ).toBeInTheDocument();
+    await user.click(
+      within(section).getByRole("button", { name: "Show all notes" }),
+    );
+    expect(p.onFiltersChange).toHaveBeenCalledWith({
+      product: "TRL",
+      type: "note",
+      status: "current",
+    });
+  });
+
+  test("every current note shown: no Showing line and no Show all notes", () => {
+    renderProject({
+      items: { status: "ready", data: withNotes() },
+      notes: { status: "ready", data: notes },
+    });
+    const section = screen.getByRole("region", { name: /^Notes/ });
+    expect(within(section).queryByText(/^Showing/)).toBeNull();
+    expect(
+      within(section).queryByRole("button", { name: "Show all notes" }),
+    ).toBeNull();
+  });
+
   test("Try again on notes leaves focus on their heading", async () => {
     const user = userEvent.setup();
     const items = { status: "ready", data: withNotes() } as const;

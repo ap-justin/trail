@@ -23,6 +23,7 @@ import {
   note,
   teamAccess,
   todo,
+  trail,
 } from "@/test/fixtures";
 
 function renderIssue(overrides: Partial<IssueViewProps> = {}) {
@@ -1392,5 +1393,97 @@ describe("notes", () => {
   test("an item no note is about has no Notes section", () => {
     renderIssue();
     expect(screen.queryByRole("region", { name: "Notes" })).toBeNull();
+  });
+});
+
+describe("about edits on a note's timeline", () => {
+  const aboutChanged = (
+    id: string,
+    change: {
+      added: string[];
+      removed: string[];
+      others: { from: number; to: number };
+    },
+  ) => ({
+    product: trail,
+    project: null,
+    item: {
+      key: "TRL-31",
+      title: "Why the feed reads newest first",
+      type: "note" as const,
+    },
+    kind: "about_changed" as const,
+    id,
+    createdAt: "2026-11-09T14:05:00.000Z",
+    actor: alpha,
+    ...change,
+  });
+  const line = (id: string) => {
+    const found = document.querySelector<HTMLElement>(
+      `[data-entry-id="${id}"]`,
+    );
+    if (!found) throw new Error(`no ${id} line`);
+    return found;
+  };
+
+  test("added and removed keys read as one sentence, the keys in mono, and an unchanged other-product count says nothing", () => {
+    renderIssue({
+      issueKey: "TRL-31",
+      issue: {
+        status: "ready",
+        data: note({
+          timeline: [
+            aboutChanged("both", {
+              added: ["TRL-3", "TRL-5"],
+              removed: ["TRL-1"],
+              others: { from: 1, to: 1 },
+            }),
+          ],
+        }),
+      },
+    });
+    expect(line("both")).toHaveTextContent(
+      "Alpha changed what this note is about: added TRL-3, TRL-5; removed TRL-1",
+    );
+    expect(line("both")).not.toHaveTextContent(/other products/);
+    for (const key of ["TRL-3", "TRL-5", "TRL-1"])
+      expect(within(line("both")).getByText(key)).toHaveClass("font-mono");
+  });
+
+  test("other products' items are counted in a plain clause, never named", () => {
+    renderIssue({
+      issueKey: "TRL-31",
+      issue: {
+        status: "ready",
+        data: note({
+          timeline: [
+            aboutChanged("gained", {
+              added: ["TRL-3"],
+              removed: [],
+              others: { from: 0, to: 2 },
+            }),
+            aboutChanged("lost", {
+              added: [],
+              removed: [],
+              others: { from: 1, to: 0 },
+            }),
+            aboutChanged("moved", {
+              added: [],
+              removed: ["TRL-1"],
+              others: { from: 2, to: 3 },
+            }),
+          ],
+        }),
+      },
+    });
+    expect(line("gained")).toHaveTextContent(
+      "changed what this note is about: added TRL-3; added 2 items in other products",
+    );
+    expect(line("lost")).toHaveTextContent(
+      "changed what this note is about: removed 1 item in other products",
+    );
+    expect(line("moved")).toHaveTextContent(
+      "changed what this note is about: removed TRL-1; went from 2 to 3 items in other products",
+    );
   });
 });

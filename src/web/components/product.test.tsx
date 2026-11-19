@@ -732,6 +732,37 @@ describe("notes", () => {
       }),
     ).toBeInTheDocument();
   });
+
+  test("a notes list cut short of the count says how many show, and Show all notes lists the current ones with focus on the list", async () => {
+    const user = userEvent.setup();
+    const p = renderProduct({
+      items: { status: "ready", data: workWithNotes },
+      noteCounts: { current: 2134, archived: 1 },
+      notes: { status: "ready", data: current },
+    });
+    expect(
+      within(notesSection()).getByText("Showing 2 of 2,134 notes"),
+    ).toBeInTheDocument();
+    await user.click(
+      within(notesSection()).getByRole("button", { name: "Show all notes" }),
+    );
+    expect(p.onFiltersChange).toHaveBeenCalledWith({
+      type: "note",
+      status: "current",
+    });
+    expect(screen.getByRole("tabpanel", { name: /^All/ })).toHaveFocus();
+  });
+
+  test("every current note shown: no Showing line and no Show all notes", () => {
+    renderProduct({
+      items: { status: "ready", data: workWithNotes },
+      notes: { status: "ready", data: current },
+    });
+    expect(within(notesSection()).queryByText(/^Showing/)).toBeNull();
+    expect(
+      within(notesSection()).queryByRole("button", { name: "Show all notes" }),
+    ).toBeNull();
+  });
 });
 
 describe("aside", () => {
