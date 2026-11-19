@@ -1,4 +1,5 @@
 import { FolderIcon } from "lucide-react";
+import { Fragment } from "react";
 import { ActorAvatar } from "@/components/actor";
 import { RowLink } from "@/components/app-link";
 import { EmptyState, ListSkeleton, ProjectsError } from "@/components/states";
@@ -9,7 +10,7 @@ import {
   TargetDate,
   UpdateHealth,
 } from "@/components/status-updates";
-import { KeyText } from "@/components/text";
+import { KeyPill } from "@/components/text";
 import {
   Table,
   TableBody,
@@ -32,14 +33,14 @@ export type ProjectsViewProps = {
   now?: Date;
 };
 
-/** The viewer's products in the project, keys in mono. */
+/** The viewer's products in the project, each key a pill. */
 function ProductKeys({ project }: { project: WebProjectView }) {
   return (
     <span className="flex flex-wrap items-center gap-x-2">
       {project.products.map((product) => (
-        <KeyText key={product.key} className="text-foreground">
-          {product.key}{" "}
-        </KeyText>
+        <Fragment key={product.key}>
+          <KeyPill>{product.key}</KeyPill>{" "}
+        </Fragment>
       ))}
     </span>
   );

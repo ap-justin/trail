@@ -23,7 +23,7 @@ import {
 import { ActorAvatar } from "@/components/actor";
 import { AppLink, type AppLinkProps } from "@/components/app-link";
 import { Logo } from "@/components/logo";
-import { KeyText } from "@/components/text";
+import { KeyPill, KeyText } from "@/components/text";
 import { useTheme } from "@/components/theme-provider";
 import { Button } from "@/components/ui/button";
 import {
@@ -221,10 +221,10 @@ function Sidebar({
                 aria-current={current}
                 className={sideItem}
               >
-                <KeyText className={cn(current && "text-current")}>
+                <span className="truncate">{product.name}</span>{" "}
+                <KeyPill className={cn(current && "text-current")}>
                   {product.key}
-                </KeyText>{" "}
-                <span className="truncate">{product.name}</span>
+                </KeyPill>
               </AppLink>
             );
           })}
@@ -585,7 +585,7 @@ export function AppShell({
             <div className="flex items-center gap-2 px-4 pt-3 lg:hidden">
               <ShellHeading
                 kind={headingKind}
-                className="text-base font-medium"
+                className="min-w-0 text-base font-medium"
               >
                 {heading}
               </ShellHeading>

@@ -14,7 +14,7 @@ import {
   NO_STATUS_UPDATE,
   UpdateHealth,
 } from "@/components/status-updates";
-import { KeyText } from "@/components/text";
+import { KeyPill } from "@/components/text";
 import {
   Table,
   TableBody,
@@ -46,8 +46,8 @@ function ProductName({ product }: { product: WebProductView }) {
       href={paths.product(product.key)}
       className="flex min-w-0 items-center gap-2"
     >
-      <KeyText className="text-foreground">{product.key}</KeyText>{" "}
-      <span className="truncate font-medium">{product.name}</span>
+      <span className="truncate font-medium">{product.name}</span>{" "}
+      <KeyPill>{product.key}</KeyPill>
     </RowLink>
   );
 }

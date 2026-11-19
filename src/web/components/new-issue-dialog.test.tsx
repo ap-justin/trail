@@ -55,7 +55,7 @@ describe("new issue dialog", () => {
     const user = userEvent.setup();
     const props = renderDialog();
     expect(within(dialog()).getByLabelText("Product")).toHaveTextContent(
-      "DOC Docs site",
+      "Docs site DOC",
     );
     await user.type(
       within(dialog()).getByLabelText("Title"),
@@ -78,7 +78,7 @@ describe("new issue dialog", () => {
   test("without a current product the first visible one is picked", () => {
     renderDialog({ defaultProductKey: null });
     expect(within(dialog()).getByLabelText("Product")).toHaveTextContent(
-      "TRL trail",
+      "trail TRL",
     );
   });
 
@@ -210,7 +210,7 @@ describe("product field", () => {
       within(dialog()).getByRole("combobox", { name: "Product" }),
     );
     await user.click(
-      await screen.findByRole("option", { name: "OPB OpenBot" }),
+      await screen.findByRole("option", { name: "OpenBot OPB" }),
     );
     await user.type(within(dialog()).getByLabelText("Title"), "Retry webhooks");
     await user.click(

@@ -9,7 +9,7 @@ import {
 } from "react";
 import { ActorAvatar } from "@/components/actor";
 import { ProductsEmpty } from "@/components/states";
-import { KeyText } from "@/components/text";
+import { KeyPill } from "@/components/text";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -158,10 +158,8 @@ function NewIssueForm({
                   const product = products.find((p) => p.key === key);
                   return product ? (
                     <>
-                      <KeyText className="text-foreground">
-                        {product.key}
-                      </KeyText>{" "}
-                      {product.name}
+                      <span className="min-w-0 truncate">{product.name}</span>{" "}
+                      <KeyPill>{product.key}</KeyPill>
                     </>
                   ) : (
                     "Pick a product"
@@ -173,8 +171,7 @@ function NewIssueForm({
               <SelectGroup>
                 {products.map((product) => (
                   <SelectItem key={product.key} value={product.key}>
-                    <KeyText className="text-foreground">{product.key}</KeyText>{" "}
-                    {product.name}
+                    {product.name} <KeyPill>{product.key}</KeyPill>
                   </SelectItem>
                 ))}
               </SelectGroup>

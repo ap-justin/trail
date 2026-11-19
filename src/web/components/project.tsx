@@ -26,7 +26,7 @@ import {
   TargetDate,
   UpdateHealth,
 } from "@/components/status-updates";
-import { KeyText } from "@/components/text";
+import { KeyPill } from "@/components/text";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import type {
   WebProjectDetailView,
@@ -104,7 +104,7 @@ const HIDDEN_PRODUCTS = "Items from products you can't see are not shown.";
 
 /**
  * Lead, Target, Health and Products as a ledger. `aside` (1024px and up): a 72px label
- * column, the lead's title under the name, each product's key and name. `inline`
+ * column, the lead's title under the name, each product's name and key. `inline`
  * (below): Lead and Target alone in 36px rows on an 80px column, the title in line;
  * Health rides the heading there and the groups name the products.
  */
@@ -157,9 +157,12 @@ function ProjectDetails({
           <dt className={label}>Products</dt>
           <dd className="flex flex-col gap-1.5">
             {project.products.map((product) => (
-              <span key={product.key} className="flex items-center gap-2">
-                <KeyText className="text-foreground">{product.key}</KeyText>{" "}
-                {product.name}
+              <span
+                key={product.key}
+                className="flex min-w-0 items-center gap-2"
+              >
+                <span className="truncate">{product.name}</span>{" "}
+                <KeyPill>{product.key}</KeyPill>
               </span>
             ))}
           </dd>

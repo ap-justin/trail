@@ -88,7 +88,7 @@ describe("properties", () => {
     expect(within(props).queryByText("Bot")).toBeNull();
     expect(within(props).getByText("auth")).toBeInTheDocument();
     expect(
-      within(props).getByRole("link", { name: "TRL trail" }),
+      within(props).getByRole("link", { name: "trail TRL" }),
     ).toHaveAttribute("href", "/products/TRL");
   });
 
@@ -1008,10 +1008,10 @@ describe("projects property", () => {
     ).toEqual([]);
   });
 
-  test("the product shows its key and name, linking to the product", () => {
+  test("the product shows its name and key, linking to the product", () => {
     renderIssue();
     const link = within(propertyValue("Product")).getByRole("link", {
-      name: "TRL trail",
+      name: "trail TRL",
     });
     expect(within(link).getByText("TRL")).toHaveClass("font-mono");
   });
