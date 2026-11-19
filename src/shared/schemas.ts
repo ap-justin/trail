@@ -885,8 +885,9 @@ const projectSlug = z.string().min(1).max(SLUG_MAX).meta({
     "The project's slug, like launch-q4, exactly; list_projects lists them.",
   example: "launch-q4",
 });
-const ISSUE_PROJECT =
-  "A project's slug, like launch-q4: the issue joins that project as it is filed, and product must be one the project draws from (left out, the project's one product). A key reaching a product only through projects sends `project` when it names more than one; with exactly one, that one is the default. list_projects lists them with their products.";
+const ONE_PROJECT_DEFAULT =
+  "A key reaching a product only through projects sends `project` when it names more than one; with exactly one, that one is the default.";
+const ISSUE_PROJECT = `A project's slug, like launch-q4: the issue joins that project as it is filed, and product must be one the project draws from (left out, the project's one product). ${ONE_PROJECT_DEFAULT} list_projects lists them with their products.`;
 const botRef = z.string().min(1).max(200);
 const LABEL_NAMES =
   "A name matches the product's label ignoring the case of A-Z. Only the product's owner creates labels: from the owner, or on a product with no owner, a new name creates the label; from anyone else, the names the product lacks come back in skippedLabels.";
@@ -1135,7 +1136,7 @@ export const issueFileSchema = z
     {
       product: productRef.optional().meta({
         description:
-          "The key (like TRL) of the product the issue is for: any product list_products lists, which for a key reaching it only through a project needs project too. Left out, the project's one product.",
+          "The key (like TRL) of the product the issue is for: any product list_products lists. Left out, the project's one product.",
       }),
       project: projectSlug.optional().meta({ description: ISSUE_PROJECT }),
       ...itemFields,
@@ -1165,11 +1166,10 @@ export const noteCreateSchema = z
     {
       product: productRef.optional().meta({
         description:
-          "The key (like TRL) of the product the note belongs to: any product list_products lists, as with file_issue, which for a key reaching it only through a project needs project too. Left out, the project's one product.",
+          "The key (like TRL) of the product the note belongs to: any product list_products lists, as with file_issue. Left out, the project's one product.",
       }),
       project: projectSlug.optional().meta({
-        description:
-          "A project's slug, like launch-q4: the note joins that project as it is added, and product must be one the project draws from (left out, the project's one product). list_projects lists them with their products.",
+        description: `A project's slug, like launch-q4: the note joins that project as it is added, and product must be one the project draws from (left out, the project's one product). ${ONE_PROJECT_DEFAULT} list_projects lists them with their products.`,
       }),
       title,
       description: text.optional(),
@@ -1283,7 +1283,7 @@ export const itemUpdateSchema = z
     {
       type: itemTypeSchema.optional().meta({
         description:
-          "todo makes it planned work of its product (an item in triage opens, and a note opens; it gets the product's owner as assignee when it has none); issue makes it a request for work (a note goes to triage); note makes it a record: status current, no assignee, priority 0 and estimate null. Only the product's owner changes an item's type.",
+          "todo makes it planned work of its product (an item in triage opens, and a note opens; it gets the product's owner as assignee when it has none); issue makes it a request for work (a note goes to triage); note makes it a record: status current, no assignee, priority 0 and estimate null. Only the product's owner changes an item's type; on a product with no owner any bot swaps todo and issue, and none turns an item into a note or a note into work.",
       }),
       ...itemPatchFields,
       estimate: itemPatchFields.estimate.meta({

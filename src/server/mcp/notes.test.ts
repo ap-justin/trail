@@ -1030,6 +1030,52 @@ test("a note turned back into an issue goes to triage, into a todo opens with th
   });
 });
 
+test("on a product with no owner no bot turns an item into a note or a note into work, and is told what to do instead; todo and issue still swap", async () => {
+  const former = await productBot("Gone owner");
+  const author = await productBot("Ownerless author");
+  const filer = await productBot("Ownerless filer");
+  const issue = await call(filer.client, "file_issue", {
+    product: former.product,
+    title: "is this a bug?",
+  });
+  const note = await call(author.client, "add_note", {
+    product: former.product,
+    title: "how it works",
+  });
+  db.update(productTable)
+    .set({ ownerId: null })
+    .where(eq(productTable.key, former.product))
+    .run();
+
+  for (const bot of [filer, author]) {
+    expect(
+      await callError(bot.client, "update_item", {
+        item: issue.key,
+        type: "note",
+      }),
+    ).toBe(
+      `forbidden: ${former.product} has no owner bot, and only a product's own bot turns an item into a note: add a note about ${issue.key} with add_note instead, or ask the operator to give ${former.product} an owner`,
+    );
+  }
+  expect(
+    await callError(author.client, "update_item", {
+      item: note.key,
+      type: "issue",
+    }),
+  ).toBe(
+    `forbidden: ${former.product} has no owner bot, and only a product's own bot turns a note into work: file an issue (file_issue) for the work instead, or ask the operator to give ${former.product} an owner`,
+  );
+  expect(
+    await call(author.client, "get_item", { item: note.key }),
+  ).toMatchObject({ type: "note" });
+  expect(
+    await call(filer.client, "update_item", {
+      item: issue.key,
+      type: "todo",
+    }),
+  ).toMatchObject({ type: "todo", assignee: { name: "Ownerless filer" } });
+});
+
 test("get_project and get_product count notes apart from the work counts", async () => {
   const owner = await productBot("Counter");
   await call(owner.client, "add_todo", { title: "work" });

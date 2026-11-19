@@ -132,7 +132,7 @@ function NotesBody({
           // the item table rows' hover wash, which this list continues
           className={cn(
             NOTE_ROW_BOX,
-            "relative transition-colors hover:bg-muted/50",
+            "relative transition-colors lg:hover:bg-muted/50",
           )}
         >
           <KeyText className="shrink-0">{note.key}</KeyText>

@@ -75,6 +75,17 @@ function withType(filters: ItemFilters, type: ItemType | null): ItemFilters {
   return { ...filters, type, status: keeps ? filters.status : null };
 }
 
+/**
+ * Where FilterEmpty's Show all lands, `none` being the page's cleared filters. Notes
+ * with a status drop only the status: All lists issues and todos, so clearing the type
+ * would leave the notes altogether.
+ */
+export function showAllFilters<F extends ItemFilters>(filters: F, none: F): F {
+  return filters.type === "note" && filters.status
+    ? { ...filters, status: null }
+    : none;
+}
+
 /** A tab's count by its value, All included; a status the type has no tab for has none. */
 type StatusCounts = Partial<Record<StatusFilter | typeof ALL, number>>;
 
@@ -354,8 +365,9 @@ export function ItemFilterBar({
 /** Lists, tabs and chips all read the same filter value off this. */
 export const statusTabValue = (filters: ItemFilters) => filters.status ?? ALL;
 
+// All holds issues and todos; notes list beside it, so "items" would deny them
 const nouns: Record<ItemType | "all", string> = {
-  all: "items",
+  all: "issues and todos",
   issue: "issues",
   todo: "todos",
   note: "notes",
@@ -369,7 +381,7 @@ export function FilterEmpty({
   filters: ItemFilters;
   onShowAll: () => void;
 }) {
-  // All holds issues and todos; notes list beside it, so "items" would deny them
+  // "or" where it negates: none of either
   const noun = filters.type ? nouns[filters.type] : "issues or todos";
   return (
     <EmptyState
@@ -446,11 +458,11 @@ function Labels({
 }
 
 function itemNoun(count: number, type: ItemType | null = null) {
-  const plural = nouns[type ?? "all"];
-  return count === 1 ? plural.slice(0, -1) : plural;
+  if (count !== 1) return nouns[type ?? "all"];
+  return type ? nouns[type].slice(0, -1) : "issue or todo";
 }
 
-/** `trail TRL 8 items`, or `3 notes` in a list of notes: a product group's heading, its key as a pill after the name. */
+/** `trail TRL 8 issues and todos`, or `3 notes` in a list of notes: a product group's heading, its key as a pill after the name. */
 export function GroupHeading({
   product,
   count,

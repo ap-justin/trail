@@ -136,3 +136,45 @@ test("update_item says who edits a note", async () => {
     /A note is edited only by its author and its product's own bot/,
   );
 });
+
+test("add_note's and file_issue's project fields say a key reaching one project defaults to it, and their product fields don't ask for project", async () => {
+  const tool = await toolDescriptions();
+  const field = (name: string, key: string) =>
+    (
+      tool(name).inputSchema.properties as Record<
+        string,
+        { description?: string }
+      >
+    )[key]?.description;
+  for (const name of ["file_issue", "add_note"]) {
+    expect(field(name, "project"), name).toMatch(
+      /A key reaching a product only through projects sends `project` when it names more than one; with exactly one, that one is the default\./,
+    );
+    expect(field(name, "product"), name).not.toMatch(/needs project/);
+  }
+});
+
+test("list_items and GET /items say that without type they list issues and todos only", async () => {
+  const tool = await toolDescriptions();
+  expect(tool("list_items").description).toMatch(
+    /Without type it lists issues and todos only; notes need type "note" or about/,
+  );
+  const spec = (await (
+    await request("GET", "/api/v1/openapi.json", { key: null })
+  ).json()) as {
+    paths: Record<string, { get?: { description?: string } }>;
+  };
+  expect(spec.paths["/items"]?.get?.description).toMatch(
+    /Without type, issues and todos only: notes are listed with type note or about/,
+  );
+});
+
+test("add_note says a note is a record nobody has to act on and file_issue that it is a request for work", async () => {
+  const tool = await toolDescriptions();
+  expect(tool("add_note").description).toMatch(
+    /^Add a note: a record nobody has to act on/,
+  );
+  expect(tool("file_issue").description).toMatch(
+    /a bug report or request for work to a product's bot/,
+  );
+});

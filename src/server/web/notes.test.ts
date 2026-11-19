@@ -2,7 +2,7 @@ import { beforeAll, expect, test } from "vitest";
 import { atFakeTimeAsync, setupTestApp } from "../test-app.js";
 import { type Body, webSeed } from "./test-seed.js";
 
-const { request, addMember, addProject, addBot } = setupTestApp();
+const { request, addMember, addProject, addBot, bot } = setupTestApp();
 const { get, item, project } = webSeed(request);
 
 // Alpha, which the member sees, holds a todo, an issue and two notes, one archived; Hidden, which they don't, a todo a note is about and a note about Alpha's todo and issue.
@@ -301,6 +301,10 @@ test("a person comments on a note, and the comment is on its timeline", async ()
 });
 
 test("turning a todo into a note shows its type and status change, not the priority, estimate and assignee it clears", async () => {
+  // only a product's own bot converts, so the sending key's bot owns Alpha here
+  await request("PATCH", `/api/v1/products/${alpha.key}`, {
+    json: { owner: bot.actor.id },
+  });
   const todo = await item(alpha.key, "todo", {
     priority: 2,
     estimate: 3,

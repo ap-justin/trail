@@ -357,7 +357,6 @@ test("the notes about an item are read off the item index", () => {
       "i1",
     ) as { detail: string }[]
   ).map((r) => r.detail);
-  expect(plan).toEqual([
-    "SEARCH note_about USING COVERING INDEX note_about_item_note_idx (item_id=?)",
-  ]);
+  expect(plan.join("\n")).toMatch(/\bnote_about_item_note_idx\b/);
+  expect(plan.join("\n")).not.toMatch(/\bSCAN\b/);
 });

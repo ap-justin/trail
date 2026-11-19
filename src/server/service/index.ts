@@ -3654,6 +3654,23 @@ export function createService({
               : row.type === "note"
                 ? "turns a note into work"
                 : "changes an item's type between todo and issue";
+          // requireOwner passes anyone on a product with no owner, but only a product's own bot retypes to or from a note, so there no bot does
+          if (
+            (type === "note" || row.type === "note") &&
+            ownerIdOf(tx, row.productId) === null
+          ) {
+            const productKey = current.key.slice(
+              0,
+              current.key.lastIndexOf("-"),
+            );
+            const instead =
+              type === "note"
+                ? `add a note about ${current.key} with add_note`
+                : "file an issue (file_issue) for the work";
+            throw new ForbiddenError(
+              `${productKey} has no owner bot, and only a product's own bot ${retyping}: ${instead} instead, or ask the operator to give ${productKey} an owner`,
+            );
+          }
           requireOwner(
             tx,
             actor,

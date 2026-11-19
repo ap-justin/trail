@@ -220,14 +220,18 @@ describe("groups", () => {
     ] as const) {
       const body = groupBody(key);
       const header = within(body).getByRole("columnheader");
-      expect(header).toHaveTextContent(`${name} ${key} ${count} items`);
+      expect(header).toHaveTextContent(
+        `${name} ${key} ${count} issues and todos`,
+      );
       expect(rowsIn(body)).toBe(count);
     }
   });
 
   test("below 1024px each group is a section headed the same way", () => {
     renderProject();
-    const section = screen.getByRole("region", { name: "trail TRL 3 items" });
+    const section = screen.getByRole("region", {
+      name: "trail TRL 3 issues and todos",
+    });
     expect(within(section).getAllByRole("listitem")).toHaveLength(3);
   });
 
@@ -273,7 +277,7 @@ describe("groups", () => {
       "Priority",
       "Assignee",
       "Updated",
-      "Docs site DOC 2 items",
+      "Docs site DOC 2 issues and todos",
     ]);
     expect(table().querySelector('[data-item-key="DOC-6"]')).toHaveTextContent(
       "Unassigned",
@@ -418,6 +422,16 @@ describe("375", () => {
     expect(
       await within(sheet).findByRole("button", { name: /^Show / }),
     ).toHaveAccessibleName("Show 2 notes");
+  });
+
+  test("under All the sheet's button counts issues and todos, not items", async () => {
+    const user = userEvent.setup();
+    render(<FilteredProject />);
+    await user.click(filtersButton());
+    const sheet = await screen.findByRole("dialog", { name: "Filters" });
+    expect(
+      within(sheet).getByRole("button", { name: /^Show / }),
+    ).toHaveAccessibleName("Show 5 issues and todos");
   });
 
   test("the button counts the product and type in force; while the list loads the sheet has no count, only the type", async () => {
@@ -641,7 +655,7 @@ describe("notes", () => {
     ).toEqual(["All 5", "Open 4", "In progress 1", "Done 0", "Canceled 0"]);
     const body = groupBody("TRL");
     expect(within(body).getByRole("columnheader")).toHaveTextContent(
-      "TRL trail 3 items",
+      "TRL trail 3 issues and todos",
     );
     expect(rowsIn(body)).toBe(3);
     expect(
@@ -691,6 +705,29 @@ describe("notes", () => {
     expect(
       screen.getByRole("region", { name: "TRL trail 1 note" }),
     ).toBeInTheDocument();
+  });
+
+  test("Show all on an empty notes filter keeps the notes and the product, and clears only the status", async () => {
+    const user = userEvent.setup();
+    const p = renderProject({
+      filters: { product: "TRL", type: "note", status: "current" },
+      items: {
+        status: "ready",
+        data: {
+          ...projectItems([]),
+          counts: countsOf([archived]),
+        },
+      },
+    });
+    expect(
+      screen.getByRole("heading", { name: "No notes are current" }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Show all" }));
+    expect(p.onFiltersChange).toHaveBeenCalledWith({
+      product: "TRL",
+      type: "note",
+      status: null,
+    });
   });
 
   test("a project with notes and no work: Show archived notes leaves focus on the list", async () => {

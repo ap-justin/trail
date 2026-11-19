@@ -8,6 +8,7 @@ import { AppLink } from "@/components/app-link";
 import { EmptyState, SkeletonBlock } from "@/components/states";
 import {
   type IssueStatus,
+  type ItemType,
   StatusIcon,
   statusLabel,
   TypeIcon,
@@ -73,9 +74,14 @@ export function SearchResults({
 
 type Results = NonNullable<SearchResultsProps["results"]>;
 
-/** How a note's link begins: `Note`, or `Archived note` once it is archived. */
-const noteName = (status: IssueStatus) =>
-  status === "archived" ? `${statusLabel(status)} note` : typeLabel("note");
+/**
+ * How an item's link begins, the type its glyph shows only by sight: `Issue`, `Todo`,
+ * `Note`, or `Archived note` once a note is archived.
+ */
+const typeName = (type: ItemType, status: IssueStatus) =>
+  type === "note" && status === "archived"
+    ? `${statusLabel(status)} note`
+    : typeLabel(type);
 
 function announcement(shown: Results | "loading" | "error" | null): string {
   if (shown === "loading" || shown === null) return "Loading";
@@ -156,7 +162,7 @@ function SearchResultsBody({ results }: { results: Results }) {
           <AppLink
             href={paths.issue(issue.key)}
             aria-label={[
-              issue.type === "note" && noteName(issue.status),
+              typeName(issue.type, issue.status),
               issue.key,
               issue.title,
               issue.sourceKey,

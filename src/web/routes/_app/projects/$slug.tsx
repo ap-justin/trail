@@ -72,9 +72,10 @@ function ProjectPage() {
   };
   // with ?product=, only the project's own products say whether it applies
   const itemsWaitOnProject = search.product !== undefined;
+  const productSettled = !itemsWaitOnProject || project.data !== undefined;
   const items = useQuery({
     ...projectItemsQuery(slug, filters),
-    enabled: !itemsWaitOnProject || project.data !== undefined,
+    enabled: productSettled,
   });
   // the placeholder lends only its counts: its groups' counts follow the last tab's filters
   const counts = items.data?.counts ?? null;
@@ -91,7 +92,7 @@ function ProjectPage() {
       previousQuery?.queryKey[1] === slug ? previous : undefined,
   });
   const noteCounts =
-    noteCountsQuery.isPlaceholderData && items.isError
+    !productSettled || (noteCountsQuery.isPlaceholderData && items.isError)
       ? null
       : (noteCountsQuery.data ?? null);
   // the Notes section's, under the product filter the counts it reads follow, once they say
@@ -100,6 +101,7 @@ function ProjectPage() {
   const notes = useQuery({
     ...projectItemsQuery(slug, { product, type: "note", status: "current" }),
     enabled:
+      productSettled &&
       filters.type !== "note" &&
       !noteCountsQuery.isPlaceholderData &&
       (noteCounts?.current ?? 0) > 0,
@@ -156,9 +158,7 @@ function ProjectPage() {
         onRetryProject={() => void project.refetch()}
         // a refetch ignores `enabled`, so items still waiting on the project wait on its retry
         onRetryItems={() =>
-          void (itemsWaitOnProject && project.data === undefined
-            ? project.refetch()
-            : items.refetch())
+          void (productSettled ? items.refetch() : project.refetch())
         }
         onRetryNotes={() => void notes.refetch()}
         onRetryStatusUpdates={() => void updates.refetch()}

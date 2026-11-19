@@ -1,10 +1,11 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { cleanup, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, test } from "vitest";
-import { ITEM_PAGES_MAX } from "@/lib/queries";
+import { createQueryClient, ITEM_PAGES_MAX, keys } from "@/lib/queries";
 import { notFound, renderApp, signedInAs } from "@/test/app";
+import { FakeEventSource } from "@/test/event-source";
 import {
   issueRow,
   noteRow,
@@ -16,6 +17,7 @@ import {
   trail,
 } from "@/test/fixtures";
 import { server } from "@/test/server";
+import { reading, watchFor } from "@/test/watch-for";
 
 /** Answers Human UI launch's reads, recording each item-list request's query. */
 function serveProject(detail = projectDetail()) {
@@ -235,13 +237,15 @@ describe("while the next filter loads", () => {
       }),
     );
     renderApp("/projects/human-ui");
-    expect(await screen.findAllByText("3 items")).not.toHaveLength(0);
+    expect(await screen.findAllByText("3 issues and todos")).not.toHaveLength(
+      0,
+    );
     await userEvent.click(screen.getByRole("tab", { name: /^Open/ }));
     await waitFor(() =>
-      expect(screen.queryAllByText("3 items")).toHaveLength(0),
+      expect(screen.queryAllByText("3 issues and todos")).toHaveLength(0),
     );
     release();
-    expect(await screen.findAllByText("1 item")).not.toHaveLength(0);
+    expect(await screen.findAllByText("1 issue or todo")).not.toHaveLength(0);
   });
 
   test("a new product drops the last counts, which counted the other products", async () => {
@@ -373,6 +377,42 @@ describe("notes section on load", () => {
     expect(
       ["product", "type", "status"].map((name) => query.get(name)),
     ).toEqual(["TRL", "note", "current"]);
+  });
+
+  test("under ?product=, all products' cached note counts wait on the project too", async () => {
+    signedInAs("member");
+    const notesAsked = serveNoteCounts({ current: 1, archived: 0 });
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.get("/api/web/projects/human-ui", async () => {
+        await held;
+        return HttpResponse.json(projectDetail());
+      }),
+    );
+    const queryClient = createQueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    queryClient.setQueryData(keys.projectNoteCounts("human-ui", null), {
+      ...projectItems([]).counts,
+      notes: { current: 3, archived: 0 },
+    });
+    renderApp("/projects/human-ui?product=TRL", queryClient);
+    // all but the held project read
+    await waitFor(() => expect(queryClient.isFetching()).toBe(1));
+    expect(
+      screen.queryByRole("heading", { name: /^Notes/ }),
+    ).not.toBeInTheDocument();
+    expect(notesAsked).toEqual([]);
+    release();
+    await waitFor(() => expect(notesAsked).toHaveLength(1));
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    expect(notesAsked).toHaveLength(1);
+    expect(new URL(notesAsked[0] ?? "").searchParams.get("product")).toBe(
+      "TRL",
+    );
   });
 
   test("only archived notes: the section says none are current and links the archived", async () => {
@@ -638,6 +678,76 @@ describe("notes section on load", () => {
     await waitFor(() => expect(queryClient.isFetching()).toBe(0));
     expect(notesAsked).toEqual([]);
   });
+
+  test("a product revoked while on the Notes tab: back on All, the section never shows its notes", async () => {
+    signedInAs("member");
+    serveProject();
+    let revoked = false;
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const revokedNote = noteRow({ key: "OPB-9", title: "Read the bot queue" });
+    server.use(
+      http.get("/api/web/projects/human-ui/items", async ({ request }) => {
+        const query = new URL(request.url).searchParams;
+        const counts = {
+          ...projectItems([]).counts,
+          notes: { current: 1, archived: 0 },
+        };
+        if (query.get("type") !== "note")
+          return HttpResponse.json({
+            ...projectItems([{ product: trail, items: [todoRow()] }]),
+            counts,
+          });
+        if (revoked && query.get("status") === "current") await held;
+        return HttpResponse.json({
+          ...projectItems(
+            revoked
+              ? [{ product: trail, items: [noteRow()] }]
+              : [{ product: openBot, items: [revokedNote] }],
+          ),
+          counts,
+        });
+      }),
+    );
+    const { router, queryClient } = renderApp("/projects/human-ui");
+    expect(
+      await within(
+        await screen.findByRole("region", { name: /^Notes/ }),
+      ).findByText(revokedNote.title),
+    ).toBeVisible();
+    const stream = FakeEventSource.current;
+    stream.open();
+    await router.navigate({
+      to: "/projects/$slug",
+      params: { slug: "human-ui" },
+      search: { type: "note" },
+    });
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+
+    revoked = true;
+    act(() => {
+      stream.dispatchEvent(new MessageEvent("access", { data: "{}" }));
+    });
+    expect(await screen.findAllByText(noteRow().title)).not.toHaveLength(0);
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+
+    const shown = watchFor(reading(revokedNote.title));
+    await router.navigate({
+      to: "/projects/$slug",
+      params: { slug: "human-ui" },
+      search: {},
+    });
+    await screen.findByRole("region", { name: /^Notes/ });
+    release();
+    expect(
+      await within(screen.getByRole("region", { name: /^Notes/ })).findByText(
+        noteRow().title,
+      ),
+    ).toBeVisible();
+    expect(shown()).toBe(false);
+  });
 });
 
 describe("pages", () => {
@@ -675,9 +785,9 @@ describe("pages", () => {
     expect(await screen.findAllByText(todoRow().title)).not.toHaveLength(0);
     expect(screen.getAllByText("Continued row")).not.toHaveLength(0);
     expect(cursors).toEqual([null, "after-opb-3"]);
-    // as many openBot headers ("2 items") as trail ones ("1 item"): one per layout, not per page
-    expect(screen.getAllByText("2 items")).toHaveLength(
-      screen.getAllByText("1 item").length,
+    // as many openBot headers ("2 issues and todos") as trail ones ("1 issue or todo"): one per layout, not per page
+    expect(screen.getAllByText("2 issues and todos")).toHaveLength(
+      screen.getAllByText("1 issue or todo").length,
     );
   });
 

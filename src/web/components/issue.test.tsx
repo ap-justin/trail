@@ -1214,7 +1214,31 @@ describe("notes", () => {
     expect(links[0]).toHaveAccessibleName(
       "In progress Issue TRL-14 Team access",
     );
-    expect(screen.queryByRole("region", { name: "Notes" })).toBeNull();
+  });
+
+  test("a note's page lists the notes about it beside the items it is about", () => {
+    renderIssue({
+      issueKey: "TRL-31",
+      issue: {
+        status: "ready",
+        data: note({
+          notes: [
+            {
+              key: "TRL-40",
+              title: "A follow-up on this note",
+              type: "note",
+              status: "current",
+            },
+          ],
+          notesCount: { current: 1, archived: 0 },
+        }),
+      },
+    });
+    const notes = screen.getByRole("region", { name: "Notes" });
+    expect(within(notes).getByRole("link")).toHaveAccessibleName(
+      "TRL-40 A follow-up on this note",
+    );
+    expect(screen.getByRole("region", { name: "About" })).toBeVisible();
   });
 
   test("a note about nothing the viewer reaches has no About section", () => {

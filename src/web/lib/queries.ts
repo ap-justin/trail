@@ -1,4 +1,5 @@
 import {
+  hashKey,
   infiniteQueryOptions,
   MutationCache,
   type Query,
@@ -24,10 +25,13 @@ import type {
 } from "@/lib/api-types";
 
 /**
- * A query nothing on screen observes. Not Query's `inactive`: that also counts a query whose
- * every observer is disabled, as a `skipToken` one's always is, though the page still shows it.
+ * A query nothing on screen shows: no observer, or only disabled ones, as a section's list is
+ * while its tab hides it. Not Query's `inactive` alone: a `skipToken` query's observers are
+ * always disabled, though the page still shows its data.
  */
-export const isOffScreen = (query: Query) => query.getObserversCount() === 0;
+export const isOffScreen = (query: Query) =>
+  query.getObserversCount() === 0 ||
+  (!query.isActive() && query.options.queryFn !== skipToken);
 
 export const keys = {
   me: ["me"] as const,
@@ -133,6 +137,16 @@ const isCurrentNotes = ({ type, status }: ItemQuery) =>
   type === CURRENT_NOTES.type && status === CURRENT_NOTES.status;
 
 /**
+ * Whether `previous`, the list an observer last showed, is another filter's. One under this
+ * list's own key was dropped from the cache, as an access event drops the lists off screen,
+ * and may hold a revoked product's rows.
+ */
+const isAnotherList = (
+  queryKey: QueryKey,
+  previous: Pick<Query, "queryHash"> | undefined,
+) => previous !== undefined && previous.queryHash !== hashKey(queryKey);
+
+/**
  * A product's items under `filters`, every page up to `ITEM_PAGES_MAX`, as one list. A
  * `nextCursor` left set means the cap cut the list short.
  */
@@ -162,7 +176,10 @@ export const productItemsQuery = (key: string, filters: ItemQuery) =>
     // put: the view filters rows by the active filters, and a product's counts don't follow
     // type or status
     placeholderData: (previous, previousQuery) =>
-      previousQuery?.queryKey[1] === key ? previous : undefined,
+      previousQuery?.queryKey[1] === key &&
+      isAnotherList(keys.productItems(key, filters), previousQuery)
+        ? previous
+        : undefined,
   });
 
 type ItemGroup = WebProjectItemsView["groups"][number];
@@ -215,7 +232,8 @@ export const projectItemsQuery = (slug: string, filters: ProjectItemQuery) =>
     // the caller shows none of its groups
     placeholderData: (previous, previousQuery) =>
       previousQuery?.queryKey[1] === slug &&
-      previousQuery.queryKey[3] === filters.product
+      previousQuery.queryKey[3] === filters.product &&
+      isAnotherList(keys.projectItems(slug, filters), previousQuery)
         ? previous
         : undefined,
   });

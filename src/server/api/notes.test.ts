@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { expect, test, vi } from "vitest";
 import { activityEventSchema } from "../../shared/schemas.js";
-import { activityEvent } from "../db/schema.js";
+import { activityEvent, product } from "../db/schema.js";
 import { createBot } from "../service/keys.js";
 import { eventForReach, type Reach } from "../service/visible.js";
 import { atFakeTimeAsync, projectKey, setupTestApp } from "../test-app.js";
@@ -467,6 +467,33 @@ test("PATCH /items/{key} on a note by a third bot is 403 forbidden, and the note
   expect(read.title).toBe("draft");
 });
 
+test("PATCH /items/{key} with type note on a product with no owner is 403 forbidden, saying so, and the item stays an issue", async () => {
+  const former = await newProduct("rest ownerless");
+  const filer = addBot("rest ownerless filer");
+  const issue = await ok(
+    await request("POST", "/api/v1/items", {
+      json: { type: "issue", product: former.key, title: "is this a bug?" },
+      key: filer.key,
+    }),
+    201,
+  );
+  db.update(product)
+    .set({ ownerId: null })
+    .where(eq(product.key, former.key))
+    .run();
+  const res = await request("PATCH", `/api/v1/items/${issue.key}`, {
+    json: { type: "note" },
+    key: filer.key,
+  });
+  expect(res.status).toBe(403);
+  expect(((await res.json()) as Body).error).toEqual({
+    code: "forbidden",
+    message: `${former.key} has no owner bot, and only a product's own bot turns an item into a note: add a note about ${issue.key} with add_note instead, or ask the operator to give ${former.key} an owner`,
+  });
+  const read = await ok(await request("GET", `/api/v1/items/${issue.key}`));
+  expect(read.type).toBe("issue");
+});
+
 test("POST /items with type note needs a key with the issues action, and a key at all", async () => {
   const owner = await newProduct("rest keys");
   const readOnly = createBot(db, "rest reader", {
@@ -606,4 +633,69 @@ test("swapping one other product's item for another on a note's about writes it 
       },
     },
   ]);
+});
+
+test.each([
+  [
+    "a note",
+    "note",
+    "done",
+    /^.* is a note, and a note's status is current or archived, not done: /,
+  ],
+  [
+    "a note",
+    "note",
+    "open",
+    /^.* is a note, and a note's status is current or archived, not open: /,
+  ],
+  [
+    "a todo",
+    "todo",
+    "current",
+    /^.* is a todo, and current and archived are a note's statuses: send open, in_progress, done or canceled, /,
+  ],
+  [
+    "an issue",
+    "issue",
+    "archived",
+    /^.* is an issue, and current and archived are a note's statuses: send triage, open, in_progress, done or canceled, /,
+  ],
+])(
+  "PATCH /items/{key} refuses a status of another type on %s, naming the valid ones",
+  async (_, type, status, message) => {
+    const owner = await newProduct(`rest status ${type}`);
+    const item = await ok(
+      await request("POST", "/api/v1/items", {
+        json: { type, product: owner.key, title: "subject" },
+      }),
+      201,
+    );
+    const res = await request("PATCH", `/api/v1/items/${item.key}`, {
+      json: { status },
+    });
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as Body).error.message).toMatch(message);
+    expect(
+      (await ok(await request("GET", `/api/v1/items/${item.key}`))).status,
+    ).toBe(item.status);
+  },
+);
+
+test("PATCH /items/{key} takes a note's own statuses and refuses nothing a note may hold", async () => {
+  const owner = await newProduct("rest status ok");
+  const note = await ok(
+    await request("POST", "/api/v1/items", {
+      json: { type: "note", product: owner.key, title: "record" },
+    }),
+    201,
+  );
+  for (const status of ["archived", "current"]) {
+    expect(
+      await ok(
+        await request("PATCH", `/api/v1/items/${note.key}`, {
+          json: { status },
+        }),
+      ),
+    ).toMatchObject({ status });
+  }
 });

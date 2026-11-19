@@ -18,7 +18,7 @@ const results = {
 };
 
 describe("SearchResults", () => {
-  test("products, projects and items as links: products by name and key, projects by name, items by status and type glyph", () => {
+  test("products, projects and items as links: products by name and key, projects by name, items by status and type glyph, each named for its type", () => {
     render(
       <SearchResults
         query="team"
@@ -42,7 +42,7 @@ describe("SearchResults", () => {
     expect(project?.querySelector("svg")).toHaveClass("lucide-folder");
     expect(issue).toHaveAttribute("href", "/products/TRL/14");
     expect(issue).toHaveAccessibleName(
-      "TRL-14 Team access: invite people OLD-187",
+      "Issue TRL-14 Team access: invite people OLD-187",
     );
     // every item row leads with the same two glyphs, so keys line up whatever the type
     expect(
@@ -50,6 +50,35 @@ describe("SearchResults", () => {
         (svg) => svg.dataset.itemType ?? null,
       ),
     ).toEqual([null, "issue"]);
+  });
+
+  test("a todo's row says it's a todo, as an issue's says issue: the glyph alone tells them apart only by sight", () => {
+    render(
+      <SearchResults
+        query="volume"
+        answeredQuery="volume"
+        results={{
+          products: [],
+          projects: [],
+          items: [
+            {
+              key: "TRL-15",
+              sourceKey: null,
+              title: "Back up the volume with Litestream",
+              type: "todo",
+              status: "open",
+              product: { key: "TRL", name: "trail" },
+            },
+          ],
+        }}
+        status="ready"
+      />,
+    );
+    expect(
+      screen.getByRole("link", {
+        name: "Todo TRL-15 Back up the volume with Litestream",
+      }),
+    ).toBeInTheDocument();
   });
 
   test("a note's row carries its status glyph and the Note glyph, and says it's a note; an archived one says so and looks it", () => {

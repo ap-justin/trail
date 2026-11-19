@@ -10,6 +10,7 @@ import {
   ItemTable,
   matchesFilters,
   NO_FILTERS,
+  showAllFilters,
   statusFilterOf,
   statusTabValue,
 } from "@/components/item-list";
@@ -187,7 +188,7 @@ function ItemsBody({
         filters={filters}
         onShowAll={() => {
           focusList();
-          onFiltersChange(NO_FILTERS);
+          onFiltersChange(showAllFilters(filters, NO_FILTERS));
         }}
       />
     );

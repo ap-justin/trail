@@ -10,9 +10,13 @@ import {
   ProductView,
 } from "@/components/product";
 import { api, isNotFound } from "@/lib/api";
+import type { WebItemListView } from "@/lib/api-types";
 import { itemSearchOf, validateItemSearch } from "@/lib/item-search";
 import { loadableOf } from "@/lib/loadable";
 import { keys, productItemsQuery, productNoteCountsQuery } from "@/lib/queries";
+
+// module-scoped so the query reruns the select only when the list changes, not every render
+const itemsOfList = (list: WebItemListView) => list.items;
 
 export const Route = createFileRoute("/_app/products/$key/")({
   validateSearch: validateItemSearch,
@@ -57,7 +61,7 @@ function ProductPage() {
   const notes = useQuery({
     ...productItemsQuery(key, { type: "note", status: "current" }),
     enabled: type !== "note" && (noteCounts?.current ?? 0) > 0,
-    select: (list) => list.items,
+    select: itemsOfList,
   });
   const updates = useQuery({
     queryKey: keys.productStatusUpdates(key),

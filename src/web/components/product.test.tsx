@@ -522,6 +522,29 @@ describe("notes", () => {
     expect(screen.getByRole("tabpanel", { name: /^All/ })).toHaveFocus();
   });
 
+  test("Show all on an empty notes filter keeps the notes and clears only the status", async () => {
+    const user = userEvent.setup();
+    const p = renderProduct({
+      filters: { type: "note", status: "current" },
+      items: {
+        status: "ready",
+        data: {
+          items: [archived],
+          nextCursor: null,
+          counts: countsOf([archived]),
+        },
+      },
+    });
+    expect(
+      screen.getByRole("heading", { name: "No notes are current" }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Show all" }));
+    expect(p.onFiltersChange).toHaveBeenCalledWith({
+      type: "note",
+      status: null,
+    });
+  });
+
   test("a list of notes has Current and Archived tabs, no Notes section, and no New issue for a product with no work", () => {
     renderProduct({
       filters: { type: "note", status: "archived" },

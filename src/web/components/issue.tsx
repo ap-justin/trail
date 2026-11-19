@@ -926,8 +926,9 @@ function CommentBox({
 
 /**
  * An item (issue, todo or note) as people see it: everything read-only except the comment box
- * at the end of the timeline. At 1440 a main column beside a 280px Properties and Links rail; below,
- * one column in the order title, description, properties, links, activity, comment box.
+ * at the end of the timeline. At 1440 a main column beside a 280px rail of Properties, Links, About
+ * and Notes; below, one column in the order title, description, properties, links, about, notes,
+ * activity, comment box.
  */
 export function IssueView(props: IssueViewProps) {
   const { issue } = props;
