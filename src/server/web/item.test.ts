@@ -85,6 +85,7 @@ test("an issue reads with its type, product and fields, its people as actors, an
     completedAt: null,
     about: [],
     notes: [],
+    notesCount: { current: 0, archived: 0 },
   });
   const workerActor = {
     id: worker.actor.id,

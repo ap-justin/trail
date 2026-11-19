@@ -29,6 +29,7 @@ import {
 import { NotFoundError } from "../service/errors.js";
 import { isNoteStatus, type Service } from "../service/index.js";
 import { photoUrlOf } from "../service/photos.js";
+import { ITEM_NOTES_MAX } from "../service/validate.js";
 import { amongProducts } from "../service/visible.js";
 import { timelineOf } from "./entries.js";
 import { createWebRouter, type Member } from "./env.js";
@@ -168,8 +169,10 @@ export function itemView(
       db,
       member,
       noteAbout.noteId,
-      eq(noteAbout.itemId, row.id),
+      and(eq(noteAbout.itemId, row.id), eq(issue.status, "current")),
+      ITEM_NOTES_MAX,
     ),
+    notesCount: notesCountAbout(db, member, row.id),
     timeline: timelineOf(
       db,
       row,
@@ -181,14 +184,16 @@ export function itemView(
 
 /**
  * The items at the `end` of the note_about rows `where` picks that the
- * viewer sees: the items a note is about in key order, or the notes about an
- * item newest first.
+ * viewer sees, at most `limit`: the items a note is about in key order, or
+ * the notes about an item newest first.
  */
 function linkedItems(
   db: Db,
   member: Member,
   end: typeof noteAbout.itemId | typeof noteAbout.noteId,
-  where: SQL,
+  where: SQL | undefined,
+  // SQLite reads a negative limit as none
+  limit = -1,
 ) {
   return db
     .select({
@@ -206,7 +211,28 @@ function linkedItems(
         ? [asc(product.key), asc(issue.number)]
         : [desc(issue.createdAt), desc(issue.id)]),
     )
+    .limit(limit)
     .all();
+}
+
+/** Every note about the item that the viewer sees, per status. */
+function notesCountAbout(db: Db, member: Member, itemId: string) {
+  const counts = { current: 0, archived: 0 };
+  for (const { status, n } of db
+    .select({ status: issue.status, n: sql<number>`count(*)` })
+    .from(noteAbout)
+    .innerJoin(issue, eq(issue.id, noteAbout.noteId))
+    .where(
+      and(
+        eq(noteAbout.itemId, itemId),
+        amongProducts(issue.productId, visibleIds(member)),
+      ),
+    )
+    .groupBy(issue.status)
+    .all()) {
+    if (isNoteStatus(status)) counts[status] = n;
+  }
+  return counts;
 }
 
 /** Each item's label names, A to Z. */

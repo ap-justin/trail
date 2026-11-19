@@ -104,6 +104,64 @@ test("POST /items refuses an assignee on a note", async () => {
   );
 });
 
+test.each([
+  ["priority", { priority: 2 }],
+  ["estimate", { estimate: 3 }],
+])("POST /items refuses %s on a note", async (_, field) => {
+  const owner = await newProduct("rest unranked");
+  const note = await request("POST", "/api/v1/items", {
+    json: { type: "note", product: owner.key, title: "record", ...field },
+  });
+  expect(note.status).toBe(422);
+  expect(((await note.json()) as Body).error.message).toBe(
+    "a note has no priority or estimate, since nobody has to act on it: leave both out, and file an issue (file_issue) for work someone has to do, listing it in the note's about",
+  );
+});
+
+test("GET /items/{key} counts the notes about an item in notesCount, and GET /items?about= lists them, refusing a type other than note", async () => {
+  const owner = await newProduct("rest about list");
+  const todo = await ok(
+    await request("POST", "/api/v1/items", {
+      json: { type: "todo", product: owner.key, title: "work" },
+    }),
+    201,
+  );
+  const notes: Body[] = [];
+  for (const title of ["older", "newer"]) {
+    notes.push(
+      await ok(
+        await request("POST", "/api/v1/items", {
+          json: { type: "note", product: owner.key, title, about: [todo.key] },
+        }),
+        201,
+      ),
+    );
+  }
+  await ok(
+    await request("PATCH", `/api/v1/items/${notes[0]?.key}`, {
+      json: { status: "archived" },
+    }),
+  );
+  const read = await ok(await request("GET", `/api/v1/items/${todo.key}`));
+  expect(read.notes.map((n: Body) => n.key)).toEqual([notes[1]?.key]);
+  expect(read.notesCount).toEqual({ current: 1, archived: 1 });
+  const listed = await ok(
+    await request("GET", `/api/v1/items?about=${todo.key}`),
+  );
+  expect(listed.items.map((i: Body) => i.key)).toEqual([
+    notes[1]?.key,
+    notes[0]?.key,
+  ]);
+  const refused = await request(
+    "GET",
+    `/api/v1/items?about=${todo.key}&type=issue`,
+  );
+  expect(refused.status).toBe(422);
+  expect(((await refused.json()) as Body).error.message).toMatch(
+    /^about lists the notes about an item, so it takes type note or no type, not issue/,
+  );
+});
+
 test("the deprecated /issues routes never show a note", async () => {
   const owner = await newProduct("rest legacy");
   const note = await ok(
@@ -137,7 +195,11 @@ test("the OpenAPI spec documents notes on the items routes", async () => {
     expect.arrayContaining(["about", "addAbout", "removeAbout"]),
   );
   expect(schemas.Item.properties.notes).toBeDefined();
+  expect(schemas.Item.properties.notesCount).toBeDefined();
   expect(schemas.Project.properties.notes).toBeDefined();
+  expect(
+    spec.paths["/items"].get.parameters.map((p: Body) => p.name),
+  ).toContain("about");
   expect(spec.paths["/items"].post.description).toMatch(
     /a note is a record nobody has to act on/,
   );

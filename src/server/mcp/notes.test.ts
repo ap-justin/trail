@@ -1,8 +1,9 @@
 import { eq } from "drizzle-orm";
 import { expect, test } from "vitest";
-import { webhookDelivery } from "../db/schema.js";
+import { activityEvent, webhookDelivery } from "../db/schema.js";
 import { createBot } from "../service/keys.js";
 import { projectKey, setupTestApp } from "../test-app.js";
+import { buildEnvelope } from "../webhooks/payload.js";
 import { type Body, mcpClients } from "./test-client.js";
 
 const { app, db } = setupTestApp();
@@ -127,6 +128,123 @@ test("get_item on a todo hides a note from a product the key doesn't reach, and 
   ).toEqual([
     { key: note.key, title: note.title, type: "note", status: "current" },
   ]);
+});
+
+test("get_item lists the 50 newest current notes about an item and counts all it reaches in notesCount", async () => {
+  const owner = await productBot("Crowded");
+  const elsewhere = await productBot("Faraway");
+  const todo = await call(owner.client, "add_todo", { title: "popular" });
+  const keys: string[] = [];
+  for (let i = 0; i < 52; i++) {
+    keys.push(
+      (
+        await call(owner.client, "add_note", {
+          product: owner.product,
+          title: `note ${i}`,
+          about: [todo.key],
+        })
+      ).key,
+    );
+  }
+  await call(owner.client, "update_item", {
+    item: keys[51],
+    status: "archived",
+  });
+  await call(elsewhere.client, "add_note", {
+    product: elsewhere.product,
+    title: "out of reach",
+    about: [todo.key],
+  });
+  const scoped = await connect(
+    createBot(db, "Crowded only", { scope: { products: [owner.product] } }).key,
+  );
+  const read = await call(scoped, "get_item", { item: todo.key });
+  expect(read.notes.map((n: Body) => n.key)).toEqual(
+    keys.slice(1, 51).reverse(),
+  );
+  expect(read.notesCount).toEqual({ current: 51, archived: 1 });
+  expect(
+    (await call(elsewhere.client, "get_item", { item: todo.key })).notesCount,
+  ).toEqual({ current: 52, archived: 1 });
+});
+
+test("list_items with about pages every note about the item, with or without type note, and with a note status", async () => {
+  const owner = await productBot("Paged");
+  const hidden = await productBot("Hidden");
+  const todo = await call(owner.client, "add_todo", { title: "talked about" });
+  const other = await call(owner.client, "add_todo", { title: "elsewhere" });
+  const keys: string[] = [];
+  for (const title of ["one", "two", "three"]) {
+    keys.push(
+      (
+        await call(owner.client, "add_note", {
+          product: owner.product,
+          title,
+          about: [todo.key],
+        })
+      ).key,
+    );
+  }
+  await call(owner.client, "update_item", {
+    item: keys[0],
+    status: "archived",
+  });
+  await call(owner.client, "add_note", {
+    product: owner.product,
+    title: "not about it",
+    about: [other.key],
+  });
+  await call(hidden.client, "add_note", {
+    product: hidden.product,
+    title: "out of reach",
+    about: [todo.key],
+  });
+  const scoped = await connect(
+    createBot(db, "Paged only", { scope: { products: [owner.product] } }).key,
+  );
+  const first = await call(scoped, "list_items", { about: todo.key, limit: 2 });
+  expect(first.items.map((i: Body) => i.key)).toEqual([keys[2], keys[1]]);
+  const rest = await call(scoped, "list_items", {
+    about: todo.key,
+    limit: 2,
+    cursor: first.nextCursor,
+  });
+  expect(rest.items.map((i: Body) => i.key)).toEqual([keys[0]]);
+  expect(rest.nextCursor).toBeNull();
+  const keysOf = async (args: Body) =>
+    (await call(scoped, "list_items", args)).items.map((i: Body) => i.key);
+  expect(
+    await keysOf({ about: todo.key, type: "note", status: "archived" }),
+  ).toEqual([keys[0]]);
+  expect(await keysOf({ about: todo.key, status: "current" })).toEqual([
+    keys[2],
+    keys[1],
+  ]);
+});
+
+test("list_items refuses about with a type other than note, a work status, or a key it doesn't reach, naming it", async () => {
+  const owner = await productBot("Refuser");
+  const hidden = await productBot("Secretive");
+  const todo = await call(owner.client, "add_todo", { title: "work" });
+  const secret = await call(hidden.client, "add_todo", { title: "secret" });
+  const scoped = await connect(
+    createBot(db, "Refuser only", { scope: { products: [owner.product] } }).key,
+  );
+  expect(
+    await callError(scoped, "list_items", { about: todo.key, type: "todo" }),
+  ).toBe(
+    "validation_failed: about lists the notes about an item, so it takes type note or no type, not todo: leave type out, or drop about to list todos",
+  );
+  expect(
+    await callError(scoped, "list_items", { about: todo.key, status: "open" }),
+  ).toBe(
+    "validation_failed: about lists notes, and a note's status is current or archived, not open",
+  );
+  for (const key of [secret.key, "ZZ-404"]) {
+    expect(await callError(scoped, "list_items", { about: key })).toBe(
+      `validation_failed: about names ${key}, which this key doesn't reach or which doesn't exist: send the key, like TRL-12, of an item get_item finds`,
+    );
+  }
 });
 
 test("add_note with an idempotency key returns the first note on a retry and adds nothing", async () => {
@@ -268,6 +386,37 @@ test("a note's status is current or archived, an issue's or a todo's never is, a
   }
 });
 
+test("update_item refuses priority and estimate on a note, or with type note, saying a note has none", async () => {
+  const owner = await productBot("Ranker");
+  const note = await call(owner.client, "add_note", {
+    product: owner.product,
+    title: "record",
+  });
+  const todo = await call(owner.client, "add_todo", { title: "work" });
+  for (const field of [{ priority: 2 }, { estimate: 3 }, { estimate: null }]) {
+    expect(
+      await callError(owner.client, "update_item", {
+        item: note.key,
+        ...field,
+      }),
+    ).toBe(
+      `validation_failed: ${note.key} is a note, and a note has no priority or estimate: leave both out, and file an issue (file_issue) for work someone has to do, listing it in the note's about`,
+    );
+  }
+  expect(
+    await callError(owner.client, "update_item", {
+      item: todo.key,
+      type: "note",
+      priority: 1,
+    }),
+  ).toBe(
+    `validation_failed: type note makes ${todo.key} a note, and a note has no priority or estimate: leave both out, and file an issue (file_issue) for work someone has to do, listing it in the note's about`,
+  );
+  expect(
+    await call(owner.client, "get_item", { item: note.key }),
+  ).toMatchObject({ priority: 0, estimate: null });
+});
+
 test("update_item replaces, adds to and removes from about, never about with addAbout or removeAbout", async () => {
   const owner = await productBot("Abouter");
   const items: Body[] = [];
@@ -340,7 +489,11 @@ test("only the product's bot turns an item into a note: it keeps its key, drops 
   ).toBe(
     `forbidden: only Converter, the owner of ${owner.product}, turns an item into a note: comment on ${issue.key} with add_comment to ask Converter`,
   );
-  const todo = await call(owner.client, "add_todo", { title: "assigned" });
+  const todo = await call(owner.client, "add_todo", {
+    title: "assigned",
+    priority: 2,
+    estimate: 3,
+  });
   for (const item of [issue, todo]) {
     expect(
       await call(owner.client, "update_item", { item: item.key, type: "note" }),
@@ -349,6 +502,8 @@ test("only the product's bot turns an item into a note: it keeps its key, drops 
       type: "note",
       status: "current",
       assignee: null,
+      priority: 0,
+      estimate: null,
       about: [],
     });
   }
@@ -477,7 +632,7 @@ test("writing a note needs the issues action, as filing an issue does", async ()
   );
 });
 
-test("a note's events go out as trail.item.* with type note, and never under the deprecated trail.issue.* names", async () => {
+test("a note's events go out as trail.item.* with type note, and under the deprecated trail.issue.* names only as the update that made it a note", async () => {
   const owner = await productBot("Hooked");
   const { id } = await call(owner.client, "create_webhook", {
     url: "https://hooked.example.com/hook",
@@ -506,6 +661,7 @@ test("a note's events go out as trail.item.* with type note, and never under the
     "trail.item.updated",
     "trail.issue.created",
     "trail.item.created",
+    "trail.issue.updated",
     "trail.item.updated",
   ]);
   const created = (
@@ -514,4 +670,49 @@ test("a note's events go out as trail.item.* with type note, and never under the
     (e: Body) => e.action === "issue.created" && e.payload.key === note.key,
   );
   expect(created.payload).toMatchObject({ type: "note", status: "current" });
+});
+
+test("an issue turned into a note sends one last trail.issue.updated carrying type note, and nothing more under trail.issue.*", async () => {
+  const owner = await productBot("Retyped");
+  const filer = await productBot("Asker");
+  const { id } = await call(owner.client, "create_webhook", {
+    url: "https://retyped.example.com/hook",
+    secret: "whsec_retyped_0123456789",
+    products: [owner.product],
+  });
+  const issue = await call(filer.client, "file_issue", {
+    product: owner.product,
+    title: "how does export work?",
+  });
+  await call(owner.client, "update_item", { item: issue.key, type: "note" });
+  await call(owner.client, "update_item", {
+    item: issue.key,
+    title: "how export works",
+  });
+  await call(owner.client, "add_comment", { item: issue.key, body: "noted" });
+  const deliveries = db
+    .select({ type: webhookDelivery.type, eventId: webhookDelivery.eventId })
+    .from(webhookDelivery)
+    .where(eq(webhookDelivery.subscriptionId, id))
+    .orderBy(webhookDelivery.seq, webhookDelivery.type)
+    .all();
+  expect(deliveries.map((d) => d.type)).toEqual([
+    "trail.issue.created",
+    "trail.item.created",
+    "trail.issue.updated",
+    "trail.item.updated",
+    "trail.item.updated",
+    "trail.comment.created",
+  ]);
+  const conversion = db
+    .select()
+    .from(activityEvent)
+    .where(eq(activityEvent.id, deliveries[2]?.eventId as string))
+    .get() as typeof activityEvent.$inferSelect;
+  const { data } = buildEnvelope(db, conversion, undefined);
+  expect(data.subject).toMatchObject({ key: issue.key, itemType: "note" });
+  expect(data.payload).toMatchObject({
+    type: { from: "issue", to: "note" },
+    status: { from: "triage", to: "current" },
+  });
 });

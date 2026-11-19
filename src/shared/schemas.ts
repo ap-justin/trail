@@ -24,6 +24,7 @@ import {
   botTitleCharacterProblem,
   ISSUE_LABELS_MAX,
   ISSUE_LINKS_MAX,
+  ITEM_NOTES_MAX,
   NOTE_ABOUT_MAX,
   SLUG_MAX,
 } from "../server/service/validate.js";
@@ -210,8 +211,13 @@ export const issueSchema = z
       description:
         "An issue: triage, open, in_progress, done or canceled. A todo: the same but triage. A note: current or archived.",
     }),
-    priority,
-    estimate: estimate.nullable(),
+    priority: priority.meta({
+      description:
+        "0 none, 1 urgent, 2 high, 3 medium, 4 low; always 0 on a note.",
+    }),
+    estimate: estimate.nullable().meta({
+      description: "Hours; always null on a note.",
+    }),
     labels: z.array(z.string()).meta({ description: "Names, A to Z." }),
     links: z.array(itemLinkSchema),
     assignee: actorRefSchema.nullable(),
@@ -233,9 +239,15 @@ export const issueSchema = z
       description:
         "On a note only: the items it is about that this key reaches, by key.",
     }),
-    notes: z.array(itemRefSchema).optional().meta({
+    notes: z
+      .array(itemRefSchema)
+      .optional()
+      .meta({
+        description: `On get_item (GET /items/{key}) only: the ${ITEM_NOTES_MAX} newest current notes about this item that this key reaches, newest first. notesCount counts them all; list_items (GET /items) with about set to this item's key lists every one, archived ones too.`,
+      }),
+    notesCount: noteCountsSchema.optional().meta({
       description:
-        "On get_item (GET /items/{key}) only: the notes about this item that this key reaches, newest first.",
+        "On get_item (GET /items/{key}) only: every note about this item that this key reaches, per status.",
     }),
     access: z.enum(["product", "project", "via_project"]).optional().meta({
       description:
@@ -1157,6 +1169,13 @@ export const itemCreateSchema = z
         description: `Issues and notes only (a todo with it is a 422). ${ISSUE_PROJECT}`,
       }),
       ...itemFields,
+      estimate: estimate.optional().meta({
+        description: "Hours. A note takes none.",
+      }),
+      priority: priority.optional().meta({
+        description:
+          "0 none, 1 urgent, 2 high, 3 medium, 4 low. A note takes none.",
+      }),
       labels: labelNames.optional(),
       assignee: assigneeRef.nullable().optional().meta({
         description:
@@ -1231,9 +1250,16 @@ export const itemUpdateSchema = z
     {
       type: itemTypeSchema.optional().meta({
         description:
-          "todo makes it planned work of its product (an item in triage opens, and a note opens; it gets the product's owner as assignee when it has none); issue makes it a request for work (a note goes to triage); note makes it a record: status current, no assignee. Only the product's owner changes an item's type.",
+          "todo makes it planned work of its product (an item in triage opens, and a note opens; it gets the product's owner as assignee when it has none); issue makes it a request for work (a note goes to triage); note makes it a record: status current, no assignee, priority 0 and estimate null. Only the product's owner changes an item's type.",
       }),
       ...itemPatchFields,
+      estimate: itemPatchFields.estimate.meta({
+        description: "Hours; null clears. Refused on a note, which has none.",
+      }),
+      priority: priority.optional().meta({
+        description:
+          "0 none, 1 urgent, 2 high, 3 medium, 4 low. Refused on a note, which has none.",
+      }),
       assignee: assigneeRef.nullable().optional().meta({
         description:
           "A bot's name (any case) or id, or a person's id; null unassigns an issue (a todo always keeps one, and a note never has one).",
@@ -1501,13 +1527,18 @@ export const itemListQuerySchema = pageQuerySchema.extend({
   }),
   type: itemTypeSchema.optional().meta({
     description:
-      "todo, issue or note. Left out, issues and todos only: notes are listed only with type note.",
+      "todo, issue or note. Left out, issues and todos only: notes are listed only with type note or about.",
   }),
   status: issueStatusSchema.optional().meta({
     description:
-      "triage, open, in_progress, done or canceled for issues and todos; current or archived with type note.",
+      "triage, open, in_progress, done or canceled for issues and todos; current or archived with type note or about.",
   }),
   assignee: assigneeRef.optional(),
+  about: z.string().min(1).max(200).optional().meta({
+    description:
+      "An item's key, like TRL-12: every note about it that this key reaches, archived ones too unless status says which. It lists notes, so type is note or left out.",
+    example: "TRL-12",
+  }),
 });
 
 export const activityListQuerySchema = pageQuerySchema.extend({
@@ -1924,7 +1955,10 @@ export const webItemSchema = z.object({
       "On a note: the items it is about that the viewer sees, by key; empty on an issue or a todo.",
   }),
   notes: z.array(webItemLinkSchema).meta({
-    description: "The notes about the item that the viewer sees, newest first.",
+    description: `The ${ITEM_NOTES_MAX} newest current notes about the item that the viewer sees, newest first.`,
+  }),
+  notesCount: noteCountsSchema.meta({
+    description: "Every note about the item that the viewer sees, per status.",
   }),
   timeline: z.array(entrySchema).meta({
     description:

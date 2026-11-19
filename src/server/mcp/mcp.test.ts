@@ -258,6 +258,7 @@ test("issue tools file, read, list and update an issue with its fields, labels a
   expect(await call(client, "get_item", { item: "MCI-1" })).toEqual({
     ...created,
     notes: [],
+    notesCount: { current: 0, archived: 0 },
     access: "product",
   });
 

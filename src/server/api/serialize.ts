@@ -141,6 +141,7 @@ export function toIssue(row: Issue): IssueView {
     ...(row.access && { access: row.access }),
     ...(row.about && { about: row.about }),
     ...(row.notes && { notes: row.notes }),
+    ...(row.notesCount && { notesCount: row.notesCount }),
   };
 }
 

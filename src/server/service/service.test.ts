@@ -601,6 +601,7 @@ describe("updatedAt", () => {
     expect(service.getItem(bot, created.id)).toEqual({
       ...created,
       notes: [],
+      notesCount: { current: 0, archived: 0 },
       access: "product",
     });
     expect(published).toEqual([]);

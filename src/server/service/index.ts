@@ -87,6 +87,7 @@ import { clearActorPhoto, photoUrl, setActorPhoto } from "./photos.js";
 import type { Tx } from "./tx.js";
 import {
   completedAtOf,
+  ITEM_NOTES_MAX,
   type Link,
   type LinkInput,
   labelKey,
@@ -189,8 +190,10 @@ export type Issue = IssueRow & {
   access?: ItemAccess;
   /** On a note: the items it is about that the caller reaches, in key order. */
   about?: ItemRef[];
-  /** On get_item: the notes about the item that the caller reaches, newest first. */
+  /** On get_item: the newest current notes about the item that the caller reaches, newest first. */
   notes?: ItemRef[];
+  /** On get_item: every note about the item that the caller reaches, per status. */
+  notesCount?: NoteCounts;
 };
 
 /** An item as another item names it. */
@@ -436,6 +439,8 @@ export type ItemQuery = PageQuery & {
   status?: IssueStatus | readonly IssueStatus[];
   /** a bot's id or name, or a person's id */
   assignee?: string;
+  /** an item's key: the notes about it */
+  about?: string;
 };
 /**
  * `cursor` pages newest first; `after` resumes oldest first from a cursor ("" is
@@ -1429,7 +1434,14 @@ export function createService({
     return about;
   }
 
-  /** The notes about the item that `actor` reaches, newest first. */
+  /** Where a note is about the item and `actor` reaches the note. */
+  const reachedNotesAbout = (itemId: string, actor: ActingActor) =>
+    and(
+      eq(noteAbout.itemId, itemId),
+      itemsReached(db, reachFor(actor), issue.id, issue.productId),
+    );
+
+  /** The newest `ITEM_NOTES_MAX` current notes about the item that `actor` reaches, newest first. */
   function notesAbout(
     tx: Tx | Db,
     itemId: string,
@@ -1440,14 +1452,41 @@ export function createService({
       .from(noteAbout)
       .innerJoin(issue, eq(issue.id, noteAbout.noteId))
       .innerJoin(product, eq(product.id, issue.productId))
-      .where(
-        and(
-          eq(noteAbout.itemId, itemId),
-          itemsReached(db, reachFor(actor), issue.id, issue.productId),
-        ),
-      )
+      .where(and(reachedNotesAbout(itemId, actor), eq(issue.status, "current")))
       .orderBy(desc(issue.createdAt), desc(issue.id))
+      .limit(ITEM_NOTES_MAX)
       .all();
+  }
+
+  /** The item list_items' `about` names; one `actor` doesn't reach is a bad query, named. */
+  function aboutTarget(ref: string, actor: ActingActor): IssueRow {
+    try {
+      return resolveIssueRow(db, ref, actor);
+    } catch (error) {
+      if (!(error instanceof NotFoundError)) throw error;
+      throw new ValidationError(
+        `about names ${ref}, which this key doesn't reach or which doesn't exist: send the key, like TRL-12, of an item get_item finds`,
+      );
+    }
+  }
+
+  /** Every note about the item that `actor` reaches, per status. */
+  function notesCountAbout(
+    tx: Tx | Db,
+    itemId: string,
+    actor: ActingActor,
+  ): NoteCounts {
+    const counts = noNotes();
+    for (const { status, n } of tx
+      .select({ status: issue.status, n: sql<number>`count(*)` })
+      .from(noteAbout)
+      .innerJoin(issue, eq(issue.id, noteAbout.noteId))
+      .where(reachedNotesAbout(itemId, actor))
+      .groupBy(issue.status)
+      .all()) {
+      if (isNoteStatus(status)) counts[status] = n;
+    }
+    return counts;
   }
 
   /** `about` as sent, checked for count before any lookup. */
@@ -2699,6 +2738,14 @@ export function createService({
               "a note has no assignee, since nobody has to act on it: leave assignee out, and file an issue (file_issue) for work someone has to do, listing it in the note's about",
             );
           }
+          if (
+            type === "note" &&
+            (input.priority !== undefined || input.estimate !== undefined)
+          ) {
+            throw new ValidationError(
+              "a note has no priority or estimate, since nobody has to act on it: leave both out, and file an issue (file_issue) for work someone has to do, listing it in the note's about",
+            );
+          }
           if (type === "todo") {
             requireOwner(
               tx,
@@ -3561,6 +3608,11 @@ export function createService({
               `${becomes}, and a note has no assignee: file an issue (file_issue) for work someone has to do, and list it in the note's about`,
             );
           }
+          if (patch.priority !== undefined || patch.estimate !== undefined) {
+            throw new ValidationError(
+              `${becomes}, and a note has no priority or estimate: leave both out, and file an issue (file_issue) for work someone has to do, listing it in the note's about`,
+            );
+          }
           assigneeId = null;
         } else {
           if (status !== undefined && isNoteStatus(status)) {
@@ -3622,7 +3674,13 @@ export function createService({
               `${current.key} was filed on ${key}, which ${owner} owns, and was canceled: only ${owner} reopens it. Comment on it with add_comment to ask ${owner}`,
           );
         }
-        const fields = { ...next, type, status: nextStatus, assigneeId };
+        const fields = {
+          ...next,
+          ...(type === "note" && { priority: 0, estimate: null }),
+          type,
+          status: nextStatus,
+          assigneeId,
+        };
         const changes = changesOf<IssueRow>(row, fields);
         // the add and remove forms edit the set read here, under the write lock this transaction holds
         const wantedLabels =
@@ -4510,7 +4568,11 @@ export function createService({
       const found = withPullRequest(hydrateOne(db, row, actor));
       const item = legacy
         ? found
-        : { ...found, notes: notesAbout(db, row.id, actor) };
+        : {
+            ...found,
+            notes: notesAbout(db, row.id, actor),
+            notesCount: notesCountAbout(db, row.id, actor),
+          };
       return actor.kind === "bot"
         ? { ...item, access: accessOf(db, actor, row) }
         : item;
@@ -4530,10 +4592,21 @@ export function createService({
     },
 
     /**
-     * Newest first, filtered by any of product, project, type, status and
-     * assignee. Without `type`, issues and todos only: notes need type note.
+     * Newest first, filtered by any of product, project, type, status,
+     * assignee and the item notes are about. Without `type`, issues and todos
+     * only: notes need type note or `about`.
      */
     listItems(actor: ActingActor, query: ItemQuery = {}): Page<Issue> {
+      if (
+        query.about !== undefined &&
+        query.type !== undefined &&
+        query.type !== "note"
+      ) {
+        throw new ValidationError(
+          `about lists the notes about an item, so it takes type note or no type, not ${query.type}: leave type out, or drop about to list ${query.type}s`,
+        );
+      }
+      const type = query.about === undefined ? query.type : "note";
       const statuses =
         query.status === undefined
           ? []
@@ -4541,12 +4614,14 @@ export function createService({
             ? [validStatus(query.status)]
             : query.status.map(validStatus);
       for (const status of statuses) {
-        if (query.type === "note" && !isNoteStatus(status)) {
+        if (type === "note" && !isNoteStatus(status)) {
           throw new ValidationError(
-            `a note's status is current or archived, so type note takes status current or archived, not ${status}`,
+            query.about === undefined
+              ? `a note's status is current or archived, so type note takes status current or archived, not ${status}`
+              : `about lists notes, and a note's status is current or archived, not ${status}`,
           );
         }
-        if (query.type !== "note" && isNoteStatus(status)) {
+        if (type !== "note" && isNoteStatus(status)) {
           throw new ValidationError(
             query.type === undefined
               ? `status ${status} is a note's, and list_items without type lists issues and todos: send type note with it`
@@ -4564,6 +4639,10 @@ export function createService({
         query.project === undefined
           ? undefined
           : resolveProject(db, query.project, actor);
+      const aboutId =
+        query.about === undefined
+          ? undefined
+          : aboutTarget(query.about, actor).id;
       const filters = [
         itemsReached(db, reachFor(actor), issue.id, issue.productId),
         query.product === undefined
@@ -4581,9 +4660,18 @@ export function createService({
                 .from(projectItem)
                 .where(eq(projectItem.projectId, inProject.id)),
             ),
-        query.type === undefined
+        type === undefined
           ? inArray(issue.type, workTypes)
-          : eq(issue.type, query.type),
+          : eq(issue.type, type),
+        aboutId === undefined
+          ? undefined
+          : inArray(
+              issue.id,
+              db
+                .select({ id: noteAbout.noteId })
+                .from(noteAbout)
+                .where(eq(noteAbout.itemId, aboutId)),
+            ),
         statuses.length === 0 ? undefined : inArray(issue.status, statuses),
         query.assignee === undefined
           ? undefined

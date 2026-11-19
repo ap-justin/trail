@@ -85,6 +85,8 @@ export const ISSUE_LABELS_MAX = 50;
 export const ISSUE_LINKS_MAX = 50;
 /** Most items one note is about. */
 export const NOTE_ABOUT_MAX = 50;
+/** Most notes get_item lists about one item; list_items with about pages the rest. */
+export const ITEM_NOTES_MAX = 50;
 
 export function withinIssueCap<T>(set: T[], what: "labels" | "links"): T[] {
   const [max, remove] =

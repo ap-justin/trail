@@ -13,6 +13,7 @@ import {
   updatedItemSchema,
 } from "../../shared/schemas.js";
 import type { Service } from "../service/index.js";
+import { ITEM_NOTES_MAX } from "../service/validate.js";
 import { createRouter } from "./env.js";
 import {
   conflictError,
@@ -47,7 +48,7 @@ export const WHICH_ITEM =
 
 /** Who edits a note, and how its fields differ from work's: update_item and PATCH /items/{key} both say it. */
 export const NOTE_EDITS =
-  "A note is edited only by its author and its product's own bot; anyone else is refused (forbidden) and comments with add_comment. Its status is current or archived, it has no assignee, and about, addAbout and removeAbout set the items it is about. Only the product's owner turns an item into a note (type note: status current, assignee dropped) or a note back into work (an issue goes to triage, a todo opens assigned to the owner).";
+  "A note is edited only by its author and its product's own bot; anyone else is refused (forbidden) and comments with add_comment. Its status is current or archived, it has no assignee, priority or estimate (priority reads 0 and estimate null), and about, addAbout and removeAbout set the items it is about. Only the product's owner turns an item into a note (type note: status current, assignee dropped, priority and estimate cleared) or a note back into work (an issue goes to triage, a todo opens assigned to the owner).";
 
 export const COMMENT_HOLDS =
   "A comment holds what changed for the work and why, a decision or scope change, a blocker and who clears it, or that it is done. It leaves out commit SHAs, CI runs and logs, review findings and agent run ids: those stay on the pull request, and the pull request goes in the item's links.";
@@ -78,9 +79,9 @@ const listItems = createRoute({
   method: "get",
   path: "/items",
   summary:
-    "List items newest first, filtered by product, project, type, status or assignee",
+    "List items newest first, filtered by product, project, type, status, assignee or about",
   description:
-    "Without type, issues and todos only: notes are listed with type note, and status current or archived goes with it.",
+    "Without type, issues and todos only: notes are listed with type note or about, and status current or archived goes with them. about, an item's key like TRL-12, lists every note about that item this key reaches, archived ones too, paged like any list; it implies type note, so type todo or issue beside it is a 422, and so is a key this key doesn't reach.",
   tags,
   request: { query: itemListQuerySchema },
   responses: {
@@ -95,8 +96,7 @@ const getItem = createRoute({
   method: "get",
   path: "/items/{key}",
   summary: "Get an item",
-  description:
-    "A note carries about, the items it is about; every item carries notes, the notes about it. Both list only what this key reaches.",
+  description: `A note carries about, the items it is about; every item carries notes, the ${ITEM_NOTES_MAX} newest current notes about it, and notesCount, every note about it per status. All three cover only what this key reaches; GET /items with about set to the item's key pages through every note about it, archived ones too.`,
   tags,
   request: { params: itemParam },
   responses: {

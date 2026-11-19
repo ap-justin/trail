@@ -108,6 +108,35 @@ test("a note's page lists the items it is about that the viewer sees; an item's 
   });
 });
 
+test("an item's page lists the 50 newest current notes about it and counts every note the viewer sees in notesCount", async () => {
+  const crowded = addProject("Crowded");
+  const elsewhere = addProject("Elsewhere");
+  const writer = addBot("crowd writer");
+  const target = await item(crowded.key, "todo");
+  const add = async (title: string, product = crowded.key) => {
+    const res = await request("POST", "/api/v1/items", {
+      json: { type: "note", product, title, about: [target] },
+      key: writer.key,
+    });
+    expect(res.status, await res.clone().text()).toBe(201);
+    return ((await res.json()) as Body).key as string;
+  };
+  const added: string[] = [];
+  for (let i = 0; i < 52; i++) added.push(await add(`note ${i}`));
+  const archive = await request("PATCH", `/api/v1/items/${added[51]}`, {
+    json: { status: "archived" },
+    key: writer.key,
+  });
+  expect(archive.status).toBe(200);
+  await add("out of sight", elsewhere.key);
+  const viewer = await addMember("crowdreader", [crowded.id]);
+  const page = await get(`/items/${target}`, viewer);
+  expect(page.body.notes.map((n: Body) => n.key)).toEqual(
+    added.slice(1, 51).reverse(),
+  );
+  expect(page.body.notesCount).toEqual({ current: 51, archived: 1 });
+});
+
 test("search finds a note, with its type and status", async () => {
   const found = await get("/search?q=current%20note", member);
   expect(found.body.items).toEqual([

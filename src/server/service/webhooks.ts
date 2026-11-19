@@ -616,7 +616,11 @@ export function enqueueDeliveries(
     .all();
   const followers = [...new Set([...byProduct, ...byProject].map((f) => f.id))];
   if (followers.length === 0) return;
-  const types = deliveryTypesOf(event.action, itemTypeOf(tx, event));
+  const types = deliveryTypesOf(
+    event.action,
+    itemTypeOf(tx, event),
+    madeANote(event.payload),
+  );
   // in this order: the worker sends one event's deliveries in insertion order
   tx.insert(webhookDelivery)
     .values(
@@ -646,23 +650,33 @@ function itemTypeOf(
     .get()?.type;
 }
 
+/** Whether an item update's payload turned an issue or a todo into a note. */
+function madeANote(payload: unknown): boolean {
+  const type = (payload as { type?: { from?: unknown; to?: unknown } } | null)
+    ?.type;
+  return type?.to === "note" && type.from !== "note";
+}
+
 /**
  * The webhook types an event goes out as: trail.<action>, and for one release
  * a second type beside it: a product event also as the trail.project.* it was
  * sent as before products and projects split, an item event also as the
  * trail.item.* that replaces trail.issue.*. A note's item events, which came
- * after trail.issue.* was deprecated, go out as trail.item.* alone.
+ * after trail.issue.* was deprecated, go out as trail.item.* alone, but for the
+ * update that turned an issue or a todo into one (`madeNote`): a trail.issue.*
+ * follower gets that one, to see the item leave.
  */
 export function deliveryTypesOf(
   action: string,
   itemType?: IssueType,
+  madeNote = false,
 ): string[] {
   const type = `trail.${action}`;
   const [subject, verb] = action.split(".", 2);
   if (subject === "product") return [type, `trail.project.${verb}`];
   if (subject === "issue") {
     const renamed = `trail.item.${verb}`;
-    return itemType === "note" ? [renamed] : [type, renamed];
+    return itemType === "note" && !madeNote ? [renamed] : [type, renamed];
   }
   return [type];
 }

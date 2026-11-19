@@ -215,6 +215,7 @@ export function issue(overrides: Partial<WebItemView> = {}): WebItemView {
     completedAt: null,
     about: [],
     notes: [],
+    notesCount: { current: 0, archived: 0 },
     timeline: [
       {
         ...on,

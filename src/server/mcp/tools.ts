@@ -92,7 +92,7 @@ import {
   PHOTO_MAX_BYTES,
   photoTooLarge,
 } from "../service/photos.js";
-import { BOT_TITLE_MAX } from "../service/validate.js";
+import { BOT_TITLE_MAX, ITEM_NOTES_MAX } from "../service/validate.js";
 import { PING_LIMIT, PING_WINDOW_MS } from "../service/webhooks.js";
 import {
   WEBHOOK_DELIVERY,
@@ -422,8 +422,7 @@ export function registerTools(
   register(
     "get_item",
     {
-      description:
-        "Get an item (a todo, an issue or a note) by its key, like TRL-12: type, product, status, assignee, labels, links, the projects it is in, notes (the notes about it, newest first), on a note about (the items it is about), and access, why this key reaches it: product (its products cover it), project (a project the key lists holds it) or via_project (a project drawing from one of the key's products holds it: read it and comment with add_comment, and any change is refused until the key lists its product or project).",
+      description: `Get an item (a todo, an issue or a note) by its key, like TRL-12: type, product, status, assignee, labels, links, the projects it is in, notes (the ${ITEM_NOTES_MAX} newest current notes about it, newest first), notesCount (every note about it this key reaches, as {current, archived}; when it counts more than notes holds, list_items with about set to the item's key pages through all of them, archived ones too), on a note about (the items it is about), and access, why this key reaches it: product (its products cover it), project (a project the key lists holds it) or via_project (a project drawing from one of the key's products holds it: read it and comment with add_comment, and any change is refused until the key lists its product or project).`,
       inputSchema: () => z.strictObject({ item }),
       annotations: read,
     },
@@ -451,7 +450,7 @@ export function registerTools(
     "list_items",
     {
       description:
-        'List items newest first, filtered by any of product, project, type (todo, issue or note), status and assignee, a page at a time: pass nextCursor back as cursor until it is null. Without type it lists issues and todos only; notes need type "note", with status "current" or "archived" if any. Your product\'s triage: product and status "triage". A project\'s open todos: project, type "todo" and status "open". A project\'s current notes: project, type "note" and status "current". Only items this key reaches are listed: every item of its products, and the items of its projects and of the projects drawing from its products, whichever product they are in (list_projects lists them; send project for the items of one).',
+        'List items newest first, filtered by any of product, project, type (todo, issue or note), status, assignee and about, a page at a time: pass nextCursor back as cursor until it is null. Without type it lists issues and todos only; notes need type "note" or about, with status "current" or "archived" if any. about, an item\'s key like TRL-12, lists every note about that item this key reaches, archived ones too, paged like any list: it implies type "note", so type "todo" or "issue" beside it is refused. Your product\'s triage: product and status "triage". A project\'s open todos: project, type "todo" and status "open". A project\'s current notes: project, type "note" and status "current". Only items this key reaches are listed: every item of its products, and the items of its projects and of the projects drawing from its products, whichever product they are in (list_projects lists them; send project for the items of one).',
       inputSchema: () =>
         z.strictObject({
           product: product.optional(),
@@ -459,6 +458,7 @@ export function registerTools(
           type: itemListQuerySchema.shape.type,
           status: itemListQuerySchema.shape.status,
           assignee: itemListQuerySchema.shape.assignee,
+          about: itemListQuerySchema.shape.about,
           ...page,
         }),
       annotations: read,
