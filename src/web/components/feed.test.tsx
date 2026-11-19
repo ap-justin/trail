@@ -532,6 +532,18 @@ describe("item events", () => {
     expect(row).toHaveTextContent(/to\s*Todo/);
   });
 
+  test("a type change to Note names Note, and Issue and Todo stay out of the tail", () => {
+    renderFeed({
+      entries: [
+        typeChangedEntry("e1", minutesAgo(1), { from: "issue", to: "note" }),
+      ],
+    });
+    const row = rowFor("e1");
+    expect(row).toHaveTextContent(/changed type of\s*TRL-14/);
+    expect(row).toHaveTextContent(/to\s*Note/);
+    expect(row).not.toHaveTextContent("Todo");
+  });
+
   test("adding to and removing from a project name the project", () => {
     renderFeed({
       entries: [

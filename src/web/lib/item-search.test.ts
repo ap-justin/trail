@@ -1,5 +1,9 @@
 import { describe, expect, test } from "vitest";
-import { validateFeedSearch, validateItemSearch } from "@/lib/item-search";
+import {
+  itemSearchOf,
+  validateFeedSearch,
+  validateItemSearch,
+} from "@/lib/item-search";
 
 describe("an item list's deep link", () => {
   test("a note status with no type is All", () => {
@@ -65,5 +69,30 @@ describe("the feed's deep link", () => {
       project: undefined,
       type: "note",
     });
+  });
+});
+
+describe("the filters back to search params", () => {
+  test("a note type keeps its status in the URL", () => {
+    expect(itemSearchOf({ type: "note", status: "archived" })).toEqual({
+      type: "note",
+      status: "archived",
+    });
+    expect(itemSearchOf({ type: "note", status: "current" })).toEqual({
+      type: "note",
+      status: "current",
+    });
+  });
+
+  test("All notes leaves the status out, and All leaves both out", () => {
+    expect(itemSearchOf({ type: "note", status: null })).toStrictEqual({
+      type: "note",
+    });
+    expect(itemSearchOf({ type: null, status: null })).toStrictEqual({});
+  });
+
+  test("what it writes is what the validator reads back", () => {
+    const filters = { type: "note", status: "archived" } as const;
+    expect(validateItemSearch(itemSearchOf(filters))).toEqual(filters);
   });
 });

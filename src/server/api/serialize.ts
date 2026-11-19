@@ -148,10 +148,19 @@ export function toIssue(row: Issue): IssueView {
 
 /** An item as the routes from before triage serve it: triage, which their status enum lacks, reads as open. */
 export function toLegacyIssue(row: Issue) {
-  return { ...toIssue(row), status: legacyStatus(row.status) };
+  return {
+    ...toIssue(row),
+    type: legacyType(row.type),
+    status: legacyStatus(row.status),
+  };
 }
 
 // the service keeps notes from reaching the legacy routes
+function legacyType(type: Issue["type"]) {
+  if (type === "note") throw new Error("a note reached a legacy route");
+  return type;
+}
+
 function legacyStatus(status: Issue["status"]) {
   if (status === "triage") return "open";
   if (isNoteStatus(status)) {

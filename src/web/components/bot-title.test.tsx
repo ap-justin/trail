@@ -277,6 +277,7 @@ describe("product", () => {
           status: "ready",
           data: issueList([issueRow({ assignee: betaTitled })]),
         }}
+        counts={null}
         statusUpdates={{
           status: "ready",
           data: {

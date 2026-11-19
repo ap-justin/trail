@@ -447,6 +447,7 @@ function projectRefs(db: Db, ids: string[]): (id: string) => WebProjectRefView {
 type AboutChanges = {
   about?: Change<string[]>;
   aboutOthers?: Change<number>;
+  type?: Change<IssueType>;
 };
 
 /**
@@ -454,8 +455,9 @@ type AboutChanges = {
  * note's own product's items, which whoever reads the note's page sees; the
  * rest it only counts.
  */
-function aboutChange({ about, aboutOthers }: AboutChanges) {
-  if (!about || !aboutOthers) return undefined;
+function aboutChange({ about, aboutOthers, type }: AboutChanges) {
+  // turning a note into another type empties its about: the type change already says so
+  if (!about || !aboutOthers || type?.from === "note") return undefined;
   return {
     added: about.to.filter((k) => !about.from.includes(k)),
     removed: about.from.filter((k) => !about.to.includes(k)),

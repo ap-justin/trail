@@ -58,6 +58,7 @@ function props(overrides: Partial<ProjectViewProps> = {}): ProjectViewProps {
       data: projectDetail({ products: [docsSite, trail] }),
     },
     items,
+    counts: null,
     notes: { status: "ready", data: [] },
     statusUpdates: {
       status: "ready",

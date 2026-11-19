@@ -1595,11 +1595,7 @@ export function createService({
       .map((r) => r.id);
     const idsOf = (refs: string[], field: string) =>
       aboutRows(tx, actor, refs, field, row.id).map((r) => r.id);
-    let kept: string[];
-    let added: string[] = [];
-    if (type !== "note") {
-      kept = [];
-    } else if (forms.replace !== undefined) {
+    const unreached = () => {
       const reached = new Set(
         tx
           .select({ id: issue.id })
@@ -1613,7 +1609,14 @@ export function createService({
           .all()
           .map((r) => r.id),
       );
-      kept = stored.filter((id) => !reached.has(id));
+      return stored.filter((id) => !reached.has(id));
+    };
+    let kept: string[];
+    let added: string[] = [];
+    if (type !== "note") {
+      kept = [];
+    } else if (forms.replace !== undefined) {
+      kept = unreached();
       added = idsOf(forms.replace, "about");
     } else if (forms.add !== undefined || forms.remove !== undefined) {
       const removed = new Set(
@@ -1633,8 +1636,13 @@ export function createService({
     }
     const wanted = [...new Set([...kept, ...added])];
     if (wanted.length > NOTE_ABOUT_MAX) {
+      // both forms keep every stored item the key can't reach
+      const out = unreached().length;
+      const total = `a note is about at most ${NOTE_ABOUT_MAX} items, and this update would make it about ${wanted.length}`;
       throw new ValidationError(
-        `a note is about at most ${NOTE_ABOUT_MAX} items, and this update would make it about ${wanted.length}: drop some with removeAbout`,
+        out === 0
+          ? `${total}: drop some with removeAbout`
+          : `${total}, ${out} of them out of this key's reach, which it keeps and removeAbout can't drop: leave it about at most ${Math.max(NOTE_ABOUT_MAX - out, 0)} items this key reaches`,
       );
     }
     const same =

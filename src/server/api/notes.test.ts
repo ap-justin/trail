@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { expect, test, vi } from "vitest";
 import { activityEventSchema } from "../../shared/schemas.js";
 import { activityEvent, product } from "../db/schema.js";
-import { createBot } from "../service/keys.js";
+import { createBot, createKey, editKeyScope } from "../service/keys.js";
 import { eventForReach, type Reach } from "../service/visible.js";
 import { atFakeTimeAsync, projectKey, setupTestApp } from "../test-app.js";
 
@@ -567,6 +567,57 @@ test("PATCH /items/{key} refuses about with 51 items and an addAbout that would 
   );
 });
 
+test("PATCH /items/{key} over the cap counts the kept items the key can't reach, which removeAbout can't drop", async () => {
+  const owner = await newProduct("rest cap reach");
+  const elsewhere = addBot("cap elsewhere");
+  const hidden = await newProduct("cap hidden", elsewhere.key);
+  const secret = await ok(
+    await request("POST", "/api/v1/items", {
+      json: { type: "todo", product: hidden.key, title: "secret" },
+      key: elsewhere.key,
+    }),
+    201,
+  );
+  const keys: string[] = [];
+  for (let i = 0; i < 50; i++) {
+    keys.push(
+      (
+        await ok(
+          await request("POST", "/api/v1/items", {
+            json: { type: "todo", product: owner.key, title: `item ${i}` },
+          }),
+          201,
+        )
+      ).key,
+    );
+  }
+  const note = await ok(
+    await request("POST", "/api/v1/items", {
+      json: {
+        type: "note",
+        product: owner.key,
+        title: "spans products",
+        about: [secret.key],
+      },
+    }),
+    201,
+  );
+  const scoped = createKey(db, bot.actor.id, { products: [owner.key] }).key;
+  const res = await request("PATCH", `/api/v1/items/${note.key}`, {
+    json: { about: keys },
+    key: scoped,
+  });
+  expect(res.status, await res.clone().text()).toBe(422);
+  const { error } = (await res.json()) as Body;
+  expect(error).toEqual({
+    code: "validation_failed",
+    message:
+      "a note is about at most 50 items, and this update would make it about 51, 1 of them out of this key's reach, which it keeps and removeAbout can't drop: leave it about at most 49 items this key reaches",
+  });
+  const read = await ok(await request("GET", `/api/v1/items/${note.key}`));
+  expect(read.about.map((r: Body) => r.key)).toEqual([secret.key]);
+});
+
 test.each([
   ["type todo with about", "type=todo&about=TRL-1"],
   ["type note with status open", "type=note&status=open"],
@@ -698,4 +749,131 @@ test("PATCH /items/{key} takes a note's own statuses and refuses nothing a note 
       ),
     ).toMatchObject({ status });
   }
+});
+
+test("POST /items with type note and links keeps them, and a non-owner author's labels are skipped and named while the owner's are made", async () => {
+  const owner = await newProduct("rest note labels");
+  const writer = addBot("rest note labeler");
+  const send = (key: string, labels: string[]) =>
+    request("POST", "/api/v1/items", {
+      json: {
+        type: "note",
+        product: owner.key,
+        title: "labelled record",
+        labels,
+        links: [{ url: "https://example.com/doc", title: "the doc" }],
+      },
+      key,
+    });
+  const outside = await ok(await send(writer.key, ["note-label"]), 201);
+  expect(outside).toMatchObject({
+    type: "note",
+    labels: [],
+    skippedLabels: ["note-label"],
+    links: [{ url: "https://example.com/doc", title: "the doc" }],
+  });
+  const names = async () =>
+    (
+      await ok(await request("GET", `/api/v1/products/${owner.key}/labels`))
+    ).items.map((l: Body) => l.name);
+  expect(await names()).not.toContain("note-label");
+
+  const own = await ok(await send(bot.key, ["note-label"]), 201);
+  expect(own.labels).toEqual(["note-label"]);
+  expect(own).not.toHaveProperty("skippedLabels");
+  expect(await names()).toContain("note-label");
+});
+
+test("a note with labels and links keeps both when PATCH turns it into an issue and back", async () => {
+  const owner = await newProduct("rest note round trip");
+  const note = await ok(
+    await request("POST", "/api/v1/items", {
+      json: {
+        type: "note",
+        product: owner.key,
+        title: "round trip",
+        labels: ["kept"],
+        links: [{ url: "https://example.com/kept" }],
+      },
+    }),
+    201,
+  );
+  const expected = {
+    labels: ["kept"],
+    links: [{ url: "https://example.com/kept" }],
+  };
+  expect(note).toMatchObject(expected);
+  for (const type of ["issue", "note"]) {
+    expect(
+      await ok(
+        await request("PATCH", `/api/v1/items/${note.key}`, { json: { type } }),
+      ),
+      type,
+    ).toMatchObject({ type, ...expected });
+  }
+});
+
+test("POST /items with type note and an Idempotency-Key returns the first note on a replay and writes nothing", async () => {
+  const owner = await newProduct("rest note idem");
+  const writer = addBot("rest note replayer");
+  const note = (key: string, extra: Body = {}) =>
+    request("POST", "/api/v1/items", {
+      json: { type: "note", product: owner.key, title: "a record", ...extra },
+      key,
+      headers: { "idempotency-key": "note-rest-1" },
+    });
+  const first = await ok(await note(writer.key), 201);
+  const again = await ok(await note(writer.key), 201);
+  expect(again).toEqual(first);
+  const listed = await ok(
+    await request("GET", `/api/v1/items?product=${owner.key}&type=note`),
+  );
+  expect(listed.items.map((i: Body) => i.key)).toEqual([first.key]);
+
+  const reused = await note(writer.key, { title: "another record" });
+  expect(reused.status).toBe(422);
+  expect(((await reused.json()) as Body).error.code).toBe(
+    "idempotency_key_reused",
+  );
+});
+
+test("POST /items replaying a todo's Idempotency-Key as a note is refused as a reused key, and the todo stays", async () => {
+  const owner = await newProduct("rest note type swap");
+  const send = (type: string) =>
+    request("POST", "/api/v1/items", {
+      json: { type, product: owner.key, title: "same title" },
+      headers: { "idempotency-key": "type-swap-1" },
+    });
+  const todo = await ok(await send("todo"), 201);
+  const swapped = await send("note");
+  expect(swapped.status).toBe(422);
+  expect(((await swapped.json()) as Body).error.code).toBe(
+    "idempotency_key_reused",
+  );
+  expect(await ok(await send("todo"), 201)).toEqual(todo);
+});
+
+test("a note replayed by a key that lost the product is the 404 a new note gets, and writes nothing", async () => {
+  const owner = await newProduct("rest note lost reach");
+  const other = await newProduct("rest note kept reach");
+  const { key } = createBot(db, "rest note scoped", {
+    scope: { products: [owner.key, other.key] },
+  });
+  const send = (idempotency: string) =>
+    request("POST", "/api/v1/items", {
+      json: { type: "note", product: owner.key, title: "scoped record" },
+      key,
+      headers: { "idempotency-key": idempotency },
+    });
+  const first = await ok(await send("lost-reach"), 201);
+  expect((await ok(await send("lost-reach"), 201)).id).toBe(first.id);
+  const events = db.select().from(activityEvent).all().length;
+  editKeyScope(db, key.slice(6, 14), { removeProducts: [owner.key] });
+
+  const replay = await send("lost-reach");
+  expect(replay.status).toBe(404);
+  const fresh = await send("lost-reach-fresh");
+  expect(fresh.status).toBe(404);
+  expect(await replay.json()).toEqual(await fresh.json());
+  expect(db.select().from(activityEvent).all().length).toBe(events);
 });

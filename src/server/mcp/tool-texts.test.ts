@@ -130,6 +130,39 @@ test("GET /activity's event payload and POST /webhooks say how a note's events c
   expectNoteEventAbout(spec.paths["/webhooks"]?.post?.description, "/webhooks");
 });
 
+test("create_webhook and POST /webhooks say a note event naming items is rebuilt on every attempt", async () => {
+  const tool = await toolDescriptions();
+  const spec = (await (
+    await request("GET", "/api/v1/openapi.json", { key: null })
+  ).json()) as { paths: Record<string, { post?: { description?: string } }> };
+  for (const [where, text] of [
+    ["create_webhook", tool("create_webhook").description],
+    ["/webhooks", spec.paths["/webhooks"]?.post?.description],
+  ]) {
+    expect(text, where).toMatch(
+      /A note event whose payload carries about is the exception: it is built afresh on every attempt, so each retry, under the same delivery id, carries the subject, product, actor and url as they stand at that retry\./,
+    );
+  }
+});
+
+test("POST /items' project field says an issue or a note joins the project", async () => {
+  const spec = (await (
+    await request("GET", "/api/v1/openapi.json", { key: null })
+  ).json()) as {
+    components: {
+      schemas: Record<
+        string,
+        { properties: Record<string, { description?: string }> }
+      >;
+    };
+  };
+  const project =
+    spec.components.schemas.ItemCreate?.properties.project?.description;
+  expect(project).toMatch(
+    /^Issues and notes only \(a todo with it is a 422\)\. A project's slug, like launch-q4: the issue or note joins that project as it is added, and product must be one the project draws from/,
+  );
+});
+
 test("update_item says who edits a note", async () => {
   const tool = await toolDescriptions();
   expect(tool("update_item").description).toMatch(

@@ -766,6 +766,125 @@ describe("type filter", () => {
   });
 });
 
+describe("notes filters in the URL", () => {
+  const retired = noteRow({
+    key: "TRL-32",
+    title: "Retired note",
+    status: "archived",
+  });
+
+  /** TRL with one current and one archived note; returns each request's type and status. */
+  function serveNotes() {
+    serveProduct();
+    const asked: string[] = [];
+    server.use(
+      http.get("/api/web/products/TRL/items", ({ request }) => {
+        const params = new URL(request.url).searchParams;
+        const type = params.get("type");
+        const status = params.get("status");
+        asked.push(`${type} ${status}`);
+        const rows =
+          type !== "note"
+            ? [issueRow()]
+            : status === "archived"
+              ? [retired]
+              : [noteRow()];
+        const list = issueList(rows);
+        return HttpResponse.json({
+          ...list,
+          counts: { ...list.counts, notes: { current: 1, archived: 1 } },
+        });
+      }),
+    );
+    return asked;
+  }
+
+  test("Show archived note puts type and status in the URL and asks for them", async () => {
+    signedInAs("member");
+    const asked = serveNotes();
+    const { router } = renderApp("/products/TRL");
+    await screen.findAllByText(noteRow().title);
+    await userEvent.click(
+      screen.getByRole("button", { name: "Show 1 archived note" }),
+    );
+    await waitFor(() =>
+      expect(router.state.location.search).toEqual({
+        type: "note",
+        status: "archived",
+      }),
+    );
+    expect(await screen.findAllByText(retired.title)).not.toHaveLength(0);
+    expect(asked).toContain("note archived");
+    expect(selectedTab()).toMatch(/^Archived/);
+    expect(
+      screen.queryByRole("button", { name: "Show 1 archived note" }),
+    ).not.toBeInTheDocument();
+  });
+
+  test("?type=note&status=archived picks the Archived tab and asks for archived notes", async () => {
+    signedInAs("member");
+    const asked = serveNotes();
+    renderApp("/products/TRL?type=note&status=archived");
+    expect(await screen.findAllByText(retired.title)).not.toHaveLength(0);
+    expect(asked).toEqual(["note archived"]);
+    expect(selectedTab()).toMatch(/^Archived/);
+    expect(screen.queryByText(noteRow().title)).not.toBeInTheDocument();
+  });
+
+  test("past the page cap the Notes section counts what it shows, and Show all notes lists them", async () => {
+    signedInAs("member");
+    serveProduct();
+    const total = 25;
+    let notePages = 0;
+    server.use(
+      http.get("/api/web/products/TRL/items", ({ request }) => {
+        const isNotes =
+          new URL(request.url).searchParams.get("type") === "note";
+        if (!isNotes) {
+          return HttpResponse.json({
+            ...issueList([issueRow()]),
+            counts: {
+              ...issueList([]).counts,
+              notes: { current: total, archived: 0 },
+            },
+          });
+        }
+        notePages++;
+        const list = issueList([
+          noteRow({ key: `TRL-${notePages}`, title: `Note ${notePages}` }),
+        ]);
+        return HttpResponse.json({
+          ...list,
+          counts: { ...list.counts, notes: { current: total, archived: 0 } },
+          nextCursor: `after-${notePages}`,
+        });
+      }),
+    );
+    const { router } = renderApp("/products/TRL");
+    const section = await screen.findByRole("region", { name: /^Notes/ });
+    expect(
+      await within(section).findByText(
+        `Showing ${ITEM_PAGES_MAX} of ${total} notes`,
+      ),
+    ).toBeVisible();
+    expect(notePages).toBe(ITEM_PAGES_MAX);
+    await userEvent.click(
+      within(section).getByRole("button", { name: "Show all notes" }),
+    );
+    await waitFor(() =>
+      expect(router.state.location.search).toEqual({
+        type: "note",
+        status: "current",
+      }),
+    );
+    // the notes are now the list, so the section's cap line is gone and the rows remain
+    expect(screen.queryByText(/^Showing \d+ of/)).not.toBeInTheDocument();
+    expect(
+      await screen.findAllByText(`Note ${ITEM_PAGES_MAX}`),
+    ).not.toHaveLength(0);
+  });
+});
+
 describe("pages", () => {
   test("rows past the first page are read and drawn", async () => {
     signedInAs("member");

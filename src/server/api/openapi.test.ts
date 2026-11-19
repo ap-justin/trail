@@ -258,6 +258,39 @@ test("the legacy issue and label routes are marked deprecated, and their replace
   ).toBeUndefined();
 });
 
+test("the legacy item schemas leave out a note's type and fields, which the legacy routes never return", async () => {
+  const spec = (await (
+    await request("GET", "/api/v1/openapi.json", { key: null })
+  ).json()) as {
+    components: {
+      schemas: Record<
+        string,
+        {
+          enum?: string[];
+          allOf?: { $ref?: string }[];
+          properties?: Record<string, { $ref?: string }>;
+        }
+      >;
+    };
+  };
+  const { schemas } = spec.components;
+  expect(schemas.LegacyItemType?.enum).toEqual(["issue", "todo"]);
+  const properties = schemas.LegacyItem?.properties ?? {};
+  expect(properties.type?.$ref).toBe("#/components/schemas/LegacyItemType");
+  for (const field of ["about", "notes", "notesCount"]) {
+    expect(properties, field).not.toHaveProperty(field);
+  }
+  for (const name of ["LegacyCreatedItem", "LegacyUpdatedItem"]) {
+    expect(schemas[name]?.allOf?.[0]?.$ref, name).toBe(
+      "#/components/schemas/LegacyItem",
+    );
+  }
+  // the current item schema keeps them
+  expect(Object.keys(schemas.Item?.properties ?? {})).toEqual(
+    expect.arrayContaining(["about", "notes", "notesCount"]),
+  );
+});
+
 test("the deprecated label list says what its replacement says about implicitly named products", async () => {
   const res = await request("GET", "/api/v1/openapi.json", { key: null });
   const spec = (await res.json()) as {

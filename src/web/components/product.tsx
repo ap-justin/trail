@@ -51,11 +51,8 @@ export type ProductViewProps = {
   detail: WebProductDetailView | null;
   /** The rows under `filters`; `counts` are per type and status whatever the filters. */
   items: Loadable<WebItemListView>;
-  /**
-   * The last list's counts, held while the next filter's list loads; null before any. Without
-   * them the toggle and tabs count only a ready list.
-   */
-  counts?: WebItemCountsView | null;
+  /** The last list's counts, held while the next filter's list loads; null before any. */
+  counts: WebItemCountsView | null;
   /** The current notes, for the Notes section under the list. */
   notes: Loadable<WebItemRowView[]>;
   /** The product's last note counts, held while the next filter's list loads; null before any. */
@@ -245,9 +242,7 @@ export function ProductView(props: ProductViewProps) {
   const { detail, filters, onFiltersChange } = props;
   const projects = detail?.projects ?? [];
   const counts =
-    props.items.status === "ready"
-      ? props.items.data.counts
-      : (props.counts ?? null);
+    props.items.status === "ready" ? props.items.data.counts : props.counts;
   const panes: [PaneName, string][] = [
     ["items", "Items"],
     ...(projects.length > 0

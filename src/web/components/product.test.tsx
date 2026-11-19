@@ -58,6 +58,7 @@ function props(overrides: Partial<ProductViewProps> = {}): ProductViewProps {
     product: trail,
     detail: productDetail(),
     items,
+    counts: null,
     notes: { status: "ready", data: [] },
     statusUpdates: {
       status: "ready",

@@ -48,8 +48,9 @@ const workStatusSchema = z
     "canceled",
   ] as const satisfies readonly IssueStatus[])
   .openapi("WorkStatus");
-const ITEM_TYPES =
-  "todo: planned work of the product's own bot, open from the start and always assigned. issue: a request for work to the product's bot, filed in triage until that bot accepts it (status open with an assignee) or cancels it. note: a record nobody has to act on, current or archived and never assigned; about lists the items it is about.";
+const WORK_TYPES =
+  "todo: planned work of the product's own bot, open from the start and always assigned. issue: a request for work to the product's bot, filed in triage until that bot accepts it (status open with an assignee) or cancels it.";
+const ITEM_TYPES = `${WORK_TYPES} note: a record nobody has to act on, current or archived and never assigned; about lists the items it is about.`;
 const healthSchema = z.enum(projectHealths).openapi("ProjectHealth");
 const priority = z.int().min(0).max(4).meta({
   description: "0 none, 1 urgent, 2 high, 3 medium, 4 low.",
@@ -272,8 +273,14 @@ export const updatedItemSchema = issueSchema
   .extend({ skippedLabels })
   .openapi("UpdatedItem");
 
+// the routes from before notes find no note, so a note's fields never reach them
 export const legacyIssueSchema = issueSchema
+  .omit({ about: true, notes: true, notesCount: true })
   .extend({
+    type: z
+      .enum(["issue", "todo"])
+      .openapi("LegacyItemType")
+      .meta({ description: WORK_TYPES }),
     status: z
       .enum(["open", "in_progress", "done", "canceled"])
       .openapi("LegacyIssueStatus")
@@ -887,7 +894,8 @@ const projectSlug = z.string().min(1).max(SLUG_MAX).meta({
 });
 const ONE_PROJECT_DEFAULT =
   "A key reaching a product only through projects sends `project` when it names more than one; with exactly one, that one is the default.";
-const ISSUE_PROJECT = `A project's slug, like launch-q4: the issue joins that project as it is filed, and product must be one the project draws from (left out, the project's one product). ${ONE_PROJECT_DEFAULT} list_projects lists them with their products.`;
+const joiningProject = (joins: string) =>
+  `A project's slug, like launch-q4: ${joins}, and product must be one the project draws from (left out, the project's one product). ${ONE_PROJECT_DEFAULT} list_projects lists them with their products.`;
 const botRef = z.string().min(1).max(200);
 const LABEL_NAMES =
   "A name matches the product's label ignoring the case of A-Z. Only the product's owner creates labels: from the owner, or on a product with no owner, a new name creates the label; from anyone else, the names the product lacks come back in skippedLabels.";
@@ -1138,7 +1146,11 @@ export const issueFileSchema = z
         description:
           "The key (like TRL) of the product the issue is for: any product list_products lists. Left out, the project's one product.",
       }),
-      project: projectSlug.optional().meta({ description: ISSUE_PROJECT }),
+      project: projectSlug.optional().meta({
+        description: joiningProject(
+          "the issue joins that project as it is filed",
+        ),
+      }),
       ...itemFields,
       labels: labelNames.optional(),
       assignee: assigneeRef.nullable().optional().meta({
@@ -1169,7 +1181,9 @@ export const noteCreateSchema = z
           "The key (like TRL) of the product the note belongs to: any product list_products lists, as with file_issue. Left out, the project's one product.",
       }),
       project: projectSlug.optional().meta({
-        description: `A project's slug, like launch-q4: the note joins that project as it is added, and product must be one the project draws from (left out, the project's one product). ${ONE_PROJECT_DEFAULT} list_projects lists them with their products.`,
+        description: joiningProject(
+          "the note joins that project as it is added",
+        ),
       }),
       title,
       description: text.optional(),
@@ -1199,7 +1213,7 @@ export const itemCreateSchema = z
           "The product's key (like TRL). An issue or a note needs it unless project draws from one product; a todo goes to the one product you own when left out.",
       }),
       project: projectSlug.optional().meta({
-        description: `Issues and notes only (a todo with it is a 422). ${ISSUE_PROJECT}`,
+        description: `Issues and notes only (a todo with it is a 422). ${joiningProject("the issue or note joins that project as it is added")}`,
       }),
       ...itemFields,
       estimate: estimate.optional().meta({

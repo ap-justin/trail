@@ -424,7 +424,14 @@ export function itemCreatedEntry(
   };
 }
 
-export function typeChangedEntry(id: string, createdAt: string): EntryView {
+export function typeChangedEntry(
+  id: string,
+  createdAt: string,
+  {
+    from = "issue",
+    to = "todo",
+  }: { from?: Item["type"]; to?: Item["type"] } = {},
+): EntryView {
   return {
     kind: "type_changed",
     id,
@@ -432,9 +439,9 @@ export function typeChangedEntry(id: string, createdAt: string): EntryView {
     actor: alpha,
     product: trail,
     project: null,
-    item: { ...teamAccessIssue, type: "todo" },
-    from: "issue",
-    to: "todo",
+    item: { ...teamAccessIssue, type: to },
+    from,
+    to,
   };
 }
 

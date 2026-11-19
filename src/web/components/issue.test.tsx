@@ -865,6 +865,51 @@ describe("reading order", () => {
     ).toBeTruthy();
   });
 
+  test("below lg the page reads description, properties, links, about, notes, activity, comment box", () => {
+    renderIssue({
+      issue: {
+        status: "ready",
+        data: issue({
+          about: [
+            {
+              key: "TRL-15",
+              title: "Back up the volume with Litestream",
+              type: "todo",
+              status: "open",
+            },
+          ],
+          notes: [
+            {
+              key: "TRL-31",
+              title: "Why the feed reads newest first",
+              type: "note",
+              status: "current",
+            },
+          ],
+          notesCount: { current: 1, archived: 0 },
+        }),
+      },
+    });
+    const inOrder = [
+      screen.getByRole("heading", { level: 1 }),
+      screen.getByText("Invited people sign in with GitHub."),
+      propertiesRegion(),
+      screen.getByRole("region", { name: "Links" }),
+      screen.getByRole("region", { name: "About" }),
+      screen.getByRole("region", { name: "Notes" }),
+      screen.getByRole("region", { name: "Activity" }),
+      screen.getByRole("textbox", { name: "Comment" }),
+    ];
+    inOrder.slice(1).forEach((later, i) => {
+      const earlier = inOrder[i] as HTMLElement;
+      expect(
+        earlier.compareDocumentPosition(later) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+        `${later.textContent?.slice(0, 20)} after ${earlier.textContent?.slice(0, 20)}`,
+      ).toBeTruthy();
+    });
+  });
+
   test("the header carries the item's status for the phone, where Properties drops it", () => {
     renderIssue();
     const header = screen.getByRole("banner");
@@ -945,6 +990,49 @@ describe("item type", () => {
       issue: { status: "ready", data: acceptedAsTodo() },
     });
     expect(byline()).toHaveTextContent(/Todo\s*TRL-15\s*filed by.*Alpha/);
+  });
+
+  test("an issue made a note: the byline says Note and filed by, the timeline says issue then Note", () => {
+    const base = note();
+    const on = {
+      product: trail,
+      project: null,
+      item: { key: "TRL-31", title: base.title, type: "note" as const },
+    };
+    renderIssue({
+      issueKey: "TRL-31",
+      issue: {
+        status: "ready",
+        data: note({
+          timeline: [
+            {
+              ...on,
+              kind: "item_created",
+              id: "a",
+              createdAt: "2026-11-11T10:20:00.000Z",
+              actor: alpha,
+              sourceAuthor: null,
+              createdAs: "issue",
+            },
+            {
+              ...on,
+              kind: "type_changed",
+              id: "b",
+              createdAt: "2026-11-11T10:25:00.000Z",
+              actor: maya,
+              from: "issue",
+              to: "note",
+            },
+          ],
+        }),
+      },
+    });
+    expect(byline()).toHaveTextContent(/Note\s*TRL-31\s*filed by.*Alpha/);
+    const [created, typed] = [
+      ...document.querySelectorAll<HTMLElement>("[data-entry-id]"),
+    ];
+    expect(created).toHaveTextContent("filed this issue");
+    expect(typed).toHaveTextContent("changed type from Issue to Note");
   });
 
   test("with no created entry in the timeline, the byline follows the current type", () => {

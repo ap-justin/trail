@@ -58,9 +58,9 @@ export type ProjectViewProps = {
   items: Loadable<WebProjectItemsView>;
   /**
    * The tab counts under the product filter, held while the next tab's list loads; null
-   * before any. A ready `items` draws its own; omitted, the tabs count only a ready list.
+   * before any. A ready `items` draws its own.
    */
-  counts?: WebItemCountsView | null;
+  counts: WebItemCountsView | null;
   /** The current notes under the product filter, for the Notes section under the list. */
   notes: Loadable<WebItemRowView[]>;
   /** The last note counts under the product filter, held while the next list loads; null before any. */
@@ -288,8 +288,7 @@ function ProjectBody(
     items.data.counts.all.all === 0 &&
     items.data.counts.notes.current + items.data.counts.notes.archived === 0 &&
     filters.product === null;
-  const counts =
-    items.status === "ready" ? items.data.counts : (props.counts ?? null);
+  const counts = items.status === "ready" ? items.data.counts : props.counts;
   const productSelect = (fieldLabel?: string) => (
     <ProductSelect
       products={project.products}

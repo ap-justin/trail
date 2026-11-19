@@ -112,31 +112,29 @@ test("a note's page lists the items it is about that the viewer sees; an item's 
   });
 });
 
-test("a note's page lists several visible items it is about in key order, whatever order they were created or named in", async () => {
+test("a note's page lists the items it is about in numeric key order, whatever order they were created or named in", async () => {
   const wide = addProject("Wide");
   const writer = addBot("wide writer");
-  const [first, second, third] = await atFakeTimeAsync([
-    () => item(wide.key, "todo"),
-    () => item(wide.key, "issue"),
-    () => item(wide.key, "todo"),
-  ]);
+  // the clock runs backwards, so the lowest number is the newest item and createdAt order is the reverse of key order; 11 items put TRL-10 ahead of TRL-2 as text
+  const made = await atFakeTimeAsync(
+    Array.from({ length: 11 }, () => () => item(wide.key, "todo")),
+    -1000,
+  );
   const res = await request("POST", "/api/v1/items", {
     json: {
       type: "note",
       product: wide.key,
-      title: "spans three",
-      about: [third, first, second],
+      title: "spans eleven",
+      about: [...made].reverse(),
     },
     key: writer.key,
   });
   expect(res.status, await res.clone().text()).toBe(201);
   const reader = await addMember("widereader", [wide.id]);
   const page = await get(`/items/${((await res.json()) as Body).key}`, reader);
-  expect(page.body.about.map((a: Body) => a.key)).toEqual([
-    first,
-    second,
-    third,
-  ]);
+  const numbers = (keys: string[]) => keys.map((k) => Number(k.split("-")[1]));
+  expect(numbers(made)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+  expect(page.body.about.map((a: Body) => a.key)).toEqual(made);
 });
 
 test("an item's page lists the 50 newest current notes about it and counts every note the viewer sees in notesCount", async () => {
@@ -327,6 +325,39 @@ test("turning a todo into a note shows its type and status change, not the prior
       .filter((e: Body) => e.item?.key === todo)
       .map((e: Body) => e.kind),
   ).toEqual(["status_changed", "type_changed", "item_created"]);
+});
+
+test("turning a note into an issue shows its type change, not the about list the conversion empties", async () => {
+  const own = addProject("Unnoted");
+  await request("PATCH", `/api/v1/products/${own.key}`, {
+    json: { owner: bot.actor.id },
+  });
+  const [first, second] = await atFakeTimeAsync([
+    () => item(own.key, "todo"),
+    () => item(own.key, "issue"),
+  ]);
+  const created = await request("POST", "/api/v1/items", {
+    json: {
+      type: "note",
+      product: own.key,
+      title: "becomes an issue",
+      about: [first, second],
+    },
+  });
+  expect(created.status, await created.clone().text()).toBe(201);
+  const note = ((await created.json()) as Body).key as string;
+  const retype = await request("PATCH", `/api/v1/items/${note}`, {
+    json: { type: "issue" },
+  });
+  expect(retype.status, await retype.clone().text()).toBe(200);
+
+  const reader = await addMember("unnotedreader", [own.id]);
+  const page = await get(`/items/${note}`, reader);
+  expect(page.body.timeline.map((e: Body) => e.kind)).toEqual([
+    "item_created",
+    "status_changed",
+    "type_changed",
+  ]);
 });
 
 test("an edit that only changes a note's about adds one timeline entry naming the items added and removed, and only counts other products' items", async () => {
