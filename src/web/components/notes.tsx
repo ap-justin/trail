@@ -11,7 +11,7 @@ import { paths } from "@/lib/paths";
 export type NotesSectionProps = {
   /** The current notes, in the list's order. */
   notes: Loadable<WebItemRowView[]>;
-  /** Null while the page's list reloads them; the section then stands on `notes` alone. */
+  /** Null until the page's list first loads them; the section then stands on `notes` alone. */
   counts: WebItemCountsView["notes"] | null;
   /** Lists the archived notes in the page's own item list. */
   onShowArchived: () => void;

@@ -1,6 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Navigate, redirect } from "@tanstack/react-router";
-import { useRef } from "react";
 import { AppPage, useChrome } from "@/app/chrome";
 import { NotFoundPage } from "@/app/not-found-page";
 import { RowsMissing } from "@/app/rows-missing";
@@ -70,26 +69,25 @@ function ProjectPage() {
   const items = useQuery({
     ...projectItemsQuery(slug, filters),
     enabled: !itemsWaitOnProject || project.data !== undefined,
+    // counts follow only the product filter, so while a new type or status tab loads, the last
+    // list for this project and product holds them; without them the notes query switches off
+    // and back on, which refetches it, and the Notes section loses its archived count
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === slug &&
+      previousQuery.queryKey[3] === product
+        ? previous
+        : undefined,
   });
-  // counts follow only the product filter, so while a new type or status tab loads the last
-  // ones for this project and product still hold; without them the notes query switches off
-  // and back on, which refetches it
-  const countsKey = `${slug} ${product}`;
-  const lastNoteCount = useRef<{ key: string; current: number }>(undefined);
-  if (items.data)
-    lastNoteCount.current = {
-      key: countsKey,
-      current: items.data.counts.notes.current,
-    };
-  const currentNotes =
-    lastNoteCount.current?.key === countsKey
-      ? lastNoteCount.current.current
-      : 0;
+  // the placeholder lends only its counts: its groups' counts follow the last tab's filters
+  const shownItems = items.isPlaceholderData
+    ? { data: undefined, isError: false }
+    : items;
+  const noteCounts = items.data?.counts.notes ?? null;
   // the Notes section's, under the product filter the counts it reads follow, once they say
   // there are current notes; a list of notes has no section
   const notes = useQuery({
     ...projectItemsQuery(slug, { product, type: "note", status: "current" }),
-    enabled: filters.type !== "note" && currentNotes > 0,
+    enabled: filters.type !== "note" && (noteCounts?.current ?? 0) > 0,
     select: (list) => list.groups.flatMap((group) => group.items),
   });
   const updates = useQuery({
@@ -123,9 +121,12 @@ function ProjectPage() {
       <ProjectView
         project={loadableOf(project)}
         items={
-          itemsWaitOnProject ? loadableAfter(items, project) : loadableOf(items)
+          itemsWaitOnProject
+            ? loadableAfter(shownItems, project)
+            : loadableOf(shownItems)
         }
         notes={loadableOf(notes)}
+        noteCounts={noteCounts}
         statusUpdates={loadableOf(updates)}
         filters={filters}
         onFiltersChange={(next) =>
@@ -147,9 +148,10 @@ function ProjectPage() {
         onRetryStatusUpdates={() => void updates.refetch()}
         footer={
           <RowsMissing
-            list={items.data}
+            list={shownItems.data}
             shown={
-              items.data?.groups.reduce((n, g) => n + g.items.length, 0) ?? 0
+              shownItems.data?.groups.reduce((n, g) => n + g.items.length, 0) ??
+              0
             }
           />
         }

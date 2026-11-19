@@ -78,6 +78,85 @@ describe("product page", () => {
   });
 });
 
+describe("notes section on load", () => {
+  /** TRL's items with these note counts; returns the notes requests made. */
+  function serveNoteCounts(notes: { current: number; archived: number }) {
+    serveProduct();
+    const notesAsked: string[] = [];
+    server.use(
+      http.get("/api/web/products/TRL/items", ({ request }) => {
+        if (new URL(request.url).searchParams.get("type") === "note")
+          notesAsked.push(request.url);
+        const list = issueList([issueRow()]);
+        return HttpResponse.json({
+          ...list,
+          counts: { ...list.counts, notes },
+        });
+      }),
+    );
+    return notesAsked;
+  }
+
+  test("only archived notes: the section says none are current and links the archived", async () => {
+    signedInAs("member");
+    const notesAsked = serveNoteCounts({ current: 0, archived: 2 });
+    renderApp("/products/TRL");
+    expect(
+      await screen.findAllByText("Human UI: feed, projects, issue page"),
+    ).not.toHaveLength(0);
+    expect(screen.getByRole("heading", { name: /^Notes/ })).toBeInTheDocument();
+    expect(screen.getByText("No current notes.")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Archived notes 2" }),
+    ).toBeInTheDocument();
+    expect(notesAsked).toEqual([]);
+  });
+
+  test("only archived notes: the section stays while a filter with no rows yet loads", async () => {
+    signedInAs("member");
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const notesAsked = serveNoteCounts({ current: 0, archived: 2 });
+    server.use(
+      http.get("/api/web/products/TRL/items", async ({ request }) => {
+        // the open issue's list has nothing under In progress, so it can't stand in
+        if (new URL(request.url).searchParams.has("status")) await held;
+        const list = issueList([issueRow({ status: "open" })]);
+        return HttpResponse.json({
+          ...list,
+          counts: { ...list.counts, notes: { current: 0, archived: 2 } },
+        });
+      }),
+    );
+    renderApp("/products/TRL");
+    expect(
+      await screen.findAllByText("Human UI: feed, projects, issue page"),
+    ).not.toHaveLength(0);
+    await userEvent.click(screen.getByRole("tab", { name: /^In progress/ }));
+    expect(screen.getByText("No current notes.")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Archived notes 2" }),
+    ).toBeInTheDocument();
+    release();
+    expect(notesAsked).toEqual([]);
+  });
+
+  test("no notes at all: no section and no notes request", async () => {
+    signedInAs("member");
+    const notesAsked = serveNoteCounts({ current: 0, archived: 0 });
+    renderApp("/products/TRL");
+    expect(
+      await screen.findAllByText("Human UI: feed, projects, issue page"),
+    ).not.toHaveLength(0);
+    expect(
+      screen.queryByRole("heading", { name: /^Notes/ }),
+    ).not.toBeInTheDocument();
+    expect(notesAsked).toEqual([]);
+  });
+});
+
 describe("while the next filter loads", () => {
   /** TRL's All list holds an open and a done row; any other status waits on `release`. */
   function serveHeld() {

@@ -1263,6 +1263,7 @@ describe("notes", () => {
               status: "current",
             },
           ],
+          notesCount: { current: 1, archived: 0 },
         }),
       },
     });
@@ -1270,7 +1271,61 @@ describe("notes", () => {
     expect(within(notes).getByRole("link")).toHaveAccessibleName(
       "Current Note TRL-31 Why the feed reads newest first",
     );
+    expect(within(notes).queryByText(/Archived notes/)).toBeNull();
     expect(screen.queryByRole("region", { name: "About" })).toBeNull();
+  });
+
+  test("a note's properties have no Priority or Estimate", () => {
+    renderIssue({
+      issueKey: "TRL-31",
+      issue: { status: "ready", data: note() },
+    });
+    expect(termsOf(propertiesRegion())).toEqual([
+      "Type",
+      "Status",
+      "Labels",
+      "Product",
+      "Projects",
+      "Created",
+      "Updated",
+    ]);
+  });
+
+  test("only archived notes about an item: the section says none are current and counts the archived, as text", () => {
+    renderIssue({
+      issue: {
+        status: "ready",
+        data: issue({ notes: [], notesCount: { current: 0, archived: 2 } }),
+      },
+    });
+    const notes = screen.getByRole("region", { name: "Notes" });
+    expect(within(notes).getByText("No current notes.")).toBeInTheDocument();
+    expect(within(notes).getByText("Archived notes 2")).toBeInTheDocument();
+    expect(within(notes).queryByRole("link")).toBeNull();
+    expect(within(notes).queryByRole("list")).toBeNull();
+  });
+
+  test("more current notes than the read carries: the rest are a count", () => {
+    const shown = Array.from({ length: 50 }, (_, n) => ({
+      key: `TRL-${100 + n}`,
+      title: `Note ${n}`,
+      type: "note" as const,
+      status: "current" as const,
+    }));
+    renderIssue({
+      issue: {
+        status: "ready",
+        data: issue({
+          notes: shown,
+          notesCount: { current: 53, archived: 1 },
+        }),
+      },
+    });
+    const notes = screen.getByRole("region", { name: "Notes" });
+    expect(within(notes).getAllByRole("link")).toHaveLength(50);
+    expect(within(notes).getByText("3 more current notes")).toBeInTheDocument();
+    expect(within(notes).getByText("Archived notes 1")).toBeInTheDocument();
+    expect(within(notes).queryByText("No current notes.")).toBeNull();
   });
 
   test("an item no note is about has no Notes section", () => {

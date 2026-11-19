@@ -234,9 +234,9 @@ const noAssignee: Record<Exclude<WebItemType, "note">, ReactNode> = {
 /**
  * Read-only on purpose: people never change status, priority, labels, assignee or
  * estimate, so nothing here is a control, has a hover state or carries a chevron. A note
- * is never assigned, so it has no Assignee row.
+ * is never assigned, prioritised or estimated, so it has no Assignee, Priority or Estimate row.
  * Below lg every property is a full 44px row; Type and Status sit in the header there
- * and Created drops, so Priority leads.
+ * and Created drops, so Priority leads (Labels on a note).
  */
 function Properties({ issue }: { issue: WebItemView }) {
   const headingId = useId();
@@ -252,12 +252,16 @@ function Properties({ issue }: { issue: WebItemView }) {
         <Property label="Status" className="max-lg:hidden">
           <StatusLabel status={issue.status} className="text-sm" />
         </Property>
-        <Property label="Priority">
-          <PriorityLabel priority={issue.priority} className="text-sm" />
-        </Property>
-        <Property label="Estimate">
-          {issue.estimate === null ? none : `${issue.estimate} h`}
-        </Property>
+        {issue.type !== "note" && (
+          <>
+            <Property label="Priority">
+              <PriorityLabel priority={issue.priority} className="text-sm" />
+            </Property>
+            <Property label="Estimate">
+              {issue.estimate === null ? none : `${issue.estimate} h`}
+            </Property>
+          </>
+        )}
         {/* at lg the label stays on the name's row, above the title's */}
         {issue.type !== "note" && (
           <Property label="Assignee" itemClassName="lg:self-start">
@@ -344,17 +348,19 @@ function Properties({ issue }: { issue: WebItemView }) {
 
 /**
  * Items as links, each its status and type glyphs, key and title: the items a note is about, or the
- * notes about this item. Nothing when there are none.
+ * notes about this item, with `children` under them. Nothing when there are no items and no `children`.
  */
 function ItemRefs({
   heading,
   items,
+  children,
 }: {
   heading: string;
   items: WebItemView["about"];
+  children?: ReactNode;
 }) {
   const headingId = useId();
-  if (items.length === 0) return null;
+  if (items.length === 0 && children === undefined) return null;
   return (
     <section
       aria-labelledby={headingId}
@@ -363,25 +369,50 @@ function ItemRefs({
       <h2 id={headingId} className="mb-1.5 font-medium lg:mb-2">
         {heading}
       </h2>
-      <ul>
-        {items.map((item) => (
-          <li key={item.key}>
-            <AppLink
-              href={paths.issue(item.key)}
-              className="group flex min-h-11 items-center gap-2 rounded-md py-1.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring lg:min-h-0"
-            >
-              {/* named by its glyphs and words: "In progress Issue TRL-14 Team access" */}
-              <StatusIcon status={item.status} label />{" "}
-              <TypeIcon type={item.type} />{" "}
-              <KeyText className="shrink-0">{item.key}</KeyText>{" "}
-              <span className="min-w-0 truncate group-hover:underline">
-                {item.title}
-              </span>
-            </AppLink>
-          </li>
-        ))}
-      </ul>
+      {items.length > 0 && (
+        <ul>
+          {items.map((item) => (
+            <li key={item.key}>
+              <AppLink
+                href={paths.issue(item.key)}
+                className="group flex min-h-11 items-center gap-2 rounded-md py-1.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring lg:min-h-0"
+              >
+                {/* named by its glyphs and words: "In progress Issue TRL-14 Team access" */}
+                <StatusIcon status={item.status} label />{" "}
+                <TypeIcon type={item.type} />{" "}
+                <KeyText className="shrink-0">{item.key}</KeyText>{" "}
+                <span className="min-w-0 truncate group-hover:underline">
+                  {item.title}
+                </span>
+              </AppLink>
+            </li>
+          ))}
+        </ul>
+      )}
+      {children}
     </section>
+  );
+}
+
+/**
+ * The notes about an item: the current ones the read carries (newest first, capped), then
+ * what the list leaves out as counts. The web list has no about filter, so no count links.
+ */
+function NotesAbout({ item }: { item: WebItemView }) {
+  const { current, archived } = item.notesCount;
+  if (current + archived === 0) return null;
+  const unlisted = current - item.notes.length;
+  const line = "py-1.5 text-muted-foreground";
+  return (
+    <ItemRefs heading="Notes" items={item.notes}>
+      {current === 0 && <p className={line}>No current notes.</p>}
+      {unlisted > 0 && (
+        <p className={line}>
+          {unlisted} more current {unlisted === 1 ? "note" : "notes"}
+        </p>
+      )}
+      {archived > 0 && <p className={line}>Archived notes {archived}</p>}
+    </ItemRefs>
   );
 }
 
@@ -902,7 +933,7 @@ export function IssueView(props: IssueViewProps) {
         <Properties issue={data} />
         <Links links={data.links} />
         <ItemRefs heading="About" items={data.about} />
-        <ItemRefs heading="Notes" items={data.notes} />
+        <NotesAbout item={data} />
       </aside>
       <section
         aria-labelledby={activityId}

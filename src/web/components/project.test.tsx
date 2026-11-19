@@ -45,12 +45,18 @@ const groups = [
 ];
 
 function props(overrides: Partial<ProjectViewProps> = {}): ProjectViewProps {
+  const items: ProjectViewProps["items"] = overrides.items ?? {
+    status: "ready",
+    data: projectItems(groups),
+  };
   return {
+    // the route's: the last list's
+    noteCounts: items.status === "ready" ? items.data.counts.notes : null,
     project: {
       status: "ready",
       data: projectDetail({ products: [docsSite, trail] }),
     },
-    items: { status: "ready", data: projectItems(groups) },
+    items,
     notes: { status: "ready", data: [] },
     statusUpdates: {
       status: "ready",

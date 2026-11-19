@@ -291,6 +291,108 @@ describe("while the next filter loads", () => {
   });
 });
 
+describe("notes section on load", () => {
+  /** Human UI launch's items with these note counts; returns the notes requests made. */
+  function serveNoteCounts(notes: { current: number; archived: number }) {
+    serveProject();
+    const notesAsked: string[] = [];
+    server.use(
+      http.get("/api/web/projects/human-ui/items", ({ request }) => {
+        if (new URL(request.url).searchParams.get("type") === "note")
+          notesAsked.push(request.url);
+        const list = projectItems([{ product: trail, items: [todoRow()] }]);
+        return HttpResponse.json({
+          ...list,
+          counts: { ...list.counts, notes },
+        });
+      }),
+    );
+    return notesAsked;
+  }
+
+  test("only archived notes: the section says none are current and links the archived", async () => {
+    signedInAs("member");
+    const notesAsked = serveNoteCounts({ current: 0, archived: 2 });
+    renderApp("/projects/human-ui");
+    expect(await screen.findAllByText(todoRow().title)).not.toHaveLength(0);
+    expect(screen.getByRole("heading", { name: /^Notes/ })).toBeInTheDocument();
+    expect(screen.getByText("No current notes.")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Archived notes 2" }),
+    ).toBeInTheDocument();
+    expect(notesAsked).toEqual([]);
+  });
+
+  test("only archived notes: the section stays while the next tab's list loads", async () => {
+    signedInAs("member");
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const notesAsked = serveNoteCounts({ current: 0, archived: 2 });
+    server.use(
+      http.get("/api/web/projects/human-ui/items", async ({ request }) => {
+        if (new URL(request.url).searchParams.has("status")) await held;
+        const list = projectItems([{ product: trail, items: [todoRow()] }]);
+        return HttpResponse.json({
+          ...list,
+          counts: { ...list.counts, notes: { current: 0, archived: 2 } },
+        });
+      }),
+    );
+    renderApp("/projects/human-ui");
+    expect(await screen.findAllByText(todoRow().title)).not.toHaveLength(0);
+    await userEvent.click(screen.getByRole("tab", { name: /^Open/ }));
+    expect(screen.getByText("No current notes.")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Archived notes 2" }),
+    ).toBeInTheDocument();
+    release();
+    expect(notesAsked).toEqual([]);
+  });
+
+  test("a new product drops the last note counts, which counted the other products", async () => {
+    signedInAs("member");
+    serveNoteCounts({ current: 0, archived: 2 });
+    const never = new Promise<void>(() => {});
+    server.use(
+      http.get("/api/web/projects/human-ui/items", async ({ request }) => {
+        if (new URL(request.url).searchParams.has("product")) await never;
+        const list = projectItems([{ product: trail, items: [todoRow()] }]);
+        return HttpResponse.json({
+          ...list,
+          counts: { ...list.counts, notes: { current: 0, archived: 2 } },
+        });
+      }),
+    );
+    const { router } = renderApp("/projects/human-ui");
+    expect(
+      await screen.findByRole("button", { name: "Archived notes 2" }),
+    ).toBeInTheDocument();
+    await router.navigate({
+      to: "/projects/$slug",
+      params: { slug: "human-ui" },
+      search: { product: "TRL" },
+    });
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Archived notes 2" }),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
+  test("no notes at all: no section and no notes request", async () => {
+    signedInAs("member");
+    const notesAsked = serveNoteCounts({ current: 0, archived: 0 });
+    renderApp("/projects/human-ui");
+    expect(await screen.findAllByText(todoRow().title)).not.toHaveLength(0);
+    expect(
+      screen.queryByRole("heading", { name: /^Notes/ }),
+    ).not.toBeInTheDocument();
+    expect(notesAsked).toEqual([]);
+  });
+});
+
 describe("pages", () => {
   test("a group split across pages is one group, and later groups are drawn", async () => {
     signedInAs("member");

@@ -42,10 +42,16 @@ const rows = [
 ];
 
 function props(overrides: Partial<ProductViewProps> = {}): ProductViewProps {
+  const items: ProductViewProps["items"] = overrides.items ?? {
+    status: "ready",
+    data: itemList(rows),
+  };
   return {
+    // the route's: the last list's
+    noteCounts: items.status === "ready" ? items.data.counts.notes : null,
     product: trail,
     detail: productDetail(),
-    items: { status: "ready", data: itemList(rows) },
+    items,
     notes: { status: "ready", data: [] },
     statusUpdates: {
       status: "ready",
@@ -468,6 +474,49 @@ describe("notes", () => {
     ).toEqual(["All 3", "Current 2", "Archived 1"]);
     expect(screen.queryByRole("region", { name: /^Notes/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "New issue" })).toBeNull();
+  });
+
+  test("a list of notes has no Priority or Assignee column, and its rows no priority", () => {
+    renderProduct({
+      filters: { type: "note", status: "archived" },
+      items: {
+        status: "ready",
+        data: {
+          items: [archived],
+          nextCursor: null,
+          counts: countsOf([...current, archived]),
+        },
+      },
+    });
+    expect(
+      within(table())
+        .getAllByRole("columnheader")
+        .map((h) => h.textContent),
+    ).toEqual(["Status", "Type", "Key", "Title", "Labels", "Updated"]);
+    expect(tableRow("TRL-29").querySelectorAll("td")).toHaveLength(6);
+    const phoneRow = screen.getByRole("link", {
+      name: "TRL-29 Old deploy steps",
+      description: /Note/,
+    });
+    expect(phoneRow).not.toHaveAccessibleDescription(/priority/i);
+  });
+
+  test("a work list keeps its Priority and Assignee columns", () => {
+    renderProduct();
+    expect(
+      within(table())
+        .getAllByRole("columnheader")
+        .map((h) => h.textContent),
+    ).toEqual([
+      "Status",
+      "Type",
+      "Key",
+      "Title",
+      "Priority",
+      "Labels",
+      "Assignee",
+      "Updated",
+    ]);
   });
 
   test("leaving Notes for a work type drops a note status", async () => {

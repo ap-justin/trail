@@ -463,8 +463,9 @@ export type ItemGroup = {
 const head = "h-7.5 px-0";
 
 /**
- * The 1024px table: status, type, key, title, priority, (labels,) assignee, updated. A
- * group with a product gets a heading row; groups after the first sit 12px apart.
+ * The 1024px table: status, type, key, title, priority, (labels,) assignee, updated; a list
+ * of notes alone drops priority and assignee, which a note never has. A group with a product
+ * gets a heading row; groups after the first sit 12px apart.
  */
 export function ItemTable({
   groups,
@@ -475,7 +476,11 @@ export function ItemTable({
   labels: boolean;
   now: Date;
 }) {
-  const columns = labels ? 8 : 7;
+  // a list holds notes only when filtered to them: without a type it holds issues and todos
+  const work = groups.some((group) =>
+    group.items.some((item) => item.type !== "note"),
+  );
+  const columns = 5 + (labels ? 1 : 0) + (work ? 2 : 0);
   return (
     <Table className="table-fixed max-lg:hidden">
       <TableHeader>
@@ -488,11 +493,15 @@ export function ItemTable({
           </TableHead>
           <TableHead className={cn(head, "w-18")}>Key</TableHead>
           <TableHead className={head}>Title</TableHead>
-          <TableHead className={cn(head, "w-21.5")}>Priority</TableHead>
+          {work && (
+            <TableHead className={cn(head, "w-21.5")}>Priority</TableHead>
+          )}
           {labels && (
             <TableHead className={cn(head, "w-24.5")}>Labels</TableHead>
           )}
-          <TableHead className={cn(head, "w-34.5")}>Assignee</TableHead>
+          {work && (
+            <TableHead className={cn(head, "w-34.5")}>Assignee</TableHead>
+          )}
           <TableHead className={cn(head, "w-15 pr-2 text-right")}>
             Updated
           </TableHead>
@@ -546,17 +555,21 @@ export function ItemTable({
                   {item.title}
                 </RowLink>
               </TableCell>
-              <TableCell className="px-0 py-2">
-                <PriorityLabel priority={item.priority} />
-              </TableCell>
+              {work && (
+                <TableCell className="px-0 py-2">
+                  <PriorityLabel priority={item.priority} />
+                </TableCell>
+              )}
               {labels && (
                 <TableCell className="px-0 py-2 pr-2.5">
                   <Labels labels={item.labels} oneLine />
                 </TableCell>
               )}
-              <TableCell className="px-0 py-2 pr-2.5">
-                <Assignee item={item} />
-              </TableCell>
+              {work && (
+                <TableCell className="px-0 py-2 pr-2.5">
+                  <Assignee item={item} />
+                </TableCell>
+              )}
               <TableCell className="py-2 pr-2 pl-0 text-right text-muted-foreground">
                 <Age iso={item.updatedAt} now={now} />
               </TableCell>

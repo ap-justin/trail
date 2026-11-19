@@ -29,6 +29,7 @@ import {
 import { KeyText } from "@/components/text";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import type {
+  WebItemCountsView,
   WebItemListView,
   WebItemRowView,
   WebProductDetailView,
@@ -51,6 +52,8 @@ export type ProductViewProps = {
   items: Loadable<WebItemListView>;
   /** The current notes, for the Notes section under the list. */
   notes: Loadable<WebItemRowView[]>;
+  /** The product's last note counts, held while the next filter's list loads; null before any. */
+  noteCounts: WebItemCountsView["notes"] | null;
   /** Newest first. */
   statusUpdates: Loadable<WebStatusUpdatePageView>;
   filters: ItemFilters;
@@ -289,7 +292,7 @@ export function ProductView(props: ProductViewProps) {
         {filters.type !== "note" && (
           <NotesSection
             notes={props.notes}
-            counts={counts?.notes ?? null}
+            counts={props.noteCounts}
             onShowArchived={() => {
               listRef.current?.focus();
               onFiltersChange({ type: "note", status: "archived" });

@@ -30,6 +30,7 @@ import {
 import { KeyText } from "@/components/text";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import type {
+  WebItemCountsView,
   WebItemRowView,
   WebProjectDetailView,
   WebProjectItemsView,
@@ -56,6 +57,8 @@ export type ProjectViewProps = {
   items: Loadable<WebProjectItemsView>;
   /** The current notes under the product filter, for the Notes section under the list. */
   notes: Loadable<WebItemRowView[]>;
+  /** The last note counts under the product filter, held while the next list loads; null before any. */
+  noteCounts: WebItemCountsView["notes"] | null;
   /** Newest first. */
   statusUpdates: Loadable<WebStatusUpdatePageView>;
   filters: ProjectItemFilters;
@@ -350,7 +353,7 @@ function ProjectBody(
         {filters.type !== "note" && (
           <NotesSection
             notes={props.notes}
-            counts={counts?.notes ?? null}
+            counts={props.noteCounts}
             onShowArchived={() => {
               if (listRef.current) listRef.current.focus();
               else focusListOnMount.current = true;

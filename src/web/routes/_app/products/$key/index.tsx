@@ -49,11 +49,13 @@ function ProductPage() {
     !items.data.items.some((item) => matchesFilters(item, filters))
       ? { data: undefined, isError: false }
       : items;
+  // the placeholder's too: it is this product's, and its counts don't follow the filters
+  const noteCounts = items.data?.counts.notes ?? null;
   // the Notes section's, once the list's counts say there are current notes; a list of
   // notes has no section
   const notes = useQuery({
     ...productItemsQuery(key, { type: "note", status: "current" }),
-    enabled: type !== "note" && (items.data?.counts.notes.current ?? 0) > 0,
+    enabled: type !== "note" && (noteCounts?.current ?? 0) > 0,
     select: (list) => list.items,
   });
   const updates = useQuery({
@@ -80,6 +82,7 @@ function ProductPage() {
         detail={product.data ?? null}
         items={loadableOf(shownItems)}
         notes={loadableOf(notes)}
+        noteCounts={noteCounts}
         statusUpdates={loadableOf(updates)}
         filters={filters}
         onFiltersChange={(next) =>
