@@ -1,9 +1,6 @@
-import {
-  type ItemFilters,
-  type StatusFilter,
-  statusesOf,
-} from "@/components/item-list";
+import type { ItemFilters } from "@/components/item-list";
 import type { ItemType } from "@/components/status";
+import { type StatusFilter, statusesOf } from "@/lib/item-status";
 
 const isStatusOf = (
   type: ItemType | null,

@@ -100,7 +100,10 @@ function expectNoteEventAbout(text: string | undefined, where: string) {
   expect(text, where).toMatch(/On its create event, about is an array of keys/);
   expect(text, where).toMatch(/aboutOthers counts the rest/);
   expect(text, where).toMatch(
-    /changes which items it is about.*carries about \{from, to\} and aboutOthers \{from, to\}/,
+    /changes which of its own product's items it is about, or how many others.*carries about \{from, to\} and aboutOthers \{from, to\}/,
+  );
+  expect(text, where).toMatch(
+    /can change with no event when the change is outside the key's reach/,
   );
 }
 

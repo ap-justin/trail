@@ -12,7 +12,6 @@ import {
   ItemTable,
   matchesFilters,
   showAllFilters,
-  statusFilterOf,
   statusTabValue,
 } from "@/components/item-list";
 import { NotesSection } from "@/components/notes";
@@ -38,6 +37,7 @@ import type {
   WebProjectView,
   WebStatusUpdatePageView,
 } from "@/lib/api-types";
+import { statusFilterOf } from "@/lib/item-status";
 import type { Loadable } from "@/lib/loadable";
 import { paths } from "@/lib/paths";
 import { useMinuteClock } from "@/lib/use-minute-clock";

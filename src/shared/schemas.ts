@@ -427,7 +427,7 @@ export const projectItemsRemovedSchema = z
 
 /** How a note's events carry about: list_activity, the webhook docs and the activity payload all say it. */
 export const NOTE_EVENT_ABOUT =
-  "A note's events name the items it is about by key. On its create event, about is an array of keys, like [\"TRL-3\"], of the items in the note's own product that the reading key reaches (on a webhook, the key its deliveries are checked against), in key order, and aboutOthers counts the rest: items in other products and items the key doesn't reach. An update that changes which items it is about, a turn into an issue or a todo included (which empties it), carries about {from, to} and aboutOthers {from, to} in the same form; an update that leaves them as they were carries neither. So about on an event is not the note's full list, and holds keys, not the {key, title, type, status} of an item's about: get_item (GET /items/{key}) on the note lists every item it is about that the key reaches.";
+  "A note's events name the items it is about by key. On its create event, about is an array of keys, like [\"TRL-3\"], of the items in the note's own product that the reading key reaches (on a webhook, the key its deliveries are checked against), in key order, and aboutOthers counts the rest: items in other products and items the key doesn't reach. An update that changes which of its own product's items it is about, or how many others, a turn into an issue or a todo included (which empties it), carries about {from, to} and aboutOthers {from, to} in the same form; an update that changes neither, or changes only items the reading key doesn't reach (a swap among other products' items, say), carries neither, and is no event at all when it changed nothing else. So about on an event is not the note's full list, and holds keys, not the {key, title, type, status} of an item's about: get_item (GET /items/{key}) on the note lists every item it is about that the key reaches, and that list can change with no event when the change is outside the key's reach.";
 
 const eventAboutKeys = z.array(z.string());
 const activityPayload = z
@@ -1217,11 +1217,12 @@ export const itemCreateSchema = z
       }),
       ...itemFields,
       estimate: estimate.optional().meta({
-        description: "Hours. A note takes none.",
+        description:
+          "Hours. A note holds no rank, so on a note only null is taken.",
       }),
       priority: priority.optional().meta({
         description:
-          "0 none, 1 urgent, 2 high, 3 medium, 4 low. A note takes none.",
+          "0 none, 1 urgent, 2 high, 3 medium, 4 low. A note holds no rank, so on a note only 0 is taken.",
       }),
       labels: labelNames.optional(),
       assignee: assigneeRef.nullable().optional().meta({
@@ -1301,11 +1302,12 @@ export const itemUpdateSchema = z
       }),
       ...itemPatchFields,
       estimate: itemPatchFields.estimate.meta({
-        description: "Hours; null clears. Refused on a note, which has none.",
+        description:
+          "Hours; null clears. A note holds no rank, so on a note only null is taken.",
       }),
       priority: priority.optional().meta({
         description:
-          "0 none, 1 urgent, 2 high, 3 medium, 4 low. Refused on a note, which has none.",
+          "0 none, 1 urgent, 2 high, 3 medium, 4 low. A note holds no rank, so on a note only 0 is taken.",
       }),
       assignee: assigneeRef.nullable().optional().meta({
         description:

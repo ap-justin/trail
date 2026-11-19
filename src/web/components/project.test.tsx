@@ -447,6 +447,25 @@ describe("375", () => {
       await screen.findByRole("button", { name: "Show issues" }),
     ).toBeInTheDocument();
   });
+
+  test.each([
+    [null, "Show issues and todos"],
+    ["note", "Show notes"],
+  ] as const)(
+    "while the list loads under type %s the sheet's button reads %s, without a count",
+    async (type, label) => {
+      const user = userEvent.setup();
+      renderProject({
+        filters: { ...NO_PROJECT_FILTERS, type },
+        items: { status: "loading" },
+      });
+      await user.click(filtersButton());
+      const sheet = await screen.findByRole("dialog", { name: "Filters" });
+      expect(
+        within(sheet).getByRole("button", { name: /^Show / }),
+      ).toHaveAccessibleName(label);
+    },
+  );
 });
 
 describe("empty and failed", () => {
@@ -679,6 +698,50 @@ describe("notes", () => {
       type: "note",
       status: "archived",
     });
+  });
+
+  test("every note archived and the notes list not loaded: the section says none are current and still offers the archived, whose list then shows", async () => {
+    const user = userEvent.setup();
+    const onlyArchived = {
+      ...projectItems(groups),
+      counts: countsOf([...groups.flatMap((g) => g.items), archived]),
+    };
+    const p = props({
+      items: { status: "ready", data: onlyArchived },
+      // the route's read of current notes never runs for a count of 0
+      notes: { status: "loading" },
+    });
+    const { rerender } = render(<ProjectView {...p} />);
+    const section = screen.getByRole("region", { name: /^Notes/ });
+    expect(
+      within(section).getByRole("heading", { name: "Notes 0" }),
+    ).toBeInTheDocument();
+    expect(within(section).getByText("No current notes.")).toBeInTheDocument();
+    expect(within(section).queryByRole("status")).toBeNull();
+    await user.click(
+      within(section).getByRole("button", { name: "Show 1 archived note" }),
+    );
+    expect(p.onFiltersChange).toHaveBeenCalledWith({
+      ...NO_PROJECT_FILTERS,
+      type: "note",
+      status: "archived",
+    });
+    rerender(
+      <ProjectView
+        {...p}
+        filters={{ ...NO_PROJECT_FILTERS, type: "note", status: "archived" }}
+        items={{
+          status: "ready",
+          data: {
+            ...projectItems([{ product: trail, items: [archived] }]),
+            counts: onlyArchived.counts,
+          },
+        }}
+      />,
+    );
+    expect(
+      screen.getAllByRole("link", { name: "TRL-29 Old deploy steps" }),
+    ).not.toHaveLength(0);
   });
 
   test("a project with notes and no work lists its notes when asked, not the empty state, and its group counts notes", () => {

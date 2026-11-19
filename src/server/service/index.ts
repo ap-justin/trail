@@ -4778,7 +4778,13 @@ export function createService({
                 .from(noteAbout)
                 .where(eq(noteAbout.itemId, aboutId)),
             ),
-        statuses.length === 0 ? undefined : inArray(issue.status, statuses),
+        statuses.length > 0
+          ? inArray(issue.status, statuses)
+          : // every note status, the same rows as type note by issue_note_status_check, so
+            // issue_product_status_created_idx serves the page instead of a walk of the product
+            type === "note"
+            ? inArray(issue.status, [...noteStatuses])
+            : undefined,
         query.assignee === undefined
           ? undefined
           : eq(
@@ -5024,7 +5030,7 @@ export function createService({
           ? undefined
           : eq(activityEvent.actorId, filters.actorId),
       ];
-      const select = (order: SQL, max: number) =>
+      const select = (order: SQL, max: number, afterSeq?: number) =>
         db
           .select({
             ...getTableColumns(activityEvent),
@@ -5034,24 +5040,38 @@ export function createService({
           .from(activityEvent)
           .leftJoin(product, eq(product.id, activityEvent.productId))
           .leftJoin(project, eq(project.id, activityEvent.projectId))
-          .where(and(...where))
+          .where(
+            and(
+              ...where,
+              afterSeq === undefined
+                ? undefined
+                : gt(activityEvent.seq, afterSeq),
+            ),
+          )
           .orderBy(order)
           .limit(max)
-          .all()
-          .map((event) => eventForReach(db, reach, event));
+          .all();
+      // the cursor steps past an event the key reads as nothing, so it is dropped after paging
+      const readable = (events: ReturnType<typeof select>) =>
+        events.flatMap((event) => eventForReach(db, reach, event) ?? []);
 
       if (query.after !== undefined) {
         const from =
           query.after === ""
             ? 0
             : decodeFeedCursor(query.after, filters, "after");
-        where.push(gt(activityEvent.seq, from));
-        const items = select(asc(activityEvent.seq), limit);
-        const seq = items.at(-1)?.seq ?? from;
-        return {
-          items,
-          nextCursor: encodeFeedCursor({ ...filters, seq, param: "after" }),
-        };
+        // an empty page promises nothing new, so a full page the key reads as nothing reads on
+        let seq = from;
+        for (;;) {
+          const rows = select(asc(activityEvent.seq), limit, seq);
+          seq = rows.at(-1)?.seq ?? seq;
+          const items = readable(rows);
+          if (items.length > 0 || rows.length < limit)
+            return {
+              items,
+              nextCursor: encodeFeedCursor({ ...filters, seq, param: "after" }),
+            };
+        }
       }
 
       if (query.cursor !== undefined) {
@@ -5063,10 +5083,9 @@ export function createService({
         );
       }
       const rows = select(desc(activityEvent.seq), limit + 1);
-      const items = rows.slice(0, limit);
-      const last = items.at(-1);
+      const last = rows.slice(0, limit).at(-1);
       return {
-        items,
+        items: readable(rows.slice(0, limit)),
         nextCursor:
           rows.length > limit && last
             ? encodeFeedCursor({ ...filters, seq: last.seq, param: "cursor" })

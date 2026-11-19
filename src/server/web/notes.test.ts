@@ -299,11 +299,12 @@ test("a person comments on a note, and the comment is on its timeline", async ()
 });
 
 test("turning a todo into a note shows its type and status change, not the priority, estimate and assignee it clears", async () => {
-  // only a product's own bot converts, so the sending key's bot owns Alpha here
-  await request("PATCH", `/api/v1/products/${alpha.key}`, {
+  // only a product's own bot converts, so the sending key's bot owns a product of its own
+  const own = addProject("Converted");
+  await request("PATCH", `/api/v1/products/${own.key}`, {
     json: { owner: bot.actor.id },
   });
-  const todo = await item(alpha.key, "todo", {
+  const todo = await item(own.key, "todo", {
     priority: 2,
     estimate: 3,
     assignee: "note writer",
@@ -313,13 +314,14 @@ test("turning a todo into a note shows its type and status change, not the prior
   });
   expect(retype.status, await retype.clone().text()).toBe(200);
 
-  const page = await get(`/items/${todo}`, member);
+  const reader = await addMember("convertedreader", [own.id]);
+  const page = await get(`/items/${todo}`, reader);
   expect(page.body.timeline.map((e: Body) => e.kind)).toEqual([
     "item_created",
     "status_changed",
     "type_changed",
   ]);
-  const feed = await get("/feed?type=note", member);
+  const feed = await get("/feed?type=note", reader);
   expect(
     feed.body.items
       .filter((e: Body) => e.item?.key === todo)

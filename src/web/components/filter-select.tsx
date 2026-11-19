@@ -212,7 +212,7 @@ const TYPE_OPTIONS: { value: WebItemType; label: string }[] = [
   { value: "note", label: "Notes" },
 ];
 
-/** All, Issues, Todos or Notes. */
+/** Issues, Todos or Notes, under the caller's `allLabel` for no type. */
 export function TypeSelect({
   value,
   onChange,

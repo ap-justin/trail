@@ -5,7 +5,6 @@ import { AppLink, RowLink } from "@/components/app-link";
 import { FiltersSheet, TypeSelect } from "@/components/filter-select";
 import { EmptyState } from "@/components/states";
 import {
-  type IssueStatus,
   type ItemType,
   PriorityLabel,
   priorityLabel,
@@ -32,11 +31,13 @@ import type {
   WebItemRowView,
   WebProductRefView,
 } from "@/lib/api-types";
+import {
+  type StatusFilter,
+  statusesOf,
+  statusFilterOf,
+} from "@/lib/item-status";
 import { paths } from "@/lib/paths";
 import { cn } from "@/lib/utils";
-
-/** A status tab: triage has none of its own, Open covers it. */
-export type StatusFilter = Exclude<IssueStatus, "triage">;
 
 /** The type toggle and the status tab; null is All. The URL is the route's. */
 export type ItemFilters = {
@@ -46,28 +47,13 @@ export type ItemFilters = {
 
 export const NO_FILTERS: ItemFilters = { type: null, status: null };
 
-const workStatuses: StatusFilter[] = [
+// the 375 chips leave Canceled out, unless it is the filter in force
+const workChipStatuses: readonly StatusFilter[] = [
   "open",
   "in_progress",
   "done",
-  "canceled",
 ];
-const noteStatuses: StatusFilter[] = ["current", "archived"];
-// the 375 chips leave Canceled out, unless it is the filter in force
-const workChipStatuses: StatusFilter[] = ["open", "in_progress", "done"];
 const ALL = "all";
-
-/** The status tabs a type has: a note's two states, or the work statuses for the rest and All. */
-export const statusesOf = (type: ItemType | null) =>
-  type === "note" ? noteStatuses : workStatuses;
-
-/** A tab value back to its filter: All and anything unknown are null. */
-export function statusFilterOf(value: string): StatusFilter | null {
-  return (
-    [...workStatuses, ...noteStatuses].find((status) => status === value) ??
-    null
-  );
-}
 
 /** The filters under another type; a status that type has no tab for falls back to All. */
 function withType(filters: ItemFilters, type: ItemType | null): ItemFilters {
@@ -179,7 +165,10 @@ export function TypeToggle({
 }
 
 /** All, then each status, with its count once the list has loaded. */
-function statusOptions(statuses: StatusFilter[], counts: StatusCounts | null) {
+function statusOptions(
+  statuses: readonly StatusFilter[],
+  counts: StatusCounts | null,
+) {
   return [
     { value: ALL, label: "All", count: counts?.all },
     ...statuses.map((status) => ({
@@ -251,7 +240,7 @@ function StatusChips({
   value: StatusFilter | null;
   onChange: (status: StatusFilter | null) => void;
 }) {
-  const chipStatuses = type === "note" ? noteStatuses : workChipStatuses;
+  const chipStatuses = type === "note" ? statusesOf("note") : workChipStatuses;
   // the row scrolls sideways; its right padding fades out, so a chip cut at the edge reads as more
   return (
     <ToggleGroup

@@ -232,7 +232,7 @@ test("the deprecated /issues routes never show a note", async () => {
   const read = await request("GET", `/api/v1/issues/${note.key}`);
   expect(read.status).toBe(404);
   expect(((await read.json()) as Body).error.message).toBe(
-    `${note.key} is a note, which the deprecated issue routes don't serve: read it with get_item (GET /api/v1/items/{key}) and edit it with update_item (PATCH /api/v1/items/{key})`,
+    `${note.key} is a note, which the deprecated issue routes don't read or edit (GET and POST /api/v1/issues/{id}/comments still serve its comments): read it with get_item (GET /api/v1/items/{key}) and edit it with update_item (PATCH /api/v1/items/{key})`,
   );
   const edit = await request("PATCH", `/api/v1/issues/${note.key}`, {
     json: { title: "x" },

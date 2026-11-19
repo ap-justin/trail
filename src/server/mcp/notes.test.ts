@@ -487,6 +487,27 @@ test("list_items lists notes only with type note; without type, issues and todos
   );
 });
 
+test.each([
+  ["todo", "current"],
+  ["todo", "archived"],
+  ["issue", "current"],
+  ["issue", "archived"],
+] as const)(
+  "list_items type %s with note status %s is refused and says to send type note",
+  async (type, status) => {
+    const owner = await productBot(`Mixer ${type} ${status}`);
+    await call(owner.client, "add_todo", { title: "work" });
+    const message = await callError(owner.client, "list_items", {
+      product: owner.product,
+      type,
+      status,
+    });
+    expect(message).toMatch(/^validation_failed: /);
+    expect(message).toContain(`never ${status}`);
+    expect(message).toContain("send type note");
+  },
+);
+
 test("a note's author and the product's bot edit it; a third bot is told to comment", async () => {
   const owner = await productBot("Editor");
   const author = await productBot("Author");
@@ -1130,7 +1151,7 @@ test("the deprecated issue tools never show a note", async () => {
   expect(
     await callError(owner.client, "get_issue", { issueId: note.key }),
   ).toBe(
-    `not_found: ${note.key} is a note, which the deprecated issue routes don't serve: read it with get_item (GET /api/v1/items/{key}) and edit it with update_item (PATCH /api/v1/items/{key})`,
+    `not_found: ${note.key} is a note, which the deprecated issue routes don't read or edit (GET and POST /api/v1/issues/{id}/comments still serve its comments): read it with get_item (GET /api/v1/items/{key}) and edit it with update_item (PATCH /api/v1/items/{key})`,
   );
   expect(
     await callError(owner.client, "update_issue", {
@@ -1392,6 +1413,93 @@ test("a webhook following the project on a key reaching only it gets a note's ev
     },
   ]);
   expect(JSON.stringify(payloads)).not.toContain(`"${outside.key}"`);
+});
+
+test("a swap among about items a project key doesn't reach is no event and no webhook for it, and a key reaching them still gets it", async () => {
+  const { owner, slug, inside, outside, follower } =
+    await noteInProject("Hidden swap");
+  const elsewhere = await call(owner.client, "add_todo", { title: "else" });
+  const url = `https://${slug}.example.com/hook`;
+  await call(follower, "create_webhook", {
+    url,
+    secret: "whsec_hidden_swap_0123456789",
+    projects: [slug],
+  });
+  const note = await call(owner.client, "add_note", {
+    product: owner.product,
+    project: slug,
+    title: "both todos ship together",
+    about: [inside.key, outside.key],
+  });
+  await call(owner.client, "update_item", {
+    item: note.key,
+    about: [inside.key, elsewhere.key],
+  });
+
+  const eventsOf = async (client: typeof follower) =>
+    (await call(client, "list_activity", {})).items
+      .filter((e: Body) => e.subjectId === note.id)
+      .map((e: Body) => [e.action, e.payload]);
+  expect(
+    (await eventsOf(follower)).map(([action]: unknown[]) => action),
+  ).toEqual(["project.item_added", "issue.created"]);
+  expect(await eventsOf(owner.client)).toContainEqual([
+    "issue.updated",
+    {
+      about: {
+        from: [inside.key, outside.key].sort(),
+        to: [inside.key, elsewhere.key].sort(),
+      },
+      aboutOthers: { from: 0, to: 0 },
+    },
+  ]);
+
+  sent.length = 0;
+  await worker.tick();
+  expect(
+    sent
+      .filter((s) => s.url === url && s.body.data.subject.id === note.id)
+      .map((s) => s.body.type)
+      .sort(),
+  ).toEqual(["trail.item.created", "trail.project.item_added"]);
+});
+
+test("a swap among about items a project key doesn't reach, beside a title change, reaches it as the title change alone, and list_activity after a cursor reads past the swap", async () => {
+  const { owner, slug, inside, outside, follower } =
+    await noteInProject("Hidden beside");
+  const elsewhere = await call(owner.client, "add_todo", { title: "else" });
+  const note = await call(owner.client, "add_note", {
+    product: owner.product,
+    project: slug,
+    title: "both todos ship together",
+    about: [inside.key, outside.key],
+  });
+  const { nextCursor } = await call(follower, "list_activity", { after: "" });
+  await call(owner.client, "update_item", {
+    item: note.key,
+    about: [inside.key, elsewhere.key],
+  });
+  await call(owner.client, "update_item", {
+    item: note.key,
+    about: [inside.key, outside.key],
+    title: "the todos ship together",
+  });
+
+  const page = await call(follower, "list_activity", {
+    after: nextCursor,
+    limit: 1,
+  });
+  expect(page.items.map((e: Body) => [e.action, e.payload])).toEqual([
+    [
+      "issue.updated",
+      {
+        title: {
+          from: "both todos ship together",
+          to: "the todos ship together",
+        },
+      },
+    ],
+  ]);
 });
 
 /**

@@ -500,7 +500,7 @@ describe("notes section on load", () => {
       releaseInProgress = resolve;
     });
     let notesAsked = 0;
-    // settles when the abandoned read's fetch does, answered or aborted
+    // settles when the abandoned read ends: aborted, or its answer's body read, the last step before the read writes its counts
     let inProgressSettled = () => {};
     const inProgressDone = new Promise<void>((resolve) => {
       inProgressSettled = resolve;
@@ -511,7 +511,10 @@ describe("notes section on load", () => {
       .mockImplementation(async (input, init) => {
         const read = realFetch(input, init);
         if (String(input).includes("status=in_progress")) {
-          read.then(inProgressSettled, inProgressSettled);
+          read.then((response) => {
+            const readBody = response.json.bind(response);
+            response.json = () => readBody().finally(inProgressSettled);
+          }, inProgressSettled);
         }
         return read;
       });
@@ -533,17 +536,17 @@ describe("notes section on load", () => {
     );
     const { queryClient } = renderApp("/products/TRL");
     const heading = () => screen.getByRole("heading", { name: /^Notes/ });
-    await waitFor(() => expect(heading()).toHaveTextContent("Notes 2"));
+    await waitFor(() => expect(heading()).toHaveAccessibleName("Notes 2"));
     await userEvent.click(screen.getByRole("tab", { name: /^In progress/ }));
     await userEvent.click(screen.getByRole("tab", { name: /^Done/ }));
     await waitFor(() => expect(queryClient.isFetching()).toBe(0));
     releaseInProgress();
-    // a read the query let go of leaves nothing to wait on: wait for its fetch, then a task for the query function's tail and any commit it causes
+    // an abandoned read that still wrote its counts would show them and start a notes read, which isFetching sees at once
     await inProgressDone;
-    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    await act(async () => {});
     fetchSpy.mockRestore();
     expect(queryClient.isFetching()).toBe(0);
-    expect(heading()).toHaveTextContent("Notes 2");
+    expect(heading()).toHaveAccessibleName("Notes 2");
     expect(notesAsked).toBe(1);
   });
 

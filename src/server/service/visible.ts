@@ -220,8 +220,10 @@ function splitItemKey(key: string): { product: string; number: number }[] {
  * A note event as `reach` may read it. The stored `about` names the note's
  * own product's items, which a product follower reaches whole, so it reads
  * the event as stored; a key reaching the product only through a project gets
- * just the keys of the items it reaches, the rest added to `aboutOthers`. Any
- * other event as stored.
+ * just the keys of the items it reaches, the rest added to `aboutOthers`. An
+ * update whose about change it can't see reads without `about`, as the writer
+ * drops a swap among other products' items; null when that leaves nothing, so
+ * the key reads no event at all. Any other event as stored.
  */
 export function eventForReach<
   E extends {
@@ -229,7 +231,7 @@ export function eventForReach<
     productId: string | null;
     payload: Record<string, unknown>;
   },
->(db: Db, reach: Reach, event: E): E {
+>(db: Db, reach: Reach, event: E): E | null {
   if (
     reach === null ||
     event.subjectType !== "issue" ||
@@ -270,6 +272,15 @@ export function eventForReach<
   const to = shown(keys.to);
   const fromOthers = others.from + keys.from.length - from.length;
   const toOthers = others.to + keys.to.length - to.length;
+  if (
+    !created &&
+    fromOthers === toOthers &&
+    from.length === to.length &&
+    from.every((key, i) => key === to[i])
+  ) {
+    const { about: _about, aboutOthers: _others, ...rest } = event.payload;
+    return Object.keys(rest).length === 0 ? null : { ...event, payload: rest };
+  }
   const about: About = created
     ? { about: to, aboutOthers: toOthers }
     : {
@@ -297,7 +308,7 @@ export const noProject = (ref: string) =>
 /** What the routes from before notes answer for a note the key reaches. */
 export const noteOnIssueRoute = (key: string) =>
   new NotFoundError(
-    `${key} is a note, which the deprecated issue routes don't serve: read it with get_item (GET /api/v1/items/{key}) and edit it with update_item (PATCH /api/v1/items/{key})`,
+    `${key} is a note, which the deprecated issue routes don't read or edit (GET and POST /api/v1/issues/{id}/comments still serve its comments): read it with get_item (GET /api/v1/items/{key}) and edit it with update_item (PATCH /api/v1/items/{key})`,
   );
 export const noIssue = (ref: string) =>
   notFound(

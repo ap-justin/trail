@@ -49,6 +49,8 @@ export const PURGE_BATCH = 500;
 /** The lastError of a delivery the worker drops instead of sending. */
 export const LEFT_PROJECT =
   "not sent: the item left the projects this webhook follows before it went out";
+export const NOTHING_IN_REACH =
+  "not sent: the note's about changed only among items this webhook's key doesn't reach";
 
 export type WebhookWorkerOptions = {
   db: Db;
@@ -236,6 +238,8 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
       .get();
     if (!event) return undefined;
     const read = eventForReach(db, sendingKeyReach(db, keyId), event);
+    // clearance dropped a delivery its key reads as nothing
+    if (!read) return undefined;
     return {
       envelope: buildEnvelope(db, read, settings.publicUrl),
       perKey: event.payload.about !== undefined,
@@ -322,7 +326,8 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
   /**
    * The key a delivery goes out on (null when its event is gone), or why it
    * mustn't go out now: its event's item has left the project a follow alone
-   * queued it for, or the webhook's key can no longer send it (`deliveryKey`).
+   * queued it for, the key reads its event as nothing (`eventForReach`), or the
+   * webhook's key can no longer send it (`deliveryKey`).
    * `tell` is set on the key's refusals, which only the bot can fix.
    */
   function clearance(
@@ -344,7 +349,14 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
     if (!event) return { keyId: null };
     if (leftFollowedProjects(db, sub.id, event))
       return { refused: { reason: LEFT_PROJECT, tell: false } };
-    return keyFor(event);
+    const key = keyFor(event);
+    if (
+      "keyId" in key &&
+      key.keyId !== null &&
+      eventForReach(db, sendingKeyReach(db, key.keyId), event) === null
+    )
+      return { refused: { reason: NOTHING_IN_REACH, tell: false } };
+    return key;
   }
 
   /**

@@ -667,6 +667,76 @@ describe("notes section on load", () => {
     expect(notesAsked).toHaveLength(2);
   });
 
+  /**
+   * The project's lists as a bot moves notes between reads: `notes` are the current notes,
+   * `archived` how many are archived, `work` how many issues and todos; returns that state,
+   * counting the notes reads.
+   */
+  function serveMovingNotes(start: {
+    notes: ReturnType<typeof noteRow>[];
+    archived: number;
+    work: number;
+  }) {
+    serveProject();
+    const state = { ...start, notesAsked: 0 };
+    server.use(
+      http.get("/api/web/projects/human-ui/items", ({ request }) => {
+        const isNotes =
+          new URL(request.url).searchParams.get("type") === "note";
+        if (isNotes) state.notesAsked++;
+        const list = projectItems([
+          { product: trail, items: isNotes ? state.notes : [todoRow()] },
+        ]);
+        return HttpResponse.json({
+          ...list,
+          counts: {
+            ...list.counts,
+            all: { ...list.counts.all, all: state.work },
+            notes: { current: state.notes.length, archived: state.archived },
+          },
+        });
+      }),
+    );
+    return state;
+  }
+
+  test("a tab whose list counts archived notes differently reads the current ones again", async () => {
+    signedInAs("member");
+    const before = noteRow();
+    const since = noteRow({ key: "TRL-32", title: "Filed since" });
+    const state = serveMovingNotes({ notes: [before], archived: 0, work: 1 });
+    const { queryClient } = renderApp("/projects/human-ui");
+    expect(await screen.findAllByText(before.title)).not.toHaveLength(0);
+    // a bot archives the note and files another, so as many are current
+    state.notes = [since];
+    state.archived = 1;
+    await userEvent.click(screen.getByRole("tab", { name: /^In progress/ }));
+    expect(await screen.findAllByText(since.title)).not.toHaveLength(0);
+    expect(screen.queryByText(before.title)).not.toBeInTheDocument();
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    expect(state.notesAsked).toBe(2);
+  });
+
+  test("a tab whose list counts more issues and todos reads the current notes again", async () => {
+    signedInAs("member");
+    const converted = noteRow();
+    const since = noteRow({ key: "TRL-32", title: "Filed since" });
+    const state = serveMovingNotes({
+      notes: [converted],
+      archived: 0,
+      work: 1,
+    });
+    const { queryClient } = renderApp("/projects/human-ui");
+    expect(await screen.findAllByText(converted.title)).not.toHaveLength(0);
+    // a bot makes the note an issue and files another note
+    state.notes = [since];
+    state.work = 2;
+    await userEvent.click(screen.getByRole("tab", { name: /^In progress/ }));
+    expect(await screen.findAllByText(since.title)).not.toHaveLength(0);
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    expect(state.notesAsked).toBe(2);
+  });
+
   test("no notes at all: no section and no notes request", async () => {
     signedInAs("member");
     const notesAsked = serveNoteCounts({ current: 0, archived: 0 });

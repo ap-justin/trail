@@ -523,6 +523,48 @@ describe("notes", () => {
     expect(screen.getByRole("tabpanel", { name: /^All/ })).toHaveFocus();
   });
 
+  test("every note archived and the notes list not loaded: the section says none are current and still offers the archived, whose list then shows", async () => {
+    const user = userEvent.setup();
+    const onlyArchived = {
+      ...itemList(rows),
+      counts: countsOf([...rows, archived]),
+    };
+    const p = props({
+      items: { status: "ready", data: onlyArchived },
+      // the route's read of current notes never runs for a count of 0
+      notes: { status: "loading" },
+    });
+    const { rerender } = render(<ProductView {...p} />);
+    const section = notesSection();
+    expect(
+      within(section).getByRole("heading", { name: "Notes 0" }),
+    ).toBeInTheDocument();
+    expect(within(section).getByText("No current notes.")).toBeInTheDocument();
+    expect(within(section).queryByRole("status")).toBeNull();
+    await user.click(
+      within(section).getByRole("button", { name: "Show 1 archived note" }),
+    );
+    expect(p.onFiltersChange).toHaveBeenCalledWith({
+      type: "note",
+      status: "archived",
+    });
+    rerender(
+      <ProductView
+        {...p}
+        filters={{ type: "note", status: "archived" }}
+        items={{
+          status: "ready",
+          data: {
+            items: [archived],
+            nextCursor: null,
+            counts: onlyArchived.counts,
+          },
+        }}
+      />,
+    );
+    expect(tableKeys()).toEqual(["TRL-29"]);
+  });
+
   test("Show all on an empty notes filter keeps the notes and clears only the status", async () => {
     const user = userEvent.setup();
     const p = renderProduct({
