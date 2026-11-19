@@ -26,7 +26,7 @@ import {
   TargetDate,
   UpdateHealth,
 } from "@/components/status-updates";
-import { KeyText } from "@/components/text";
+import { KeyPill } from "@/components/text";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import type {
   WebItemCountsView,
@@ -73,7 +73,7 @@ export type ProductViewProps = {
   now?: Date;
 };
 
-/** The shell heading on a product page: `Products / TRL trail` at 1440, `TRL trail` below. */
+/** The shell heading on a product page: `Products / trail TRL` at 1440, `trail TRL` below. */
 export function ProductHeading({ product }: { product: WebProductRefView }) {
   return (
     <span className="flex min-w-0 items-center gap-2">
@@ -86,8 +86,8 @@ export function ProductHeading({ product }: { product: WebProductRefView }) {
         </AppLink>
         <span aria-hidden="true">/</span>
       </span>
-      <KeyText className="text-sm text-foreground">{product.key}</KeyText>{" "}
-      <span className="truncate">{product.name}</span>
+      <span className="truncate">{product.name}</span>{" "}
+      <KeyPill>{product.key}</KeyPill>
     </span>
   );
 }

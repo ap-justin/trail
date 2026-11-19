@@ -282,7 +282,7 @@ describe("a product taken away while filtered to it", () => {
       screen.getByRole("combobox", { name: "Filter by product" }),
     );
     await userEvent.click(
-      await screen.findByRole("option", { name: "TRL trail" }),
+      await screen.findByRole("option", { name: "trail TRL" }),
     );
     await waitFor(() => expect(asked.at(-1)?.get("product")).toBe("TRL"));
     const filtered = FakeEventSource.current;
@@ -434,7 +434,7 @@ describe("a product taken away by an access event", () => {
     const options = (await screen.findAllByRole("option")).map(
       (o) => o.textContent,
     );
-    expect(options).toEqual(["All products", "ALP alpha"]);
+    expect(options).toEqual(["All products", "alpha ALP"]);
   });
 
   test("with a project filter too, only the product filter goes, and no error shows on the way", async () => {
@@ -741,7 +741,7 @@ describe("one of two filters taken away", () => {
       screen.getByRole("combobox", { name: "Filter by product" }),
     );
     await userEvent.click(
-      await screen.findByRole("option", { name: "TRL trail" }),
+      await screen.findByRole("option", { name: "trail TRL" }),
     );
     await userEvent.click(
       screen.getByRole("combobox", { name: "Filter by project" }),
@@ -943,7 +943,7 @@ describe("filters in the URL", () => {
       screen.getByRole("combobox", { name: "Filter by product" }),
     );
     await userEvent.click(
-      await screen.findByRole("option", { name: "ATL Atlas" }),
+      await screen.findByRole("option", { name: "Atlas ATL" }),
     );
     await waitFor(() =>
       expect(router.state.location.search).toEqual({ product: "ATL" }),
@@ -1031,7 +1031,7 @@ describe("filters in the URL", () => {
       screen.getByRole("combobox", { name: "Filter by product" }),
     );
     await userEvent.click(
-      await screen.findByRole("option", { name: "BTL Bastion" }),
+      await screen.findByRole("option", { name: "Bastion BTL" }),
     );
     await waitFor(() =>
       expect(FakeEventSource.current.url).toBe("/api/web/events?product=BTL"),

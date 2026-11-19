@@ -30,7 +30,7 @@ import {
   TypeIcon,
   typeLabel,
 } from "@/components/status";
-import { KeyText, LabelChip } from "@/components/text";
+import { KeyPill, KeyText, LabelChip } from "@/components/text";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { WorkingNow } from "@/components/working-now";
@@ -421,12 +421,12 @@ function productSubject(product: WebProductRefView) {
   return (
     <RowLink
       href={paths.product(product.key)}
-      // spans with no space between would be read as one word: "OPBOpenBot"
-      label={`${product.key} ${product.name}`}
+      // spans with no space between would be read as one word: "OpenBotOPB"
+      label={`${product.name} ${product.key}`}
       className="inline-flex items-center gap-1.5 font-medium"
     >
-      <KeyText className="text-foreground">{product.key}</KeyText>
       {product.name}
+      <KeyPill>{product.key}</KeyPill>
     </RowLink>
   );
 }
@@ -721,7 +721,7 @@ function FeedRow({
       </div>
       {/* empty on a project's own entries, which belong to no product */}
       <span data-product-column className="min-w-8 text-right max-lg:hidden">
-        {entry.product && <KeyText>{entry.product.key}</KeyText>}
+        {entry.product && <KeyPill>{entry.product.key}</KeyPill>}
       </span>
       <span className="w-14 text-right text-xs whitespace-nowrap text-muted-foreground max-lg:hidden">
         <RowTime iso={entry.createdAt} now={now} />

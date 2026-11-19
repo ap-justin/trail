@@ -151,15 +151,15 @@ describe("people list", () => {
         name: "Edit products for @mayachen",
       }),
     );
-    const trail = row("mayachen").getByRole("checkbox", { name: "TRL trail" });
+    const trail = row("mayachen").getByRole("checkbox", { name: "trail TRL" });
     expect(trail).toBeChecked();
     expect(trail).toHaveFocus();
     expect(
-      row("mayachen").getByRole("checkbox", { name: "OPB OpenBot" }),
+      row("mayachen").getByRole("checkbox", { name: "OpenBot OPB" }),
     ).not.toBeChecked();
     await user.click(trail);
     await user.click(
-      row("mayachen").getByRole("checkbox", { name: "OPB OpenBot" }),
+      row("mayachen").getByRole("checkbox", { name: "OpenBot OPB" }),
     );
     await user.click(
       row("mayachen").getByRole("button", { name: "Save products" }),
@@ -503,7 +503,7 @@ describe("people invited by email", () => {
       }),
     );
     await user.click(
-      row("sam@studio.example").getByRole("checkbox", { name: "OPB OpenBot" }),
+      row("sam@studio.example").getByRole("checkbox", { name: "OpenBot OPB" }),
     );
     await user.click(
       row("sam@studio.example").getByRole("button", { name: "Save products" }),
@@ -582,9 +582,9 @@ describe("invite", () => {
       screen.getByRole("button", { name: /^Products they can see/ }),
     );
     await user.click(
-      await screen.findByRole("checkbox", { name: "TRL trail" }),
+      await screen.findByRole("checkbox", { name: "trail TRL" }),
     );
-    await user.click(screen.getByRole("checkbox", { name: "DOC Docs site" }));
+    await user.click(screen.getByRole("checkbox", { name: "Docs site DOC" }));
     await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: "Invite" }));
     expect(props.onInvite).toHaveBeenCalledWith({
@@ -669,7 +669,7 @@ describe("parseEntry", () => {
 });
 
 describe("products", () => {
-  test("the invite's picker is named by its label, says Pick products until one is picked, then shows each picked key and name", async () => {
+  test("the invite's picker is named by its label, says Pick products until one is picked, then shows each picked name and key", async () => {
     const user = userEvent.setup();
     renderPeople();
     const picker = screen.getByRole("button", {
@@ -678,13 +678,13 @@ describe("products", () => {
     expect(picker).toHaveTextContent("Pick products");
     await user.click(picker);
     await user.click(
-      await screen.findByRole("checkbox", { name: "TRL trail" }),
+      await screen.findByRole("checkbox", { name: "trail TRL" }),
     );
-    await user.click(screen.getByRole("checkbox", { name: "DOC Docs site" }));
+    await user.click(screen.getByRole("checkbox", { name: "Docs site DOC" }));
     await user.keyboard("{Escape}");
-    expect(picker).toHaveTextContent(/^TRL trail\s*DOC Docs site$/);
+    expect(picker).toHaveTextContent(/^trail TRL\s*Docs site DOC$/);
     expect(picker).toHaveAccessibleName(
-      "Products they can see TRL trail DOC Docs site",
+      "Products they can see trail TRL Docs site DOC",
     );
   });
 
@@ -708,14 +708,14 @@ describe("products", () => {
     expect(owner).not.toHaveAttribute("data-slot", "badge");
   });
 
-  test("a person's row lists each product as key and name", () => {
+  test("a person's row lists each product as name and key", () => {
     renderPeople();
     const chips = document.querySelectorAll(
       '[data-person="mayachen"] [data-product-chip]',
     );
     expect([...chips].map((chip) => chip.textContent)).toEqual([
-      "TRL trail",
-      "DOC Docs site",
+      "trail TRL",
+      "Docs site DOC",
     ]);
   });
 

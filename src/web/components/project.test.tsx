@@ -135,7 +135,7 @@ describe("goal and details", () => {
     expect(lead).not.toHaveTextContent("Bot");
     expect(target).toHaveTextContent(/^Dec 4$/);
     expect(health).toHaveTextContent(/^At risk$/);
-    expect(products).toHaveTextContent(/DOC Docs site\s*TRL trail/);
+    expect(products).toHaveTextContent(/Docs site DOC\s*trail TRL/);
   });
 
   test("no target drops the Target row; no status update drops Health", () => {
@@ -180,8 +180,8 @@ describe("goal and details", () => {
         g.querySelector("h3")?.textContent,
       ]),
     ).toEqual([
-      ["DOC", expect.stringMatching(/^DOC\s*Docs site/)],
-      ["TRL", expect.stringMatching(/^TRL\s*trail/)],
+      ["DOC", expect.stringMatching(/^Docs site\s*DOC/)],
+      ["TRL", expect.stringMatching(/^trail\s*TRL/)],
     ]);
   });
 });
@@ -211,7 +211,7 @@ describe("hidden products", () => {
 });
 
 describe("groups", () => {
-  test("groups follow the given order, each headed by key, name and its count, which equals its rows under All", () => {
+  test("groups follow the given order, each headed by name, key and its count, which equals its rows under All", () => {
     renderProject();
     expect(groupKeys()).toEqual(["DOC", "TRL"]);
     for (const [key, name, count] of [
@@ -220,14 +220,14 @@ describe("groups", () => {
     ] as const) {
       const body = groupBody(key);
       const header = within(body).getByRole("columnheader");
-      expect(header).toHaveTextContent(`${key} ${name} ${count} items`);
+      expect(header).toHaveTextContent(`${name} ${key} ${count} items`);
       expect(rowsIn(body)).toBe(count);
     }
   });
 
   test("below 1024px each group is a section headed the same way", () => {
     renderProject();
-    const section = screen.getByRole("region", { name: "TRL trail 3 items" });
+    const section = screen.getByRole("region", { name: "trail TRL 3 items" });
     expect(within(section).getAllByRole("listitem")).toHaveLength(3);
   });
 
@@ -273,7 +273,7 @@ describe("groups", () => {
       "Priority",
       "Assignee",
       "Updated",
-      "DOC Docs site 2 items",
+      "Docs site DOC 2 items",
     ]);
     expect(table().querySelector('[data-item-key="DOC-6"]')).toHaveTextContent(
       "Unassigned",
@@ -291,10 +291,10 @@ describe("product select", () => {
     const options = await screen.findAllByRole("option");
     expect(options.map((o) => o.textContent)).toEqual([
       "All products",
-      "DOC Docs site",
-      "TRL trail",
+      "Docs site DOC",
+      "trail TRL",
     ]);
-    await user.click(screen.getByRole("option", { name: "TRL trail" }));
+    await user.click(screen.getByRole("option", { name: "trail TRL" }));
     expect(p.onFiltersChange).toHaveBeenCalledWith({
       ...NO_PROJECT_FILTERS,
       product: "TRL",

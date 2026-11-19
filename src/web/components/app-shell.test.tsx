@@ -588,9 +588,9 @@ describe("main nav", () => {
     },
   );
 
-  test("under the Products label, one row per visible product: key in mono, then name", () => {
+  test("under the Products label, one row per visible product: name, then its key as a pill", () => {
     renderShell(owner);
-    const row = within(productsNav()).getByRole("link", { name: "TRL trail" });
+    const row = within(productsNav()).getByRole("link", { name: "trail TRL" });
     expect(row).toHaveAttribute("href", "/products/TRL");
     expect(within(row).getByText("TRL")).toHaveClass("font-mono");
     expect(
@@ -627,7 +627,7 @@ describe("where the page sits", () => {
       within(sidebarNav()).getByRole("link", { name: "Products" }),
     ).not.toHaveAttribute("aria-current");
     expect(
-      within(productsNav()).getByRole("link", { name: "TRL trail" }),
+      within(productsNav()).getByRole("link", { name: "trail TRL" }),
     ).toHaveAttribute("aria-current", "page");
     expect(
       within(tabNav()).getByRole("link", { name: "Products" }),
@@ -637,10 +637,10 @@ describe("where the page sits", () => {
   test("an item page marks its product's row and the Products tab as its location", () => {
     renderAt({ section: null, productKey: "TRL" });
     expect(
-      within(productsNav()).getByRole("link", { name: "TRL trail" }),
+      within(productsNav()).getByRole("link", { name: "trail TRL" }),
     ).toHaveAttribute("aria-current", "location");
     expect(
-      within(productsNav()).getByRole("link", { name: "OPB OpenBot" }),
+      within(productsNav()).getByRole("link", { name: "OpenBot OPB" }),
     ).not.toHaveAttribute("aria-current");
     expect(
       within(sidebarNav()).getByRole("link", { name: "Products" }),
@@ -844,6 +844,24 @@ describe("a title heading in the top bar at lg", () => {
     const text = within(h1).getByText(longName);
     expect(text).not.toBe(h1);
     expectEllipsis(text);
+  });
+});
+
+describe("the heading under the top bar below lg", () => {
+  test("a product's long name ends in an ellipsis and its key pill stays whole", async () => {
+    const { container } = renderTitled(
+      <ProductHeading key="p" product={{ key: "ALPHA", name: longName }} />,
+    );
+    onTestFinished(await applyCompiledCss(container));
+    const header = container.querySelector("header") as HTMLElement;
+    const h1 = screen
+      .getAllByRole("heading", { level: 1, hidden: true })
+      .find((el) => !header.contains(el)) as HTMLElement;
+    expect(getComputedStyle(h1).minWidth).toBe("0px");
+    expectEllipsis(within(h1).getByText(longName));
+    const pill = within(h1).getByText("ALPHA");
+    expect(pill).toHaveAttribute("data-key-pill");
+    expect(getComputedStyle(pill).flexShrink).toBe("0");
   });
 });
 

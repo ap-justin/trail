@@ -133,7 +133,7 @@ describe("products", () => {
     expect(age).toHaveAttribute("datetime", "2026-11-11T09:12:00.000Z");
     expect(age).toHaveTextContent(/^41m$/);
     const order = [
-      within(item).getByRole("link", { name: "TRL trail" }),
+      within(item).getByRole("link", { name: "trail TRL" }),
       within(item).getByText("Beta"),
       within(item).getByText(/^SSE feed shipped/),
       within(item).getByText(/issues/),
@@ -152,8 +152,18 @@ describe("products", () => {
 
   test("each product links to its page", () => {
     renderProducts();
-    for (const link of screen.getAllByRole("link", { name: "TRL trail" })) {
+    for (const link of screen.getAllByRole("link", { name: "trail TRL" })) {
       expect(link).toHaveAttribute("href", "/products/TRL");
+    }
+  });
+
+  test("each product link leads with its name and ends on its key as a pill", () => {
+    renderProducts();
+    for (const link of screen.getAllByRole("link", { name: "trail TRL" })) {
+      const pill = link.lastElementChild;
+      expect(pill).toHaveTextContent(/^TRL$/);
+      expect(pill).toHaveAttribute("data-key-pill");
+      expect(link.firstElementChild).toHaveTextContent(/^trail$/);
     }
   });
 

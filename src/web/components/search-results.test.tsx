@@ -18,7 +18,7 @@ const results = {
 };
 
 describe("SearchResults", () => {
-  test("products, projects and items as links: products by key and name, projects by name, items by status and type glyph", () => {
+  test("products, projects and items as links: products by name and key, projects by name, items by status and type glyph", () => {
     render(
       <SearchResults
         query="team"
@@ -31,7 +31,11 @@ describe("SearchResults", () => {
       screen.getByRole("list", { name: "Search results" }),
     ).getAllByRole("link");
     expect(product).toHaveAttribute("href", "/products/TRL");
-    expect(product).toHaveAccessibleName("TRL trail");
+    expect(product).toHaveAccessibleName("trail TRL");
+    expect(product?.lastElementChild).toHaveAttribute("data-key-pill");
+    expect(product?.lastElementChild).toHaveTextContent(/^TRL$/);
+    // an issue key stays plain mono text, not a pill
+    expect(issue?.querySelector("[data-key-pill]")).toBeNull();
     expect(product?.querySelector("svg")).toHaveClass("lucide-package");
     expect(project).toHaveAttribute("href", "/projects/human-ui");
     expect(project).toHaveAccessibleName("Human UI launch");

@@ -852,7 +852,7 @@ describe("links", () => {
     await screen.findAllByText("Human UI: feed, projects, issue page");
     const products = screen.getByRole("navigation", { name: "Products" });
     expect(
-      within(products).getByRole("link", { name: "TRL trail" }),
+      within(products).getByRole("link", { name: "trail TRL" }),
     ).toHaveAttribute("aria-current", "page");
   });
 
@@ -868,7 +868,7 @@ describe("links", () => {
     await screen.findAllByText("Human UI: feed, projects, issue page");
     const products = screen.getByRole("navigation", { name: "Products" });
     expect(
-      within(products).getByRole("link", { name: "TRL trail" }),
+      within(products).getByRole("link", { name: "trail TRL" }),
     ).toHaveAttribute("aria-current", "page");
     expect(statuses).toEqual(["in_progress"]);
   });
