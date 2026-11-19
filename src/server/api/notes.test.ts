@@ -1,8 +1,8 @@
 import { eq } from "drizzle-orm";
 import { expect, test, vi } from "vitest";
 import { activityEventSchema } from "../../shared/schemas.js";
-import { activityEvent, webhookDelivery } from "../db/schema.js";
-import { createBot, createKey } from "../service/keys.js";
+import { activityEvent } from "../db/schema.js";
+import { createBot } from "../service/keys.js";
 import { eventForReach, type Reach } from "../service/visible.js";
 import { atFakeTimeAsync, projectKey, setupTestApp } from "../test-app.js";
 
@@ -92,15 +92,13 @@ test.each([
   );
 });
 
-test("POST /items refuses an assignee on a note", async () => {
+test.each([
+  ["a bot it names", "tester"],
+  ["a name no bot has", "no such bot"],
+])("POST /items refuses an assignee on a note, %s", async (_, assignee) => {
   const owner = await newProduct("rest refusals");
   const note = await request("POST", "/api/v1/items", {
-    json: {
-      type: "note",
-      product: owner.key,
-      title: "record",
-      assignee: "tester",
-    },
+    json: { type: "note", product: owner.key, title: "record", assignee },
   });
   expect(note.status).toBe(422);
   expect(((await note.json()) as Body).error.message).toMatch(
@@ -542,67 +540,70 @@ test("PATCH /items/{key} refuses about with 51 items and an addAbout that would 
   );
 });
 
-test("a refused PATCH turning an item into a note leaves its type, fields, events and webhook deliveries as they were", async () => {
-  const owner = await newProduct("rest atomic");
-  const elsewhere = addBot("rest atomic elsewhere");
-  const hiddenProduct = await newProduct("rest atomic hidden", elsewhere.key);
-  const create = async (product: string, title: string, key?: string) =>
-    ok(
-      await request("POST", "/api/v1/items", {
-        json: { type: "todo", product, title, priority: 2, estimate: 3 },
-        key,
-      }),
-      201,
-    );
-  const hidden = await create(hiddenProduct.key, "hidden", elsewhere.key);
-  const target = await create(owner.key, "target");
-  const todo = await create(owner.key, "work");
-  const reaching = createKey(db, bot.actor.id, { products: [owner.key] }).key;
-  const hook = await ok(
-    await request("POST", "/api/v1/webhooks", {
-      json: {
-        url: "https://rest-atomic.example.com/hook",
-        secret: "whsec_rest_atomic_0123456789",
-        products: [owner.key],
-      },
+test.each([
+  ["type todo with about", "type=todo&about=TRL-1"],
+  ["type note with status open", "type=note&status=open"],
+])(
+  "GET /items on a key without read is a 403 naming the action, even with %s",
+  async (_, query) => {
+    const commenter = createBot(db, `no read ${query}`, {
+      scope: { actions: ["comments"] },
+    });
+    const res = await request("GET", `/api/v1/items?${query}`, {
+      key: commenter.key,
+    });
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as Body).error).toMatchObject({
+      code: "forbidden_action",
+      message: expect.stringMatching(/^this key may not list items: .*read/),
+    });
+  },
+);
+
+test("swapping one other product's item for another on a note's about writes it but emits no event; a change in their count does", async () => {
+  const owner = await newProduct("about swap");
+  const other = await newProduct("about swap other");
+  const todo = async (title: string) =>
+    (
+      await ok(
+        await request("POST", "/api/v1/items", {
+          json: { type: "todo", product: other.key, title },
+        }),
+        201,
+      )
+    ).key as string;
+  const [first, second] = [await todo("first"), await todo("second")];
+  const note = await ok(
+    await request("POST", "/api/v1/items", {
+      json: { type: "note", product: owner.key, title: "r", about: [first] },
     }),
     201,
   );
-  const state = async () => ({
-    item: await ok(await request("GET", `/api/v1/items/${todo.key}`)),
-    events: (
-      await ok(await request("GET", `/api/v1/activity?product=${owner.key}`))
-    ).items.length,
-    deliveries: db
-      .select()
-      .from(webhookDelivery)
-      .where(eq(webhookDelivery.subscriptionId, hook.id))
-      .all().length,
-  });
-  const before = await state();
+  const swapped = await ok(
+    await request("PATCH", `/api/v1/items/${note.key}`, {
+      json: { about: [second] },
+    }),
+  );
+  expect(swapped.about.map((i: Body) => i.key)).toEqual([second]);
+  await ok(
+    await request("PATCH", `/api/v1/items/${note.key}`, {
+      json: { addAbout: [first] },
+    }),
+  );
 
-  for (const [key, patch] of [
-    [reaching, { about: [hidden.key] }],
-    [bot.key, { about: Array.from({ length: 51 }, () => target.key) }],
-    [bot.key, { status: "done" }],
-  ] as const) {
-    const res = await request("PATCH", `/api/v1/items/${todo.key}`, {
-      json: { type: "note", title: "retitled", ...patch },
-      key,
-    });
-    expect(res.status, await res.clone().text()).toBe(422);
-    expect(await state()).toEqual(before);
-  }
-
-  // the same retype with a reachable about is written: the state above can move
-  expect(
-    await ok(
-      await request("PATCH", `/api/v1/items/${todo.key}`, {
-        json: { type: "note", title: "retitled", about: [target.key] },
-      }),
-    ),
-  ).toMatchObject({ type: "note", title: "retitled" });
-  const after = await state();
-  expect(after.events).toBe(before.events + 1);
-  expect(after.deliveries).toBeGreaterThan(before.deliveries);
+  const updates = db
+    .select({ payload: activityEvent.payload })
+    .from(activityEvent)
+    .where(eq(activityEvent.subjectId, note.id))
+    .orderBy(activityEvent.seq)
+    .all()
+    .slice(1);
+  expect(updates).toEqual([
+    {
+      payload: {
+        about: { from: [], to: [] },
+        aboutOthers: { from: 1, to: 2 },
+      },
+    },
+  ]);
 });

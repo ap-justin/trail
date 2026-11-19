@@ -1086,7 +1086,8 @@ export const webhookDelivery = sqliteTable(
     status: text("status", { enum: webhookDeliveryStatuses })
       .notNull()
       .default("pending"),
-    // the JSON sent, built at the first attempt so a retry sends the same bytes
+    // the JSON sent, built at the first attempt so a retry sends the same bytes;
+    // never kept for a note event, whose about keys follow the key sending it
     body: text("body"),
     attempts: integer("attempts").notNull().default(0),
     nextAttemptAt: integer("next_attempt_at", {

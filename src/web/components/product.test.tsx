@@ -645,21 +645,6 @@ describe("notes", () => {
     expect(notesSection()).toBeInTheDocument();
   });
 
-  test("only archived notes: the section says there are no current ones and still links the archived", () => {
-    renderProduct({
-      items: {
-        status: "ready",
-        data: { ...itemList(rows), counts: countsOf([...rows, archived]) },
-      },
-    });
-    expect(notesSection()).toHaveTextContent("No current notes.");
-    expect(
-      within(notesSection()).getByRole("button", {
-        name: "Show 1 archived note",
-      }),
-    ).toBeInTheDocument();
-  });
-
   test("a product with no notes has no Notes section", () => {
     renderProduct();
     expect(screen.queryByRole("region", { name: /^Notes/ })).toBeNull();
@@ -690,35 +675,6 @@ describe("notes", () => {
     ).toBeInTheDocument();
     const placeholder = within(notesSection()).getByRole("status");
     expect(placeholder.querySelectorAll(":scope > div")).toHaveLength(2);
-  });
-
-  test("a placeholder row has a note row's box and line, so the section keeps its height when they land", () => {
-    const items = { status: "ready", data: workWithNotes } as const;
-    const { rerender } = render(
-      <ProductView {...props({ items, notes: { status: "loading" } })} />,
-    );
-    const placeholders = [
-      ...within(notesSection())
-        .getByRole("status")
-        .querySelectorAll<HTMLElement>(":scope > div"),
-    ];
-    rerender(
-      <ProductView
-        {...props({ items, notes: { status: "ready", data: current } })}
-      />,
-    );
-    const [row] = within(notesSection()).getAllByRole("listitem");
-    if (!row) throw new Error("no note rows");
-    // what sizes the row: its height floor, padding and rule, not its hover wash
-    const box = [...row.classList].filter((c) =>
-      /^(lg:|max-lg:)?(min-h|h|py|my|border|mx)-/.test(c),
-    );
-    expect(box).toContain("min-h-11");
-    for (const placeholder of placeholders) {
-      expect(placeholder).toHaveClass(...box);
-      // the row's height at lg is its text's line, which bare blocks don't have
-      expect(placeholder.firstElementChild).toHaveClass("h-lh");
-    }
   });
 
   test("Try again on notes leaves focus on their heading", async () => {

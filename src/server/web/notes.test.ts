@@ -73,8 +73,10 @@ test("a product's item list leaves notes out unless type note asks for them, and
 test("a project's item groups leave notes out unless type note asks for them, and count them apart", async () => {
   const all = await get(`/projects/${slug}/items`, member);
   expect(
-    all.body.groups.flatMap((g: Body) => g.items.map((i: Body) => i.key)),
-  ).toEqual(expect.arrayContaining([keys.todo, keys.issue]));
+    all.body.groups
+      .flatMap((g: Body) => g.items.map((i: Body) => i.key))
+      .sort(),
+  ).toEqual([keys.todo, keys.issue].sort());
   expect(all.body.groups[0].count).toBe(2);
   expect(all.body.counts).toEqual(workCounts);
   const archived = await get(
@@ -296,4 +298,29 @@ test("a person comments on a note, and the comment is on its timeline", async ()
   expect(page.body.timeline.filter((e: Body) => e.kind === "comment")).toEqual([
     expect.objectContaining({ id: comment.id }),
   ]);
+});
+
+test("turning a todo into a note shows its type and status change, not the priority, estimate and assignee it clears", async () => {
+  const todo = await item(alpha.key, "todo", {
+    priority: 2,
+    estimate: 3,
+    assignee: "note writer",
+  });
+  const retype = await request("PATCH", `/api/v1/items/${todo}`, {
+    json: { type: "note" },
+  });
+  expect(retype.status, await retype.clone().text()).toBe(200);
+
+  const page = await get(`/items/${todo}`, member);
+  expect(page.body.timeline.map((e: Body) => e.kind)).toEqual([
+    "item_created",
+    "status_changed",
+    "type_changed",
+  ]);
+  const feed = await get("/feed?type=note", member);
+  expect(
+    feed.body.items
+      .filter((e: Body) => e.item?.key === todo)
+      .map((e: Body) => e.kind),
+  ).toEqual(["status_changed", "type_changed", "item_created"]);
 });

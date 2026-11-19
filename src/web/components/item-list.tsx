@@ -369,7 +369,8 @@ export function FilterEmpty({
   filters: ItemFilters;
   onShowAll: () => void;
 }) {
-  const noun = nouns[filters.type ?? "all"];
+  // All holds issues and todos; notes list beside it, so "items" would deny them
+  const noun = filters.type ? nouns[filters.type] : "issues or todos";
   return (
     <EmptyState
       icon={SearchIcon}

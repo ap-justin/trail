@@ -2757,6 +2757,12 @@ export function createService({
         "a person files an issue unassigned: drop the assignee, and the product's bot assigns it",
       );
     }
+    // before the assignee is resolved, so an unknown name isn't refused for the name first
+    if (asked === "note" && input.assignee != null) {
+      throw new ValidationError(
+        "a note has no assignee, since nobody has to act on it: leave assignee out, and file an issue (file_issue) for work someone has to do, listing it in the note's about",
+      );
+    }
     const title = nonBlank(input.title, "title");
     const priority = validPriority(input.priority);
     const estimate = validEstimate(input.estimate);
@@ -2792,11 +2798,6 @@ export function createService({
           if (about !== undefined && type !== "note") {
             throw new ValidationError(
               "about is a note's field, the items it is about: leave it out of a todo or an issue, and add a note about the item with add_note",
-            );
-          }
-          if (type === "note" && assignee != null) {
-            throw new ValidationError(
-              "a note has no assignee, since nobody has to act on it: leave assignee out, and file an issue (file_issue) for work someone has to do, listing it in the note's about",
             );
           }
           if (type === "note" && !holdsANotesRank(input)) {
@@ -3824,19 +3825,30 @@ export function createService({
         const written = hydrateOne(tx, updatedRow, actor);
         if (aboutBefore) {
           const after = aboutInEvents(tx, row.id, row.productId);
-          changes.about = { from: aboutBefore.keys, to: after.keys };
-          changes.aboutOthers = { from: aboutBefore.others, to: after.others };
+          // a swap among other products' items changes nothing an event can show
+          if (
+            !sameJson(aboutBefore.keys, after.keys) ||
+            aboutBefore.others !== after.others
+          ) {
+            changes.about = { from: aboutBefore.keys, to: after.keys };
+            changes.aboutOthers = {
+              from: aboutBefore.others,
+              to: after.others,
+            };
+          }
         }
         return {
           result: withSkipped(written, skipped),
-          event: {
-            actorId: actor.id,
-            subjectType: "issue",
-            subjectId: row.id,
-            productId: row.productId,
-            action: "issue.updated",
-            payload: changes,
-          },
+          event: isEmpty(changes)
+            ? null
+            : {
+                actorId: actor.id,
+                subjectType: "issue",
+                subjectId: row.id,
+                productId: row.productId,
+                action: "issue.updated",
+                payload: changes,
+              },
         };
       });
       return withPullRequest(updated);
@@ -4665,6 +4677,12 @@ export function createService({
      * only: notes need type note or `about`.
      */
     listItems(actor: ActingActor, query: ItemQuery = {}): Page<Issue> {
+      requireAction(actor, "read", "list items", () => {
+        if (query.product !== undefined)
+          resolveNamedProduct(db, query.product, actor);
+        if (query.project !== undefined)
+          resolveProject(db, query.project, actor);
+      });
       if (
         query.about !== undefined &&
         query.type !== undefined &&
@@ -4697,12 +4715,6 @@ export function createService({
           );
         }
       }
-      requireAction(actor, "read", "list items", () => {
-        if (query.product !== undefined)
-          resolveNamedProduct(db, query.product, actor);
-        if (query.project !== undefined)
-          resolveProject(db, query.project, actor);
-      });
       const inProject =
         query.project === undefined
           ? undefined

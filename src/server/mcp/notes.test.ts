@@ -108,6 +108,27 @@ test("about points a note at items in other products, and get_item reads it both
   ]);
 });
 
+test("a note may be about another note, and that note's page lists it", async () => {
+  const owner = await productBot("Chain");
+  const first = await call(owner.client, "add_note", {
+    product: owner.product,
+    title: "first note",
+  });
+  const second = await call(owner.client, "add_note", {
+    product: owner.product,
+    title: "second note",
+    about: [first.key],
+  });
+  expect(second.about).toEqual([
+    { key: first.key, title: "first note", type: "note", status: "current" },
+  ]);
+  expect(
+    (await call(owner.client, "get_item", { item: first.key })).notes,
+  ).toEqual([
+    { key: second.key, title: "second note", type: "note", status: "current" },
+  ]);
+});
+
 test("about refuses a key the caller doesn't reach, naming it, and more than 50 keys", async () => {
   const hidden = await productBot("Hydra");
   const secret = await call(hidden.client, "add_todo", { title: "secret" });
@@ -1400,6 +1421,7 @@ async function noteSeenByProjectKey(name: string, olderKeyActions?: string[]) {
       .where(eq(webhookSubscription.id, id))
       .run();
   return {
+    url,
     inside,
     reading,
     aboutAsSent,
@@ -1422,6 +1444,52 @@ test("a webhook recording no key reads a note's about items as its bot's reading
   );
   forgetRecordedKey();
   expect(await aboutAsSent()).toEqual({ about: [inside.key], aboutOthers: 1 });
+});
+
+test("a note event retried on a narrower key than its first attempt's names only the about items the new key reaches", async () => {
+  const {
+    url: hookUrl,
+    inside,
+    forgetRecordedKey,
+    creationDeliveries,
+  } = await noteSeenByProjectKey("Narrowed");
+  // with no recorded key the webhook goes out on the bot's older key, which reaches both todos
+  forgetRecordedKey();
+  const older = db
+    .select({ prefix: apiKey.prefix })
+    .from(apiKey)
+    .innerJoin(actor, eq(actor.id, apiKey.actorId))
+    .where(eq(actor.displayName, "Narrowed reader"))
+    .orderBy(apiKey.createdAt)
+    .get();
+  const tries: Body[] = [];
+  let clock = Date.now();
+  const failingFirst = createWebhookWorker({
+    db,
+    bus,
+    settings: testWebhookSettings({
+      now: () => clock,
+      transport: async ({ url, body }) => {
+        const sentBody = JSON.parse(body) as Body;
+        if (url.href !== hookUrl || sentBody.type !== "trail.item.created")
+          return { status: 204 };
+        tries.push(sentBody.data.payload);
+        return { status: tries.length === 1 ? 503 : 204 };
+      },
+    }),
+  });
+  await failingFirst.tick();
+  expect(tries).toHaveLength(1);
+  expect(tries[0]?.aboutOthers).toBe(0);
+
+  revokeKey(db, older?.prefix ?? "");
+  clock += 60_000;
+  await failingFirst.tick();
+  expect(tries).toHaveLength(2);
+  expect(tries[1]).toMatchObject({ about: [inside.key], aboutOthers: 1 });
+  expect(creationDeliveries()).toEqual([
+    { status: "delivered", lastError: null },
+  ]);
 });
 
 test("a webhook whose recorded key is revoked is sent nothing of a note, and its delivery fails saying why", async () => {
@@ -1731,6 +1799,9 @@ test("a refused turn into a note leaves the item's type, fields, events and webh
   });
   const state = async () => ({
     item: await call(owner.client, "get_item", { item: todo.key }),
+    labels: (
+      await call(owner.client, "list_labels", { product: owner.product })
+    ).items.map((l: { name: string }) => l.name),
     events: (
       await call(owner.client, "list_activity", { product: owner.product })
     ).items.length,
@@ -1750,6 +1821,12 @@ test("a refused turn into a note leaves the item's type, fields, events and webh
       /<=50 items at about/,
     ],
     [owner.client, { status: "done" }, /^validation_failed: type note makes /],
+    // the label is created before about is read: only the transaction undoes it
+    [
+      reaching,
+      { addLabels: ["atomic-brand-new"], about: [hidden.key] },
+      /^validation_failed: about names /,
+    ],
   ] as const) {
     expect(
       await callError(client, "update_item", {

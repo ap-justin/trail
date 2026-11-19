@@ -26,8 +26,8 @@ const productKey = /^(?=.*[A-Z])[A-Z0-9]{2,10}$/;
 
 type ProjectSearch = ItemSearch & { product?: string };
 
-// module-scoped so the query keeps its last selection, and the notes prop its identity,
-// across renders
+// module-scoped so the query reruns the flatten only when the list changes, not every render;
+// structural sharing keeps the notes' identity either way
 const itemsOfGroups = (list: WebProjectItemsView) =>
   list.groups.flatMap((group) => group.items);
 
@@ -82,14 +82,27 @@ function ProjectPage() {
     ? { data: undefined, isError: false }
     : items;
   // from the first page of whichever list under this product filter read last, so a long
-  // list's later pages don't hold up the Notes section, and a tab whose read failed keeps them
+  // list's later pages don't hold up the Notes section, and a tab whose read failed keeps them;
+  // while a product filter's first list loads, the last filter's keep the section in place,
+  // but a failed read leaves nothing coming to replace them
+  const noteCountsQuery = useQuery({
+    ...projectNoteCountsQuery(slug, product),
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === slug ? previous : undefined,
+  });
   const noteCounts =
-    useQuery(projectNoteCountsQuery(slug, product)).data ?? null;
+    noteCountsQuery.isPlaceholderData && items.isError
+      ? null
+      : (noteCountsQuery.data ?? null);
   // the Notes section's, under the product filter the counts it reads follow, once they say
-  // there are current notes; a list of notes has no section
+  // there are current notes; a list of notes has no section, and the last filter's counts
+  // don't say this one has any
   const notes = useQuery({
     ...projectItemsQuery(slug, { product, type: "note", status: "current" }),
-    enabled: filters.type !== "note" && (noteCounts?.current ?? 0) > 0,
+    enabled:
+      filters.type !== "note" &&
+      !noteCountsQuery.isPlaceholderData &&
+      (noteCounts?.current ?? 0) > 0,
     select: itemsOfGroups,
   });
   const updates = useQuery({

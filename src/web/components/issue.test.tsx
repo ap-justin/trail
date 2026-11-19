@@ -1217,6 +1217,15 @@ describe("notes", () => {
     expect(screen.queryByRole("region", { name: "Notes" })).toBeNull();
   });
 
+  test("a note about nothing the viewer reaches has no About section", () => {
+    renderIssue({
+      issueKey: "TRL-31",
+      issue: { status: "ready", data: note({ about: [] }) },
+    });
+    expect(screen.getByRole("region", { name: "Properties" })).toBeVisible();
+    expect(screen.queryByRole("region", { name: "About" })).toBeNull();
+  });
+
   test("a person comments on a note: the box is there and Comment sends the trimmed body", async () => {
     const user = userEvent.setup();
     const { props } = renderIssue({

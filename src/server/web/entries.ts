@@ -112,13 +112,15 @@ function changeEntries(
   actorOf: (id: string) => WebActorView,
 ): EntryPart[] {
   const parts: EntryPart[] = [];
+  // a note has no priority, estimate or assignee: the type change already says they went
+  const toNote = changes.type?.to === "note";
   if (changes.status) {
     parts.push({ kind: "status_changed", ...changes.status });
   }
   if (changes.type) {
     parts.push({ kind: "type_changed", ...changes.type });
   }
-  if (changes.priority) {
+  if (changes.priority && !toNote) {
     parts.push({ kind: "priority_changed", ...changes.priority });
   }
   if (changes.labels) {
@@ -140,7 +142,7 @@ function changeEntries(
       }
     }
   }
-  if (changes.assigneeId) {
+  if (changes.assigneeId && !toNote) {
     const { from, to } = changes.assigneeId;
     parts.push({
       kind: "assignee_changed",
@@ -148,7 +150,7 @@ function changeEntries(
       to: to === null ? null : actorOf(to),
     });
   }
-  if (changes.estimate) {
+  if (changes.estimate && !toNote) {
     parts.push({ kind: "estimate_changed", ...changes.estimate });
   }
   return parts;

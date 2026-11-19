@@ -362,6 +362,19 @@ describe("notes section on load", () => {
     return notesAsked;
   }
 
+  test("under ?product=, the current notes are that product's", async () => {
+    signedInAs("member");
+    const notesAsked = serveNoteCounts({ current: 1, archived: 0 });
+    const { queryClient } = renderApp("/projects/human-ui?product=TRL");
+    await waitFor(() => expect(notesAsked).toHaveLength(1));
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    expect(notesAsked).toHaveLength(1);
+    const query = new URL(notesAsked[0] ?? "").searchParams;
+    expect(
+      ["product", "type", "status"].map((name) => query.get(name)),
+    ).toEqual(["TRL", "note", "current"]);
+  });
+
   test("only archived notes: the section says none are current and links the archived", async () => {
     signedInAs("member");
     const notesAsked = serveNoteCounts({ current: 0, archived: 2 });
@@ -416,17 +429,24 @@ describe("notes section on load", () => {
     expect(notesAsked).toEqual([]);
   });
 
-  test("a new product drops the last note counts, which counted the other products", async () => {
+  test("a new product keeps the last note counts until its own list counts them", async () => {
     signedInAs("member");
-    serveNoteCounts({ current: 0, archived: 2 });
-    const never = new Promise<void>(() => {});
+    serveProject();
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     server.use(
       http.get("/api/web/projects/human-ui/items", async ({ request }) => {
-        if (new URL(request.url).searchParams.has("product")) await never;
+        const isTrl = new URL(request.url).searchParams.has("product");
+        if (isTrl) await held;
         const list = projectItems([{ product: trail, items: [todoRow()] }]);
         return HttpResponse.json({
           ...list,
-          counts: { ...list.counts, notes: { current: 0, archived: 2 } },
+          counts: {
+            ...list.counts,
+            notes: { current: 0, archived: isTrl ? 1 : 2 },
+          },
         });
       }),
     );
@@ -439,11 +459,84 @@ describe("notes section on load", () => {
       params: { slug: "human-ui" },
       search: { product: "TRL" },
     });
-    await waitFor(() =>
-      expect(
-        screen.queryByRole("button", { name: "Show 2 archived notes" }),
-      ).not.toBeInTheDocument(),
+    expect(
+      screen.getByRole("button", { name: "Show 2 archived notes" }),
+    ).toBeInTheDocument();
+    release();
+    expect(
+      await screen.findByRole("button", { name: "Show 1 archived note" }),
+    ).toBeInTheDocument();
+  });
+
+  test("a new product's notes wait for its own counts, not the last product's", async () => {
+    signedInAs("member");
+    serveProject();
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const notesAsked: string[] = [];
+    server.use(
+      http.get("/api/web/projects/human-ui/items", async ({ request }) => {
+        const query = new URL(request.url).searchParams;
+        const isTrl = query.has("product");
+        if (query.get("type") === "note") notesAsked.push(request.url);
+        else if (isTrl) await held;
+        const list = projectItems([{ product: trail, items: [todoRow()] }]);
+        // every current note is another product's
+        return HttpResponse.json({
+          ...list,
+          counts: {
+            ...list.counts,
+            notes: isTrl
+              ? { current: 0, archived: 1 }
+              : { current: 1, archived: 0 },
+          },
+        });
+      }),
     );
+    const { router, queryClient } = renderApp("/projects/human-ui");
+    await waitFor(() => expect(notesAsked).toHaveLength(1));
+    await router.navigate({
+      to: "/projects/$slug",
+      params: { slug: "human-ui" },
+      search: { product: "TRL" },
+    });
+    expect(screen.getByRole("heading", { name: /^Notes/ })).toBeInTheDocument();
+    release();
+    expect(await screen.findByText("No current notes.")).toBeInTheDocument();
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    expect(notesAsked).toHaveLength(1);
+  });
+
+  test("a new product whose list fails drops the last product's note counts", async () => {
+    signedInAs("member");
+    serveNoteCounts({ current: 1, archived: 0 });
+    server.use(
+      http.get("/api/web/projects/human-ui/items", ({ request }) => {
+        const query = new URL(request.url).searchParams;
+        if (query.has("product"))
+          return HttpResponse.json({ error: "bad request" }, { status: 400 });
+        const list = projectItems([{ product: trail, items: [noteRow()] }]);
+        return HttpResponse.json({
+          ...list,
+          counts: { ...list.counts, notes: { current: 1, archived: 0 } },
+        });
+      }),
+    );
+    const { router } = renderApp("/projects/human-ui");
+    expect(
+      await screen.findByRole("heading", { name: /^Notes/ }),
+    ).toBeInTheDocument();
+    await router.navigate({
+      to: "/projects/$slug",
+      params: { slug: "human-ui" },
+      search: { product: "TRL" },
+    });
+    expect(await screen.findAllByRole("alert")).not.toHaveLength(0);
+    expect(
+      screen.queryByRole("heading", { name: /^Notes/ }),
+    ).not.toBeInTheDocument();
   });
 
   test("only archived notes: the section stays when the next tab's list fails", async () => {

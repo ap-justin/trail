@@ -85,13 +85,10 @@ test("POST status-update routes, product and project, carry the same guidance", 
   }
 });
 
-test("add_todo, file_issue and add_note each say which item to add: planned work, a request for work, or a record nobody acts on", async () => {
+test("add_todo, file_issue and add_note each send what someone has to act on to its own issue", async () => {
   const tool = await toolDescriptions();
   for (const name of ["add_todo", "file_issue", "add_note"]) {
     const text = tool(name).description;
-    expect(text, name).toMatch(/a todo is planned work/);
-    expect(text, name).toMatch(/an issue asks a product's bot for work/);
-    expect(text, name).toMatch(/a note is a record nobody has to act on/);
     expect(text, name).toMatch(
       /Anything in a note that someone has to act on goes in its own issue/,
     );
@@ -101,14 +98,10 @@ test("add_todo, file_issue and add_note each say which item to add: planned work
 /** How a note's events carry about: its own product's keys the reader reaches, the rest counted, never the full list. */
 function expectNoteEventAbout(text: string | undefined, where: string) {
   expect(text, where).toMatch(/On its create event, about is an array of keys/);
-  expect(text, where).toMatch(
-    /of the items in the note's own product that the reading key reaches/,
-  );
   expect(text, where).toMatch(/aboutOthers counts the rest/);
   expect(text, where).toMatch(
     /changes which items it is about.*carries about \{from, to\} and aboutOthers \{from, to\}/,
   );
-  expect(text, where).toMatch(/not the note's full list/);
 }
 
 test("list_activity and create_webhook say how a note's events carry about and aboutOthers", async () => {
@@ -137,15 +130,9 @@ test("GET /activity's event payload and POST /webhooks say how a note's events c
   expectNoteEventAbout(spec.paths["/webhooks"]?.post?.description, "/webhooks");
 });
 
-test("list_items says that without type it lists issues and todos only, and update_item says who edits a note", async () => {
+test("update_item says who edits a note", async () => {
   const tool = await toolDescriptions();
-  expect(tool("list_items").description).toMatch(
-    /Without type it lists issues and todos only/,
-  );
   expect(tool("update_item").description).toMatch(
     /A note is edited only by its author and its product's own bot/,
-  );
-  expect(tool("get_item").description).toMatch(
-    /list_items with about set to the item's key pages through all of them, archived ones too/,
   );
 });

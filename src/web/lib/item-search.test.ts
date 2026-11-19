@@ -31,6 +31,10 @@ describe("an item list's deep link", () => {
   });
 
   test("a status the type has is kept", () => {
+    expect(validateItemSearch({ type: "note", status: "current" })).toEqual({
+      status: "current",
+      type: "note",
+    });
     expect(validateItemSearch({ type: "note", status: "archived" })).toEqual({
       status: "archived",
       type: "note",

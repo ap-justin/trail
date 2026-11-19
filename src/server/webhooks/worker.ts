@@ -215,13 +215,18 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
       .filter((d) => d.nextAttemptAt.getTime() <= now);
   }
 
-  /** The envelope a delivery carries: its message's on an inbox subscription, else its event's as `keyId`, the key sending it, reads it. */
+  /**
+   * The envelope a delivery carries: its message's on an inbox subscription,
+   * else its event's as `keyId`, the key sending it, reads it. `perKey` marks a
+   * note event's, whose about keys depend on that key.
+   */
   function envelopeOf(
     delivery: Delivery,
     keyId: string | null,
-  ): Envelope | undefined {
+  ): { envelope: Envelope; perKey: boolean } | undefined {
     if (delivery.messageId !== null) {
-      return buildMessageEnvelope(db, delivery.messageId);
+      const envelope = buildMessageEnvelope(db, delivery.messageId);
+      return envelope && { envelope, perKey: false };
     }
     if (delivery.eventId === null || keyId === null) return undefined;
     const event = db
@@ -231,22 +236,29 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
       .get();
     if (!event) return undefined;
     const read = eventForReach(db, sendingKeyReach(db, keyId), event);
-    return buildEnvelope(db, read, settings.publicUrl);
+    return {
+      envelope: buildEnvelope(db, read, settings.publicUrl),
+      perKey: event.payload.about !== undefined,
+    };
   }
 
   function bodyOf(delivery: Delivery, keyId: string | null): string | null {
     if (delivery.body !== null) return delivery.body;
-    const envelope = envelopeOf(delivery, keyId);
-    if (!envelope) return null;
+    const built = envelopeOf(delivery, keyId);
+    if (!built) return null;
     const body = JSON.stringify({
-      ...envelope,
+      ...built.envelope,
       // a product event's legacy trail.project.* twin carries its own type
       type: delivery.type,
     });
-    db.update(webhookDelivery)
-      .set({ body })
-      .where(eq(webhookDelivery.id, delivery.id))
-      .run();
+    // a retry may go out on another key (the webhook moved, or its fallback key
+    // changed), so a body naming what one key reaches is built afresh each time
+    if (!built.perKey) {
+      db.update(webhookDelivery)
+        .set({ body })
+        .where(eq(webhookDelivery.id, delivery.id))
+        .run();
+    }
     return body;
   }
 
