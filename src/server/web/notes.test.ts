@@ -229,6 +229,28 @@ test("a person cannot file a note through the issue route, and no note appears",
   ]);
 });
 
+test("a person's session is refused at /api/v1/items for a note write, and the note stays as it was", async () => {
+  const before = await get(`/items/${keys.current}`, member);
+  expect(before.status).toBe(200);
+  const created = await request("POST", "/api/v1/items", {
+    key: null,
+    cookie: member,
+    json: { type: "note", product: alpha.key, title: "human note" },
+  });
+  const edited = await request("PATCH", `/api/v1/items/${keys.current}`, {
+    key: null,
+    cookie: member,
+    json: { title: "edited by a person", status: "archived" },
+  });
+  expect([created.status, edited.status]).toEqual([401, 401]);
+  expect(await get(`/items/${keys.current}`, member)).toEqual(before);
+  const listed = await get(`/products/${alpha.key}/items?type=note`, member);
+  expect(listed.body.items.map((i: Body) => i.title).sort()).toEqual([
+    "archived note",
+    "current note",
+  ]);
+});
+
 test("a person comments on a note, and the comment is on its timeline", async () => {
   const res = await request("POST", `/api/web/items/${keys.current}/comments`, {
     key: null,

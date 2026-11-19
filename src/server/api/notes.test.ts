@@ -1,6 +1,8 @@
+import { eq } from "drizzle-orm";
 import { expect, test } from "vitest";
 import { activityEventSchema } from "../../shared/schemas.js";
-import { createBot } from "../service/keys.js";
+import { webhookDelivery } from "../db/schema.js";
+import { createBot, createKey } from "../service/keys.js";
 import { atFakeTimeAsync, projectKey, setupTestApp } from "../test-app.js";
 
 const { bot, addBot, db, request } = setupTestApp();
@@ -228,14 +230,18 @@ test("the deprecated /issues routes never show a note", async () => {
       await ok(await request("GET", `/api/v1/issues?product=${owner.key}`))
     ).items.map((i: Body) => i.key),
   ).toEqual([issue.key]);
-  expect((await request("GET", `/api/v1/issues/${note.key}`)).status).toBe(404);
-  expect(
-    (
-      await request("PATCH", `/api/v1/issues/${note.key}`, {
-        json: { title: "x" },
-      })
-    ).status,
-  ).toBe(404);
+  const read = await request("GET", `/api/v1/issues/${note.key}`);
+  expect(read.status).toBe(404);
+  expect(((await read.json()) as Body).error.message).toBe(
+    `${note.key} is a note, which the deprecated issue routes don't serve: read it with get_item (GET /api/v1/items/{key}) and edit it with update_item (PATCH /api/v1/items/{key})`,
+  );
+  const edit = await request("PATCH", `/api/v1/issues/${note.key}`, {
+    json: { title: "x" },
+  });
+  expect(edit.status).toBe(404);
+  expect(((await edit.json()) as Body).error.message).toMatch(
+    new RegExp(`^${note.key} is a note, `),
+  );
 });
 
 test("the OpenAPI spec documents notes on the items routes", async () => {
@@ -463,4 +469,69 @@ test("PATCH /items/{key} refuses about with 51 items and an addAbout that would 
   expect(read.about.map((r: Body) => r.key).sort()).toEqual(
     keys.slice(0, 50).sort(),
   );
+});
+
+test("a refused PATCH turning an item into a note leaves its type, fields, events and webhook deliveries as they were", async () => {
+  const owner = await newProduct("rest atomic");
+  const elsewhere = addBot("rest atomic elsewhere");
+  const hiddenProduct = await newProduct("rest atomic hidden", elsewhere.key);
+  const create = async (product: string, title: string, key?: string) =>
+    ok(
+      await request("POST", "/api/v1/items", {
+        json: { type: "todo", product, title, priority: 2, estimate: 3 },
+        key,
+      }),
+      201,
+    );
+  const hidden = await create(hiddenProduct.key, "hidden", elsewhere.key);
+  const target = await create(owner.key, "target");
+  const todo = await create(owner.key, "work");
+  const reaching = createKey(db, bot.actor.id, { products: [owner.key] }).key;
+  const hook = await ok(
+    await request("POST", "/api/v1/webhooks", {
+      json: {
+        url: "https://rest-atomic.example.com/hook",
+        secret: "whsec_rest_atomic_0123456789",
+        products: [owner.key],
+      },
+    }),
+    201,
+  );
+  const state = async () => ({
+    item: await ok(await request("GET", `/api/v1/items/${todo.key}`)),
+    events: (
+      await ok(await request("GET", `/api/v1/activity?product=${owner.key}`))
+    ).items.length,
+    deliveries: db
+      .select()
+      .from(webhookDelivery)
+      .where(eq(webhookDelivery.subscriptionId, hook.id))
+      .all().length,
+  });
+  const before = await state();
+
+  for (const [key, patch] of [
+    [reaching, { about: [hidden.key] }],
+    [bot.key, { about: Array.from({ length: 51 }, () => target.key) }],
+    [bot.key, { status: "done" }],
+  ] as const) {
+    const res = await request("PATCH", `/api/v1/items/${todo.key}`, {
+      json: { type: "note", title: "retitled", ...patch },
+      key,
+    });
+    expect(res.status, await res.clone().text()).toBe(422);
+    expect(await state()).toEqual(before);
+  }
+
+  // the same retype with a reachable about is written: the state above can move
+  expect(
+    await ok(
+      await request("PATCH", `/api/v1/items/${todo.key}`, {
+        json: { type: "note", title: "retitled", about: [target.key] },
+      }),
+    ),
+  ).toMatchObject({ type: "note", title: "retitled" });
+  const after = await state();
+  expect(after.events).toBe(before.events + 1);
+  expect(after.deliveries).toBeGreaterThan(before.deliveries);
 });

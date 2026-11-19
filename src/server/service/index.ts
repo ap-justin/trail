@@ -117,6 +117,7 @@ import {
   noIssue,
   noProduct,
   noProject,
+  noteOnIssueRoute,
   productsNamed,
   projectsReached,
   type Reach,
@@ -1646,12 +1647,22 @@ export function createService({
     const ownerId = ownerIdOf(tx, row.productId);
     if (actor.id === row.createdBy || actor.id === ownerId) return;
     const names = actorRefs(tx, [row.createdBy, ownerId]);
-    const author = names.get(row.createdBy)?.name ?? "its author";
-    const productKey = key.slice(0, key.lastIndexOf("-"));
+    const authorRef = names.get(row.createdBy);
+    const author = authorRef?.name ?? "its author";
+    // a person authors a note only by filing the issue it was turned from, and people edit nothing over the API
+    const authorEdits = authorRef?.kind !== "human";
+    const owner =
+      ownerId === null
+        ? undefined
+        : `${names.get(ownerId)?.name ?? "its owner"}, the bot of ${key.slice(0, key.lastIndexOf("-"))}`;
     const editors =
-      ownerId === null || ownerId === row.createdBy
-        ? `only ${author} edits it`
-        : `only ${author} and ${names.get(ownerId)?.name ?? "its owner"}, the bot of ${productKey}, edit it`;
+      owner === undefined || ownerId === row.createdBy
+        ? authorEdits
+          ? `only ${author} edits it`
+          : "no bot edits it"
+        : authorEdits
+          ? `only ${author} and ${owner}, edit it`
+          : `only ${owner}, edits it`;
     throw new ForbiddenError(
       `${key} is a note by ${author}, and ${editors}: add what you know with add_comment on ${key}`,
     );
@@ -1660,8 +1671,13 @@ export function createService({
   /** `resolveIssueRow` among issues and todos: what the routes from before notes find. */
   function workRow(tx: Tx | Db, ref: string, actor: ActingActor): IssueRow {
     const row = resolveIssueRow(tx, ref, actor);
-    if (row.type === "note") throw noIssue(ref);
-    return row;
+    if (row.type !== "note") return row;
+    const productKey = tx
+      .select({ key: product.key })
+      .from(product)
+      .where(eq(product.id, row.productId))
+      .get()?.key;
+    throw noteOnIssueRoute(`${productKey}-${row.number}`);
   }
 
   /** Replaces the items the note is about. */
@@ -2931,6 +2947,7 @@ export function createService({
     ref: string | undefined,
     slug: string | undefined,
     tool = "file_issue",
+    item: "issue" | "note" = "issue",
   ): Placement {
     const named =
       ref === undefined ? undefined : resolveNamedProduct(tx, ref, actor);
@@ -2943,7 +2960,14 @@ export function createService({
       place: (settled) => {
         if (into !== undefined) {
           return {
-            product: drawnProduct(tx, actor, into, named ?? settled, tool),
+            product: drawnProduct(
+              tx,
+              actor,
+              into,
+              named ?? settled,
+              tool,
+              item,
+            ),
             project: into,
           };
         }
@@ -2955,7 +2979,7 @@ export function createService({
   }
 
   /**
-   * The product of `into` the issue goes to: `named` when the project draws
+   * The product of `into` the item goes to: `named` when the project draws
    * from it, else the project's one product. Of `into`'s products the actor
    * files on those its product grant covers, or on all of them when `into` is
    * one of its own projects, so the item stays one it reaches; a refusal names
@@ -2967,6 +2991,7 @@ export function createService({
     into: ProjectRow,
     named: Product | undefined,
     tool: string,
+    item: "issue" | "note",
   ): Product {
     const drawn = tx
       .select(getTableColumns(product))
@@ -2999,7 +3024,7 @@ export function createService({
       }
       throw new ValidationError(
         drawn.length === 0
-          ? `project ${into.slug} draws from no product yet, so nothing is filed into it: file the issue on ${named.key} without project, then add it with add_to_project (POST /projects/{slug}/items)`
+          ? `project ${into.slug} draws from no product yet, so nothing is filed into it: ${item === "note" ? "add the note" : "file the issue"} on ${named.key} without project, then add it with add_to_project (POST /projects/{slug}/items)`
           : `project ${into.slug} draws from ${drawsFrom}, not ${named.key}: send product with ${sendOne}, or a project that draws from ${named.key} (list_projects shows each one's products)`,
       );
     }
@@ -3007,7 +3032,7 @@ export function createService({
     if (drawn.length === 1) return fileable[0] as Product;
     throw new ValidationError(
       drawn.length === 0
-        ? `project ${into.slug} draws from no product yet, so ${tool} needs product: send the key (like TRL) of the product the issue is for, without project, then add the issue with add_to_project (POST /projects/{slug}/items)`
+        ? `project ${into.slug} draws from no product yet, so ${tool} needs product: send the key (like TRL) of the product the ${item} is for, without project, then add the ${item} with add_to_project (POST /projects/{slug}/items)`
         : `project ${into.slug} draws from ${drawsFrom}, so ${tool} needs product: send product with ${others === 0 ? "one of them" : sendOne}`,
     );
   }
@@ -3451,7 +3476,8 @@ export function createService({
         {
           asked: "note",
           typeOf: () => "note",
-          placement: (tx) => issuePlacement(tx, actor, ref, slug, "add_note"),
+          placement: (tx) =>
+            issuePlacement(tx, actor, ref, slug, "add_note", "note"),
         },
       );
     },

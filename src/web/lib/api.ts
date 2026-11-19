@@ -117,19 +117,26 @@ export const api = {
   products: () => request<WebProductListView>(web("/products")),
   product: (key: string) =>
     request<WebProductDetailView>(web(`/products/${seg(key)}`)),
-  productItems: (key: string, filters: ItemQuery, cursor: string | null) =>
+  productItems: (
+    key: string,
+    filters: ItemQuery,
+    cursor: string | null,
+    signal?: AbortSignal,
+  ) =>
     request<WebItemListView>(
       web(
         `/products/${seg(key)}/items${query({ ...filters, cursor, limit: MAX_PAGE })}`,
       ),
+      { signal },
     ),
   productStatusUpdates: (key: string) =>
     request<WebStatusUpdatePageView>(
       web(`/products/${seg(key)}/status-updates${query({ limit: MAX_PAGE })}`),
     ),
-  projects: (cursor: string | null) =>
+  projects: (cursor: string | null, signal?: AbortSignal) =>
     request<WebProjectPageView>(
       web(`/projects${query({ cursor, limit: MAX_PAGE })}`),
+      { signal },
     ),
   project: (slug: string) =>
     request<WebProjectDetailView>(web(`/projects/${seg(slug)}`)),
@@ -137,11 +144,13 @@ export const api = {
     slug: string,
     filters: ProjectItemQuery,
     cursor: string | null,
+    signal?: AbortSignal,
   ) =>
     request<WebProjectItemsView>(
       web(
         `/projects/${seg(slug)}/items${query({ ...filters, cursor, limit: MAX_PAGE })}`,
       ),
+      { signal },
     ),
   projectStatusUpdates: (slug: string) =>
     request<WebStatusUpdatePageView>(

@@ -62,7 +62,9 @@ export function NotesSection({
           variant="ghost"
           size="sm"
           onClick={onShowArchived}
-          className="mt-1 font-normal text-muted-foreground max-lg:mx-4 lg:ml-0.5"
+          // the word on the note keys, 8px into the box past its 1px border: 16px in below lg,
+          // 8px at lg with the box on the rows' edge
+          className="mt-1 px-1.75 font-normal text-muted-foreground max-lg:mx-2"
         >
           Show {counts.archived} archived{" "}
           {counts.archived === 1 ? "note" : "notes"}
@@ -91,7 +93,7 @@ function NotesBody({
     );
   }
   if (notes.status === "loading")
-    return <ListSkeleton className="px-4 lg:px-2" />;
+    return <ListSkeleton rows={current} className="px-4 lg:px-2" />;
   if (notes.status === "error") {
     return (
       <ErrorState
@@ -107,7 +109,8 @@ function NotesBody({
         <li
           key={note.key}
           data-item-key={note.key}
-          className="relative flex min-h-11 items-center gap-2.5 border-b border-rule py-2 max-lg:mx-4 lg:min-h-0 lg:px-2"
+          // the item table rows' hover wash, which this list continues
+          className="relative flex min-h-11 items-center gap-2.5 border-b border-rule py-2 transition-colors hover:bg-muted/50 max-lg:mx-4 lg:min-h-0 lg:px-2"
         >
           <KeyText className="shrink-0">{note.key}</KeyText>
           <RowLink

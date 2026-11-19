@@ -303,21 +303,21 @@ describe("while the next filter loads", () => {
     server.use(
       http.get("/api/web/projects/human-ui/items", async ({ request }) => {
         const query = new URL(request.url).searchParams;
+        const list = projectItems([{ product: trail, items: [todoRow()] }]);
+        // the counts follow only the product filter, so the notes list's are the same
+        const counts = { ...list.counts, notes: { current: 1, archived: 0 } };
         if (query.get("type") === "note") {
           notesAsked.push(request.url);
-          return HttpResponse.json(
-            projectItems([{ product: trail, items: [noteRow()] }]),
-          );
+          return HttpResponse.json({
+            ...projectItems([{ product: trail, items: [noteRow()] }]),
+            counts,
+          });
         }
         if (query.has("status")) {
           await held;
           heldAnswered = true;
         }
-        const list = projectItems([{ product: trail, items: [todoRow()] }]);
-        return HttpResponse.json({
-          ...list,
-          counts: { ...list.counts, notes: { current: 1, archived: 0 } },
-        });
+        return HttpResponse.json({ ...list, counts });
       }),
     );
     const { queryClient } = renderApp("/projects/human-ui");

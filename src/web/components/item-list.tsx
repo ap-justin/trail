@@ -147,7 +147,8 @@ export function TypeToggle({
         <ToggleGroupItem
           key={option.value}
           value={option.value}
-          className="gap-1.25 text-xs max-lg:flex-1 max-lg:text-sm"
+          // grown from its own width, not split evenly: "Issues 116" outgrows a quarter of 343px
+          className="gap-1.25 text-xs max-lg:flex-auto max-lg:text-sm"
         >
           {option.label}
           {counts && (
@@ -198,7 +199,8 @@ function StatusTabs({
       aria-label="Filter by status"
       className={cn(
         // at lg the bar under the tabs and the type toggle draws the one rule
-        "rounded-none p-0 lg:h-8 lg:gap-3 lg:data-[variant=line]:border-b-0",
+        // at lg the list sizes to its tabs, not the line variant's w-full, so the toggle can share its row
+        "rounded-none p-0 lg:h-8 lg:gap-3 lg:data-[variant=line]:w-fit lg:data-[variant=line]:border-b-0",
         belowLg
           ? // the stock line variant's p-0 is an attribute selector, so the inset needs one too
             "max-lg:scrollbar-none max-lg:overflow-x-auto max-lg:mask-r-from-88% max-lg:data-[variant=line]:px-4"
@@ -294,7 +296,9 @@ export function ItemFilterBar({
   const onTypeChange = (type: ItemType | null) =>
     onFiltersChange(withType(filters, type));
   return (
-    <div className="flex flex-col lg:flex-row lg:items-end lg:border-b">
+    // too narrow for both, the toggle wraps above the tabs: wrap-reverse keeps the tabs on
+    // the rule, and items-start is the bottom under it
+    <div className="flex flex-col lg:flex-row lg:flex-wrap-reverse lg:items-start lg:gap-x-4 lg:gap-y-2 lg:border-b">
       <StatusTabs
         type={filters.type}
         counts={typeCounts}

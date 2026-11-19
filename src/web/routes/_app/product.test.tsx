@@ -301,6 +301,74 @@ describe("notes section on load", () => {
     expect(notesAsked).toHaveLength(2);
   });
 
+  /**
+   * TRL's lists as a bot moves notes between reads: `notes` are the current notes, `archived`
+   * how many are archived, `work` how many issues and todos; returns that state, counting
+   * the notes reads.
+   */
+  function serveMovingNotes(start: {
+    notes: ReturnType<typeof noteRow>[];
+    archived: number;
+    work: number;
+  }) {
+    serveProduct();
+    const state = { ...start, notesAsked: 0 };
+    server.use(
+      http.get("/api/web/products/TRL/items", ({ request }) => {
+        const isNotes =
+          new URL(request.url).searchParams.get("type") === "note";
+        if (isNotes) state.notesAsked++;
+        const list = issueList(isNotes ? state.notes : [issueRow()]);
+        return HttpResponse.json({
+          ...list,
+          counts: {
+            ...list.counts,
+            all: { ...list.counts.all, all: state.work },
+            notes: { current: state.notes.length, archived: state.archived },
+          },
+        });
+      }),
+    );
+    return state;
+  }
+
+  test("a tab whose list counts archived notes differently reads the current ones again", async () => {
+    signedInAs("member");
+    const before = noteRow();
+    const since = noteRow({ key: "TRL-32", title: "Filed since" });
+    const state = serveMovingNotes({ notes: [before], archived: 0, work: 1 });
+    const { queryClient } = renderApp("/products/TRL");
+    expect(await screen.findAllByText(before.title)).not.toHaveLength(0);
+    // a bot archives the note and files another, so as many are current
+    state.notes = [since];
+    state.archived = 1;
+    await userEvent.click(screen.getByRole("tab", { name: /^In progress/ }));
+    expect(await screen.findAllByText(since.title)).not.toHaveLength(0);
+    expect(screen.queryByText(before.title)).not.toBeInTheDocument();
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    expect(state.notesAsked).toBe(2);
+  });
+
+  test("a tab whose list counts more issues and todos reads the current notes again", async () => {
+    signedInAs("member");
+    const converted = noteRow();
+    const since = noteRow({ key: "TRL-32", title: "Filed since" });
+    const state = serveMovingNotes({
+      notes: [converted],
+      archived: 0,
+      work: 1,
+    });
+    const { queryClient } = renderApp("/products/TRL");
+    expect(await screen.findAllByText(converted.title)).not.toHaveLength(0);
+    // a bot makes the note an issue and files another note
+    state.notes = [since];
+    state.work = 2;
+    await userEvent.click(screen.getByRole("tab", { name: /^In progress/ }));
+    expect(await screen.findAllByText(since.title)).not.toHaveLength(0);
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    expect(state.notesAsked).toBe(2);
+  });
+
   test("current notes as the list: a reread with a new count reads them once", async () => {
     signedInAs("member");
     serveProduct();
@@ -326,6 +394,95 @@ describe("notes section on load", () => {
     await waitFor(() => expect(queryClient.isFetching()).toBe(0));
     expect(screen.getAllByText("Added since")).not.toHaveLength(0);
     expect(notesAsked).toBe(2);
+  });
+
+  test("a reread whose list moves the count while the notes reread is in flight reads them once", async () => {
+    signedInAs("member");
+    serveProduct();
+    let current = [noteRow()];
+    let notesAsked = 0;
+    let holdNotes: Promise<void> | null = null;
+    let releaseNotes = () => {};
+    server.use(
+      http.get("/api/web/products/TRL/items", async ({ request }) => {
+        const isNotes =
+          new URL(request.url).searchParams.get("type") === "note";
+        if (isNotes) {
+          notesAsked++;
+          if (holdNotes) await holdNotes;
+        }
+        const list = issueList(isNotes ? current : [issueRow()]);
+        return HttpResponse.json({
+          ...list,
+          counts: {
+            ...list.counts,
+            notes: { current: current.length, archived: 0 },
+          },
+        });
+      }),
+    );
+    const { queryClient } = renderApp("/products/TRL");
+    expect(await screen.findAllByText(noteRow().title)).not.toHaveLength(0);
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    // a bot adds a note; a window focus rereads the list and the notes together
+    current = [noteRow(), noteRow({ key: "TRL-32", title: "Added since" })];
+    holdNotes = new Promise((resolve) => {
+      releaseNotes = resolve;
+    });
+    const reread = queryClient.refetchQueries({
+      queryKey: ["product", "TRL", "items"],
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: /^Notes/ })).toHaveTextContent(
+        "Notes 2",
+      ),
+    );
+    releaseNotes();
+    await reread;
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    expect(screen.getAllByText("Added since")).not.toHaveLength(0);
+    expect(notesAsked).toBe(2);
+  });
+
+  test("a tab left before its list answers never writes its older counts or rereads the notes", async () => {
+    signedInAs("member");
+    serveProduct();
+    let releaseInProgress = () => {};
+    const inProgressHeld = new Promise<void>((resolve) => {
+      releaseInProgress = resolve;
+    });
+    let inProgressAnswered = false;
+    let notesAsked = 0;
+    server.use(
+      http.get("/api/web/products/TRL/items", async ({ request }) => {
+        const query = new URL(request.url).searchParams;
+        // asked before a bot filed a second note, answered after
+        const notes = query.get("status") === "in_progress" ? 1 : 2;
+        if (query.get("status") === "in_progress") {
+          await inProgressHeld;
+          inProgressAnswered = true;
+        }
+        if (query.get("type") === "note") notesAsked++;
+        const list = issueList([issueRow()]);
+        return HttpResponse.json({
+          ...list,
+          counts: { ...list.counts, notes: { current: notes, archived: 0 } },
+        });
+      }),
+    );
+    const { queryClient } = renderApp("/products/TRL");
+    const heading = () => screen.getByRole("heading", { name: /^Notes/ });
+    await waitFor(() => expect(heading()).toHaveTextContent("Notes 2"));
+    await userEvent.click(screen.getByRole("tab", { name: /^In progress/ }));
+    await userEvent.click(screen.getByRole("tab", { name: /^Done/ }));
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    releaseInProgress();
+    await waitFor(() => expect(inProgressAnswered).toBe(true));
+    // a read the query let go of leaves nothing to wait on, so its answer gets time to land
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    expect(heading()).toHaveTextContent("Notes 2");
+    expect(notesAsked).toBe(1);
   });
 
   test("no notes at all: no section and no notes request", async () => {
@@ -572,6 +729,33 @@ describe("pages", () => {
     ).not.toHaveLength(0);
     expect(cursors).toEqual([null, "after-17"]);
     expect(screen.queryByText(/items are shown/)).toBeNull();
+  });
+
+  test("a list the viewer tabs away from stops reading its pages", async () => {
+    signedInAs("member");
+    serveProduct();
+    let laterPageAsked = false;
+    let laterPageAbandoned = false;
+    server.use(
+      http.get("/api/web/products/TRL/items", async ({ request }) => {
+        const query = new URL(request.url).searchParams;
+        if (query.has("cursor")) {
+          laterPageAsked = true;
+          await new Promise<void>((resolve) =>
+            request.signal.addEventListener("abort", () => resolve()),
+          );
+          laterPageAbandoned = true;
+        }
+        return HttpResponse.json({
+          ...issueList([issueRow()]),
+          nextCursor: query.has("status") ? null : "after-17",
+        });
+      }),
+    );
+    renderApp("/products/TRL");
+    await waitFor(() => expect(laterPageAsked).toBe(true));
+    await userEvent.click(screen.getByRole("tab", { name: /^In progress/ }));
+    await waitFor(() => expect(laterPageAbandoned).toBe(true));
   });
 
   test("past the page cap the page says rows are missing", async () => {

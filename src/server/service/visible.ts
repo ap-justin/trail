@@ -288,6 +288,11 @@ export const noProject = (ref: string) =>
     ref,
     "pass the slug (like launch-q4) of a project this key reaches; list_projects (GET /api/v1/projects) lists them",
   );
+/** What the routes from before notes answer for a note the key reaches. */
+export const noteOnIssueRoute = (key: string) =>
+  new NotFoundError(
+    `${key} is a note, which the deprecated issue routes don't serve: read it with get_item (GET /api/v1/items/{key}) and edit it with update_item (PATCH /api/v1/items/{key})`,
+  );
 export const noIssue = (ref: string) =>
   notFound(
     "item",

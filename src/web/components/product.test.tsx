@@ -662,6 +662,18 @@ describe("notes", () => {
     expect(p.onRetryNotes).toHaveBeenCalledOnce();
   });
 
+  test("loading notes hold as many placeholder rows as the heading counts", () => {
+    renderProduct({
+      items: { status: "ready", data: workWithNotes },
+      notes: { status: "loading" },
+    });
+    expect(
+      within(notesSection()).getByRole("heading", { name: "Notes 2" }),
+    ).toBeInTheDocument();
+    const placeholder = within(notesSection()).getByRole("status");
+    expect(placeholder.querySelectorAll(":scope > div")).toHaveLength(2);
+  });
+
   test("Try again on notes leaves focus on their heading", async () => {
     const user = userEvent.setup();
     const items = { status: "ready", data: workWithNotes } as const;

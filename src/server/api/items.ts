@@ -48,7 +48,7 @@ export const WHICH_ITEM =
 
 /** Who edits a note, and how its fields differ from work's: update_item and PATCH /items/{key} both say it. */
 export const NOTE_EDITS =
-  "A note is edited only by its author and its product's own bot; anyone else is refused (forbidden) and comments with add_comment. Its status is current or archived, it has no assignee, priority or estimate (priority reads 0 and estimate null), and about, addAbout and removeAbout set the items it is about. Only the product's owner turns an item into a note (type note: status current, assignee dropped, priority and estimate cleared) or a note back into work (an issue goes to triage, a todo opens assigned to the owner).";
+  "A note is edited only by its author and its product's own bot, and on a product with no owner only by its author; anyone else is refused (forbidden) and comments with add_comment. Its status is current or archived, it has no assignee, priority or estimate (priority reads 0 and estimate null), and about, addAbout and removeAbout set the items it is about. Only the product's owner turns an item into a note (type note: status current, assignee dropped, priority and estimate cleared) or a note back into work (an issue goes to triage, a todo opens assigned to the owner).";
 
 export const COMMENT_HOLDS =
   "A comment holds what changed for the work and why, a decision or scope change, a blocker and who clears it, or that it is done. It leaves out commit SHAs, CI runs and logs, review findings and agent run ids: those stay on the pull request, and the pull request goes in the item's links.";

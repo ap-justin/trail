@@ -1,4 +1,4 @@
-import { ExternalLinkIcon, FolderIcon, PlusIcon } from "lucide-react";
+import { ExternalLinkIcon } from "lucide-react";
 import { type ReactNode, useId, useRef, useState } from "react";
 import { ActorAvatar } from "@/components/actor";
 import { AppLink, RowLink, textLinkFocus } from "@/components/app-link";
@@ -16,7 +16,6 @@ import {
 import { NotesSection } from "@/components/notes";
 import { Pane, PaneTabs } from "@/components/pane-tabs";
 import {
-  EmptyState,
   ItemListEmpty,
   ItemListError,
   ListSkeleton,
@@ -28,7 +27,6 @@ import {
   UpdateHealth,
 } from "@/components/status-updates";
 import { KeyText } from "@/components/text";
-import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import type {
   WebItemCountsView,
@@ -174,11 +172,12 @@ function ItemsBody({
   // a list of notes is a filter result even where there is no work
   const { counts } = items.data;
   if (counts.all.all === 0 && filters.type !== "note") {
-    // the notes are items, listed under this
-    return counts.notes.current + counts.notes.archived > 0 ? (
-      <NoWork productKey={product.key} onNewIssue={onNewIssue} />
-    ) : (
-      <ItemListEmpty productKey={product.key} onNewIssue={onNewIssue} />
+    return (
+      <ItemListEmpty
+        productKey={product.key}
+        onlyNotes={counts.notes.current + counts.notes.archived > 0}
+        onNewIssue={onNewIssue}
+      />
     );
   }
   const rows = items.data.items.filter((item) => matchesFilters(item, filters));
@@ -199,29 +198,6 @@ function ItemsBody({
       <ItemTable groups={groups} labels now={now} />
       <ItemRows groups={groups} now={now} />
     </>
-  );
-}
-
-function NoWork({
-  productKey,
-  onNewIssue,
-}: {
-  productKey: string;
-  onNewIssue: () => void;
-}) {
-  return (
-    <EmptyState
-      icon={FolderIcon}
-      title={`No issues or todos in ${productKey} yet`}
-      description="Bots plan todos and file issues here. You can file an issue too."
-      action={
-        // ItemListEmpty's action: 28px at 1440, 44px below with room either side of the word
-        <Button size="sm" className="max-lg:px-3.5" onClick={onNewIssue}>
-          <PlusIcon data-icon="inline-start" aria-hidden="true" />
-          New issue
-        </Button>
-      }
-    />
   );
 }
 
