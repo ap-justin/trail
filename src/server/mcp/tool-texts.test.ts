@@ -106,5 +106,7 @@ test("list_items says that without type it lists issues and todos only, and upda
   expect(tool("update_item").description).toMatch(
     /A note is edited only by its author and its product's own bot/,
   );
-  expect(tool("get_item").description).toMatch(/notes/);
+  expect(tool("get_item").description).toMatch(
+    /list_items with about set to the item's key pages through all of them, archived ones too/,
+  );
 });

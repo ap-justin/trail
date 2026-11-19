@@ -40,7 +40,12 @@ import {
 import { ValidationError } from "./errors.js";
 import { canRead, liveKeyScope } from "./keys.js";
 import type { Tx } from "./tx.js";
-import { eventsReached, projectsReached, reachOfScope } from "./visible.js";
+import {
+  eventsReached,
+  projectsReached,
+  type Reach,
+  reachOfScope,
+} from "./visible.js";
 
 /** What the service needs to store secrets and to send a test call. */
 export type WebhookSettings = SendDeps & {
@@ -474,6 +479,31 @@ export function deliveryKeyRefusal(
 const NO_LIVE_KEY = `not sent: this bot has no live key: a key must be minted for it first (trail key create), then ${toResume("that key (with the read action, on an activity webhook)")}`;
 const KEY_CANNOT_READ = `not sent: this webhook's key lacks the read action: ${toResume("a key that has the read action")}`;
 const NO_KEY_CAN_READ = `not sent: none of this bot's live keys has the read action: ${toResume("a key that has the read action")}`;
+
+/**
+ * The reach of the key the subscription sends `event` on: its recorded key,
+ * else the first of its bot's reading keys that may send it, as
+ * `deliveryKeyRefusal` picks. Reaches nothing when no key may.
+ */
+export function deliveryReach(
+  db: Db,
+  sub: typeof webhookSubscription.$inferSelect,
+  event: typeof activityEvent.$inferSelect,
+): Reach {
+  const keyIds =
+    sub.apiKeyId !== null
+      ? [sub.apiKeyId]
+      : liveKeysWhere(db, eq(apiKey.actorId, sub.actorId))
+          .filter(canRead)
+          .map((k) => k.id);
+  const sending = keyIds.find(
+    (id) => keyRefusal(db, id, sub.id, event) === null,
+  );
+  const scope = sending === undefined ? undefined : liveKeyScope(db, sending);
+  return scope
+    ? reachOfScope(scope, true)
+    : { products: [], projects: [], implicitProjects: false };
+}
 
 /** The unrevoked keys matching `where`, oldest first, with their actions. */
 const liveKeysWhere = (db: Db, where: SQL) =>

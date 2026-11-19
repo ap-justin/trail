@@ -42,32 +42,55 @@ describe("SearchResults", () => {
     );
   });
 
-  test("a note's row carries the Note glyph where an issue's has its status, and says it's a note", () => {
+  test("a note's row carries its status glyph and the Note glyph, and says it's a note; an archived one says so and looks it", () => {
+    const note = {
+      sourceKey: null,
+      type: "note" as const,
+      product: { key: "TRL", name: "trail" },
+    };
     render(
       <SearchResults
-        query="feed"
-        answeredQuery="feed"
+        query="deploy"
+        answeredQuery="deploy"
         results={{
           products: [],
           projects: [],
           items: [
             {
+              ...note,
               key: "TRL-31",
-              sourceKey: null,
-              title: "Why the feed reads newest first",
-              type: "note",
+              title: "How a deploy reaches the volume",
               status: "current",
-              product: { key: "TRL", name: "trail" },
+            },
+            {
+              ...note,
+              key: "TRL-29",
+              title: "Old deploy steps",
+              status: "archived",
             },
           ],
         }}
         status="ready"
       />,
     );
-    const note = screen.getByRole("link", {
-      name: "Note TRL-31 Why the feed reads newest first",
+    const glyphs = (link: HTMLElement) =>
+      [...link.querySelectorAll("svg")].map(
+        (svg) => svg.dataset.itemType ?? svg.getAttribute("class"),
+      );
+    const current = screen.getByRole("link", {
+      name: "Note TRL-31 How a deploy reaches the volume",
     });
-    expect(note.querySelector("svg")).toHaveAttribute("data-item-type", "note");
+    const archived = screen.getByRole("link", {
+      name: "Archived note TRL-29 Old deploy steps",
+    });
+    expect(glyphs(current)).toEqual([
+      expect.stringContaining("lucide-bookmark"),
+      "note",
+    ]);
+    expect(glyphs(archived)).toEqual([
+      expect.stringContaining("lucide-archive"),
+      "note",
+    ]);
   });
 
   test("none: the empty state", () => {

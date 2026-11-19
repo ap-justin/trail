@@ -1,5 +1,5 @@
 import { PackageIcon } from "lucide-react";
-import { type ReactNode, useCallback, useId, useRef } from "react";
+import { type ReactNode, useId, useRef } from "react";
 import { ActorAvatar, BotTitle } from "@/components/actor";
 import { AppLink, textLinkFocus, textLinkTap } from "@/components/app-link";
 import { ProductSelect } from "@/components/filter-select";
@@ -55,6 +55,11 @@ export type ProjectViewProps = {
   project: Loadable<WebProjectDetailView>;
   /** The groups under `filters`; `counts` follow the product filter alone. */
   items: Loadable<WebProjectItemsView>;
+  /**
+   * The tab counts under the product filter, held while the next tab's list loads; null
+   * before any. A ready `items` draws its own; omitted, the tabs count only a ready list.
+   */
+  counts?: WebItemCountsView | null;
   /** The current notes under the product filter, for the Notes section under the list. */
   notes: Loadable<WebItemRowView[]>;
   /** The last note counts under the product filter, held while the next list loads; null before any. */
@@ -219,6 +224,9 @@ function ItemsBody({
       />
     );
   const groups = visibleGroups(items.data, filters);
+  // no filter to clear: the project's only items are its notes, under the list
+  const unfiltered = !filters.type && !filters.status && !filters.product;
+  if (groups.length === 0 && unfiltered) return <NoWork />;
   if (groups.length === 0) {
     return (
       <FilterEmpty
@@ -248,6 +256,16 @@ function NoItems() {
   );
 }
 
+function NoWork() {
+  return (
+    <EmptyState
+      icon={PackageIcon}
+      title="No issues or todos in this project yet"
+      description="They show up here, grouped by product, once bots add them."
+    />
+  );
+}
+
 function ProjectBody(
   props: Omit<ProjectViewProps, "project" | "onRetryProject"> & {
     project: WebProjectDetailView;
@@ -258,24 +276,16 @@ function ProjectBody(
   const detailsHeading = useId();
   const updatesHeading = useId();
   const listRef = useRef<HTMLDivElement>(null);
-  // Archived notes over the empty state asks for a list that isn't mounted yet
-  const focusListOnMount = useRef(false);
-  const attachList = useCallback((node: HTMLDivElement | null) => {
-    listRef.current = node;
-    if (node && focusListOnMount.current) {
-      focusListOnMount.current = false;
-      node.focus();
-    }
-  }, []);
   const updatesHeadingRef = useRef<HTMLHeadingElement>(null);
-  // no items at all leaves nothing to filter; none under a product filter, or a list of
-  // notes, is a filter result
+  // no items at all leaves nothing to filter; none under a product filter is a filter
+  // result, and notes alone keep the filters that list them
   const empty =
     items.status === "ready" &&
     items.data.counts.all.all === 0 &&
-    filters.product === null &&
-    filters.type !== "note";
-  const counts = items.status === "ready" ? items.data.counts : null;
+    items.data.counts.notes.current + items.data.counts.notes.archived === 0 &&
+    filters.product === null;
+  const counts =
+    items.status === "ready" ? items.data.counts : (props.counts ?? null);
   const productSelect = (fieldLabel?: string) => (
     <ProductSelect
       products={project.products}
@@ -333,7 +343,7 @@ function ProjectBody(
             />
             {/* one panel, keyed to whichever tab is current, so the list is that tab's panel */}
             <TabsContent
-              ref={attachList}
+              ref={listRef}
               value={statusTabValue(filters)}
               tabIndex={-1}
               className="outline-none"
@@ -355,8 +365,7 @@ function ProjectBody(
             notes={props.notes}
             counts={props.noteCounts}
             onShowArchived={() => {
-              if (listRef.current) listRef.current.focus();
-              else focusListOnMount.current = true;
+              listRef.current?.focus();
               onFiltersChange({ ...filters, type: "note", status: "archived" });
             }}
             onRetry={props.onRetryNotes}

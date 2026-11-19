@@ -111,6 +111,7 @@ import {
 } from "./validate.js";
 import {
   amongProducts,
+  eventForReach,
   eventsReached,
   itemsReached,
   noIssue,
@@ -261,6 +262,14 @@ export type NoteCounts = Record<NoteStatus, number>;
 
 export const isNoteStatus = (status: IssueStatus): status is NoteStatus =>
   (noteStatuses as readonly IssueStatus[]).includes(status);
+
+/** Whether a write sends no priority or estimate but a note's own, priority 0 and estimate null, as get_item shows them. */
+const holdsANotesRank = (sent: {
+  priority?: number;
+  estimate?: number | null;
+}): boolean =>
+  (sent.priority === undefined || sent.priority === 0) &&
+  (sent.estimate === undefined || sent.estimate === null);
 
 /**
  * A project as one caller sees it: only the products it reaches, `hiddenProducts`
@@ -2765,10 +2774,7 @@ export function createService({
               "a note has no assignee, since nobody has to act on it: leave assignee out, and file an issue (file_issue) for work someone has to do, listing it in the note's about",
             );
           }
-          if (
-            type === "note" &&
-            (input.priority !== undefined || input.estimate !== undefined)
-          ) {
+          if (type === "note" && !holdsANotesRank(input)) {
             throw new ValidationError(
               "a note has no priority or estimate, since nobody has to act on it: leave both out, and file an issue (file_issue) for work someone has to do, listing it in the note's about",
             );
@@ -3635,7 +3641,7 @@ export function createService({
               `${becomes}, and a note has no assignee: file an issue (file_issue) for work someone has to do, and list it in the note's about`,
             );
           }
-          if (patch.priority !== undefined || patch.estimate !== undefined) {
+          if (!holdsANotesRank(patch)) {
             throw new ValidationError(
               `${becomes}, and a note has no priority or estimate: leave both out, and file an issue (file_issue) for work someone has to do, listing it in the note's about`,
             );
@@ -4932,8 +4938,9 @@ export function createService({
         groupId: group?.id ?? null,
         projectSlug: group?.slug ?? null,
       };
+      const reach = reachFor(actor);
       const where: (SQL | undefined)[] = [
-        eventsReached(db, reachFor(actor)),
+        eventsReached(db, reach),
         filters.projectId === null
           ? undefined
           : eq(activityEvent.productId, filters.projectId),
@@ -4957,7 +4964,8 @@ export function createService({
           .where(and(...where))
           .orderBy(order)
           .limit(max)
-          .all();
+          .all()
+          .map((event) => eventForReach(db, reach, event));
 
       if (query.after !== undefined) {
         const from =

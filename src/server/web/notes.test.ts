@@ -9,12 +9,14 @@ const { get, item, project } = webSeed(request);
 let alpha: { id: string; key: string };
 let member = "";
 let hiddenId = "";
+let hiddenKey = "";
 let keys: Record<string, string> = {};
 let slug = "";
 beforeAll(async () => {
   alpha = addProject("Alpha");
   const hidden = addProject("Hidden");
   hiddenId = hidden.id;
+  hiddenKey = hidden.key;
   const writer = addBot("note writer");
   const todo = await item(alpha.key, "todo");
   const issue = await item(alpha.key, "issue");
@@ -180,6 +182,37 @@ test("a note in a product the viewer can't reach, about an item they see, is not
   const reached = await addMember("bothreader", [alpha.id, hiddenId]);
   const seen = await get(`/items/${keys.issue}`, reached);
   expect(seen.body.notes.map((n: Body) => n.key)).toEqual([keys.hiddenNote]);
+});
+
+test("a note in a product the viewer can't reach is not found by its link, search or the product's note list", async () => {
+  const direct = await get(`/items/${keys.hiddenNote}`, member);
+  expect(direct.status).toBe(404);
+  const found = await get("/search?q=private%20note", member);
+  expect(found.status).toBe(200);
+  expect(found.body.items).toEqual([]);
+  const hidden = await request(
+    "GET",
+    `/api/web/products/${hiddenKey}/items?type=note`,
+    {
+      key: null,
+      cookie: member,
+    },
+  );
+  expect(hidden.status).toBe(404);
+  expect(await hidden.text()).not.toContain("private note");
+  // the same note is there for someone who reaches the product
+  const reached = await addMember("hiddenreader", [hiddenId]);
+  expect((await get(`/items/${keys.hiddenNote}`, reached)).status).toBe(200);
+  expect(
+    (await get("/search?q=private%20note", reached)).body.items.map(
+      (i: Body) => i.key,
+    ),
+  ).toEqual([keys.hiddenNote]);
+  expect(
+    (
+      await get(`/products/${hiddenKey}/items?type=note`, reached)
+    ).body.items.map((i: Body) => i.key),
+  ).toEqual([keys.hiddenNote]);
 });
 
 test("a person cannot file a note through the issue route, and no note appears", async () => {

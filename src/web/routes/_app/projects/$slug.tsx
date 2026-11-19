@@ -77,6 +77,7 @@ function ProjectPage() {
     enabled: !itemsWaitOnProject || project.data !== undefined,
   });
   // the placeholder lends only its counts: its groups' counts follow the last tab's filters
+  const counts = items.data?.counts ?? null;
   const shownItems = items.isPlaceholderData
     ? { data: undefined, isError: false }
     : items;
@@ -126,6 +127,7 @@ function ProjectPage() {
             ? loadableAfter(shownItems, project)
             : loadableOf(shownItems)
         }
+        counts={counts}
         notes={loadableOf(notes)}
         noteCounts={noteCounts}
         statusUpdates={loadableOf(updates)}

@@ -2,7 +2,11 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, test, vi } from "vitest";
-import type { ItemFilters } from "@/components/item-list";
+import {
+  type ItemFilters,
+  matchesFilters,
+  NO_FILTERS,
+} from "@/components/item-list";
 import {
   ProductHeading,
   ProductView,
@@ -534,6 +538,39 @@ describe("notes", () => {
       type: "issue",
       status: null,
     });
+  });
+
+  test("leaving Notes for All: the notes list still answering Notes is not drawn as All, so its notes show once, in the Notes section", async () => {
+    const user = userEvent.setup();
+    const notesList = {
+      items: [...current, archived],
+      nextCursor: null,
+      counts: workWithNotes.counts,
+    };
+    render(
+      <FilteredProduct
+        items={{ status: "ready", data: notesList }}
+        notes={{ status: "ready", data: current }}
+      />,
+    );
+    await user.click(
+      within(typeToggle()).getByRole("button", { name: /^Notes/ }),
+    );
+    expect(tableKeys()).toEqual(["TRL-31", "TRL-33", "TRL-29"]);
+    // the route lends this list to All until the work list lands, unless no row belongs there
+    await user.click(
+      within(typeToggle()).getByRole("button", { name: /^All/ }),
+    );
+    expect(
+      notesList.items.some((note) => matchesFilters(note, NO_FILTERS)),
+    ).toBe(false);
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(
+      screen.getAllByRole("link", {
+        name: "TRL-31 Why the feed reads newest first",
+      }),
+    ).toHaveLength(1);
+    expect(notesSection()).toBeInTheDocument();
   });
 
   test("only archived notes: the section says there are no current ones and still links the archived", () => {

@@ -90,10 +90,12 @@ function tabCounts(
 
 /**
  * Whether a row belongs under the filters. The route fetches with them; this keeps rows
- * from a list still answering an earlier filter off the screen.
+ * from a list still answering an earlier filter off the screen. Without a type, the list
+ * is issues and todos: a note belongs only under Notes.
  */
 export function matchesFilters(item: WebItemRowView, filters: ItemFilters) {
-  if (filters.type && item.type !== filters.type) return false;
+  if (filters.type ? item.type !== filters.type : item.type === "note")
+    return false;
   if (!filters.status) return true;
   if (filters.status === "open")
     return item.status === "open" || item.status === "triage";

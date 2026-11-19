@@ -6,7 +6,13 @@ import {
 } from "lucide-react";
 import { AppLink } from "@/components/app-link";
 import { EmptyState, SkeletonBlock } from "@/components/states";
-import { StatusIcon, TypeIcon, typeLabel } from "@/components/status";
+import {
+  type IssueStatus,
+  StatusIcon,
+  statusLabel,
+  TypeIcon,
+  typeLabel,
+} from "@/components/status";
 import { KeyText } from "@/components/text";
 import type { SearchView } from "@/lib/api-types";
 import { paths } from "@/lib/paths";
@@ -31,8 +37,8 @@ const row =
 
 /**
  * The search box's results, drawn in the shell's `searchResults` slot at both widths:
- * one list of products (package glyph), projects (folder glyph), then items (status glyph), each a link reachable
- * by Tab from the box. Following one ends the search: the shell clears the box, so
+ * one list of products (package glyph), projects (folder glyph), then items (status
+ * glyph, and a note's Note glyph), each a link reachable by Tab from the box. Following one ends the search: the shell clears the box, so
  * there is no callback here.
  */
 export function SearchResults({
@@ -65,6 +71,10 @@ export function SearchResults({
 }
 
 type Results = NonNullable<SearchResultsProps["results"]>;
+
+/** How a note's link begins: `Note`, or `Archived note` once it is archived. */
+const noteName = (status: IssueStatus) =>
+  status === "archived" ? `${statusLabel(status)} note` : typeLabel("note");
 
 function announcement(shown: Results | "loading" | "error" | null): string {
   if (shown === "loading" || shown === null) return "Loading";
@@ -145,7 +155,7 @@ function SearchResultsBody({ results }: { results: Results }) {
           <AppLink
             href={paths.issue(issue.key)}
             aria-label={[
-              issue.type === "note" && typeLabel(issue.type),
+              issue.type === "note" && noteName(issue.status),
               issue.key,
               issue.title,
               issue.sourceKey,
@@ -154,12 +164,9 @@ function SearchResultsBody({ results }: { results: Results }) {
               .join(" ")}
             className={row}
           >
-            {/* a note has no work status to show, so its row carries the Note glyph */}
-            {issue.type === "note" ? (
-              <TypeIcon type="note" decorative />
-            ) : (
-              <StatusIcon status={issue.status} />
-            )}
+            <StatusIcon status={issue.status} />
+            {/* a note's status glyph alone reads as a work status; the Note glyph beside it says what it is */}
+            {issue.type === "note" && <TypeIcon type="note" decorative />}
             <KeyText>{issue.key}</KeyText>
             <span className="min-w-0 flex-1 truncate">{issue.title}</span>
             {issue.sourceKey && (

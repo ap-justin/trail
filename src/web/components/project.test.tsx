@@ -107,6 +107,11 @@ const groupBody = (key: string) => {
 const rowsIn = (scope: HTMLElement) =>
   scope.querySelectorAll("tr[data-item-key]").length;
 const details = () => screen.getByRole("region", { name: "Details" });
+const typeToggle = () => screen.getByRole("group", { name: "Filter by type" });
+const statusTabs = () =>
+  within(screen.getByRole("tablist", { name: "Filter by status" }))
+    .getAllByRole("tab")
+    .map((t) => t.textContent);
 const HIDDEN = "Items from products you can't see are not shown.";
 
 describe("goal and details", () => {
@@ -438,6 +443,41 @@ describe("empty and failed", () => {
     expect(p.onRetryItems).toHaveBeenCalledOnce();
   });
 
+  test("while a tab's list loads, the tabs keep the counts the route holds; without them, they count only a ready list", () => {
+    const { counts } = projectItems(groups);
+    const { rerender } = render(
+      <ProjectView
+        {...props({
+          filters: { ...NO_PROJECT_FILTERS, status: "done" },
+          items: { status: "loading" },
+          counts,
+        })}
+      />,
+    );
+    expect(statusTabs()).toEqual([
+      "All 5",
+      "Open 4",
+      "In progress 1",
+      "Done 0",
+      "Canceled 0",
+    ]);
+    rerender(
+      <ProjectView
+        {...props({
+          filters: { ...NO_PROJECT_FILTERS, status: "done" },
+          items: { status: "loading" },
+        })}
+      />,
+    );
+    expect(statusTabs()).toEqual([
+      "All ",
+      "Open ",
+      "In progress ",
+      "Done ",
+      "Canceled ",
+    ]);
+  });
+
   test("Try again and Show all leave focus on the list, not the top of the page", async () => {
     const user = userEvent.setup();
     const { rerender } = render(
@@ -607,7 +647,7 @@ describe("notes", () => {
     expect(screen.queryByRole("region", { name: /^Notes/ })).toBeNull();
   });
 
-  test("a project with notes and no work: Show archived notes leaves focus on the list that replaces the empty state", async () => {
+  test("a project with notes and no work: Show archived notes leaves focus on the list", async () => {
     const user = userEvent.setup();
     const notesOnly = {
       ...projectItems([]),
@@ -634,6 +674,47 @@ describe("notes", () => {
       />,
     );
     expect(screen.getByRole("tabpanel")).toHaveFocus();
+  });
+
+  test("a project with notes and no work keeps its filters: leaving the archived notes keeps focus on the pressed control, and the empty list doesn't say the project has no items", async () => {
+    const user = userEvent.setup();
+    render(
+      <FilteredProject
+        items={{
+          status: "ready",
+          data: {
+            ...projectItems([{ product: trail, items: [archived] }]),
+            counts: countsOf([...notes, archived]),
+          },
+        }}
+        notes={{ status: "ready", data: notes }}
+      />,
+    );
+    const noWork = () =>
+      screen.getByRole("heading", {
+        name: "No issues or todos in this project yet",
+      });
+    expect(noWork()).toBeInTheDocument();
+    expect(screen.queryByText(/Bots add issues and todos/)).toBeNull();
+    await user.click(
+      screen.getByRole("button", { name: "Show 1 archived note" }),
+    );
+    expect(
+      screen.getAllByRole("link", { name: "TRL-29 Old deploy steps" }),
+    ).not.toHaveLength(0);
+    const all = within(typeToggle()).getByRole("button", { name: /^All/ });
+    await user.click(all);
+    expect(all).toHaveFocus();
+    expect(noWork()).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: /^Notes/ })).toBeInTheDocument();
+    const issues = within(typeToggle()).getByRole("button", {
+      name: /^Issues/,
+    });
+    await user.click(issues);
+    expect(issues).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "Show all" }));
+    expect(screen.getByRole("tabpanel", { name: /^All/ })).toHaveFocus();
+    expect(noWork()).toBeInTheDocument();
   });
 
   test("the Notes section stays while the list's counts reload, without Show archived notes until they're back", () => {

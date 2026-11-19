@@ -118,6 +118,47 @@ test.each([
   );
 });
 
+test("POST /items takes priority 0 on a note, the priority a note holds", async () => {
+  const owner = await newProduct("rest unranked echo");
+  const note = await ok(
+    await request("POST", "/api/v1/items", {
+      json: { type: "note", product: owner.key, title: "record", priority: 0 },
+    }),
+    201,
+  );
+  expect(note).toMatchObject({ type: "note", priority: 0, estimate: null });
+});
+
+test("PATCH /items/{key} with type note and estimate null turns an issue into a note, and still refuses a nonzero priority", async () => {
+  const owner = await newProduct("rest convert clear");
+  const issue = await ok(
+    await request("POST", "/api/v1/items", {
+      json: {
+        type: "issue",
+        product: owner.key,
+        title: "is this a bug?",
+        priority: 2,
+        estimate: 3,
+      },
+    }),
+    201,
+  );
+  const refused = await request("PATCH", `/api/v1/items/${issue.key}`, {
+    json: { type: "note", priority: 2 },
+  });
+  expect(refused.status).toBe(422);
+  expect(((await refused.json()) as Body).error.message).toBe(
+    `type note makes ${issue.key} a note, and a note has no priority or estimate: leave both out, and file an issue (file_issue) for work someone has to do, listing it in the note's about`,
+  );
+  expect(
+    await ok(
+      await request("PATCH", `/api/v1/items/${issue.key}`, {
+        json: { type: "note", estimate: null },
+      }),
+    ),
+  ).toMatchObject({ type: "note", priority: 0, estimate: null });
+});
+
 test("GET /items/{key} counts the notes about an item in notesCount, and GET /items?about= lists them, refusing a type other than note", async () => {
   const owner = await newProduct("rest about list");
   const todo = await ok(
@@ -363,4 +404,44 @@ test("POST /items with type note needs a key with the issues action, and a key a
       )
     ).items,
   ).toEqual([]);
+});
+
+test("PATCH /items/{key} refuses about with 51 items and an addAbout that would make 51, leaving the note as it was", async () => {
+  const owner = await newProduct("rest cap");
+  const keys: string[] = [];
+  for (let i = 0; i < 51; i++) {
+    keys.push(
+      (
+        await ok(
+          await request("POST", "/api/v1/items", {
+            json: { type: "todo", product: owner.key, title: `item ${i}` },
+          }),
+          201,
+        )
+      ).key,
+    );
+  }
+  const note = await ok(
+    await request("POST", "/api/v1/items", {
+      json: {
+        type: "note",
+        product: owner.key,
+        title: "wide",
+        about: keys.slice(0, 50),
+      },
+    }),
+    201,
+  );
+  expect(note.about).toHaveLength(50);
+  for (const patch of [{ about: keys }, { addAbout: [keys[50]] }]) {
+    const res = await request("PATCH", `/api/v1/items/${note.key}`, {
+      json: patch,
+    });
+    expect(res.status, await res.clone().text()).toBe(422);
+    expect(((await res.json()) as Body).error.code).toBe("validation_failed");
+  }
+  const read = await ok(await request("GET", `/api/v1/items/${note.key}`));
+  expect(read.about.map((r: Body) => r.key).sort()).toEqual(
+    keys.slice(0, 50).sort(),
+  );
 });

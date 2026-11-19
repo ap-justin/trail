@@ -1,9 +1,11 @@
-import { and, eq, inArray, isNull, or, type SQL } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, type SQL, sql } from "drizzle-orm";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import type { Db } from "../db/client.js";
 import {
   activityEvent,
   comment,
+  issue,
+  product,
   project,
   projectItem,
   projectProduct,
@@ -192,6 +194,68 @@ export function eventsReached(db: Db, reach: Reach): SQL | undefined {
       ),
     ),
   );
+}
+
+/** A note's about on its events: as it stands on a create, as it changed on an update. */
+type About =
+  | { about: string[]; aboutOthers: number }
+  | {
+      about: { from: string[]; to: string[] };
+      aboutOthers: { from: number; to: number };
+    };
+
+/**
+ * A note event as `reach` may read it. The stored `about` names the note's
+ * own product's items, which a product follower reaches whole; a key reaching
+ * the product only through a project gets just the keys of the items it
+ * reaches, the rest added to `aboutOthers`. Any other event as stored.
+ */
+export function eventForReach<
+  E extends { subjectType: string; payload: Record<string, unknown> },
+>(db: Db, reach: Reach, event: E): E {
+  if (
+    reach === null ||
+    event.subjectType !== "issue" ||
+    event.payload.about === undefined
+  )
+    return event;
+  const stored = event.payload as About;
+  const created = Array.isArray(stored.about);
+  const keys = created
+    ? { from: stored.about as string[], to: stored.about as string[] }
+    : (stored.about as { from: string[]; to: string[] });
+  const others = created
+    ? { from: stored.aboutOthers as number, to: stored.aboutOthers as number }
+    : (stored.aboutOthers as { from: number; to: number });
+  const named = [...new Set([...keys.from, ...keys.to])];
+  if (named.length === 0) return event;
+  const itemKey = sql<string>`${product.key} || '-' || ${issue.number}`;
+  const reached = new Set(
+    db
+      .select({ key: itemKey })
+      .from(issue)
+      .innerJoin(product, eq(product.id, issue.productId))
+      .where(
+        and(
+          inArray(itemKey, named),
+          itemsReached(db, reach, issue.id, issue.productId),
+        ),
+      )
+      .all()
+      .map((r) => r.key),
+  );
+  const shown = (side: string[]) => side.filter((k) => reached.has(k));
+  const from = shown(keys.from);
+  const to = shown(keys.to);
+  const fromOthers = others.from + keys.from.length - from.length;
+  const toOthers = others.to + keys.to.length - to.length;
+  const about: About = created
+    ? { about: to, aboutOthers: toOthers }
+    : {
+        about: { from, to },
+        aboutOthers: { from: fromOthers, to: toOthers },
+      };
+  return { ...event, payload: { ...event.payload, ...about } };
 }
 
 // One message for a reference that is missing and one the caller can't see, so a 404 never tells them apart.

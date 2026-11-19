@@ -136,12 +136,14 @@ test("a person cannot add a note, and no note exists after the refusal", () => {
   expect(() =>
     service.addNote(human, { product: target.key, title: "record" }),
   ).toThrow("only a bot may add a note");
+  expect(published).toEqual([]);
   expect(
     service.listItems(bot, { product: target.key, type: "note" }).items,
   ).toEqual([]);
   expect(
     service.addNote(bot, { product: target.key, title: "record" }),
   ).toMatchObject({ type: "note", status: "current" });
+  expect(published.map((e) => e.action)).toEqual(["issue.created"]);
 });
 
 test("a person can file an issue but not add a todo, nor create or fill a project", () => {

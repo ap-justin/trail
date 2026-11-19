@@ -259,6 +259,38 @@ describe("while the next filter loads", () => {
     await waitFor(() => expect(allTab()).toHaveTextContent("1"));
   });
 
+  test("Open then Done keeps the tab counts, which follow only the product", async () => {
+    signedInAs("member");
+    serveProject();
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const open = issueRow({ key: "TRL-7", status: "open" });
+    const done = [
+      issueRow({ key: "TRL-8", status: "done" }),
+      issueRow({ key: "TRL-9", status: "done" }),
+    ];
+    server.use(
+      http.get("/api/web/projects/human-ui/items", async ({ request }) => {
+        const status = new URL(request.url).searchParams.get("status");
+        const list = projectItems([{ product: trail, items: [open, ...done] }]);
+        if (status === "done") await held;
+        return HttpResponse.json(list);
+      }),
+    );
+    renderApp("/projects/human-ui?status=open");
+    const doneTab = () => screen.getByRole("tab", { name: /^Done/ });
+    await waitFor(() => expect(doneTab()).toHaveTextContent("2"));
+    await userEvent.click(doneTab());
+    await waitFor(() =>
+      expect(doneTab()).toHaveAttribute("aria-selected", "true"),
+    );
+    expect(doneTab()).toHaveTextContent("2");
+    expect(screen.getByRole("tab", { name: /^Open/ })).toHaveTextContent("1");
+    release();
+  });
+
   test("Open then Done reads the notes once, since their counts follow only the product", async () => {
     signedInAs("member");
     serveProject();
@@ -267,6 +299,7 @@ describe("while the next filter loads", () => {
       release = resolve;
     });
     const notesAsked: string[] = [];
+    let heldAnswered = false;
     server.use(
       http.get("/api/web/projects/human-ui/items", async ({ request }) => {
         const query = new URL(request.url).searchParams;
@@ -276,18 +309,23 @@ describe("while the next filter loads", () => {
             projectItems([{ product: trail, items: [noteRow()] }]),
           );
         }
-        if (query.has("status")) await held;
+        if (query.has("status")) {
+          await held;
+          heldAnswered = true;
+        }
         return HttpResponse.json(
           projectItems([{ product: trail, items: [todoRow(), noteRow()] }]),
         );
       }),
     );
-    renderApp("/projects/human-ui");
+    const { queryClient } = renderApp("/projects/human-ui");
     expect(await screen.findAllByText(noteRow().title)).not.toHaveLength(0);
     await userEvent.click(screen.getByRole("tab", { name: /^Open/ }));
     await userEvent.click(screen.getByRole("tab", { name: /^Done/ }));
     release();
-    expect(await screen.findAllByText(noteRow().title)).not.toHaveLength(0);
+    await waitFor(() => expect(heldAnswered).toBe(true));
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    expect(screen.getAllByText(noteRow().title)).not.toHaveLength(0);
     expect(notesAsked).toHaveLength(1);
   });
 });

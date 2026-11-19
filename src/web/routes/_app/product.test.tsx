@@ -215,14 +215,51 @@ describe("notes section on load", () => {
   test("current notes: the section reads them once, as type note", async () => {
     signedInAs("member");
     const notesAsked = serveNoteCounts({ current: 1, archived: 0 });
-    renderApp("/products/TRL");
+    const { queryClient } = renderApp("/products/TRL");
     expect(
       await screen.findByRole("heading", { name: /^Notes/ }),
     ).toBeInTheDocument();
-    await waitFor(() => expect(notesAsked).toHaveLength(1));
+    await waitFor(() => expect(notesAsked.length).toBeGreaterThan(0));
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    expect(notesAsked).toHaveLength(1);
     const asked = new URL(notesAsked[0] ?? "", "http://localhost").searchParams;
     expect(asked.get("type")).toBe("note");
     expect(asked.get("status")).toBe("current");
+  });
+
+  test("current notes: switching a status tab doesn't read them again", async () => {
+    signedInAs("member");
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const notesAsked: string[] = [];
+    let heldAnswered = false;
+    serveProduct();
+    server.use(
+      http.get("/api/web/products/TRL/items", async ({ request }) => {
+        const query = new URL(request.url).searchParams;
+        const isNotes = query.get("type") === "note";
+        if (isNotes) notesAsked.push(request.url);
+        if (!isNotes && query.has("status")) {
+          await held;
+          heldAnswered = true;
+        }
+        const list = issueList([isNotes ? noteRow() : issueRow()]);
+        return HttpResponse.json({
+          ...list,
+          counts: { ...list.counts, notes: { current: 1, archived: 0 } },
+        });
+      }),
+    );
+    const { queryClient } = renderApp("/products/TRL");
+    expect(await screen.findAllByText(noteRow().title)).not.toHaveLength(0);
+    await userEvent.click(screen.getByRole("tab", { name: /^In progress/ }));
+    release();
+    await waitFor(() => expect(heldAnswered).toBe(true));
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    expect(screen.getAllByText(noteRow().title)).not.toHaveLength(0);
+    expect(notesAsked).toHaveLength(1);
   });
 
   test("no notes at all: no section and no notes request", async () => {

@@ -8,8 +8,10 @@ import {
   webhookSubscription,
 } from "../db/schema.js";
 import type { ActivityEvent, EventBus } from "../events/bus.js";
+import { eventForReach } from "../service/visible.js";
 import {
   deliveryKeyRefusal,
+  deliveryReach,
   isPending,
   leftFollowedProjects,
   type WebhookSettings,
@@ -213,8 +215,11 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
       .filter((d) => d.nextAttemptAt.getTime() <= now);
   }
 
-  /** The envelope a delivery carries: its message's on an inbox subscription, else its event's. */
-  function envelopeOf(delivery: Delivery): Envelope | undefined {
+  /** The envelope a delivery carries: its message's on an inbox subscription, else its event's as the key sending it reads it. */
+  function envelopeOf(
+    delivery: Delivery,
+    sub: Subscription,
+  ): Envelope | undefined {
     if (delivery.messageId !== null) {
       return buildMessageEnvelope(db, delivery.messageId);
     }
@@ -224,12 +229,14 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
       .from(activityEvent)
       .where(eq(activityEvent.id, delivery.eventId))
       .get();
-    return event && buildEnvelope(db, event, settings.publicUrl);
+    if (!event) return undefined;
+    const read = eventForReach(db, deliveryReach(db, sub, event), event);
+    return buildEnvelope(db, read, settings.publicUrl);
   }
 
-  function bodyOf(delivery: Delivery): string | null {
+  function bodyOf(delivery: Delivery, sub: Subscription): string | null {
     if (delivery.body !== null) return delivery.body;
-    const envelope = envelopeOf(delivery);
+    const envelope = envelopeOf(delivery, sub);
     if (!envelope) return null;
     const body = JSON.stringify({
       ...envelope,
@@ -370,7 +377,7 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
       return;
     }
     const secret = openSecret(settings.key, sub.id, sub.secretCipher);
-    const body = secret === null ? null : bodyOf(delivery);
+    const body = secret === null ? null : bodyOf(delivery, sub);
     let result: SendResult;
     if (secret === null) {
       result = {
