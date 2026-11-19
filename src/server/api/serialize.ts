@@ -149,7 +149,7 @@ export function toLegacyIssue(row: Issue) {
   return { ...toIssue(row), status: legacyStatus(row.status) };
 }
 
-// the service keeps notes from the routes from before notes
+// the service keeps notes from reaching the legacy routes
 function legacyStatus(status: Issue["status"]) {
   if (status === "triage") return "open";
   if (isNoteStatus(status)) {

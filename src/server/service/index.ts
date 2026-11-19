@@ -2630,10 +2630,10 @@ export function createService({
    * assigned, a note current and never assigned. `input.product` names the
    * product, else `fallback` picks it; `typeOf` decides the type once the
    * product is known, and `asked` is the type the caller asked for by the
-   * call it made (none for the legacy create). `assignee` left out assigns a todo to the product's owner, else
-   * the caller. An idempotency key is checked against the input as sent, so
-   * what `fallback`, `typeOf` and the default assignee read from current data
-   * can't turn a retry into a mismatch. `placement`, when given, replaces how
+   * call it made (none for the legacy create). `assignee` left out assigns a
+   * todo to the product's owner, else the caller. An idempotency key is checked
+   * against the input as sent, so what `fallback`, `typeOf` and the default
+   * assignee read from current data can't turn a retry into a mismatch. `placement`, when given, replaces how
    * the product is named and picked, and may put the item in a project.
    */
   function createItem(
