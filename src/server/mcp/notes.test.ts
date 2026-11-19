@@ -1,7 +1,15 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { expect, test } from "vitest";
-import { activityEvent, webhookDelivery } from "../db/schema.js";
-import { createBot } from "../service/keys.js";
+import {
+  activityEvent,
+  apiKey,
+  product as productTable,
+  webhookDelivery,
+  webhookSubscription,
+} from "../db/schema.js";
+import { createBot, createKey, revokeKey } from "../service/keys.js";
+import { eventForReach } from "../service/visible.js";
+import { deliveryReach } from "../service/webhooks.js";
 import {
   atFakeTimeAsync,
   projectKey,
@@ -351,6 +359,80 @@ test("a note's author and the product's bot edit it; a third bot is told to comm
     `forbidden: ${note.key} is a note by Author, and only Author and Editor, the bot of ${owner.product}, edit it: add what you know with add_comment on ${note.key}`,
   );
   await call(third.client, "add_comment", { item: note.key, body: "also" });
+});
+
+test("a note on a product with no owner is edited by its author alone, and a third bot is told only the author edits it", async () => {
+  const former = await productBot("Former owner");
+  const author = await productBot("Orphan author");
+  const third = await productBot("Orphan third");
+  const note = await call(author.client, "add_note", {
+    product: former.product,
+    title: "draft",
+  });
+  db.update(productTable)
+    .set({ ownerId: null })
+    .where(eq(productTable.key, former.product))
+    .run();
+  expect(
+    await call(author.client, "update_item", {
+      item: note.key,
+      title: "by the author",
+    }),
+  ).toMatchObject({ title: "by the author" });
+  expect(
+    await callError(third.client, "update_item", {
+      item: note.key,
+      title: "by a third bot",
+    }),
+  ).toBe(
+    `forbidden: ${note.key} is a note by Orphan author, and only Orphan author edits it: add what you know with add_comment on ${note.key}`,
+  );
+});
+
+test("add_note with neither product nor project is refused, saying which to send, and writes nothing", async () => {
+  const owner = await productBot("Aimless");
+  const refusal =
+    "validation_failed: add_note needs product: the key (like TRL) of the product the note belongs to, or project: the slug (like launch-q4) of a project drawing from one product; list_products and list_projects list them";
+  expect(await callError(owner.client, "add_note", { title: "lost" })).toBe(
+    refusal,
+  );
+  expect(
+    await callError(owner.client, "add_note", { title: "lost", product: " " }),
+  ).toBe(refusal);
+  expect(
+    (
+      await call(owner.client, "list_items", {
+        product: owner.product,
+        type: "note",
+      })
+    ).items,
+  ).toEqual([]);
+});
+
+test("about naming an item twice is one pointer, and the 50 limit counts the keys as sent", async () => {
+  const owner = await productBot("Doubler");
+  const todo = await call(owner.client, "add_todo", { title: "pointed at" });
+  const note = await call(owner.client, "add_note", {
+    product: owner.product,
+    title: "twice",
+    about: [todo.key, todo.key],
+  });
+  expect(note.about.map((r: Body) => r.key)).toEqual([todo.key]);
+  const replaced = await call(owner.client, "update_item", {
+    item: note.key,
+    about: [todo.key, todo.key, todo.key],
+  });
+  expect(replaced.about.map((r: Body) => r.key)).toEqual([todo.key]);
+  expect(
+    (await call(owner.client, "get_item", { item: todo.key })).notesCount,
+  ).toEqual({ current: 1, archived: 0 });
+  expect(
+    await callError(owner.client, "add_note", {
+      product: owner.product,
+      title: "fifty-one times the same",
+      about: Array.from({ length: 51 }, () => todo.key),
+    }),
+  ).toMatch(/<=50 items at about/);
 });
 
 test("a note's status is current or archived, an issue's or a todo's never is, and each refusal names the valid ones", async () => {
@@ -745,13 +827,19 @@ test("get_project and get_product count notes apart from the work counts", async
 
 test("the deprecated issue tools never show a note", async () => {
   const owner = await productBot("Legacy");
+  const issue = await call(owner.client, "file_issue", {
+    product: owner.product,
+    title: "work",
+  });
   const note = await call(owner.client, "add_note", {
     product: owner.product,
     title: "record",
   });
   expect(
-    (await call(owner.client, "list_issues", { product: owner.product })).items,
-  ).toEqual([]);
+    (
+      await call(owner.client, "list_issues", { product: owner.product })
+    ).items.map((i: Body) => i.key),
+  ).toEqual([issue.key]);
   expect(
     await callError(owner.client, "get_issue", { issueId: note.key }),
   ).toMatch(/^not_found: /);
@@ -980,6 +1068,98 @@ test("a webhook following the project on a key reaching only it gets a note's ev
   expect(JSON.stringify(payloads)).not.toContain(`"${outside.key}"`);
 });
 
+/**
+ * A note about two todos of its product, one in a project, and a webhook following that project on a key reaching only it: the key sees the one todo, so the webhook's note event names it and counts the other.
+ * `olderKeyActions` sets the bot's older key, which reaches everything.
+ */
+async function noteSeenByProjectKey(name: string, olderKeyActions?: string[]) {
+  const { owner, slug, inside, outside } = await noteInProject(name);
+  const follower = createBot(db, `${name} reader`, {
+    scope: { actions: olderKeyActions },
+  });
+  const reading = createKey(db, follower.actor.id, {
+    projects: [slug],
+    actions: ["read"],
+  }).key;
+  // minted in one millisecond, the keys' order is the ids': pin the older one first
+  for (const [key, at] of [
+    [follower.key, 10_000],
+    [reading, 20_000],
+  ] as const) {
+    db.update(apiKey)
+      .set({ createdAt: new Date(at) })
+      .where(eq(apiKey.prefix, key.slice(6, 14)))
+      .run();
+  }
+  const { id } = await call(await connect(reading), "create_webhook", {
+    url: `https://${slug}.example.com/hook`,
+    secret: "whsec_reach_0123456789",
+    projects: [slug],
+  });
+  const note = await call(owner.client, "add_note", {
+    product: owner.product,
+    project: slug,
+    title: "both todos ship together",
+    about: [inside.key, outside.key],
+  });
+  const event = db
+    .select()
+    .from(activityEvent)
+    .where(
+      and(
+        eq(activityEvent.subjectId, note.id),
+        eq(activityEvent.action, "issue.created"),
+      ),
+    )
+    .get() as typeof activityEvent.$inferSelect;
+  const aboutAsSent = () => {
+    const sub = db
+      .select()
+      .from(webhookSubscription)
+      .where(eq(webhookSubscription.id, id))
+      .get() as typeof webhookSubscription.$inferSelect;
+    const { payload } = eventForReach(db, deliveryReach(db, sub, event), event);
+    return { about: payload.about, aboutOthers: payload.aboutOthers };
+  };
+  const forgetRecordedKey = () =>
+    db
+      .update(webhookSubscription)
+      .set({ apiKeyId: null })
+      .where(eq(webhookSubscription.id, id))
+      .run();
+  return { inside, reading, aboutAsSent, forgetRecordedKey };
+}
+
+const revoke = (key: string) => revokeKey(db, key.slice(6, 14));
+
+test("a webhook's recorded key decides which about items its note events name, whatever other keys its bot holds", async () => {
+  const { inside, aboutAsSent } = await noteSeenByProjectKey("Recorded");
+  expect(aboutAsSent()).toEqual({ about: [inside.key], aboutOthers: 1 });
+});
+
+test("a webhook recording no key reads a note's about items as its bot's reading keys do, skipping a key that can't read", async () => {
+  const { inside, forgetRecordedKey, aboutAsSent } = await noteSeenByProjectKey(
+    "Fallback",
+    ["comments"],
+  );
+  forgetRecordedKey();
+  expect(aboutAsSent()).toEqual({ about: [inside.key], aboutOthers: 1 });
+});
+
+test("a webhook whose recorded key is revoked names no about item of a note and counts them all", async () => {
+  const { reading, aboutAsSent } = await noteSeenByProjectKey("Revoked");
+  revoke(reading);
+  expect(aboutAsSent()).toEqual({ about: [], aboutOthers: 2 });
+});
+
+test("a webhook recording no key, whose bot holds no live key that can read, names no about item of a note and counts them all", async () => {
+  const { reading, forgetRecordedKey, aboutAsSent } =
+    await noteSeenByProjectKey("Keyless", ["comments"]);
+  forgetRecordedKey();
+  revoke(reading);
+  expect(aboutAsSent()).toEqual({ about: [], aboutOthers: 2 });
+});
+
 test("an issue turned into a note sends one last trail.issue.updated carrying type note, and nothing more under trail.issue.*", async () => {
   const owner = await productBot("Retyped");
   const filer = await productBot("Asker");
@@ -1023,6 +1203,37 @@ test("an issue turned into a note sends one last trail.issue.updated carrying ty
     type: { from: "issue", to: "note" },
     status: { from: "triage", to: "current" },
   });
+});
+
+test("a note turned back into a todo or an issue is sent under both trail.issue.* and trail.item.* names, as the item it now is", async () => {
+  const owner = await productBot("Reverted");
+  const { id } = await call(owner.client, "create_webhook", {
+    url: "https://reverted.example.com/hook",
+    secret: "whsec_reverted_0123456789",
+    products: [owner.product],
+  });
+  const note = await call(owner.client, "add_note", {
+    product: owner.product,
+    title: "record",
+  });
+  await call(owner.client, "update_item", { item: note.key, type: "todo" });
+  await call(owner.client, "update_item", {
+    item: note.key,
+    title: "now work",
+  });
+  const deliveries = db
+    .select({ type: webhookDelivery.type })
+    .from(webhookDelivery)
+    .where(eq(webhookDelivery.subscriptionId, id))
+    .orderBy(webhookDelivery.seq, webhookDelivery.type)
+    .all();
+  expect(deliveries.map((d) => d.type)).toEqual([
+    "trail.item.created",
+    "trail.issue.updated",
+    "trail.item.updated",
+    "trail.issue.updated",
+    "trail.item.updated",
+  ]);
 });
 
 test("an update that would make a note about more than 50 items is refused, naming the total, and leaves about as it was", async () => {

@@ -1,4 +1,4 @@
-import { ExternalLinkIcon } from "lucide-react";
+import { ExternalLinkIcon, FolderIcon, PlusIcon } from "lucide-react";
 import { type ReactNode, useId, useRef, useState } from "react";
 import { ActorAvatar } from "@/components/actor";
 import { AppLink, RowLink, textLinkFocus } from "@/components/app-link";
@@ -16,6 +16,7 @@ import {
 import { NotesSection } from "@/components/notes";
 import { Pane, PaneTabs } from "@/components/pane-tabs";
 import {
+  EmptyState,
   ItemListEmpty,
   ItemListError,
   ListSkeleton,
@@ -27,6 +28,7 @@ import {
   UpdateHealth,
 } from "@/components/status-updates";
 import { KeyText } from "@/components/text";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import type {
   WebItemCountsView,
@@ -50,6 +52,11 @@ export type ProductViewProps = {
   detail: WebProductDetailView | null;
   /** The rows under `filters`; `counts` are per type and status whatever the filters. */
   items: Loadable<WebItemListView>;
+  /**
+   * The last list's counts, held while the next filter's list loads; null before any. Without
+   * them the toggle and tabs count only a ready list.
+   */
+  counts?: WebItemCountsView | null;
   /** The current notes, for the Notes section under the list. */
   notes: Loadable<WebItemRowView[]>;
   /** The product's last note counts, held while the next filter's list loads; null before any. */
@@ -165,8 +172,14 @@ function ItemsBody({
       />
     );
   // a list of notes is a filter result even where there is no work
-  if (items.data.counts.all.all === 0 && filters.type !== "note") {
-    return <ItemListEmpty productKey={product.key} onNewIssue={onNewIssue} />;
+  const { counts } = items.data;
+  if (counts.all.all === 0 && filters.type !== "note") {
+    // the notes are items, listed under this
+    return counts.notes.current + counts.notes.archived > 0 ? (
+      <NoWork productKey={product.key} onNewIssue={onNewIssue} />
+    ) : (
+      <ItemListEmpty productKey={product.key} onNewIssue={onNewIssue} />
+    );
   }
   const rows = items.data.items.filter((item) => matchesFilters(item, filters));
   if (rows.length === 0) {
@@ -186,6 +199,29 @@ function ItemsBody({
       <ItemTable groups={groups} labels now={now} />
       <ItemRows groups={groups} now={now} />
     </>
+  );
+}
+
+function NoWork({
+  productKey,
+  onNewIssue,
+}: {
+  productKey: string;
+  onNewIssue: () => void;
+}) {
+  return (
+    <EmptyState
+      icon={FolderIcon}
+      title={`No issues or todos in ${productKey} yet`}
+      description="Bots plan todos and file issues here. You can file an issue too."
+      action={
+        // ItemListEmpty's action: 28px at 1440, 44px below with room either side of the word
+        <Button size="sm" className="max-lg:px-3.5" onClick={onNewIssue}>
+          <PlusIcon data-icon="inline-start" aria-hidden="true" />
+          New issue
+        </Button>
+      }
+    />
   );
 }
 
@@ -232,7 +268,9 @@ export function ProductView(props: ProductViewProps) {
   const { detail, filters, onFiltersChange } = props;
   const projects = detail?.projects ?? [];
   const counts =
-    props.items.status === "ready" ? props.items.data.counts : null;
+    props.items.status === "ready"
+      ? props.items.data.counts
+      : (props.counts ?? null);
   const panes: [PaneName, string][] = [
     ["items", "Items"],
     ...(projects.length > 0

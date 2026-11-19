@@ -82,6 +82,7 @@ function ProductPage() {
         product={ref}
         detail={product.data ?? null}
         items={loadableOf(shownItems)}
+        counts={items.data?.counts ?? null}
         notes={loadableOf(notes)}
         noteCounts={noteCounts}
         statusUpdates={loadableOf(updates)}

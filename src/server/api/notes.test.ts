@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { activityEventSchema } from "../../shared/schemas.js";
 import { createBot } from "../service/keys.js";
 import { atFakeTimeAsync, projectKey, setupTestApp } from "../test-app.js";
 
@@ -210,6 +211,12 @@ test("GET /items/{key} counts the notes about an item in notesCount, and GET /it
 
 test("the deprecated /issues routes never show a note", async () => {
   const owner = await newProduct("rest legacy");
+  const issue = await ok(
+    await request("POST", "/api/v1/items", {
+      json: { type: "issue", product: owner.key, title: "work" },
+    }),
+    201,
+  );
   const note = await ok(
     await request("POST", "/api/v1/items", {
       json: { type: "note", product: owner.key, title: "record" },
@@ -217,9 +224,10 @@ test("the deprecated /issues routes never show a note", async () => {
     201,
   );
   expect(
-    (await ok(await request("GET", `/api/v1/issues?product=${owner.key}`)))
-      .items,
-  ).toEqual([]);
+    (
+      await ok(await request("GET", `/api/v1/issues?product=${owner.key}`))
+    ).items.map((i: Body) => i.key),
+  ).toEqual([issue.key]);
   expect((await request("GET", `/api/v1/issues/${note.key}`)).status).toBe(404);
   expect(
     (
@@ -249,6 +257,14 @@ test("the OpenAPI spec documents notes on the items routes", async () => {
   expect(spec.paths["/items"].post.description).toMatch(
     /a note is a record nobody has to act on/,
   );
+  const patch = spec.paths["/items/{key}"].patch;
+  expect(patch.summary).toMatch(/the items a note is about/);
+  expect(patch.responses["403"].description).toMatch(
+    /the item is a note and the key's bot is neither its author nor the product's owner/,
+  );
+  const payload = schemas.ActivityEvent.properties.payload;
+  expect(Object.keys(payload.properties)).toEqual(["about", "aboutOthers"]);
+  expect(payload.additionalProperties).not.toBe(false);
 });
 
 test("a note's created event lists the keys it is about, as its updated event does", async () => {
@@ -354,6 +370,9 @@ test("GET /activity for a key reaching only the note's product names its own-pro
     aboutOthers: { from: 1, to: 0 },
   });
   expect(JSON.stringify(events)).not.toContain(secret.key);
+  for (const event of events) {
+    expect(activityEventSchema.safeParse(event).error).toBeUndefined();
+  }
 });
 
 test("PATCH /items/{key} on a note by a third bot is 403 forbidden, and the note stays as written", async () => {

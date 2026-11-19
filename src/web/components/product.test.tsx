@@ -218,6 +218,27 @@ describe("items", () => {
 });
 
 describe("type toggle and status tabs", () => {
+  test("while the next type's list loads, the toggle and tabs keep the counts the route holds; without them, they drop", () => {
+    const { counts } = itemList(rows);
+    const loading = (held?: ProductViewProps["counts"]) =>
+      props({
+        filters: { type: "issue", status: null },
+        items: { status: "loading" },
+        noteCounts: counts.notes,
+        counts: held,
+      });
+    const { rerender } = render(<ProductView {...loading(counts)} />);
+    expect(
+      within(typeToggle()).getByRole("button", { name: "Issues 2" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(within(tabs()).getByRole("tab", { name: "All 2" })).toBeVisible();
+    rerender(<ProductView {...loading()} />);
+    expect(
+      within(typeToggle()).getByRole("button", { name: "Issues" }),
+    ).toBeInTheDocument();
+    expect(within(tabs()).getByRole("tab", { name: "All" })).toBeVisible();
+  });
+
   test("the toggle shows each type's count and All is pressed", () => {
     renderProduct();
     expect(
@@ -392,6 +413,26 @@ describe("type toggle and status tabs", () => {
         "Bots plan todos and file issues here. You can file an issue too.",
       ),
     ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "New issue" }));
+    expect(p.onNewIssue).toHaveBeenCalledOnce();
+  });
+
+  test("a product whose only items are notes says it has no issues or todos, still offers New issue, and lists the notes", async () => {
+    const user = userEvent.setup();
+    const p = renderProduct({
+      items: {
+        status: "ready",
+        data: { items: [], nextCursor: null, counts: countsOf([noteRow()]) },
+      },
+      notes: { status: "ready", data: [noteRow()] },
+    });
+    expect(
+      screen.getByRole("heading", { name: "No issues or todos in TRL yet" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "No items in TRL yet" }),
+    ).toBeNull();
+    expect(screen.getByRole("region", { name: /^Notes/ })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "New issue" }));
     expect(p.onNewIssue).toHaveBeenCalledOnce();
   });

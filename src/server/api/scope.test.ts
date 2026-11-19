@@ -599,8 +599,11 @@ test("the spec documents each gated operation's 403 with the action it needs", a
     `The key lacks the ${action} action (code forbidden_action)`;
   const orScope = (action: string) =>
     `${needs(action)}, or reaches only some products (code forbidden_scope)`;
-  const owner =
-    "the product has an owner bot and the call is that bot's alone: adding a todo, moving an issue out of triage, canceling an item another bot filed, reopening a canceled issue another bot filed, or changing an item's type; the message names the owner and what to do instead (code forbidden)";
+  const ownerOnly =
+    "the product has an owner bot and the call is that bot's alone: adding a todo, moving an issue out of triage, canceling an item another bot filed, reopening a canceled issue another bot filed, or changing an item's type; the message names the owner and what to do instead";
+  const owner = `${ownerOnly} (code forbidden)`;
+  const noteEditor =
+    "or the item is a note and the key's bot is neither its author nor the product's owner: the message names who edits it and says to comment with add_comment instead";
   const viaProject = (scope: string) => `, or ${scope} (code forbidden_scope)`;
   const itemChange = viaProject(VIA_PROJECT);
   const orOwner = (action: string, scope = "") =>
@@ -629,7 +632,7 @@ test("the spec documents each gated operation's 403 with the action it needs", a
     "PUT /me/photo": null,
     "DELETE /me/title": null,
     "PUT /me/title": null,
-    "PATCH /items/{key}": orOwner("issues", itemChange),
+    "PATCH /items/{key}": `${needs("issues")}${itemChange}, or ${ownerOnly}; ${noteEditor} (code forbidden)`,
     "PATCH /issues/{id}": orOwner("issues", itemChange),
     "PATCH /products/{key}": `${needs("admin")}, or owner changes the owner of a product another bot owns (code forbidden)`,
     "PATCH /projects/{ref}":

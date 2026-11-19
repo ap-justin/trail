@@ -5,6 +5,7 @@ import {
   QueryCache,
   QueryClient,
   type QueryClientConfig,
+  type QueryKey,
   queryOptions,
   skipToken,
 } from "@tanstack/react-query";
@@ -81,6 +82,32 @@ export const projectsQuery = queryOptions({
 /** Pages of a product's or project's items the page reads before it stops: neither has Load more. */
 export const ITEM_PAGES_MAX = 10;
 
+type NoteCounts = WebItemListView["counts"]["notes"];
+
+const CURRENT_NOTES = { type: "note", status: "current" } as const;
+
+/**
+ * Writes a list's note counts and, when the current count moved, marks the current notes
+ * stale, so the Notes section's rows refetch to agree with its count; the notes list's own
+ * read skips that, as it is the fresh read.
+ */
+function writeNoteCounts(
+  client: QueryClient,
+  countsKey: QueryKey,
+  notesKey: QueryKey,
+  counts: NoteCounts,
+  isNotesList: boolean,
+) {
+  const last = client.getQueryData<NoteCounts>(countsKey);
+  client.setQueryData(countsKey, counts);
+  if (!isNotesList && last !== undefined && last.current !== counts.current) {
+    void client.invalidateQueries({ queryKey: notesKey, exact: true });
+  }
+}
+
+const isCurrentNotes = ({ type, status }: ItemQuery) =>
+  type === CURRENT_NOTES.type && status === CURRENT_NOTES.status;
+
 /**
  * A product's items under `filters`, every page up to `ITEM_PAGES_MAX`, as one list. A
  * `nextCursor` left set means the cap cut the list short.
@@ -94,7 +121,13 @@ export const productItemsQuery = (key: string, filters: ItemQuery) =>
           (cursor) => api.productItems(key, filters, cursor),
           ITEM_PAGES_MAX,
           (page) =>
-            client.setQueryData(keys.productNoteCounts(key), page.counts.notes),
+            writeNoteCounts(
+              client,
+              keys.productNoteCounts(key),
+              keys.productItems(key, CURRENT_NOTES),
+              page.counts.notes,
+              isCurrentNotes(filters),
+            ),
         )
       ).reduce((read, page) => ({
         ...page,
@@ -136,9 +169,15 @@ export const projectItemsQuery = (slug: string, filters: ProjectItemQuery) =>
           (cursor) => api.projectItems(slug, filters, cursor),
           ITEM_PAGES_MAX,
           (page) =>
-            client.setQueryData(
+            writeNoteCounts(
+              client,
               keys.projectNoteCounts(slug, filters.product),
+              keys.projectItems(slug, {
+                ...CURRENT_NOTES,
+                product: filters.product,
+              }),
               page.counts.notes,
+              isCurrentNotes(filters),
             ),
         )
       ).reduce((read, page) => ({
@@ -154,8 +193,6 @@ export const projectItemsQuery = (slug: string, filters: ProjectItemQuery) =>
         ? previous
         : undefined,
   });
-
-type NoteCounts = WebItemListView["counts"]["notes"];
 
 /**
  * A product's note counts as the first page of any of its lists last read them, so they

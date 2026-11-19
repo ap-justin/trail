@@ -21,6 +21,7 @@ import {
   markReadSchema,
   messageCreateSchema,
   myTitleUpdateSchema,
+  NOTE_EVENT_ABOUT,
   noteCreateSchema,
   productCreateSchema,
   productUpdateSchema,
@@ -854,8 +855,7 @@ export function registerTools(
   register(
     "list_activity",
     {
-      description:
-        'Read the activity feed, optionally of one product (its key), one project (its slug: its own events and its items joining and leaving) or one actor. To follow it, pass after: "" for the first events, oldest first, then each page\'s nextCursor as after to get only newer events (never null; an empty page means nothing new yet). Without after, it pages newest first through cursor. A cursor only works with the filters it was issued under.',
+      description: `Read the activity feed, optionally of one product (its key), one project (its slug: its own events and its items joining and leaving) or one actor. To follow it, pass after: "" for the first events, oldest first, then each page's nextCursor as after to get only newer events (never null; an empty page means nothing new yet). Without after, it pages newest first through cursor. A cursor only works with the filters it was issued under. ${NOTE_EVENT_ABOUT}`,
       inputSchema: () =>
         z.strictObject({
           after: activityListQuerySchema.shape.after,

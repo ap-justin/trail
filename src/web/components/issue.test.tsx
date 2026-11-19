@@ -1250,7 +1250,7 @@ describe("notes", () => {
     expect(screen.getByText("wrote this note")).toBeInTheDocument();
   });
 
-  test("an item's page lists the notes about it, each a link with its state", () => {
+  test("an item's page lists the notes about it, each a link named by its key and title alone", () => {
     renderIssue({
       issue: {
         status: "ready",
@@ -1268,9 +1268,11 @@ describe("notes", () => {
       },
     });
     const notes = screen.getByRole("region", { name: "Notes" });
+    // every note listed is current, under a Notes heading: each link is its key and title
     expect(within(notes).getByRole("link")).toHaveAccessibleName(
-      "Current Note TRL-31 Why the feed reads newest first",
+      "TRL-31 Why the feed reads newest first",
     );
+    expect(within(notes).queryByRole("img")).toBeNull();
     expect(within(notes).queryByText(/archived/i)).toBeNull();
     expect(screen.queryByRole("region", { name: "About" })).toBeNull();
   });

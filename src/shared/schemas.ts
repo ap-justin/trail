@@ -418,6 +418,38 @@ export const projectItemsRemovedSchema = z
   })
   .openapi("ProjectItemsRemoved");
 
+/** How a note's events carry about: list_activity, the webhook docs and the activity payload all say it. */
+export const NOTE_EVENT_ABOUT =
+  "A note's events name the items it is about by key. On its create event, about is an array of keys, like [\"TRL-3\"], of the items in the note's own product that the reading key reaches (on a webhook, the key its deliveries are checked against), in key order, and aboutOthers counts the rest: items in other products and items the key doesn't reach. An update that changes which items it is about, a turn into an issue or a todo included (which empties it), carries about {from, to} and aboutOthers {from, to} in the same form; an update that leaves them as they were carries neither. So about on an event is not the note's full list, and holds keys, not the {key, title, type, status} of an item's about: get_item (GET /items/{key}) on the note lists every item it is about that the key reaches.";
+
+const eventAboutKeys = z.array(z.string());
+const activityPayload = z
+  .looseObject({
+    about: z
+      .union([
+        eventAboutKeys,
+        z.object({ from: eventAboutKeys, to: eventAboutKeys }),
+      ])
+      .optional()
+      .meta({
+        description:
+          "On a note's events: keys on a create, {from, to} on an update.",
+      }),
+    aboutOthers: z
+      .union([
+        z.int().min(0),
+        z.object({ from: z.int().min(0), to: z.int().min(0) }),
+      ])
+      .optional()
+      .meta({
+        description:
+          "Beside about: how many items it leaves out, as a number or {from, to}.",
+      }),
+  })
+  .meta({
+    description: `What the event changed or created; its fields depend on action. ${NOTE_EVENT_ABOUT}`,
+  });
+
 export const activityEventSchema = z
   .object({
     id,
@@ -443,7 +475,7 @@ export const activityEventSchema = z
         "Like issue.created, issue.updated, comment.created, product.created, product.updated, product.imported, project.created, project.updated, project.item_added, project.item_removed, status_update.created, label.created; ignore one you don't know.",
       example: "issue.updated",
     }),
-    payload: z.record(z.string(), z.unknown()),
+    payload: activityPayload,
     createdAt: timestamp,
   })
   .openapi("ActivityEvent");

@@ -365,13 +365,14 @@ describe("notes section on load", () => {
   test("only archived notes: the section says none are current and links the archived", async () => {
     signedInAs("member");
     const notesAsked = serveNoteCounts({ current: 0, archived: 2 });
-    renderApp("/projects/human-ui");
+    const { queryClient } = renderApp("/projects/human-ui");
     expect(await screen.findAllByText(todoRow().title)).not.toHaveLength(0);
     expect(screen.getByRole("heading", { name: /^Notes/ })).toBeInTheDocument();
     expect(screen.getByText("No current notes.")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Show 2 archived notes" }),
     ).toBeInTheDocument();
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
     expect(notesAsked).toEqual([]);
   });
 
@@ -493,14 +494,55 @@ describe("notes section on load", () => {
     expect(await screen.findAllByText(noteRow().title)).not.toHaveLength(0);
   });
 
+  test("a tab whose list counts current notes differently reads them again", async () => {
+    signedInAs("member");
+    serveProject();
+    const kept = noteRow();
+    const archived = noteRow({ key: "TRL-32", title: "Archived since" });
+    let current = [kept, archived];
+    const notesAsked: string[] = [];
+    server.use(
+      http.get("/api/web/projects/human-ui/items", ({ request }) => {
+        const isNotes =
+          new URL(request.url).searchParams.get("type") === "note";
+        if (isNotes) notesAsked.push(request.url);
+        const list = projectItems([
+          { product: trail, items: isNotes ? current : [todoRow()] },
+        ]);
+        return HttpResponse.json({
+          ...list,
+          counts: {
+            ...list.counts,
+            notes: { current: current.length, archived: 2 - current.length },
+          },
+        });
+      }),
+    );
+    const { queryClient } = renderApp("/projects/human-ui");
+    expect(await screen.findAllByText(archived.title)).not.toHaveLength(0);
+    // a bot archives a note while the page sits open
+    current = [kept];
+    await userEvent.click(screen.getByRole("tab", { name: /^Open/ }));
+    await waitFor(() =>
+      expect(screen.queryByText(archived.title)).not.toBeInTheDocument(),
+    );
+    expect(screen.getAllByText(kept.title)).not.toHaveLength(0);
+    expect(screen.getByRole("heading", { name: /^Notes/ })).toHaveTextContent(
+      "Notes 1",
+    );
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    expect(notesAsked).toHaveLength(2);
+  });
+
   test("no notes at all: no section and no notes request", async () => {
     signedInAs("member");
     const notesAsked = serveNoteCounts({ current: 0, archived: 0 });
-    renderApp("/projects/human-ui");
+    const { queryClient } = renderApp("/projects/human-ui");
     expect(await screen.findAllByText(todoRow().title)).not.toHaveLength(0);
     expect(
       screen.queryByRole("heading", { name: /^Notes/ }),
     ).not.toBeInTheDocument();
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
     expect(notesAsked).toEqual([]);
   });
 });

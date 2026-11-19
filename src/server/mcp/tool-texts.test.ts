@@ -98,6 +98,45 @@ test("add_todo, file_issue and add_note each say which item to add: planned work
   }
 });
 
+/** How a note's events carry about: its own product's keys the reader reaches, the rest counted, never the full list. */
+function expectNoteEventAbout(text: string | undefined, where: string) {
+  expect(text, where).toMatch(/On its create event, about is an array of keys/);
+  expect(text, where).toMatch(
+    /of the items in the note's own product that the reading key reaches/,
+  );
+  expect(text, where).toMatch(/aboutOthers counts the rest/);
+  expect(text, where).toMatch(
+    /changes which items it is about.*carries about \{from, to\} and aboutOthers \{from, to\}/,
+  );
+  expect(text, where).toMatch(/not the note's full list/);
+}
+
+test("list_activity and create_webhook say how a note's events carry about and aboutOthers", async () => {
+  const tool = await toolDescriptions();
+  for (const name of ["list_activity", "create_webhook"]) {
+    expectNoteEventAbout(tool(name).description, name);
+  }
+});
+
+test("GET /activity's event payload and POST /webhooks say how a note's events carry about and aboutOthers", async () => {
+  const spec = (await (
+    await request("GET", "/api/v1/openapi.json", { key: null })
+  ).json()) as {
+    paths: Record<string, { post?: { description?: string } }>;
+    components: {
+      schemas: Record<
+        string,
+        { properties: Record<string, { description?: string }> }
+      >;
+    };
+  };
+  expectNoteEventAbout(
+    spec.components.schemas.ActivityEvent?.properties.payload?.description,
+    "ActivityEvent.payload",
+  );
+  expectNoteEventAbout(spec.paths["/webhooks"]?.post?.description, "/webhooks");
+});
+
 test("list_items says that without type it lists issues and todos only, and update_item says who edits a note", async () => {
   const tool = await toolDescriptions();
   expect(tool("list_items").description).toMatch(

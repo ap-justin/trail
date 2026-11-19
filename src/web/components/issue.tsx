@@ -134,7 +134,7 @@ function createdAs(issue: WebItemView): WebItemType {
   return created?.kind === "item_created" ? created.createdAs : issue.type;
 }
 
-/** Issue or Todo as its grey glyph and word: a fact about the item, never a chip. */
+/** Issue, Todo or Note as its grey glyph and word: a fact about the item, never a chip. */
 function ItemType({ type }: { type: WebItemType }) {
   return (
     <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
@@ -349,14 +349,18 @@ function Properties({ issue }: { issue: WebItemView }) {
 /**
  * Items as links, each its status and type glyphs, key and title: the items a note is about, or the
  * notes about this item, with `children` under them. Nothing when there are no items and no `children`.
+ * With `currentNotes` every row is a current note under its heading, so the status glyph goes and the
+ * note glyph stays unnamed: each link is its key and title.
  */
 function ItemRefs({
   heading,
   items,
+  currentNotes = false,
   children,
 }: {
   heading: string;
   items: WebItemView["about"];
+  currentNotes?: boolean;
   children?: ReactNode;
 }) {
   const headingId = useId();
@@ -378,8 +382,12 @@ function ItemRefs({
                 className="group flex min-h-11 items-center gap-2 rounded-md py-1.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring lg:min-h-0"
               >
                 {/* named by its glyphs and words: "In progress Issue TRL-14 Team access" */}
-                <StatusIcon status={item.status} label />{" "}
-                <TypeIcon type={item.type} />{" "}
+                {!currentNotes && (
+                  <>
+                    <StatusIcon status={item.status} label />{" "}
+                  </>
+                )}
+                <TypeIcon type={item.type} decorative={currentNotes} />{" "}
                 <KeyText className="shrink-0">{item.key}</KeyText>{" "}
                 <span className="min-w-0 truncate group-hover:underline">
                   {item.title}
@@ -404,7 +412,7 @@ function NotesAbout({ item }: { item: WebItemView }) {
   if (current + archived === 0) return null;
   const left = notesLeftOut(current, current - item.notes.length, archived);
   return (
-    <ItemRefs heading="Notes" items={item.notes}>
+    <ItemRefs heading="Notes" items={item.notes} currentNotes>
       {left && <p className="py-1.5 text-muted-foreground">{left}</p>}
     </ItemRefs>
   );

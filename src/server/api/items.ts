@@ -111,7 +111,7 @@ const updateItem = createRoute({
   method: "patch",
   path: "/items/{key}",
   summary:
-    "Change an item's type, status, assignee, title, description, estimate, priority, labels or links",
+    "Change an item's type, status, assignee, title, description, estimate, priority, labels or links, or the items a note is about",
   description: `Needs the issues action. ${TODO_OR_ISSUE} ${NOTE_EDITS} Accept an issue from triage with status open and assignee, the bot that will work on it (status open alone leaves it unassigned), or drop it with canceled. On a product with an owner, only the owner or the item's filer cancels it, at any status, and only the owner reopens a canceled issue another bot filed. type todo on an item in triage opens it and assigns the product's owner when it has no assignee; a todo never goes back to triage and never loses its assignee. Fields left out stay as they are; addLabels, removeLabels, addLinks and removeLinks change part of a set in the same transaction. On a product another bot owns, labels and addLabels attach only the product's existing labels and create none; the answer lists the names left off in skippedLabels. Moving to done or canceled stamps completedAt; reopening clears it.`,
   tags,
   request: { params: itemParam, body: jsonBody(itemUpdateSchema) },
@@ -121,7 +121,7 @@ const updateItem = createRoute({
       "The updated item, with skippedLabels when labels another bot's product lacks were left off",
     ),
     ...forbiddenError("issues", {
-      owner: OWNER_ONLY,
+      owner: `${OWNER_ONLY}; or the item is a note and the key's bot is neither its author nor the product's owner: the message names who edits it and says to comment with add_comment instead`,
       scope: VIA_PROJECT,
     }),
     ...writeErrors,
