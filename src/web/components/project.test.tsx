@@ -655,7 +655,7 @@ describe("notes", () => {
     ).toEqual(["All 5", "Open 4", "In progress 1", "Done 0", "Canceled 0"]);
     const body = groupBody("TRL");
     expect(within(body).getByRole("columnheader")).toHaveTextContent(
-      "TRL trail 3 issues and todos",
+      "trail TRL 3 issues and todos",
     );
     expect(rowsIn(body)).toBe(3);
     expect(
@@ -701,9 +701,9 @@ describe("notes", () => {
     // a group of notes counts notes, at both widths
     expect(
       within(groupBody("TRL")).getByRole("columnheader"),
-    ).toHaveTextContent("TRL trail 1 note");
+    ).toHaveTextContent("trail TRL 1 note");
     expect(
-      screen.getByRole("region", { name: "TRL trail 1 note" }),
+      screen.getByRole("region", { name: "trail TRL 1 note" }),
     ).toBeInTheDocument();
   });
 

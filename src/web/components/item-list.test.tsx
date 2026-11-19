@@ -47,8 +47,8 @@ describe("FilterEmpty", () => {
 
 describe("GroupHeading", () => {
   test.each([
-    [1, "TRL trail 1 issue or todo"],
-    [8, "TRL trail 8 issues and todos"],
+    [1, "trail TRL 1 issue or todo"],
+    [8, "trail TRL 8 issues and todos"],
   ])("%i in a work group names issues and todos, not items", (count, text) => {
     const { container } = render(
       <GroupHeading product={trail} count={count} notes={false} />,
