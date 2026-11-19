@@ -198,9 +198,9 @@ function StatusTabs({
       variant="line"
       aria-label="Filter by status"
       className={cn(
-        // at lg the bar under the tabs and the type toggle draws the one rule
+        // at lg the bar draws the one rule, under the tabs' row
         // at lg the list sizes to its tabs, not the line variant's w-full, so the toggle can share its row
-        "rounded-none p-0 lg:h-8 lg:gap-3 lg:data-[variant=line]:w-fit lg:data-[variant=line]:border-b-0",
+        "rounded-none p-0 lg:mt-0.5 lg:h-8 lg:gap-3 lg:data-[variant=line]:w-fit lg:data-[variant=line]:border-b-0",
         belowLg
           ? // the stock line variant's p-0 is an attribute selector, so the inset needs one too
             "max-lg:scrollbar-none max-lg:overflow-x-auto max-lg:mask-r-from-88% max-lg:data-[variant=line]:px-4"
@@ -296,9 +296,10 @@ export function ItemFilterBar({
   const onTypeChange = (type: ItemType | null) =>
     onFiltersChange(withType(filters, type));
   return (
-    // too narrow for both, the toggle wraps above the tabs: wrap-reverse keeps the tabs on
-    // the rule, and items-start is the bottom under it
-    <div className="flex flex-col lg:flex-row lg:flex-wrap-reverse lg:items-start lg:gap-x-4 lg:gap-y-2 lg:border-b">
+    // too narrow for both, the toggle wraps under the tabs, so it is drawn where it falls in
+    // the Tab order. The rule is drawn at the first row's foot, under the tabs whether or
+    // not the toggle shares their row: top-8.5 is the tabs' lg:mt-0.5 plus their lg:h-8.
+    <div className="flex flex-col lg:relative lg:flex-row lg:flex-wrap lg:items-end lg:gap-x-4 lg:gap-y-2 lg:pb-px lg:after:absolute lg:after:inset-x-0 lg:after:top-8.5 lg:after:border-b lg:after:border-border">
       <StatusTabs
         type={filters.type}
         counts={typeCounts}

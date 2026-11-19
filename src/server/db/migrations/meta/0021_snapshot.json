@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "7cdab587-aaa0-4ccf-aa89-880b9be85d75",
+  "id": "0e5d2077-1a69-4b84-88d4-dd589c62cc25",
   "prevId": "31277c15-d826-49fc-858e-2aa3725a0d61",
   "tables": {
     "account": {
@@ -1441,6 +1441,10 @@
         "issue_note_assignee_check": {
           "name": "issue_note_assignee_check",
           "value": "\"type\" <> 'note' or \"assignee_id\" is null"
+        },
+        "issue_note_rank_check": {
+          "name": "issue_note_rank_check",
+          "value": "\"type\" <> 'note' or (\"priority\" = 0 and \"estimate\" is null)"
         },
         "issue_title_check": {
           "name": "issue_title_check",

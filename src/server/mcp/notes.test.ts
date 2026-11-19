@@ -249,6 +249,76 @@ test("list_items with about pages every note about the item, with or without typ
   ]);
 });
 
+test("get_item and list_items read the notes about an item through a key that reaches them only by project, and leave out a note the project doesn't hold", async () => {
+  const { owner, slug, inside, outside, follower } =
+    await noteInProject("Reach");
+  const held = await call(owner.client, "add_note", {
+    product: owner.product,
+    project: slug,
+    title: "held by the project",
+    about: [inside.key, outside.key],
+  });
+  const unheld = await call(owner.client, "add_note", {
+    product: owner.product,
+    title: "outside the project",
+    about: [inside.key],
+  });
+  const read = await call(follower, "get_item", { item: inside.key });
+  expect(read.notes).toEqual([
+    { key: held.key, title: held.title, type: "note", status: "current" },
+  ]);
+  expect(read.notesCount).toEqual({ current: 1, archived: 0 });
+  expect((await call(follower, "get_item", { item: held.key })).about).toEqual([
+    { key: inside.key, title: "inside", type: "todo", status: "open" },
+  ]);
+  expect(
+    (await call(follower, "list_items", { about: inside.key })).items.map(
+      (i: Body) => i.key,
+    ),
+  ).toEqual([held.key]);
+  // the same reads by the owner, whose key reaches the whole product, see both
+  expect(
+    (await call(owner.client, "get_item", { item: inside.key })).notesCount,
+  ).toEqual({ current: 2, archived: 0 });
+  expect(
+    (await call(owner.client, "list_items", { about: inside.key })).items.map(
+      (i: Body) => i.key,
+    ),
+  ).toEqual([unheld.key, held.key]);
+});
+
+test("list_activity following with after: shows a note's events to a key reaching it by project, with only the about items it reaches", async () => {
+  const { owner, slug, inside, outside, follower } =
+    await noteInProject("Follow");
+  const note = await call(owner.client, "add_note", {
+    product: owner.product,
+    project: slug,
+    title: "followed",
+    about: [inside.key, outside.key],
+  });
+  await call(owner.client, "update_item", {
+    item: note.key,
+    removeAbout: [inside.key],
+  });
+  const page = await call(follower, "list_activity", { after: "" });
+  const mine = page.items.filter(
+    (e: Body) => e.subjectId === note.id && e.action.startsWith("issue."),
+  );
+  expect(mine.map((e: Body) => e.action)).toEqual([
+    "issue.created",
+    "issue.updated",
+  ]);
+  expect(mine[0].payload).toMatchObject({
+    about: [inside.key],
+    aboutOthers: 1,
+  });
+  expect(mine[1].payload).toEqual({
+    about: { from: [inside.key], to: [] },
+    aboutOthers: { from: 1, to: 1 },
+  });
+  expect(JSON.stringify(page.items)).not.toContain(`"${outside.key}"`);
+});
+
 test("list_items refuses about with a type other than note, a work status, or a key it doesn't reach, naming it", async () => {
   const owner = await productBot("Refuser");
   const hidden = await productBot("Secretive");
@@ -520,7 +590,7 @@ test("add_note with neither product nor project is refused, saying which to send
   ).toEqual([]);
 });
 
-test("about naming an item twice is one pointer, and the 50 limit counts the keys as sent", async () => {
+test("about naming an item twice is one pointer, and the schema caps the list as sent at 50, duplicates counted", async () => {
   const owner = await productBot("Doubler");
   const todo = await call(owner.client, "add_todo", { title: "pointed at" });
   const note = await call(owner.client, "add_note", {
@@ -811,6 +881,45 @@ test("an item turned into a note takes about in the same update", async () => {
       (n: Body) => n.key,
     ),
   ).toEqual([todo.key]);
+});
+
+test("the update that turns a todo or an issue into a note names the about it took in its event, counting what a narrower key doesn't reach", async () => {
+  const owner = await productBot("Retypist");
+  const elsewhere = await productBot("Beyond");
+  const target = await call(owner.client, "add_todo", { title: "target" });
+  const secret = await call(elsewhere.client, "add_todo", { title: "secret" });
+  const todo = await call(owner.client, "add_todo", { title: "was work" });
+  const issue = await call(owner.client, "file_issue", {
+    product: owner.product,
+    title: "was a question",
+  });
+  const follower = await connect(
+    createBot(db, "Retypist only", { scope: { products: [owner.product] } })
+      .key,
+  );
+  for (const item of [todo, issue]) {
+    await call(owner.client, "update_item", {
+      item: item.key,
+      type: "note",
+      about: [target.key, secret.key],
+    });
+  }
+  const activity = (
+    await call(follower, "list_activity", { product: owner.product })
+  ).items;
+  for (const item of [todo, issue]) {
+    const turned = activity.find(
+      (e: Body) =>
+        e.subjectId === item.id &&
+        e.action === "issue.updated" &&
+        e.payload.type?.to === "note",
+    );
+    expect(turned?.payload).toMatchObject({
+      about: { from: [], to: [target.key] },
+      aboutOthers: { from: 0, to: 1 },
+    });
+  }
+  expect(JSON.stringify(activity)).not.toContain(secret.key);
 });
 
 test("only the product's bot turns an item into a note: it keeps its key, drops its assignee and leaves triage for current", async () => {
@@ -1379,6 +1488,38 @@ test("an issue turned into a note sends one last trail.issue.updated carrying ty
     type: { from: "issue", to: "note" },
     status: { from: "triage", to: "current" },
   });
+});
+
+test("a comment on a note goes out as trail.comment.created with the note's key and itemType note", async () => {
+  const owner = await productBot("Commented");
+  const reader = await productBot("Commenter");
+  const { id } = await call(owner.client, "create_webhook", {
+    url: "https://commented.example.com/hook",
+    secret: "whsec_commented_0123456789",
+    products: [owner.product],
+  });
+  const note = await call(owner.client, "add_note", {
+    product: owner.product,
+    title: "worth a reply",
+  });
+  await call(reader.client, "add_comment", { item: note.key, body: "thanks" });
+  const [delivery] = db
+    .select({ eventId: webhookDelivery.eventId })
+    .from(webhookDelivery)
+    .where(
+      and(
+        eq(webhookDelivery.subscriptionId, id),
+        eq(webhookDelivery.type, "trail.comment.created"),
+      ),
+    )
+    .all();
+  const comment = db
+    .select()
+    .from(activityEvent)
+    .where(eq(activityEvent.id, delivery?.eventId as string))
+    .get() as typeof activityEvent.$inferSelect;
+  const { data } = buildEnvelope(db, comment, undefined);
+  expect(data.subject).toMatchObject({ key: note.key, itemType: "note" });
 });
 
 test("a note turned back into a todo or an issue is sent under both trail.issue.* and trail.item.* names, as the item it now is", async () => {

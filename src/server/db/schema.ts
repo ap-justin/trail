@@ -432,7 +432,7 @@ export const issue = sqliteTable(
       "issue_todo_status_check",
       sql`${c(t.type)} <> 'todo' or ${c(t.status)} <> 'triage'`,
     ),
-    // a note is a record nobody acts on: it alone takes current/archived, and has no assignee
+    // a note is a record nobody acts on: it alone takes current/archived, and has no assignee, priority or estimate
     check(
       "issue_note_status_check",
       sql`(${c(t.type)} = 'note') = (${oneOf(t.status, noteStatuses)})`,
@@ -440,6 +440,10 @@ export const issue = sqliteTable(
     check(
       "issue_note_assignee_check",
       sql`${c(t.type)} <> 'note' or ${c(t.assigneeId)} is null`,
+    ),
+    check(
+      "issue_note_rank_check",
+      sql`${c(t.type)} <> 'note' or (${c(t.priority)} = 0 and ${c(t.estimate)} is null)`,
     ),
     check("issue_title_check", sql`length(${c(t.title)}) > 0`),
     check("issue_number_check", sql`${c(t.number)} > 0`),

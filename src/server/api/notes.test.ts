@@ -527,7 +527,14 @@ test("PATCH /items/{key} refuses about with 51 items and an addAbout that would 
       json: patch,
     });
     expect(res.status, await res.clone().text()).toBe(422);
-    expect(((await res.json()) as Body).error.code).toBe("validation_failed");
+    const { error } = (await res.json()) as Body;
+    expect(error.code).toBe("validation_failed");
+    // the 51-key replacement stops at the schema; the merged add reaches the service
+    expect(error.message).toMatch(
+      "about" in patch
+        ? /^about: Too big: expected array to have <=50 items/
+        : /would make it about 51/,
+    );
   }
   const read = await ok(await request("GET", `/api/v1/items/${note.key}`));
   expect(read.about.map((r: Body) => r.key).sort()).toEqual(

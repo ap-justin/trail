@@ -332,6 +332,23 @@ describe("type toggle and status tabs", () => {
     expect(tableKeys()).toEqual(["TRL-22", "TRL-17"]);
   });
 
+  test("Tab goes from the status tabs to the type toggle, and the bar draws them in that order", async () => {
+    const user = userEvent.setup();
+    renderProduct();
+    within(tabs()).getByRole("tab", { selected: true }).focus();
+    await user.tab();
+    expect(typeToggle()).toContainElement(
+      document.activeElement as HTMLElement,
+    );
+    // a reversed flow (wrap-reverse, row-reverse, order-*) would draw the toggle before the tabs
+    const bar = tabs().parentElement as HTMLElement;
+    expect(bar).toContainElement(typeToggle());
+    const reversing = [bar, ...bar.querySelectorAll("[class]")].flatMap((el) =>
+      [...el.classList].filter((c) => /(^|:)(order-|.*-reverse$)/.test(c)),
+    );
+    expect(reversing).toEqual([]);
+  });
+
   test("the 375 chips are All, Open, In progress and Done, and carry the same filter", async () => {
     const user = userEvent.setup();
     const p = renderProduct();

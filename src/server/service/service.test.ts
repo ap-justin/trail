@@ -146,6 +146,19 @@ test("a person cannot add a note, and no note exists after the refusal", () => {
   expect(published.map((e) => e.action)).toEqual(["issue.created"]);
 });
 
+test("the service refuses an about of more than 50 keys before looking any up, naming the field and the count", () => {
+  const target = service.createProduct(bot, { key: projectKey(), name: "p" });
+  const keys = Array.from({ length: 51 }, (_, i) => `${target.key}-${i + 1}`);
+  expect(() =>
+    service.addNote(bot, { product: target.key, title: "wide", about: keys }),
+  ).toThrow(
+    "about names 51 items, over the limit of 50: a note is about at most 50 items",
+  );
+  expect(
+    service.listItems(bot, { product: target.key, type: "note" }).items,
+  ).toEqual([]);
+});
+
 test("a person can file an issue but not add a todo, nor create or fill a project", () => {
   const target = service.createProduct(bot, { key: projectKey(), name: "p" });
   const filed = service.fileIssue(human, { product: target.key, title: "x" });

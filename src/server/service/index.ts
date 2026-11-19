@@ -1087,7 +1087,12 @@ export function createService({
    * Refuses filing on `named` when the actor reaches it only through
    * projects drawing from its own products: that read gives no filing.
    */
-  function requireFilingGrant(tx: Tx, actor: ActingActor, named: Product) {
+  function requireFilingGrant(
+    tx: Tx,
+    actor: ActingActor,
+    named: Product,
+    item: "issue" | "note",
+  ) {
     if (grantsProduct(actor, named.id)) return;
     if (projectsDrawingFrom(tx, actor, named.id).length > 0) return;
     const via = implicitProjectsOf(tx, actor, named.id);
@@ -1111,10 +1116,14 @@ export function createService({
     const fileOn = own.length === 1 ? own[0] : `one of ${andList(own)}`;
     const into =
       slugs.length === 1
-        ? `with project: "${slugs[0]}" to put the issue in ${slugs[0]}`
-        : `with ${projectArgs(slugs)} to put the issue in that project`;
+        ? `with project: "${slugs[0]}" to put the ${item} in ${slugs[0]}`
+        : `with ${projectArgs(slugs)} to put the ${item} in that project`;
+    const refused =
+      item === "note"
+        ? `add no notes on ${named.key}: add the note on ${fileOn}`
+        : `file nothing on ${named.key}: file on ${fileOn}`;
     throw new ForbiddenScopeError(
-      `this key reads product ${named.key} only through ${projectList(slugs)}, which lets it read ${slugs.length === 1 ? `${slugs[0]}'s` : "their"} ${named.key} items and comment on them and file nothing on ${named.key}: file on ${fileOn} (${into}), or get a key that lists ${grantsFor(named.key, slugs)}. ${askForGrant(tx, named)}`,
+      `this key reads product ${named.key} only through ${projectList(slugs)}, which lets it read ${slugs.length === 1 ? `${slugs[0]}'s` : "their"} ${named.key} items and comment on them and ${refused} (${into}), or get a key that lists ${grantsFor(named.key, slugs)}. ${askForGrant(tx, named)}`,
     );
   }
 
@@ -2951,7 +2960,7 @@ export function createService({
   ): Placement {
     const named =
       ref === undefined ? undefined : resolveNamedProduct(tx, ref, actor);
-    if (named !== undefined) requireFilingGrant(tx, actor, named);
+    if (named !== undefined) requireFilingGrant(tx, actor, named, item);
     const into =
       slug === undefined ? undefined : resolveProject(tx, slug, actor);
     return {

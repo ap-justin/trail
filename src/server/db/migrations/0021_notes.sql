@@ -36,6 +36,7 @@ CREATE TABLE `__new_issue` (
 	CONSTRAINT "issue_todo_status_check" CHECK("type" <> 'todo' or "status" <> 'triage'),
 	CONSTRAINT "issue_note_status_check" CHECK(("type" = 'note') = ("status" in ('current', 'archived'))),
 	CONSTRAINT "issue_note_assignee_check" CHECK("type" <> 'note' or "assignee_id" is null),
+	CONSTRAINT "issue_note_rank_check" CHECK("type" <> 'note' or ("priority" = 0 and "estimate" is null)),
 	CONSTRAINT "issue_title_check" CHECK(length("title") > 0),
 	CONSTRAINT "issue_number_check" CHECK("number" > 0),
 	CONSTRAINT "issue_estimate_check" CHECK("estimate" >= 0),

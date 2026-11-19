@@ -288,6 +288,8 @@ test.each([
   ["an issue that is current", { type: "issue", status: "current" }],
   ["a todo that is archived", { type: "todo", status: "archived" }],
   ["an assigned note", { assignee_id: "alpha" }],
+  ["a note with a priority", { priority: 2 }],
+  ["a note with an estimate", { estimate: 1 }],
   [
     "an archived note with completed_at",
     { status: "archived", completed_at: 6 },

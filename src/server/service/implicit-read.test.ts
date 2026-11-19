@@ -357,6 +357,21 @@ describe("a BTA-only key files nothing through its implicit read", () => {
     expect(itemCount()).toBe(before);
   });
 
+  test("add_note on ATL, with or without project recon, is a 403 in note wording that writes nothing", () => {
+    const before = itemCount();
+    for (const input of [
+      { product: "ATL", title: "no" },
+      { product: "ATL", project: "recon", title: "no" },
+    ]) {
+      const error = thrown(() => service.addNote(beta, input));
+      expect(error, JSON.stringify(input)).toBeInstanceOf(ForbiddenScopeError);
+      expect(error.message).toBe(
+        'this key reads product ATL only through project recon, which lets it read recon\'s ATL items and comment on them and add no notes on ATL: add the note on BTA (with project: "recon" to put the note in recon), or get a key that lists product ATL or project recon. Ask alpha, the owner of ATL, for that grant.',
+      );
+    }
+    expect(itemCount()).toBe(before);
+  });
+
   test("file_issue on BTA into recon goes through, as it did", () => {
     const filed = service.fileIssue(beta, {
       product: "BTA",

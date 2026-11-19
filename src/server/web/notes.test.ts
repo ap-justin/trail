@@ -110,6 +110,33 @@ test("a note's page lists the items it is about that the viewer sees; an item's 
   });
 });
 
+test("a note's page lists several visible items it is about in key order, whatever order they were created or named in", async () => {
+  const wide = addProject("Wide");
+  const writer = addBot("wide writer");
+  const [first, second, third] = await atFakeTimeAsync([
+    () => item(wide.key, "todo"),
+    () => item(wide.key, "issue"),
+    () => item(wide.key, "todo"),
+  ]);
+  const res = await request("POST", "/api/v1/items", {
+    json: {
+      type: "note",
+      product: wide.key,
+      title: "spans three",
+      about: [third, first, second],
+    },
+    key: writer.key,
+  });
+  expect(res.status, await res.clone().text()).toBe(201);
+  const reader = await addMember("widereader", [wide.id]);
+  const page = await get(`/items/${((await res.json()) as Body).key}`, reader);
+  expect(page.body.about.map((a: Body) => a.key)).toEqual([
+    first,
+    second,
+    third,
+  ]);
+});
+
 test("an item's page lists the 50 newest current notes about it and counts every note the viewer sees in notesCount", async () => {
   const crowded = addProject("Crowded");
   const elsewhere = addProject("Elsewhere");
