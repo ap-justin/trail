@@ -1,5 +1,5 @@
 import { createRoute, z } from "@hono/zod-openapi";
-import { and, asc, eq, inArray, type SQL, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, type SQL, sql } from "drizzle-orm";
 import {
   entrySchema,
   errorSchema,
@@ -21,12 +21,13 @@ import {
   issueLabel,
   issueLink,
   label,
+  noteAbout,
   product,
   project,
   projectItem,
 } from "../db/schema.js";
 import { NotFoundError } from "../service/errors.js";
-import type { Service } from "../service/index.js";
+import { isNoteStatus, type Service } from "../service/index.js";
 import { photoUrlOf } from "../service/photos.js";
 import { amongProducts } from "../service/visible.js";
 import { timelineOf } from "./entries.js";
@@ -116,6 +117,7 @@ export function visibleItem(db: Db, member: Member, ref: string) {
 export function itemView(
   db: Db,
   service: Service,
+  member: Member,
   { row, key, product: productRef }: ReturnType<typeof visibleItem>,
 ): WebItemView {
   const links = db
@@ -153,6 +155,21 @@ export function itemView(
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     completedAt: row.completedAt?.toISOString() ?? null,
+    about:
+      row.type === "note"
+        ? linkedItems(
+            db,
+            member,
+            noteAbout.itemId,
+            eq(noteAbout.noteId, row.id),
+          )
+        : [],
+    notes: linkedItems(
+      db,
+      member,
+      noteAbout.noteId,
+      eq(noteAbout.itemId, row.id),
+    ),
     timeline: timelineOf(
       db,
       row,
@@ -160,6 +177,36 @@ export function itemView(
       productRef,
     ),
   };
+}
+
+/**
+ * The items at the `end` of the note_about rows `where` picks that the
+ * viewer sees: the items a note is about in key order, or the notes about an
+ * item newest first.
+ */
+function linkedItems(
+  db: Db,
+  member: Member,
+  end: typeof noteAbout.itemId | typeof noteAbout.noteId,
+  where: SQL,
+) {
+  return db
+    .select({
+      key: sql<string>`${product.key} || '-' || ${issue.number}`,
+      title: issue.title,
+      type: issue.type,
+      status: issue.status,
+    })
+    .from(noteAbout)
+    .innerJoin(issue, eq(issue.id, end))
+    .innerJoin(product, eq(product.id, issue.productId))
+    .where(and(where, amongProducts(issue.productId, visibleIds(member))))
+    .orderBy(
+      ...(end === noteAbout.itemId
+        ? [asc(product.key), asc(issue.number)]
+        : [desc(issue.createdAt), desc(issue.id)]),
+    )
+    .all();
 }
 
 /** Each item's label names, A to Z. */
@@ -202,14 +249,16 @@ export function itemRows(
   }));
 }
 
-/** The type and status filters of an item list; `open` takes triage too, as the Open tab counts it. */
+/** The type and status filters of an item list, issues and todos without a type; `open` takes triage too, as the Open tab counts it. */
 export function itemFilters(query: {
   type?: WebItemType;
   status?: WebItemStatus;
 }): (SQL | undefined)[] {
   const { type, status } = query;
   return [
-    type === undefined ? undefined : eq(issue.type, type),
+    type === undefined
+      ? inArray(issue.type, ["issue", "todo"])
+      : eq(issue.type, type),
     status === undefined
       ? undefined
       : status === "open"
@@ -226,9 +275,14 @@ const noCounts = (): WebStatusCountsView => ({
   canceled: 0,
 });
 
-/** Items per type and status tab among the items `where` picks, triage counted as open. */
+/** Items per type and status tab among the items `where` picks, triage counted as open, and notes apart. */
 export function itemCounts(db: Db, where: SQL | undefined): WebItemCountsView {
-  const counts = { all: noCounts(), issue: noCounts(), todo: noCounts() };
+  const counts = {
+    all: noCounts(),
+    issue: noCounts(),
+    todo: noCounts(),
+    notes: { current: 0, archived: 0 },
+  };
   const rows = db
     .select({
       type: issue.type,
@@ -240,6 +294,11 @@ export function itemCounts(db: Db, where: SQL | undefined): WebItemCountsView {
     .groupBy(issue.type, issue.status)
     .all();
   for (const { type, status, n } of rows) {
+    if (type === "note") {
+      if (isNoteStatus(status)) counts.notes[status] += n;
+      continue;
+    }
+    if (isNoteStatus(status)) continue;
     const tab = status === "triage" ? "open" : status;
     for (const bucket of [counts.all, counts[type]]) {
       bucket.all += n;
@@ -261,7 +320,7 @@ export function itemRoutes(db: Db, service: Service) {
         description,
       });
       return c.json(
-        itemView(db, service, visibleItem(db, member, created.key)),
+        itemView(db, service, member, visibleItem(db, member, created.key)),
         201,
       );
     })
@@ -301,6 +360,7 @@ export function itemRoutes(db: Db, service: Service) {
         itemView(
           db,
           service,
+          c.var.member,
           visibleItem(db, c.var.member, c.req.valid("param").key),
         ),
         200,

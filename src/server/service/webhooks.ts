@@ -18,6 +18,8 @@ import {
   activityEvent,
   apiKey,
   comment,
+  type IssueType,
+  issue,
   product,
   project,
   projectItem,
@@ -614,7 +616,7 @@ export function enqueueDeliveries(
     .all();
   const followers = [...new Set([...byProduct, ...byProject].map((f) => f.id))];
   if (followers.length === 0) return;
-  const types = deliveryTypesOf(event.action);
+  const types = deliveryTypesOf(event.action, itemTypeOf(tx, event));
   // in this order: the worker sends one event's deliveries in insertion order
   tx.insert(webhookDelivery)
     .values(
@@ -631,17 +633,37 @@ export function enqueueDeliveries(
     .run();
 }
 
+/** The type of the item an item event is on, as the item is now; undefined for any other event. */
+function itemTypeOf(
+  tx: Tx,
+  event: typeof activityEvent.$inferSelect,
+): IssueType | undefined {
+  if (event.subjectType !== "issue") return undefined;
+  return tx
+    .select({ type: issue.type })
+    .from(issue)
+    .where(eq(issue.id, event.subjectId))
+    .get()?.type;
+}
+
 /**
  * The webhook types an event goes out as: trail.<action>, and for one release
  * a second type beside it: a product event also as the trail.project.* it was
  * sent as before products and projects split, an item event also as the
- * trail.item.* that replaces trail.issue.*.
+ * trail.item.* that replaces trail.issue.*. A note's item events, which came
+ * after trail.issue.* was deprecated, go out as trail.item.* alone.
  */
-export function deliveryTypesOf(action: string): string[] {
+export function deliveryTypesOf(
+  action: string,
+  itemType?: IssueType,
+): string[] {
   const type = `trail.${action}`;
   const [subject, verb] = action.split(".", 2);
   if (subject === "product") return [type, `trail.project.${verb}`];
-  if (subject === "issue") return [type, `trail.item.${verb}`];
+  if (subject === "issue") {
+    const renamed = `trail.item.${verb}`;
+    return itemType === "note" ? [renamed] : [type, renamed];
+  }
   return [type];
 }
 

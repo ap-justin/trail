@@ -83,6 +83,8 @@ export function validRepoUrl(
 /** Per-issue set sizes outside an import; the schema caps a full replace, `withinIssueCap` the merged add form. */
 export const ISSUE_LABELS_MAX = 50;
 export const ISSUE_LINKS_MAX = 50;
+/** Most items one note is about. */
+export const NOTE_ABOUT_MAX = 50;
 
 export function withinIssueCap<T>(set: T[], what: "labels" | "links"): T[] {
   const [max, remove] =

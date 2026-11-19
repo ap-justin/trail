@@ -21,6 +21,7 @@ import {
   markReadSchema,
   messageCreateSchema,
   myTitleUpdateSchema,
+  noteCreateSchema,
   productCreateSchema,
   productUpdateSchema,
   projectCreateSchema,
@@ -33,7 +34,12 @@ import {
   webhookUpdateSchema,
 } from "../../shared/schemas.js";
 import { deprecations } from "../api/deprecations.js";
-import { COMMENT_HOLDS, TODO_OR_ISSUE } from "../api/items.js";
+import {
+  COMMENT_HOLDS,
+  NOTE_EDITS,
+  TODO_OR_ISSUE,
+  WHICH_ITEM,
+} from "../api/items.js";
 import { STATUS_UPDATE_HOLDS } from "../api/products.js";
 import { LABEL_CREATORS } from "../api/routes.js";
 import {
@@ -369,7 +375,7 @@ export function registerTools(
   register(
     "add_todo",
     {
-      description: `Add a todo: planned work in a product you own, or in a product with no owner. ${TODO_OR_ISSUE} In a product another bot owns this is refused (forbidden, naming the owner): use file_issue instead to report a bug or ask for work there. Without product it goes to the one product you own; with none or several, the error lists the products to pick from. Label names match the product's labels ignoring the case of A-Z, and a new name creates the label. Returns the item with its key, like TRL-12.`,
+      description: `Add a todo: planned work in a product you own, or in a product with no owner. ${WHICH_ITEM} ${TODO_OR_ISSUE} In a product another bot owns this is refused (forbidden, naming the owner): use file_issue instead to report a bug or ask for work there. Without product it goes to the one product you own; with none or several, the error lists the products to pick from. Label names match the product's labels ignoring the case of A-Z, and a new name creates the label. Returns the item with its key, like TRL-12.`,
       inputSchema: () => todoCreateSchema.extend(idempotencyKey),
       annotations: create,
     },
@@ -384,7 +390,7 @@ export function registerTools(
   register(
     "file_issue",
     {
-      description: `File an issue: a bug report or request to a product's bot, on any product list_products lists. With project (a slug list_projects lists) the issue joins that project in the same call; product must be one the project draws from, and left out it is the project's one product. A key reaching a product only through projects sends \`project\` when it names more than one; with exactly one, that one is the default. ${TODO_OR_ISSUE} Use add_todo instead for planned work in your own product. Leave assignee out: the product's bot assigns it when it accepts the issue (status open with assignee). On a product another bot owns, labels attach only the product's existing labels (list_labels lists them) and create none; the result lists the names it left off in skippedLabels. Returns the item with its key, like TRL-12, in status triage.`,
+      description: `File an issue: a bug report or request for work to a product's bot, on any product list_products lists. ${WHICH_ITEM} With project (a slug list_projects lists) the issue joins that project in the same call; product must be one the project draws from, and left out it is the project's one product. A key reaching a product only through projects sends \`project\` when it names more than one; with exactly one, that one is the default. ${TODO_OR_ISSUE} Use add_todo instead for planned work in your own product. Leave assignee out: the product's bot assigns it when it accepts the issue (status open with assignee). On a product another bot owns, labels attach only the product's existing labels (list_labels lists them) and create none; the result lists the names it left off in skippedLabels. Returns the item with its key, like TRL-12, in status triage.`,
       inputSchema: () => issueFileSchema.extend(idempotencyKey),
       annotations: create,
     },
@@ -398,10 +404,26 @@ export function registerTools(
   );
 
   register(
+    "add_note",
+    {
+      description: `Add a note: a record nobody has to act on, on any product list_products lists, your own or another bot's. ${WHICH_ITEM} A note starts current and has no assignee and no triage; archive it with update_item status archived once it no longer holds. about names the items it is about, by key, in any product this key reaches; get_item on each lists the note in its notes. Only you and the product's own bot edit it afterwards; anyone else comments with add_comment. With project the note joins that project as it is added. On a product another bot owns, labels attach only the product's existing labels and create none; the result lists the names it left off in skippedLabels. Returns the note with its key, like TRL-12.`,
+      inputSchema: () => noteCreateSchema.extend(idempotencyKey),
+      annotations: create,
+    },
+    ({ idempotency_key, ...input }) =>
+      run("add_note", () => {
+        const added = service.addNote(actor, input, {
+          idempotencyKey: idempotency_key,
+        });
+        return withSkippedLabels(toIssue(added), added);
+      }),
+  );
+
+  register(
     "get_item",
     {
       description:
-        "Get an item (a todo or an issue) by its key, like TRL-12: type, product, status, assignee, labels, links, the projects it is in, and access, why this key reaches it: product (its products cover it), project (a project the key lists holds it) or via_project (a project drawing from one of the key's products holds it: read it and comment with add_comment, and any change is refused until the key lists its product or project).",
+        "Get an item (a todo, an issue or a note) by its key, like TRL-12: type, product, status, assignee, labels, links, the projects it is in, notes (the notes about it, newest first), on a note about (the items it is about), and access, why this key reaches it: product (its products cover it), project (a project the key lists holds it) or via_project (a project drawing from one of the key's products holds it: read it and comment with add_comment, and any change is refused until the key lists its product or project).",
       inputSchema: () => z.strictObject({ item }),
       annotations: read,
     },
@@ -411,7 +433,7 @@ export function registerTools(
   register(
     "update_item",
     {
-      description: `Change an item: type, status, assignee, priority, labels, title, description, estimate or links. ${TODO_OR_ISSUE} To accept an issue from your product's triage send status open with assignee, the bot that will work on it (often you), since status open alone leaves it unassigned; or send type todo, which opens it and assigns the product's owner when it has no assignee. To drop it send status canceled. On a product with an owner, only the owner accepts its triage issues, reopens a canceled issue another bot filed, and changes any item's type, and only the owner or the item's filer cancels it, at any status; anyone else is refused (forbidden) and should comment with add_comment to ask the owner. An item get_item shows with access via_project takes no change at all (forbidden_scope): comment on it instead, and the refusal names whom to ask for a grant. A todo never goes back to triage and never loses its assignee. Fields left out stay as they are. labels or links replace the whole set; addLabels, removeLabels, addLinks and removeLinks change part of it, safe beside another bot's edit (not together with labels or links). On a product another bot owns, labels and addLabels attach only the product's existing labels (list_labels lists them) and create none; the result lists the names it left off in skippedLabels. Moving to done or canceled stamps completedAt; reopening clears it.`,
+      description: `Change an item: type, status, assignee, priority, labels, title, description, estimate, links, or a note's about. ${TODO_OR_ISSUE} ${NOTE_EDITS} To accept an issue from your product's triage send status open with assignee, the bot that will work on it (often you), since status open alone leaves it unassigned; or send type todo, which opens it and assigns the product's owner when it has no assignee. To drop it send status canceled. On a product with an owner, only the owner accepts its triage issues, reopens a canceled issue another bot filed, and changes any item's type, and only the owner or the item's filer cancels it, at any status; anyone else is refused (forbidden) and should comment with add_comment to ask the owner. An item get_item shows with access via_project takes no change at all (forbidden_scope): comment on it instead, and the refusal names whom to ask for a grant. A todo never goes back to triage and never loses its assignee. Fields left out stay as they are. labels or links replace the whole set; addLabels, removeLabels, addLinks and removeLinks change part of it, safe beside another bot's edit (not together with labels or links). On a product another bot owns, labels and addLabels attach only the product's existing labels (list_labels lists them) and create none; the result lists the names it left off in skippedLabels. Moving to done or canceled stamps completedAt; reopening clears it.`,
       inputSchema: () => itemUpdateSchema.extend({ item }),
       annotations: update,
     },
@@ -429,7 +451,7 @@ export function registerTools(
     "list_items",
     {
       description:
-        'List items newest first, filtered by any of product, project, type (todo or issue), status and assignee, a page at a time: pass nextCursor back as cursor until it is null. Your product\'s triage: product and status "triage". A project\'s open todos: project, type "todo" and status "open". Only items this key reaches are listed: every item of its products, and the items of its projects and of the projects drawing from its products, whichever product they are in (list_projects lists them; send project for the items of one).',
+        'List items newest first, filtered by any of product, project, type (todo, issue or note), status and assignee, a page at a time: pass nextCursor back as cursor until it is null. Without type it lists issues and todos only; notes need type "note", with status "current" or "archived" if any. Your product\'s triage: product and status "triage". A project\'s open todos: project, type "todo" and status "open". A project\'s current notes: project, type "note" and status "current". Only items this key reaches are listed: every item of its products, and the items of its projects and of the projects drawing from its products, whichever product they are in (list_projects lists them; send project for the items of one).',
       inputSchema: () =>
         z.strictObject({
           product: product.optional(),
@@ -448,7 +470,7 @@ export function registerTools(
   register(
     "add_comment",
     {
-      description: `Add a comment to an item, a todo or an issue, named by its key like TRL-12, including one this key reads only through a project (access via_project). ${COMMENT_HOLDS} The result carries hint when the body reads like a build log. On an issue in triage, comment to ask the filer a question before you accept or cancel it.`,
+      description: `Add a comment to an item, a todo, an issue or a note, named by its key like TRL-12, including one this key reads only through a project (access via_project). ${COMMENT_HOLDS} The result carries hint when the body reads like a build log. On an issue in triage, comment to ask the filer a question before you accept or cancel it.`,
       inputSchema: () =>
         commentCreateSchema.extend({
           item: aliasedItem,
@@ -554,7 +576,7 @@ export function registerTools(
     "get_project",
     {
       description:
-        "Get a project by slug: goal, lead, target date, its products this key reaches (hiddenProducts true when it draws from others you can't see), item counts per status over the products shown, and its latest status update. List its items with list_items and project. Deprecated: a product key (like TRL) that matches no slug returns that product, carrying deprecated; use get_product for that.",
+        "Get a project by slug: goal, lead, target date, its products this key reaches (hiddenProducts true when it draws from others you can't see), counts (its issues and todos per status) and notes (its notes, current and archived) over the products shown, and its latest status update. List its items with list_items and project. Deprecated: a product key (like TRL) that matches no slug returns that product, carrying deprecated; use get_product for that.",
       inputSchema: () => z.strictObject(projectArg),
       annotations: read,
     },
@@ -634,7 +656,7 @@ export function registerTools(
     "list_products",
     {
       description:
-        "List the products this key can name, newest first, a page at a time: pass nextCursor back as cursor until it is null. A product owns items (keys like TRL-12); its owner is its own bot, who adds its todos and accepts issues filed to it. It lists the products this key reaches, plus every product its projects, or the projects drawing from its products, draw from; of a product it reaches only through a project it reads only the id, key and name. When the key lists that project, list_labels lists the product's labels and file_issue with project files issues on it; through a project drawing from its products, it reads no labels and files nothing. A product carries no item counts.",
+        "List the products this key can name, newest first, a page at a time: pass nextCursor back as cursor until it is null. A product owns items (keys like TRL-12); its owner is its own bot, who adds its todos and accepts issues filed to it. It lists the products this key reaches, plus every product its projects, or the projects drawing from its products, draw from; of a product it reaches only through a project it reads only the id, key and name. When the key lists that project, list_labels lists the product's labels and file_issue with project files issues on it; through a project drawing from its products, it reads no labels and files nothing. list_products carries no counts; get_product counts its notes.",
       inputSchema: () => z.strictObject(page),
       annotations: read,
     },
@@ -648,7 +670,7 @@ export function registerTools(
     "get_product",
     {
       description:
-        "Get a product by key, like TRL: name, description, repoUrl and owner (its own bot), and no item counts. A product this key reaches only through a project reads as its id, key and name only. When the key lists that project, list_labels lists the product's labels and file_issue with project files issues on it; through a project drawing from its products, it reads no labels and files nothing.",
+        "Get a product by key, like TRL: name, description, repoUrl, owner (its own bot) and notes (its notes, current and archived), and no counts of its issues and todos. A product this key reaches only through a project reads as its id, key and name only. When the key lists that project, list_labels lists the product's labels and file_issue with project files issues on it; through a project drawing from its products, it reads no labels and files nothing.",
       inputSchema: () => z.strictObject({ product }),
       annotations: read,
     },
@@ -888,7 +910,7 @@ export function registerTools(
     ({ issueId }) =>
       run("get_issue", () =>
         deprecated(
-          toLegacyIssue(service.getItem(actor, issueId)),
+          toLegacyIssue(service.getItem(actor, issueId, { legacy: true })),
           deprecations.getIssue,
         ),
       ),

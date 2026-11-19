@@ -185,6 +185,7 @@ describe("GET /projects/:slug/items", () => {
       all: { all: 4, open: 3, in_progress: 0, done: 1, canceled: 0 },
       issue: { all: 2, open: 2, in_progress: 0, done: 0, canceled: 0 },
       todo: { all: 2, open: 1, in_progress: 0, done: 1, canceled: 0 },
+      notes: { current: 0, archived: 0 },
     });
     expect(body.nextCursor).toBeNull();
   });

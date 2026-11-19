@@ -83,6 +83,8 @@ test("an issue reads with its type, product and fields, its people as actors, an
     createdAt: expect.any(String),
     updatedAt: expect.any(String),
     completedAt: null,
+    about: [],
+    notes: [],
   });
   const workerActor = {
     id: worker.actor.id,

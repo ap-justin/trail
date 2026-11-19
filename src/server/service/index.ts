@@ -27,6 +27,8 @@ import {
   issueLabel,
   issueLink,
   label,
+  noteAbout,
+  noteStatuses,
   type ProjectHealth,
   product,
   productStatusUpdate,
@@ -88,6 +90,7 @@ import {
   type Link,
   type LinkInput,
   labelKey,
+  NOTE_ABOUT_MAX,
   nonBlank,
   optionalRef,
   SLUG_MAX,
@@ -184,6 +187,18 @@ export type Issue = IssueRow & {
   projects: { slug: string; name: string }[];
   /** On a bot's get_item: why its key reaches the item; see `ItemAccess`. */
   access?: ItemAccess;
+  /** On a note: the items it is about that the caller reaches, in key order. */
+  about?: ItemRef[];
+  /** On get_item: the notes about the item that the caller reaches, newest first. */
+  notes?: ItemRef[];
+};
+
+/** An item as another item names it. */
+export type ItemRef = {
+  key: string;
+  title: string;
+  type: IssueType;
+  status: IssueStatus;
 };
 
 /**
@@ -197,6 +212,20 @@ export type ItemAccess = "product" | "project" | "via_project";
 /** An item the product's own bot creates is a todo; anyone else's is an issue. */
 const legacyTypeOf = (target: Product, creatorId: string): IssueType =>
   target.ownerId === creatorId ? "todo" : "issue";
+
+const aType = (type: IssueType) =>
+  type === "issue" ? "an issue" : `a ${type}`;
+
+/** The types of the items someone works on: everything but notes. */
+const workTypes = ["issue", "todo"] as const satisfies readonly IssueType[];
+
+/** The status each type of item is created in. */
+const startStatus = {
+  issue: "triage",
+  todo: "open",
+  note: "current",
+} as const satisfies Record<IssueType, IssueStatus>;
+
 export type Comment = typeof comment.$inferSelect;
 export type Label = typeof label.$inferSelect;
 /** A status update on a product or on a project: exactly one of the two is set. */
@@ -220,7 +249,15 @@ export type ProductView = Product & { owner: ActorRef | null };
 /** A product the actor reaches only through a project: what it may name, and no more. */
 export type NamedProduct = Pick<Product, "id" | "key" | "name">;
 
-export type ItemCounts = Record<IssueStatus, number>;
+export type NoteStatus = (typeof noteStatuses)[number];
+/** A status an issue or a todo takes. */
+export type WorkStatus = Exclude<IssueStatus, NoteStatus>;
+/** Issues and todos per status; notes are counted apart, in `NoteCounts`. */
+export type ItemCounts = Record<WorkStatus, number>;
+export type NoteCounts = Record<NoteStatus, number>;
+
+export const isNoteStatus = (status: IssueStatus): status is NoteStatus =>
+  (noteStatuses as readonly IssueStatus[]).includes(status);
 
 /**
  * A project as one caller sees it: only the products it reaches, `hiddenProducts`
@@ -232,8 +269,12 @@ export type ProjectView = ProjectRow & {
   products: { id: string; key: string; name: string }[];
   hiddenProducts: boolean;
   counts: ItemCounts;
+  notes: NoteCounts;
   latestStatusUpdate: (StatusUpdate & { author: ActorRef }) | null;
 };
+
+/** A product as get_product reads it: with its notes per status. */
+export type ProductDetail = ProductView & { notes: NoteCounts };
 
 /**
  * What `get_project` and `update_project` found: a project, or a product by
@@ -277,6 +318,8 @@ export type ItemInput = {
   labels?: string[];
   links?: LinkInput[];
   externalRef?: string | null;
+  /** a note's: keys of the items it is about */
+  about?: string[];
 };
 /** How the legacy create and list name a product: `projectId`, or `project` or `product`, its aliases. */
 export type LegacyProductRef = {
@@ -333,6 +376,12 @@ export type IssuePatch = {
   addLinks?: LinkInput[];
   /** urls of links to remove; refused beside `links` */
   removeLinks?: string[];
+  /** a note's: replaces the items it is about, by key */
+  about?: string[];
+  /** added to the items a note is about; refused beside `about` */
+  addAbout?: string[];
+  /** removed from the items a note is about; refused beside `about` */
+  removeAbout?: string[];
 };
 export type CommentInput = {
   issueId: string;
@@ -1290,6 +1339,11 @@ export function createService({
       tx,
       rows.map((r) => r.assigneeId),
     );
+    const about = aboutOf(
+      tx,
+      rows.filter((r) => r.type === "note").map((r) => r.id),
+      actor,
+    );
     return rows.map((row) => ({
       ...row,
       key: `${keys.get(row.productId)}-${row.number}`,
@@ -1305,6 +1359,7 @@ export function createService({
       projects: projects
         .filter((p) => p.issueId === row.id)
         .map(({ slug, name }) => ({ slug, name })),
+      ...(row.type === "note" && { about: about.get(row.id) ?? [] }),
     }));
   }
 
@@ -1340,6 +1395,211 @@ export function createService({
 
   const hydrateOne = (tx: Tx | Db, row: IssueRow, actor: ActingActor) =>
     hydrate(tx, [row], actor)[0] as Issue;
+
+  const itemRefColumns = {
+    key: sql<string>`${product.key} || '-' || ${issue.number}`,
+    title: issue.title,
+    type: issue.type,
+    status: issue.status,
+  };
+
+  /** The items each of these notes is about that `actor` reaches, by note id, in key order. */
+  function aboutOf(
+    tx: Tx | Db,
+    noteIds: string[],
+    actor: ActingActor,
+  ): Map<string, ItemRef[]> {
+    const about = new Map<string, ItemRef[]>();
+    if (noteIds.length === 0) return about;
+    for (const { noteId, ...ref } of tx
+      .select({ noteId: noteAbout.noteId, ...itemRefColumns })
+      .from(noteAbout)
+      .innerJoin(issue, eq(issue.id, noteAbout.itemId))
+      .innerJoin(product, eq(product.id, issue.productId))
+      .where(
+        and(
+          inArray(noteAbout.noteId, noteIds),
+          itemsReached(db, reachFor(actor), issue.id, issue.productId),
+        ),
+      )
+      .orderBy(asc(product.key), asc(issue.number))
+      .all()) {
+      about.set(noteId, [...(about.get(noteId) ?? []), ref]);
+    }
+    return about;
+  }
+
+  /** The notes about the item that `actor` reaches, newest first. */
+  function notesAbout(
+    tx: Tx | Db,
+    itemId: string,
+    actor: ActingActor,
+  ): ItemRef[] {
+    return tx
+      .select(itemRefColumns)
+      .from(noteAbout)
+      .innerJoin(issue, eq(issue.id, noteAbout.noteId))
+      .innerJoin(product, eq(product.id, issue.productId))
+      .where(
+        and(
+          eq(noteAbout.itemId, itemId),
+          itemsReached(db, reachFor(actor), issue.id, issue.productId),
+        ),
+      )
+      .orderBy(desc(issue.createdAt), desc(issue.id))
+      .all();
+  }
+
+  /** `about` as sent, checked for count before any lookup. */
+  function validAbout(refs: string[], field: string): string[] {
+    if (refs.length > NOTE_ABOUT_MAX) {
+      throw new ValidationError(
+        `${field} names ${refs.length} items, over the limit of ${NOTE_ABOUT_MAX}: a note is about at most ${NOTE_ABOUT_MAX} items`,
+      );
+    }
+    return refs.map((ref) => nonBlank(ref, field));
+  }
+
+  /**
+   * The items these keys name, once each, among those `actor` reaches; one it
+   * doesn't is a bad field in the body, named, and so is the note itself.
+   */
+  function aboutRows(
+    tx: Tx,
+    actor: ActingActor,
+    refs: string[],
+    field: string,
+    noteId?: string,
+  ): IssueRow[] {
+    const rows = new Map<string, IssueRow>();
+    for (const ref of refs) {
+      let row: IssueRow;
+      try {
+        row = resolveIssueRow(tx, ref, actor);
+      } catch (error) {
+        if (!(error instanceof NotFoundError)) throw error;
+        throw new ValidationError(
+          `${field} names ${ref}, which this key doesn't reach or which doesn't exist: send keys like TRL-12 of items get_item finds`,
+        );
+      }
+      if (row.id === noteId) {
+        throw new ValidationError(
+          `${field} names ${ref}, the note itself: a note is about other items`,
+        );
+      }
+      rows.set(row.id, row);
+    }
+    return [...rows.values()];
+  }
+
+  /**
+   * The ids of the items the note is about after an update's `replace`
+   * (about), `add` and `remove`, or undefined when they stay as they are; an
+   * item turned into work keeps none. A replace keeps the items the caller
+   * doesn't reach, which it can't name; `remove` ignores a key it can't find.
+   */
+  function wantedAbout(
+    tx: Tx,
+    actor: ActingActor,
+    row: IssueRow,
+    type: IssueType,
+    forms: { replace?: string[]; add?: string[]; remove?: string[] },
+  ): string[] | undefined {
+    const stored = tx
+      .select({ id: noteAbout.itemId })
+      .from(noteAbout)
+      .where(eq(noteAbout.noteId, row.id))
+      .all()
+      .map((r) => r.id);
+    const idsOf = (refs: string[], field: string) =>
+      aboutRows(tx, actor, refs, field, row.id).map((r) => r.id);
+    let kept: string[];
+    let added: string[] = [];
+    if (type !== "note") {
+      kept = [];
+    } else if (forms.replace !== undefined) {
+      const reached = new Set(
+        tx
+          .select({ id: issue.id })
+          .from(issue)
+          .where(
+            and(
+              inArray(issue.id, stored),
+              itemsReached(db, reachFor(actor), issue.id, issue.productId),
+            ),
+          )
+          .all()
+          .map((r) => r.id),
+      );
+      kept = stored.filter((id) => !reached.has(id));
+      added = idsOf(forms.replace, "about");
+    } else if (forms.add !== undefined || forms.remove !== undefined) {
+      const removed = new Set(
+        (forms.remove ?? []).flatMap((ref) => {
+          try {
+            return [resolveIssueRow(tx, ref, actor).id];
+          } catch (error) {
+            if (error instanceof NotFoundError) return [];
+            throw error;
+          }
+        }),
+      );
+      kept = stored.filter((id) => !removed.has(id));
+      added = idsOf(forms.add ?? [], "addAbout");
+    } else {
+      return undefined;
+    }
+    const wanted = [...new Set([...kept, ...added])];
+    if (wanted.length > NOTE_ABOUT_MAX) {
+      throw new ValidationError(
+        `a note is about at most ${NOTE_ABOUT_MAX} items, and this update would make it about ${wanted.length}: drop some with removeAbout`,
+      );
+    }
+    const same =
+      wanted.length === stored.length &&
+      wanted.every((id) => stored.includes(id));
+    return same ? undefined : wanted;
+  }
+
+  /**
+   * Refuses an edit to a note from anyone but its author and its product's
+   * own bot: anyone else who reaches it comments.
+   */
+  function requireNoteEdit(
+    tx: Tx | Db,
+    actor: ActingActor,
+    row: IssueRow,
+    key: string,
+  ): void {
+    const ownerId = ownerIdOf(tx, row.productId);
+    if (actor.id === row.createdBy || actor.id === ownerId) return;
+    const names = actorRefs(tx, [row.createdBy, ownerId]);
+    const author = names.get(row.createdBy)?.name ?? "its author";
+    const productKey = key.slice(0, key.lastIndexOf("-"));
+    const editors =
+      ownerId === null || ownerId === row.createdBy
+        ? `only ${author} edits it`
+        : `only ${author} and ${names.get(ownerId)?.name ?? "its owner"}, the bot of ${productKey}, edit it`;
+    throw new ForbiddenError(
+      `${key} is a note by ${author}, and ${editors}: add what you know with add_comment on ${key}`,
+    );
+  }
+
+  /** `resolveIssueRow` among issues and todos: what the routes from before notes find. */
+  function workRow(tx: Tx | Db, ref: string, actor: ActingActor): IssueRow {
+    const row = resolveIssueRow(tx, ref, actor);
+    if (row.type === "note") throw noIssue(ref);
+    return row;
+  }
+
+  /** Replaces the items the note is about. */
+  function setAbout(tx: Tx, noteId: string, itemIds: string[]): void {
+    tx.delete(noteAbout).where(eq(noteAbout.noteId, noteId)).run();
+    if (itemIds.length === 0) return;
+    tx.insert(noteAbout)
+      .values(itemIds.map((itemId) => ({ noteId, itemId })))
+      .run();
+  }
 
   /** Why the actor reaches `row`, an item it reaches; see `ItemAccess`. */
   function accessOf(
@@ -1682,6 +1942,7 @@ export function createService({
     done: 0,
     canceled: 0,
   });
+  const noNotes = (): NoteCounts => ({ current: 0, archived: 0 });
 
   /** `projectView` of each row, in order, in a fixed number of queries however many rows. */
   function projectViews(
@@ -1722,6 +1983,7 @@ export function createService({
       productsOf.set(projectId, [...(productsOf.get(projectId) ?? []), p]);
     }
     const countsOf = new Map<string, ItemCounts>();
+    const notesOf = new Map<string, NoteCounts>();
     for (const { projectId, status, n } of tx
       .select({
         projectId: projectItem.projectId,
@@ -1738,6 +2000,12 @@ export function createService({
       )
       .groupBy(projectItem.projectId, issue.status)
       .all()) {
+      if (isNoteStatus(status)) {
+        const notes = notesOf.get(projectId) ?? noNotes();
+        notes[status] = n;
+        notesOf.set(projectId, notes);
+        continue;
+      }
       const counts = countsOf.get(projectId) ?? noItems();
       counts[status] = n;
       countsOf.set(projectId, counts);
@@ -1770,6 +2038,7 @@ export function createService({
         products,
         hiddenProducts: products.length < all.length,
         counts: countsOf.get(row.id) ?? noItems(),
+        notes: notesOf.get(row.id) ?? noNotes(),
         latestStatusUpdate: latest
           ? { ...latest, author: refs.get(latest.authorId) as ActorRef }
           : null,
@@ -2350,10 +2619,10 @@ export function createService({
 
   /**
    * Creates an item: an issue starts in triage, a todo open and always
-   * assigned. `input.product` names the product, else `fallback` picks it;
-   * `typeOf` decides the type once the product is known, and `asked` is the
-   * type the caller asked for by the call it made (none for the legacy
-   * create). `assignee` left out assigns a todo to the product's owner, else
+   * assigned, a note current and never assigned. `input.product` names the
+   * product, else `fallback` picks it; `typeOf` decides the type once the
+   * product is known, and `asked` is the type the caller asked for by the
+   * call it made (none for the legacy create). `assignee` left out assigns a todo to the product's owner, else
    * the caller. An idempotency key is checked against the input as sent, so
    * what `fallback`, `typeOf` and the default assignee read from current data
    * can't turn a retry into a mismatch. `placement`, when given, replaces how
@@ -2386,6 +2655,8 @@ export function createService({
     const labelNames = validLabelNames(input.labels ?? []);
     const links = validLinks(input.links ?? []);
     const externalRef = optionalRef(input.externalRef);
+    const about =
+      input.about === undefined ? undefined : validAbout(input.about, "about");
     const created = currentShape(
       create(actor, options, "issue.create", (tx) => {
         const placed = placement?.(tx) ?? productPlacement(tx);
@@ -2410,6 +2681,16 @@ export function createService({
               "a person files issues, not todos: file it as an issue, and the product's bot accepts it from triage",
             );
           }
+          if (about !== undefined && type !== "note") {
+            throw new ValidationError(
+              "about is a note's field, the items it is about: leave it out of a todo or an issue, and add a note about the item with add_note",
+            );
+          }
+          if (type === "note" && assignee != null) {
+            throw new ValidationError(
+              "a note has no assignee, since nobody has to act on it: leave assignee out, and file an issue (file_issue) for work someone has to do, listing it in the note's about",
+            );
+          }
           if (type === "todo") {
             requireOwner(
               tx,
@@ -2430,6 +2711,7 @@ export function createService({
             ...sent,
             labels: labelNames,
             links,
+            about,
           },
           // as issue.create hashed it before migration 0015, when every create named its product and none a project
           legacyRequest: named &&
@@ -2454,6 +2736,10 @@ export function createService({
             const assigneeId =
               assignee ??
               (type === "todo" ? (product.ownerId ?? actor.id) : null);
+            const aboutIds =
+              type === "note"
+                ? aboutRows(tx, actor, about ?? [], "about").map((r) => r.id)
+                : [];
             if (externalRef !== null) {
               const twin = tx
                 .select({ id: issue.id, number: issue.number })
@@ -2478,7 +2764,7 @@ export function createService({
                 productId: product.id,
                 type,
                 assigneeId,
-                status: type === "issue" ? "triage" : "open",
+                status: startStatus[type],
                 number: nextIssueNumber(tx, product.id),
                 createdBy: actor.id,
               })
@@ -2489,12 +2775,13 @@ export function createService({
               tx,
               product.id,
               labelNames,
-              type === "issue" &&
+              type !== "todo" &&
                 product.ownerId !== null &&
                 product.ownerId !== actor.id,
             );
             setLabels(tx, row, labels);
             setLinks(tx, row.id, links);
+            if (type === "note") setAbout(tx, row.id, aboutIds);
             if (into !== undefined) {
               tx.insert(projectItem)
                 .values({
@@ -2555,6 +2842,7 @@ export function createService({
     actor: ActingActor,
     ref: string | undefined,
     slug: string | undefined,
+    tool = "file_issue",
   ): Placement {
     const named =
       ref === undefined ? undefined : resolveNamedProduct(tx, ref, actor);
@@ -2567,13 +2855,13 @@ export function createService({
       place: (settled) => {
         if (into !== undefined) {
           return {
-            product: drawnProduct(tx, actor, into, named ?? settled),
+            product: drawnProduct(tx, actor, into, named ?? settled, tool),
             project: into,
           };
         }
         const product = named as Product;
         if (grantsProduct(actor, product.id)) return { product };
-        return { product, project: onlyProject(tx, actor, product) };
+        return { product, project: onlyProject(tx, actor, product, tool) };
       },
     };
   }
@@ -2590,6 +2878,7 @@ export function createService({
     actor: ActingActor,
     into: ProjectRow,
     named: Product | undefined,
+    tool: string,
   ): Product {
     const drawn = tx
       .select(getTableColumns(product))
@@ -2630,20 +2919,25 @@ export function createService({
     if (drawn.length === 1) return fileable[0] as Product;
     throw new ValidationError(
       drawn.length === 0
-        ? `project ${into.slug} draws from no product yet, so file_issue needs product: send the key (like TRL) of the product the issue is for, without project, then add the issue with add_to_project (POST /projects/{slug}/items)`
-        : `project ${into.slug} draws from ${drawsFrom}, so file_issue needs product: send product with ${others === 0 ? "one of them" : sendOne}`,
+        ? `project ${into.slug} draws from no product yet, so ${tool} needs product: send the key (like TRL) of the product the issue is for, without project, then add the issue with add_to_project (POST /projects/{slug}/items)`
+        : `project ${into.slug} draws from ${drawsFrom}, so ${tool} needs product: send product with ${others === 0 ? "one of them" : sendOne}`,
     );
   }
 
   /** The key's one project, for an issue on a product it reaches only through projects; with several, a 422 listing them. */
-  function onlyProject(tx: Tx, actor: ActingActor, named: Product): ProjectRow {
+  function onlyProject(
+    tx: Tx,
+    actor: ActingActor,
+    named: Product,
+    tool: string,
+  ): ProjectRow {
     const via = projectsDrawingFrom(tx, actor, named.id);
     if (actor.scope?.projects.length === 1 && via.length === 1) {
       return via[0] as ProjectRow;
     }
     const slugs = via.map((p) => p.slug);
     throw new ValidationError(
-      `this key reaches product ${named.key} only through ${projectList(slugs)}, so file_issue needs project: resend with ${projectArgs(slugs)}`,
+      `this key reaches product ${named.key} only through ${projectList(slugs)}, so ${tool} needs project: resend with ${projectArgs(slugs)}`,
     );
   }
 
@@ -2928,14 +3222,25 @@ export function createService({
       });
     },
 
-    /** A product the actor may name: one its products or projects reach. */
-    getProduct(actor: ActingActor, ref: string): ProductView | NamedProduct {
+    /** A product the actor may name: one its products or projects reach; whole, with its notes per status. */
+    getProduct(actor: ActingActor, ref: string): ProductDetail | NamedProduct {
       requireAction(actor, "read", "read a product", () =>
         resolveNamedProduct(db, ref, actor),
       );
-      return productReads(actor, [resolveNamedProduct(db, ref, actor)])[0] as
-        | ProductView
-        | NamedProduct;
+      const read = productReads(actor, [
+        resolveNamedProduct(db, ref, actor),
+      ])[0] as ProductView | NamedProduct;
+      if (!("createdBy" in read)) return read;
+      const notes = noNotes();
+      for (const { status, n } of db
+        .select({ status: issue.status, n: sql<number>`count(*)` })
+        .from(issue)
+        .where(and(eq(issue.productId, read.id), eq(issue.type, "note")))
+        .groupBy(issue.status)
+        .all()) {
+        if (isNoteStatus(status)) notes[status] = n;
+      }
+      return { ...read, notes };
     },
 
     /** Newest first; the products the actor may name, with those its projects draw from. */
@@ -3021,6 +3326,41 @@ export function createService({
       });
     },
 
+    /**
+     * Adds a note: a record nobody has to act on, on any product the caller
+     * may file an issue on, current from the start and never assigned. With
+     * `project` it joins that project as `fileIssue` puts an issue there.
+     */
+    addNote(
+      actor: ActingActor,
+      input: ItemInput,
+      options: WriteOptions = {},
+    ): WrittenItem {
+      requireBot(actor, "add a note");
+      const ref = input.product?.trim() || undefined;
+      const slug = input.project?.trim() || undefined;
+      if (ref === undefined && slug === undefined) {
+        throw new ValidationError(
+          "add_note needs product: the key (like TRL) of the product the note belongs to, or project: the slug (like launch-q4) of a project drawing from one product; list_products and list_projects list them",
+        );
+      }
+      requireAction(actor, "issues", "add a note", () =>
+        slug === undefined
+          ? resolveNamedProduct(db, ref as string, actor)
+          : resolveProject(db, slug, actor),
+      );
+      return createItem(
+        actor,
+        { ...input, about: input.about ?? [] },
+        options,
+        {
+          asked: "note",
+          typeOf: () => "note",
+          placement: (tx) => issuePlacement(tx, actor, ref, slug, "add_note"),
+        },
+      );
+    },
+
     /** The legacy create: a todo when the caller owns the product, else an issue in triage. */
     createIssue(
       actor: ActingActor,
@@ -3063,15 +3403,11 @@ export function createService({
       { legacy = false }: { legacy?: boolean } = {},
     ): WrittenItem {
       requireBot(actor, "update an item");
-      requireAction(actor, "issues", "update an item", () =>
-        resolveIssueRow(db, ref, actor),
-      );
-      requireItemWrite(
-        db,
-        actor,
-        resolveIssueRow(db, ref, actor),
-        "update an item",
-      );
+      // the legacy routes predate notes, and find none
+      const findRow = (tx: Tx | Db) =>
+        legacy ? workRow(tx, ref, actor) : resolveIssueRow(tx, ref, actor);
+      requireAction(actor, "issues", "update an item", () => findRow(db));
+      requireItemWrite(db, actor, findRow(db), "update an item");
       const next = {
         title:
           patch.title === undefined
@@ -3117,15 +3453,36 @@ export function createService({
       const removeUrls = new Set(
         (patch.removeLinks ?? []).map((u) => nonBlank(u, "link url")),
       );
+      if (
+        patch.about !== undefined &&
+        (patch.addAbout !== undefined || patch.removeAbout !== undefined)
+      ) {
+        throw new ValidationError(
+          "about replaces the whole set, so it cannot go with addAbout or removeAbout: send about alone to replace the set, or addAbout and removeAbout to change part of it",
+        );
+      }
+      const aboutSent =
+        patch.about === undefined
+          ? undefined
+          : validAbout(patch.about, "about");
+      const addAbout =
+        patch.addAbout === undefined
+          ? undefined
+          : validAbout(patch.addAbout, "addAbout");
+      const removeAbout =
+        patch.removeAbout === undefined
+          ? undefined
+          : validAbout(patch.removeAbout, "removeAbout");
       const labelNames =
         patch.labels === undefined ? undefined : validLabelNames(patch.labels);
       const replacementLinks =
         patch.links === undefined ? undefined : validLinks(patch.links);
       const updated = commit((tx) => {
-        const row = resolveIssueRow(tx, ref, actor);
+        const row = findRow(tx);
         requireItemWrite(tx, actor, row, "update an item");
         const current = hydrateOne(tx, row, actor);
         const type = patch.type ?? row.type;
+        if (row.type === "note") requireNoteEdit(tx, actor, row, current.key);
         if (type === "todo" && status === "triage") {
           throw new ValidationError(
             `${current.key} is a todo, and a todo is never in triage: send type issue with status triage in the same update to put it in triage as an issue, or another status to keep it a todo`,
@@ -3149,15 +3506,62 @@ export function createService({
         }
         const nextStatus =
           status ??
-          (type === "todo" && row.status === "triage" ? "open" : row.status);
+          (type === "note"
+            ? row.type === "note"
+              ? row.status
+              : "current"
+            : row.type === "note"
+              ? startStatus[type]
+              : type === "todo" && row.status === "triage"
+                ? "open"
+                : row.status);
         if (type !== row.type) {
+          const retyping =
+            type === "note"
+              ? "turns an item into a note"
+              : row.type === "note"
+                ? "turns a note into work"
+                : "changes an item's type between todo and issue";
           requireOwner(
             tx,
             actor,
             row.productId,
             (owner, key) =>
-              `only ${owner}, the owner of ${key}, changes an item's type between todo and issue: comment on ${current.key} with add_comment to ask ${owner}`,
+              `only ${owner}, the owner of ${key}, ${retyping}: comment on ${current.key} with add_comment to ask ${owner}`,
           );
+        }
+        // what the item is after this update, as a refusal words it
+        const becomes =
+          type === row.type
+            ? `${current.key} is ${aType(type)}`
+            : `type ${type} makes ${current.key} ${aType(type)}`;
+        if (type === "note") {
+          if (status !== undefined && !isNoteStatus(status)) {
+            throw new ValidationError(
+              `${becomes}, and a note's status is current or archived, not ${status}: send one of those, or type issue or todo to make it work someone does`,
+            );
+          }
+          if (patch.assigneeId != null) {
+            throw new ValidationError(
+              `${becomes}, and a note has no assignee: file an issue (file_issue) for work someone has to do, and list it in the note's about`,
+            );
+          }
+          assigneeId = null;
+        } else {
+          if (status !== undefined && isNoteStatus(status)) {
+            throw new ValidationError(
+              `${becomes}, and current and archived are a note's statuses: send ${type === "todo" ? "open, in_progress, done or canceled" : "triage, open, in_progress, done or canceled"}, or type note with it to make it a note`,
+            );
+          }
+          if (
+            aboutSent !== undefined ||
+            addAbout !== undefined ||
+            removeAbout !== undefined
+          ) {
+            throw new ValidationError(
+              `${becomes}, and about, addAbout and removeAbout are a note's, the items it is about: add a note about ${current.key} with add_note instead`,
+            );
+          }
         }
         const filerCancels =
           nextStatus === "canceled" && row.createdBy === actor.id;
@@ -3250,6 +3654,17 @@ export function createService({
         if (links !== undefined && !sameJson(current.links, links)) {
           changes.links = { from: current.links, to: links };
         }
+        const aboutIds = wantedAbout(tx, actor, row, type, {
+          replace: aboutSent,
+          add: addAbout,
+          remove: removeAbout,
+        });
+        if (aboutIds !== undefined) {
+          changes.about = {
+            from: (current.about ?? []).map((a) => a.key),
+            to: undefined,
+          };
+        }
         if (isEmpty(changes)) {
           return { result: withSkipped(current, skipped), event: null };
         }
@@ -3266,8 +3681,13 @@ export function createService({
           .get() as IssueRow;
         if (labels && "labels" in changes) setLabels(tx, row, labels);
         if (links && "links" in changes) setLinks(tx, row.id, links);
+        if (aboutIds !== undefined) setAbout(tx, row.id, aboutIds);
+        const written = hydrateOne(tx, updatedRow, actor);
+        if (changes.about) {
+          changes.about.to = (written.about ?? []).map((a) => a.key);
+        }
         return {
-          result: withSkipped(hydrateOne(tx, updatedRow, actor), skipped),
+          result: withSkipped(written, skipped),
           event: {
             actorId: actor.id,
             subjectType: "issue",
@@ -4062,12 +4482,20 @@ export function createService({
       });
     },
 
-    getItem(actor: ActingActor, ref: string): Issue {
-      requireAction(actor, "read", "read an item", () =>
-        resolveIssueRow(db, ref, actor),
-      );
-      const row = resolveIssueRow(db, ref, actor);
-      const item = withPullRequest(hydrateOne(db, row, actor));
+    /** The item with the notes about it; `legacy`, for get_issue and GET /issues, finds no note. */
+    getItem(
+      actor: ActingActor,
+      ref: string,
+      { legacy = false }: { legacy?: boolean } = {},
+    ): Issue {
+      const find = () =>
+        legacy ? workRow(db, ref, actor) : resolveIssueRow(db, ref, actor);
+      requireAction(actor, "read", "read an item", find);
+      const row = find();
+      const found = withPullRequest(hydrateOne(db, row, actor));
+      const item = legacy
+        ? found
+        : { ...found, notes: notesAbout(db, row.id, actor) };
       return actor.kind === "bot"
         ? { ...item, access: accessOf(db, actor, row) }
         : item;
@@ -4086,8 +4514,31 @@ export function createService({
       });
     },
 
-    /** Newest first, filtered by any of product, project, type, status and assignee. */
+    /**
+     * Newest first, filtered by any of product, project, type, status and
+     * assignee. Without `type`, issues and todos only: notes need type note.
+     */
     listItems(actor: ActingActor, query: ItemQuery = {}): Page<Issue> {
+      const statuses =
+        query.status === undefined
+          ? []
+          : typeof query.status === "string"
+            ? [validStatus(query.status)]
+            : query.status.map(validStatus);
+      for (const status of statuses) {
+        if (query.type === "note" && !isNoteStatus(status)) {
+          throw new ValidationError(
+            `a note's status is current or archived, so type note takes status current or archived, not ${status}`,
+          );
+        }
+        if (query.type !== "note" && isNoteStatus(status)) {
+          throw new ValidationError(
+            query.type === undefined
+              ? `status ${status} is a note's, and list_items without type lists issues and todos: send type note with it`
+              : `status ${status} is a note's, and ${aType(query.type)} is never ${status}: send type note with it`,
+          );
+        }
+      }
       requireAction(actor, "read", "list items", () => {
         if (query.product !== undefined)
           resolveNamedProduct(db, query.product, actor);
@@ -4115,12 +4566,10 @@ export function createService({
                 .from(projectItem)
                 .where(eq(projectItem.projectId, inProject.id)),
             ),
-        query.type === undefined ? undefined : eq(issue.type, query.type),
-        query.status === undefined
-          ? undefined
-          : typeof query.status === "string"
-            ? eq(issue.status, validStatus(query.status))
-            : inArray(issue.status, query.status.map(validStatus)),
+        query.type === undefined
+          ? inArray(issue.type, workTypes)
+          : eq(issue.type, query.type),
+        statuses.length === 0 ? undefined : inArray(issue.status, statuses),
         query.assignee === undefined
           ? undefined
           : eq(

@@ -559,7 +559,10 @@ describe("updatedAt", () => {
         }),
     ])[0] as Product;
     expect(result).toEqual(created);
-    expect(service.getProduct(bot, created.id)).toEqual(created);
+    expect(service.getProduct(bot, created.id)).toEqual({
+      ...created,
+      notes: { current: 0, archived: 0 },
+    });
     expect(published).toEqual([]);
   });
 
@@ -579,6 +582,7 @@ describe("updatedAt", () => {
     expect(result).toEqual(created);
     expect(service.getItem(bot, created.id)).toEqual({
       ...created,
+      notes: [],
       access: "product",
     });
     expect(published).toEqual([]);

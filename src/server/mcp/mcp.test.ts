@@ -85,6 +85,7 @@ test("tools/list offers one tool per operation, none naming who writes", async (
   expect(tools.map((t) => t.name).sort()).toEqual(
     [
       "add_todo",
+      "add_note",
       "file_issue",
       "get_item",
       "update_item",
@@ -186,9 +187,10 @@ test("product tools create, get, list and update as the key's bot; a retried cre
   });
   expect(await call(client, "create_product", args)).toEqual(created);
 
-  expect(await call(client, "get_product", { product: "mcp" })).toEqual(
-    created,
-  );
+  expect(await call(client, "get_product", { product: "mcp" })).toEqual({
+    ...created,
+    notes: { current: 0, archived: 0 },
+  });
   const listed = await call(client, "list_products", { limit: 200 });
   expect(
     listed.items.filter((p: Body) => p.key === "MCP").map((p: Body) => p.id),
@@ -255,6 +257,7 @@ test("issue tools file, read, list and update an issue with its fields, labels a
   });
   expect(await call(client, "get_item", { item: "MCI-1" })).toEqual({
     ...created,
+    notes: [],
     access: "product",
   });
 

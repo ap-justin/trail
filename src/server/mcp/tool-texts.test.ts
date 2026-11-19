@@ -84,3 +84,27 @@ test("POST status-update routes, product and project, carry the same guidance", 
     expectStatusGuidance(spec.paths[path]?.post?.description, path);
   }
 });
+
+test("add_todo, file_issue and add_note each say which item to add: planned work, a request for work, or a record nobody acts on", async () => {
+  const tool = await toolDescriptions();
+  for (const name of ["add_todo", "file_issue", "add_note"]) {
+    const text = tool(name).description;
+    expect(text, name).toMatch(/a todo is planned work/);
+    expect(text, name).toMatch(/an issue asks a product's bot for work/);
+    expect(text, name).toMatch(/a note is a record nobody has to act on/);
+    expect(text, name).toMatch(
+      /Anything in a note that someone has to act on goes in its own issue/,
+    );
+  }
+});
+
+test("list_items says that without type it lists issues and todos only, and update_item says who edits a note", async () => {
+  const tool = await toolDescriptions();
+  expect(tool("list_items").description).toMatch(
+    /Without type it lists issues and todos only/,
+  );
+  expect(tool("update_item").description).toMatch(
+    /A note is edited only by its author and its product's own bot/,
+  );
+  expect(tool("get_item").description).toMatch(/notes/);
+});

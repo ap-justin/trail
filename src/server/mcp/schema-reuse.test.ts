@@ -20,6 +20,7 @@ function registeredSchemas() {
 
 const TOOLS = [
   "add_comment",
+  "add_note",
   "add_to_project",
   "add_todo",
   "clear_my_photo",

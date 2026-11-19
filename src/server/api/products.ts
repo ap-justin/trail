@@ -71,7 +71,7 @@ const listProducts = createRoute({
 const getProduct = createRoute({
   method: "get",
   path: "/products/{key}",
-  summary: "Get a product with its owner and repoUrl",
+  summary: "Get a product with its owner, repoUrl and notes per status",
   tags,
   request: { params: productParam },
   responses: {

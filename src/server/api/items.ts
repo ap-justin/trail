@@ -41,14 +41,22 @@ const tags = ["items"];
 export const TODO_OR_ISSUE =
   "A todo is planned work of a product's own bot (its owner), and only that bot adds one: open from the start and always assigned (to the owner unless it names someone). An issue is a report to a product's bot, from a person or any other bot: it starts in triage until that bot accepts it (status open with assignee, the bot that will work on it) or cancels it; its filer may cancel it too. A product with no owner leaves both to any bot that reaches it.";
 
+/** When to add which item: every create says it. */
+export const WHICH_ITEM =
+  "Pick the item by who has to act: a todo is planned work you do in a product you own (add_todo); an issue asks a product's bot for work (file_issue); a note is a record nobody has to act on, like how something works or why a decision was made (add_note). Anything in a note that someone has to act on goes in its own issue, and the note lists that issue in about.";
+
+/** Who edits a note, and how its fields differ from work's: update_item and PATCH /items/{key} both say it. */
+export const NOTE_EDITS =
+  "A note is edited only by its author and its product's own bot; anyone else is refused (forbidden) and comments with add_comment. Its status is current or archived, it has no assignee, and about, addAbout and removeAbout set the items it is about. Only the product's owner turns an item into a note (type note: status current, assignee dropped) or a note back into work (an issue goes to triage, a todo opens assigned to the owner).";
+
 export const COMMENT_HOLDS =
   "A comment holds what changed for the work and why, a decision or scope change, a blocker and who clears it, or that it is done. It leaves out commit SHAs, CI runs and logs, review findings and agent run ids: those stay on the pull request, and the pull request goes in the item's links.";
 
 const createItem = createRoute({
   method: "post",
   path: "/items",
-  summary: "Add a todo or file an issue",
-  description: `Needs the issues action on a key that reaches the product. ${TODO_OR_ISSUE} A todo without product goes to the one product you own; with none or several, the 422 lists the products to pick from. An issue with project joins that project as it is filed; a key that reaches a product only through a project files there with project. It gets the product's next number, so its key reads like TRL-12.`,
+  summary: "Add a todo, file an issue or add a note",
+  description: `Needs the issues action on a key that reaches the product. ${WHICH_ITEM} ${TODO_OR_ISSUE} A note starts current, with no assignee and no triage, on any product an issue may be filed on; about names the items it is about. A todo without product goes to the one product you own; with none or several, the 422 lists the products to pick from. An issue with project joins that project as it is filed; a key that reaches a product only through a project files there with project. It gets the product's next number, so its key reads like TRL-12.`,
   tags,
   request: {
     headers: idempotencyHeaders,
@@ -71,6 +79,8 @@ const listItems = createRoute({
   path: "/items",
   summary:
     "List items newest first, filtered by product, project, type, status or assignee",
+  description:
+    "Without type, issues and todos only: notes are listed with type note, and status current or archived goes with it.",
   tags,
   request: { query: itemListQuerySchema },
   responses: {
@@ -85,6 +95,8 @@ const getItem = createRoute({
   method: "get",
   path: "/items/{key}",
   summary: "Get an item",
+  description:
+    "A note carries about, the items it is about; every item carries notes, the notes about it. Both list only what this key reaches.",
   tags,
   request: { params: itemParam },
   responses: {
@@ -100,7 +112,7 @@ const updateItem = createRoute({
   path: "/items/{key}",
   summary:
     "Change an item's type, status, assignee, title, description, estimate, priority, labels or links",
-  description: `Needs the issues action. ${TODO_OR_ISSUE} Accept an issue from triage with status open and assignee, the bot that will work on it (status open alone leaves it unassigned), or drop it with canceled. On a product with an owner, only the owner or the item's filer cancels it, at any status, and only the owner reopens a canceled issue another bot filed. type todo on an item in triage opens it and assigns the product's owner when it has no assignee; a todo never goes back to triage and never loses its assignee. Fields left out stay as they are; addLabels, removeLabels, addLinks and removeLinks change part of a set in the same transaction. On a product another bot owns, labels and addLabels attach only the product's existing labels and create none; the answer lists the names left off in skippedLabels. Moving to done or canceled stamps completedAt; reopening clears it.`,
+  description: `Needs the issues action. ${TODO_OR_ISSUE} ${NOTE_EDITS} Accept an issue from triage with status open and assignee, the bot that will work on it (status open alone leaves it unassigned), or drop it with canceled. On a product with an owner, only the owner or the item's filer cancels it, at any status, and only the owner reopens a canceled issue another bot filed. type todo on an item in triage opens it and assigns the product's owner when it has no assignee; a todo never goes back to triage and never loses its assignee. Fields left out stay as they are; addLabels, removeLabels, addLinks and removeLinks change part of a set in the same transaction. On a product another bot owns, labels and addLabels attach only the product's existing labels and create none; the answer lists the names left off in skippedLabels. Moving to done or canceled stamps completedAt; reopening clears it.`,
   tags,
   request: { params: itemParam, body: jsonBody(itemUpdateSchema) },
   responses: {
@@ -120,7 +132,7 @@ const updateItem = createRoute({
 const addComment = createRoute({
   method: "post",
   path: "/items/{key}/comments",
-  summary: "Comment on an item, todo or issue",
+  summary: "Comment on an item: a todo, an issue or a note",
   description: COMMENT_HOLDS,
   tags,
   request: {
@@ -164,7 +176,9 @@ export function itemRoutes(service: Service) {
       const created =
         type === "todo"
           ? service.addTodo(c.var.actor, input, options)
-          : service.fileIssue(c.var.actor, input, options);
+          : type === "note"
+            ? service.addNote(c.var.actor, input, options)
+            : service.fileIssue(c.var.actor, input, options);
       return c.json(withSkippedLabels(toIssue(created), created), 201);
     })
     .openapi(listItems, (c) =>

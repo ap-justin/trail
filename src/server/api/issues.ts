@@ -148,7 +148,11 @@ export function issueRoutes(service: Service) {
     .openapi(getIssue, (c) =>
       c.json(
         deprecated(
-          toLegacyIssue(service.getItem(c.var.actor, c.req.valid("param").id)),
+          toLegacyIssue(
+            service.getItem(c.var.actor, c.req.valid("param").id, {
+              legacy: true,
+            }),
+          ),
           deprecations.getIssue,
         ),
         200,
