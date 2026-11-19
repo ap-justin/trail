@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Navigate, redirect } from "@tanstack/react-router";
+import { useRef } from "react";
 import { AppPage, useChrome } from "@/app/chrome";
 import { NotFoundPage } from "@/app/not-found-page";
 import { RowsMissing } from "@/app/rows-missing";
@@ -70,12 +71,25 @@ function ProjectPage() {
     ...projectItemsQuery(slug, filters),
     enabled: !itemsWaitOnProject || project.data !== undefined,
   });
+  // counts follow only the product filter, so while a new type or status tab loads the last
+  // ones for this project and product still hold; without them the notes query switches off
+  // and back on, which refetches it
+  const countsKey = `${slug} ${product}`;
+  const lastNoteCount = useRef<{ key: string; current: number }>(undefined);
+  if (items.data)
+    lastNoteCount.current = {
+      key: countsKey,
+      current: items.data.counts.notes.current,
+    };
+  const currentNotes =
+    lastNoteCount.current?.key === countsKey
+      ? lastNoteCount.current.current
+      : 0;
   // the Notes section's, under the product filter the counts it reads follow, once they say
   // there are current notes; a list of notes has no section
   const notes = useQuery({
     ...projectItemsQuery(slug, { product, type: "note", status: "current" }),
-    enabled:
-      filters.type !== "note" && (items.data?.counts.notes.current ?? 0) > 0,
+    enabled: filters.type !== "note" && currentNotes > 0,
     select: (list) => list.groups.flatMap((group) => group.items),
   });
   const updates = useQuery({

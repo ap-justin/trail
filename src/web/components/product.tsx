@@ -286,10 +286,10 @@ export function ProductView(props: ProductViewProps) {
           </TabsContent>
         </Tabs>
         {props.footer}
-        {counts && filters.type !== "note" && (
+        {filters.type !== "note" && (
           <NotesSection
             notes={props.notes}
-            counts={counts.notes}
+            counts={counts?.notes ?? null}
             onShowArchived={() => {
               listRef.current?.focus();
               onFiltersChange({ type: "note", status: "archived" });

@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useId, useRef } from "react";
 import { RowLink } from "@/components/app-link";
 import { ErrorState, ListSkeleton } from "@/components/states";
 import { Age, AsideHeading } from "@/components/status-updates";
@@ -11,7 +11,8 @@ import { paths } from "@/lib/paths";
 export type NotesSectionProps = {
   /** The current notes, in the list's order. */
   notes: Loadable<WebItemRowView[]>;
-  counts: WebItemCountsView["notes"];
+  /** Null while the page's list reloads them; the section then stands on `notes` alone. */
+  counts: WebItemCountsView["notes"] | null;
   /** Lists the archived notes in the page's own item list. */
   onShowArchived: () => void;
   onRetry: () => void;
@@ -32,22 +33,31 @@ export function NotesSection({
   className,
 }: NotesSectionProps) {
   const headingId = useId();
-  if (counts.current + counts.archived === 0) return null;
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const current =
+    counts?.current ?? (notes.status === "ready" ? notes.data.length : 0);
+  if (current + (counts?.archived ?? 0) === 0) return null;
   return (
     <section aria-labelledby={headingId} className={className}>
-      <AsideHeading id={headingId} className="max-lg:px-4 lg:px-2">
+      <AsideHeading
+        ref={headingRef}
+        id={headingId}
+        className="max-lg:px-4 lg:px-2"
+      >
         Notes{" "}
-        <span className="font-normal text-muted-foreground">
-          {counts.current}
-        </span>
+        <span className="font-normal text-muted-foreground">{current}</span>
       </AsideHeading>
       <NotesBody
         notes={notes}
-        current={counts.current}
-        onRetry={onRetry}
+        current={current}
+        onRetry={() => {
+          // Try again unmounts as the notes reload; focus waits on the heading
+          headingRef.current?.focus();
+          onRetry();
+        }}
         now={now}
       />
-      {counts.archived > 0 && (
+      {counts && counts.archived > 0 && (
         <Button
           variant="ghost"
           size="sm"

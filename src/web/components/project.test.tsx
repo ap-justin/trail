@@ -537,7 +537,7 @@ describe("notes", () => {
     counts: countsOf([...work.flatMap((g) => g.items), ...notes, archived]),
   });
 
-  test("current notes show in a Notes section under the work list; the group counts leave them out", () => {
+  test("current notes show in a Notes section under the work list; the tab and group counts leave them out", () => {
     renderProject({
       items: { status: "ready", data: withNotes() },
       notes: { status: "ready", data: notes },
@@ -548,7 +548,20 @@ describe("notes", () => {
         name: "TRL-31 Why the feed reads newest first",
       }),
     ).toHaveAttribute("href", "/products/TRL/31");
-    expect(screen.getAllByText("3 items")).not.toHaveLength(0);
+    // the notes are counted apart: the work list's tabs and its groups hold the 5 todos and issues only
+    expect(
+      within(screen.getByRole("tablist", { name: "Filter by status" }))
+        .getAllByRole("tab")
+        .map((t) => t.textContent),
+    ).toEqual(["All 5", "Open 4", "In progress 1", "Done 0", "Canceled 0"]);
+    const body = groupBody("TRL");
+    expect(within(body).getByRole("columnheader")).toHaveTextContent(
+      "TRL trail 3 items",
+    );
+    expect(rowsIn(body)).toBe(3);
+    expect(
+      within(table()).queryByText(/Why the feed reads newest first/),
+    ).toBeNull();
   });
 
   test("Archived notes keeps the product filter and lists the archived ones", async () => {
@@ -584,6 +597,69 @@ describe("notes", () => {
       screen.getAllByRole("link", { name: "TRL-29 Old deploy steps" }),
     ).not.toHaveLength(0);
     expect(screen.queryByRole("region", { name: /^Notes/ })).toBeNull();
+  });
+
+  test("a project with notes and no work: Archived notes leaves focus on the list that replaces the empty state", async () => {
+    const user = userEvent.setup();
+    const notesOnly = {
+      ...projectItems([]),
+      counts: countsOf([...notes, archived]),
+    };
+    const { rerender } = render(
+      <ProjectView
+        {...props({
+          items: { status: "ready", data: notesOnly },
+          notes: { status: "ready", data: notes },
+        })}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Archived notes 1" }));
+    rerender(
+      <ProjectView
+        {...props({
+          filters: { ...NO_PROJECT_FILTERS, type: "note", status: "archived" },
+          items: { status: "loading" },
+          notes: { status: "ready", data: notes },
+        })}
+      />,
+    );
+    expect(screen.getByRole("tabpanel")).toHaveFocus();
+  });
+
+  test("the Notes section stays while the list's counts reload, without Archived notes until they're back", () => {
+    renderProject({
+      filters: { ...NO_PROJECT_FILTERS, status: "open" },
+      items: { status: "loading" },
+      notes: { status: "ready", data: notes },
+    });
+    const section = screen.getByRole("region", { name: /^Notes/ });
+    expect(
+      within(section).getByRole("heading", { name: "Notes 1" }),
+    ).toBeInTheDocument();
+    expect(
+      within(section).getByRole("link", {
+        name: "TRL-31 Why the feed reads newest first",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(section).queryByRole("button", { name: /^Archived notes/ }),
+    ).toBeNull();
+  });
+
+  test("Try again on notes leaves focus on their heading", async () => {
+    const user = userEvent.setup();
+    const items = { status: "ready", data: withNotes() } as const;
+    const { rerender } = render(
+      <ProjectView {...props({ items, notes: { status: "error" } })} />,
+    );
+    const section = screen.getByRole("region", { name: /^Notes/ });
+    await user.click(
+      within(section).getByRole("button", { name: "Try again" }),
+    );
+    rerender(
+      <ProjectView {...props({ items, notes: { status: "loading" } })} />,
+    );
+    expect(screen.getByRole("heading", { name: "Notes 1" })).toHaveFocus();
   });
 
   test("a project with no notes has no Notes section", () => {

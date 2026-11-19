@@ -6,6 +6,7 @@ import { ITEM_PAGES_MAX } from "@/lib/queries";
 import { notFound, renderApp, signedInAs } from "@/test/app";
 import {
   issueRow,
+  noteRow,
   openBot,
   projectDetail,
   projectItems,
@@ -255,6 +256,38 @@ describe("while the next filter loads", () => {
     await waitFor(() => expect(allTab()).not.toHaveTextContent("2"));
     release();
     await waitFor(() => expect(allTab()).toHaveTextContent("1"));
+  });
+
+  test("Open then Done reads the notes once, since their counts follow only the product", async () => {
+    signedInAs("member");
+    serveProject();
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const notesAsked: string[] = [];
+    server.use(
+      http.get("/api/web/projects/human-ui/items", async ({ request }) => {
+        const query = new URL(request.url).searchParams;
+        if (query.get("type") === "note") {
+          notesAsked.push(request.url);
+          return HttpResponse.json(
+            projectItems([{ product: trail, items: [noteRow()] }]),
+          );
+        }
+        if (query.has("status")) await held;
+        return HttpResponse.json(
+          projectItems([{ product: trail, items: [todoRow(), noteRow()] }]),
+        );
+      }),
+    );
+    renderApp("/projects/human-ui");
+    expect(await screen.findAllByText(noteRow().title)).not.toHaveLength(0);
+    await userEvent.click(screen.getByRole("tab", { name: /^Open/ }));
+    await userEvent.click(screen.getByRole("tab", { name: /^Done/ }));
+    release();
+    expect(await screen.findAllByText(noteRow().title)).not.toHaveLength(0);
+    expect(notesAsked).toHaveLength(1);
   });
 });
 

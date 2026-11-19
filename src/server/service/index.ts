@@ -2314,6 +2314,12 @@ export function createService({
     tally: Tally,
     now: Date,
   ): string {
+    // retyped to a note since an earlier run: a note takes no work status or completedAt, and
+    // stays the owner's record, so the source no longer writes over it
+    if (current?.type === "note") {
+      tally.unchanged.issues++;
+      return current.id;
+    }
     const labelsOf = (names: string[]) =>
       names.map((n) => labels.get(labelKey(n)) as Label);
     const completedAt = completedAtOf(
@@ -2541,6 +2547,8 @@ export function createService({
         labels: created.labels,
         links: created.links,
         externalRef: created.externalRef,
+        // keys, as issue.updated's about {from, to} carries them
+        ...(created.about && { about: created.about.map((a) => a.key) }),
       },
     };
   }
@@ -3235,7 +3243,14 @@ export function createService({
       for (const { status, n } of db
         .select({ status: issue.status, n: sql<number>`count(*)` })
         .from(issue)
-        .where(and(eq(issue.productId, read.id), eq(issue.type, "note")))
+        // by status, not type: issue_note_status_check makes them the same rows, and status is in
+        // issue_product_status_created_idx, so the count reads the index alone
+        .where(
+          and(
+            eq(issue.productId, read.id),
+            inArray(issue.status, [...noteStatuses]),
+          ),
+        )
         .groupBy(issue.status)
         .all()) {
         if (isNoteStatus(status)) notes[status] = n;

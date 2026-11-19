@@ -1,7 +1,8 @@
 import { expect, test } from "vitest";
+import { createBot } from "../service/keys.js";
 import { projectKey, setupTestApp } from "../test-app.js";
 
-const { bot, addBot, request } = setupTestApp();
+const { bot, addBot, db, request } = setupTestApp();
 
 // biome-ignore lint/suspicious/noExplicitAny: loose response bodies for field reads
 type Body = Record<string, any>;
@@ -73,12 +74,22 @@ test("REST mirrors add_note: POST /items with type note on another bot's product
   ).toEqual({ current: 0, archived: 1 });
 });
 
-test("POST /items refuses about on a todo or an issue, and an assignee on a note", async () => {
-  const owner = await newProduct("rest refusals");
+test.each([
+  ["a todo", "todo"],
+  ["an issue", "issue"],
+])("POST /items refuses about on %s, naming the rule", async (_, type) => {
+  const owner = await newProduct(`rest about ${type}`);
   const res = await request("POST", "/api/v1/items", {
-    json: { type: "issue", product: owner.key, title: "ask", about: [] },
+    json: { type, product: owner.key, title: "ask", about: [] },
   });
   expect(res.status).toBe(422);
+  expect(((await res.json()) as Body).error.message).toMatch(
+    /^about is a note's field.*add a note about the item with add_note/,
+  );
+});
+
+test("POST /items refuses an assignee on a note", async () => {
+  const owner = await newProduct("rest refusals");
   const note = await request("POST", "/api/v1/items", {
     json: {
       type: "note",
@@ -130,4 +141,102 @@ test("the OpenAPI spec documents notes on the items routes", async () => {
   expect(spec.paths["/items"].post.description).toMatch(
     /a note is a record nobody has to act on/,
   );
+});
+
+test("a note's created event lists the keys it is about, as its updated event does", async () => {
+  const owner = await newProduct("created about");
+  const writer = addBot("created about writer");
+  const todo = await ok(
+    await request("POST", "/api/v1/items", {
+      json: { type: "todo", product: owner.key, title: "work" },
+    }),
+    201,
+  );
+  const note = await ok(
+    await request("POST", "/api/v1/items", {
+      json: {
+        type: "note",
+        product: owner.key,
+        title: "record",
+        about: [todo.key],
+      },
+      key: writer.key,
+    }),
+    201,
+  );
+  await ok(
+    await request("PATCH", `/api/v1/items/${note.key}`, {
+      json: { about: [] },
+      key: writer.key,
+    }),
+  );
+  const events = (
+    await ok(
+      await request(
+        "GET",
+        `/api/v1/activity?actorId=${writer.actor.id}&limit=200`,
+      ),
+    )
+  ).items.filter((e: Body) => e.subjectId === note.id);
+  const payloadOf = (action: string) =>
+    events.find((e: Body) => e.action === action)?.payload;
+  expect(payloadOf("issue.created")).toMatchObject({
+    key: note.key,
+    type: "note",
+    about: [todo.key],
+  });
+  expect(payloadOf("issue.updated").about).toEqual({
+    from: [todo.key],
+    to: [],
+  });
+});
+
+test("PATCH /items/{key} on a note by a third bot is 403 forbidden, and the note stays as written", async () => {
+  const owner = await newProduct("rest authz");
+  const author = addBot("rest author");
+  const third = addBot("rest third");
+  const note = await ok(
+    await request("POST", "/api/v1/items", {
+      json: { type: "note", product: owner.key, title: "draft" },
+      key: author.key,
+    }),
+    201,
+  );
+  const res = await request("PATCH", `/api/v1/items/${note.key}`, {
+    json: { title: "by a third bot" },
+    key: third.key,
+  });
+  expect(res.status).toBe(403);
+  expect(((await res.json()) as Body).error).toMatchObject({
+    code: "forbidden",
+    message: expect.stringContaining(`add what you know with add_comment`),
+  });
+  const read = await ok(await request("GET", `/api/v1/items/${note.key}`));
+  expect(read.title).toBe("draft");
+});
+
+test("POST /items with type note needs a key with the issues action, and a key at all", async () => {
+  const owner = await newProduct("rest keys");
+  const readOnly = createBot(db, "rest reader", {
+    scope: { actions: ["read"] },
+  });
+  const note = { type: "note", product: owner.key, title: "record" };
+  const denied = await request("POST", "/api/v1/items", {
+    json: note,
+    key: readOnly.key,
+  });
+  expect(denied.status).toBe(403);
+  expect(((await denied.json()) as Body).error.code).toBe("forbidden_action");
+  const anonymous = await request("POST", "/api/v1/items", {
+    json: note,
+    key: null,
+  });
+  expect(anonymous.status).toBe(401);
+  expect(
+    (
+      await ok(
+        await request("GET", `/api/v1/items?product=${owner.key}&type=note`),
+      )
+    ).items,
+  ).toEqual([]);
 });

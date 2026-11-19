@@ -517,6 +517,36 @@ describe("notes", () => {
     );
     expect(p.onRetryNotes).toHaveBeenCalledOnce();
   });
+
+  test("Try again on notes leaves focus on their heading", async () => {
+    const user = userEvent.setup();
+    const items = { status: "ready", data: workWithNotes } as const;
+    const { rerender } = render(
+      <ProductView {...props({ items, notes: { status: "error" } })} />,
+    );
+    await user.click(
+      within(notesSection()).getByRole("button", { name: "Try again" }),
+    );
+    rerender(
+      <ProductView {...props({ items, notes: { status: "loading" } })} />,
+    );
+    expect(screen.getByRole("heading", { name: "Notes 2" })).toHaveFocus();
+  });
+
+  test("the Notes section stays while the list's counts reload, without Archived notes until they're back", () => {
+    renderProduct({
+      filters: { type: "todo", status: null },
+      items: { status: "loading" },
+      notes: { status: "ready", data: current },
+    });
+    expect(
+      within(notesSection()).getByRole("heading", { name: "Notes 2" }),
+    ).toBeInTheDocument();
+    expect(within(notesSection()).getAllByRole("link")).toHaveLength(2);
+    expect(
+      within(notesSection()).queryByRole("button", { name: /^Archived notes/ }),
+    ).toBeNull();
+  });
 });
 
 describe("aside", () => {

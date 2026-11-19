@@ -106,6 +106,29 @@ test("about refuses a key the caller doesn't reach, naming it, and more than 50 
   ).toMatch(/<=50 items at about/);
 });
 
+test("get_item on a todo hides a note from a product the key doesn't reach, and shows it to a key that does", async () => {
+  const own = await productBot("Olga");
+  const elsewhere = await productBot("Elsa");
+  const todo = await call(own.client, "add_todo", { title: "reachable work" });
+  const note = await call(elsewhere.client, "add_note", {
+    product: elsewhere.product,
+    title: "kept out of sight",
+    about: [todo.key],
+  });
+  const scoped = await connect(
+    createBot(db, "Olga only", { scope: { products: [own.product] } }).key,
+  );
+  const seen = await call(scoped, "get_item", { item: todo.key });
+  expect(seen.title).toBe("reachable work");
+  expect(seen.notes).toEqual([]);
+  expect(JSON.stringify(seen)).not.toContain("kept out of sight");
+  expect(
+    (await call(elsewhere.client, "get_item", { item: todo.key })).notes,
+  ).toEqual([
+    { key: note.key, title: note.title, type: "note", status: "current" },
+  ]);
+});
+
 test("add_note with an idempotency key returns the first note on a retry and adds nothing", async () => {
   const owner = await productBot("Idem");
   const writer = await productBot("Iris");

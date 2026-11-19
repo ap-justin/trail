@@ -1,5 +1,5 @@
 import { PackageIcon } from "lucide-react";
-import { type ReactNode, useId, useRef } from "react";
+import { type ReactNode, useCallback, useId, useRef } from "react";
 import { ActorAvatar, BotTitle } from "@/components/actor";
 import { AppLink, textLinkFocus, textLinkTap } from "@/components/app-link";
 import { ProductSelect } from "@/components/filter-select";
@@ -255,6 +255,15 @@ function ProjectBody(
   const detailsHeading = useId();
   const updatesHeading = useId();
   const listRef = useRef<HTMLDivElement>(null);
+  // Archived notes over the empty state asks for a list that isn't mounted yet
+  const focusListOnMount = useRef(false);
+  const attachList = useCallback((node: HTMLDivElement | null) => {
+    listRef.current = node;
+    if (node && focusListOnMount.current) {
+      focusListOnMount.current = false;
+      node.focus();
+    }
+  }, []);
   const updatesHeadingRef = useRef<HTMLHeadingElement>(null);
   // no items at all leaves nothing to filter; none under a product filter, or a list of
   // notes, is a filter result
@@ -321,7 +330,7 @@ function ProjectBody(
             />
             {/* one panel, keyed to whichever tab is current, so the list is that tab's panel */}
             <TabsContent
-              ref={listRef}
+              ref={attachList}
               value={statusTabValue(filters)}
               tabIndex={-1}
               className="outline-none"
@@ -338,12 +347,13 @@ function ProjectBody(
           </Tabs>
         )}
         {props.footer}
-        {counts && filters.type !== "note" && (
+        {filters.type !== "note" && (
           <NotesSection
             notes={props.notes}
-            counts={counts.notes}
+            counts={counts?.notes ?? null}
             onShowArchived={() => {
-              listRef.current?.focus();
+              if (listRef.current) listRef.current.focus();
+              else focusListOnMount.current = true;
               onFiltersChange({ ...filters, type: "note", status: "archived" });
             }}
             onRetry={props.onRetryNotes}

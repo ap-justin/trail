@@ -126,6 +126,24 @@ test("a human cannot create a project", () => {
   );
 });
 
+test("a person cannot add a note, and no note exists after the refusal", () => {
+  const target = service.createProduct(bot, { key: projectKey(), name: "p" });
+  published = [];
+  rejectsCleanly(
+    () => service.addNote(human, { product: target.key, title: "record" }),
+    ForbiddenError,
+  );
+  expect(() =>
+    service.addNote(human, { product: target.key, title: "record" }),
+  ).toThrow("only a bot may add a note");
+  expect(
+    service.listItems(bot, { product: target.key, type: "note" }).items,
+  ).toEqual([]);
+  expect(
+    service.addNote(bot, { product: target.key, title: "record" }),
+  ).toMatchObject({ type: "note", status: "current" });
+});
+
 test("a person can file an issue but not add a todo, nor create or fill a project", () => {
   const target = service.createProduct(bot, { key: projectKey(), name: "p" });
   const filed = service.fileIssue(human, { product: target.key, title: "x" });

@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import { AppLink } from "@/components/app-link";
 import { EmptyState, SkeletonBlock } from "@/components/states";
-import { StatusIcon, TypeIcon } from "@/components/status";
+import { StatusIcon, TypeIcon, typeLabel } from "@/components/status";
 import { KeyText } from "@/components/text";
 import type { SearchView } from "@/lib/api-types";
 import { paths } from "@/lib/paths";
@@ -144,7 +144,12 @@ function SearchResultsBody({ results }: { results: Results }) {
         <li key={issue.key}>
           <AppLink
             href={paths.issue(issue.key)}
-            aria-label={[issue.key, issue.title, issue.sourceKey]
+            aria-label={[
+              issue.type === "note" && typeLabel(issue.type),
+              issue.key,
+              issue.title,
+              issue.sourceKey,
+            ]
               .filter(Boolean)
               .join(" ")}
             className={row}

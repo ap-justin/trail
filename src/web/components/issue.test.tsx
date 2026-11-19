@@ -1217,6 +1217,22 @@ describe("notes", () => {
     expect(screen.queryByRole("region", { name: "Notes" })).toBeNull();
   });
 
+  test("a person comments on a note: the box is there and Comment sends the trimmed body", async () => {
+    const user = userEvent.setup();
+    const { props } = renderIssue({
+      issueKey: "TRL-31",
+      issue: { status: "ready", data: note() },
+    });
+    await user.type(
+      screen.getByRole("textbox", { name: "Comment" }),
+      "  Thanks, this saved me an hour  ",
+    );
+    await user.click(screen.getByRole("button", { name: "Comment" }));
+    expect(props.onComment).toHaveBeenCalledWith(
+      "Thanks, this saved me an hour",
+    );
+  });
+
   test("an archived note reads Archived", () => {
     renderIssue({
       issueKey: "TRL-31",

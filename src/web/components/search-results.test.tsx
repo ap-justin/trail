@@ -42,7 +42,7 @@ describe("SearchResults", () => {
     );
   });
 
-  test("a note's row carries the Note glyph where an issue's has its status", () => {
+  test("a note's row carries the Note glyph where an issue's has its status, and says it's a note", () => {
     render(
       <SearchResults
         query="feed"
@@ -65,7 +65,7 @@ describe("SearchResults", () => {
       />,
     );
     const note = screen.getByRole("link", {
-      name: "TRL-31 Why the feed reads newest first",
+      name: "Note TRL-31 Why the feed reads newest first",
     });
     expect(note.querySelector("svg")).toHaveAttribute("data-item-type", "note");
   });
