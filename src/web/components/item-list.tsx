@@ -333,6 +333,8 @@ export function ItemFilterBar({
           {sheet.select}
           <TypeSelect
             fieldLabel="Type"
+            // null here is issues and todos, as on the lg toggle; notes list in their own section
+            allLabel="All"
             value={filters.type}
             onChange={onTypeChange}
           />

@@ -23,7 +23,7 @@ export function webSeed(request: Request) {
   /** An item filed by the bot (`key`, by default the test bot), then moved to `status` when given; returns its key. */
   async function item(
     product: string,
-    type: "issue" | "todo",
+    type: "issue" | "todo" | "note",
     {
       status,
       key,

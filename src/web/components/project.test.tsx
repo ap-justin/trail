@@ -381,18 +381,42 @@ describe("375", () => {
     expect(filtersButton()).toHaveAccessibleName("Filters 1 in use");
   });
 
-  test("under the Notes type the sheet's button counts notes, not items", async () => {
+  test("the sheet's all-types option says All, as the lg toggle does: it lists issues and todos, not notes", async () => {
     const user = userEvent.setup();
     render(<FilteredProject />);
     await user.click(filtersButton());
     const sheet = await screen.findByRole("dialog", { name: "Filters" });
     await user.click(within(sheet).getByRole("combobox", { name: "Type" }));
+    expect(
+      (await screen.findAllByRole("option")).map((o) => o.textContent),
+    ).toEqual(["All", "Issues", "Todos", "Notes"]);
+  });
+
+  test("under the Notes type the sheet's button counts notes, not items", async () => {
+    const user = userEvent.setup();
+    // 5 work items and 2 notes (1 current, 1 archived): All notes is 2, neither the work 5 nor the current 1
+    render(
+      <FilteredProject
+        items={{
+          status: "ready",
+          data: {
+            ...projectItems(groups),
+            counts: countsOf([
+              ...groups.flatMap((g) => g.items),
+              noteRow(),
+              noteRow({ key: "TRL-29", status: "archived" }),
+            ]),
+          },
+        }}
+      />,
+    );
+    await user.click(filtersButton());
+    const sheet = await screen.findByRole("dialog", { name: "Filters" });
+    await user.click(within(sheet).getByRole("combobox", { name: "Type" }));
     await user.click(await screen.findByRole("option", { name: "Notes" }));
     expect(
-      await within(sheet).findByRole("button", {
-        name: /^Show (\d+ notes?|notes)$/,
-      }),
-    ).toBeInTheDocument();
+      await within(sheet).findByRole("button", { name: /^Show / }),
+    ).toHaveAccessibleName("Show 2 notes");
   });
 
   test("the button counts the product and type in force; while the list loads the sheet has no count", async () => {

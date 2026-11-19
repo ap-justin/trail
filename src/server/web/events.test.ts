@@ -332,7 +332,40 @@ test("a type filter keeps only its type's items, live and on resume, and no prod
   await resumed.cancel();
 });
 
-test("a type filter other than issue or todo, or beside only=actors, is a 422", async () => {
+test("a type of note streams only notes, live and on resume", async () => {
+  const p = addProject("StreamNotes");
+  const item = async (type: string, title: string) => {
+    const res = await request("POST", "/api/v1/items", {
+      json: { type, product: p.key, title },
+    });
+    expect(res.status).toBe(201);
+    return ((await res.json()) as { key: string }).key;
+  };
+  const stream = await openStream(ownerCookie, {
+    query: `?product=${p.key}&type=note`,
+  });
+  await item("todo", "a todo");
+  const note = await item("note", "a note");
+  const live = await stream.nextEntry();
+  expect(live).toMatchObject({
+    kind: "item_created",
+    item: { key: note, type: "note" },
+  });
+  await stream.cancel();
+
+  await item("issue", "an issue");
+  const later = await item("note", "a later note");
+  const resumed = await openStream(ownerCookie, {
+    query: `?product=${p.key}&type=note`,
+    lastEventId: live?.seq,
+  });
+  expect(await resumed.nextEntry()).toMatchObject({
+    item: { key: later, type: "note" },
+  });
+  await resumed.cancel();
+});
+
+test("a type filter other than issue, todo or note, or beside only=actors, is a 422", async () => {
   for (const query of ["?type=epic", "?only=actors&type=issue"]) {
     const res = await app.request(`/api/web/events${query}`, {
       headers: { cookie: ownerCookie },

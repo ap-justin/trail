@@ -330,6 +330,7 @@ function FeedFilters({
       />
       <TypeSelect
         fieldLabel={inSheet ? "Type" : undefined}
+        allLabel="All types"
         value={typeFilter}
         onChange={onTypeFilterChange}
       />

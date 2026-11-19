@@ -1,10 +1,11 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { cleanup, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { ITEM_PAGES_MAX } from "@/lib/queries";
-import { notFound, renderApp, signedInAs } from "@/test/app";
+import { meView, notFound, renderApp, signedInAs } from "@/test/app";
+import { FakeEventSource } from "@/test/event-source";
 import {
   issueList,
   issueRow,
@@ -162,6 +163,53 @@ describe("notes section on load", () => {
     );
     await waitFor(() => expect(queryClient.isFetching()).toBe(0));
     expect(notesAsked).toEqual([]);
+  });
+
+  test("only archived notes: the section stays while an access event's reread is in flight", async () => {
+    signedInAs("member");
+    serveNoteCounts({ current: 0, archived: 2 });
+    const { queryClient } = renderApp("/products/TRL");
+    await screen.findByRole("button", { name: "Show 2 archived notes" });
+    const stream = FakeEventSource.current;
+    stream.open();
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    let answer = () => {};
+    const answered = new Promise<void>((resolve) => {
+      answer = resolve;
+    });
+    let reread = false;
+    // the owner granted another product, so the session the page reads changes mid-reread
+    const me = meView("member");
+    server.use(
+      http.get("/api/web/me", () =>
+        HttpResponse.json({
+          ...me,
+          products: [...me.products, { key: "BET", name: "beta" }],
+        }),
+      ),
+      http.get("/api/web/products/TRL/items", async () => {
+        reread = true;
+        await answered;
+        const list = issueList([issueRow()]);
+        return HttpResponse.json({
+          ...list,
+          counts: { ...list.counts, notes: { current: 0, archived: 2 } },
+        });
+      }),
+    );
+    act(() => {
+      stream.dispatchEvent(new MessageEvent("access", { data: "{}" }));
+    });
+    await screen.findByRole("link", { name: /beta/ });
+    expect(reread).toBe(true);
+    expect(
+      screen.getByRole("button", { name: "Show 2 archived notes" }),
+    ).toBeInTheDocument();
+    answer();
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    expect(
+      screen.getByRole("button", { name: "Show 2 archived notes" }),
+    ).toBeInTheDocument();
   });
 
   test("only archived notes: the section stays when the next tab's list fails", async () => {
@@ -451,8 +499,22 @@ describe("notes section on load", () => {
     const inProgressHeld = new Promise<void>((resolve) => {
       releaseInProgress = resolve;
     });
-    let inProgressAnswered = false;
     let notesAsked = 0;
+    // settles when the abandoned read's fetch does, answered or aborted
+    let inProgressSettled = () => {};
+    const inProgressDone = new Promise<void>((resolve) => {
+      inProgressSettled = resolve;
+    });
+    const realFetch = globalThis.fetch;
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input, init) => {
+        const read = realFetch(input, init);
+        if (String(input).includes("status=in_progress")) {
+          read.then(inProgressSettled, inProgressSettled);
+        }
+        return read;
+      });
     server.use(
       http.get("/api/web/products/TRL/items", async ({ request }) => {
         const query = new URL(request.url).searchParams;
@@ -460,7 +522,6 @@ describe("notes section on load", () => {
         const notes = query.get("status") === "in_progress" ? 1 : 2;
         if (query.get("status") === "in_progress") {
           await inProgressHeld;
-          inProgressAnswered = true;
         }
         if (query.get("type") === "note") notesAsked++;
         const list = issueList([issueRow()]);
@@ -477,10 +538,11 @@ describe("notes section on load", () => {
     await userEvent.click(screen.getByRole("tab", { name: /^Done/ }));
     await waitFor(() => expect(queryClient.isFetching()).toBe(0));
     releaseInProgress();
-    await waitFor(() => expect(inProgressAnswered).toBe(true));
-    // a read the query let go of leaves nothing to wait on, so its answer gets time to land
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    // a read the query let go of leaves nothing to wait on: wait for its fetch, then a task for the query function's tail and any commit it causes
+    await inProgressDone;
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    fetchSpy.mockRestore();
+    expect(queryClient.isFetching()).toBe(0);
     expect(heading()).toHaveTextContent("Notes 2");
     expect(notesAsked).toBe(1);
   });

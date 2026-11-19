@@ -23,6 +23,12 @@ import type {
   WebProjectView,
 } from "@/lib/api-types";
 
+/**
+ * A query nothing on screen observes. Not Query's `inactive`: that also counts a query whose
+ * every observer is disabled, as a `skipToken` one's always is, though the page still shows it.
+ */
+export const isOffScreen = (query: Query) => query.getObserversCount() === 0;
+
 export const keys = {
   me: ["me"] as const,
   products: ["products"] as const,

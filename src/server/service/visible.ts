@@ -218,17 +218,23 @@ function splitItemKey(key: string): { product: string; number: number }[] {
 
 /**
  * A note event as `reach` may read it. The stored `about` names the note's
- * own product's items, which a product follower reaches whole; a key reaching
- * the product only through a project gets just the keys of the items it
- * reaches, the rest added to `aboutOthers`. Any other event as stored.
+ * own product's items, which a product follower reaches whole, so it reads
+ * the event as stored; a key reaching the product only through a project gets
+ * just the keys of the items it reaches, the rest added to `aboutOthers`. Any
+ * other event as stored.
  */
 export function eventForReach<
-  E extends { subjectType: string; payload: Record<string, unknown> },
+  E extends {
+    subjectType: string;
+    productId: string | null;
+    payload: Record<string, unknown>;
+  },
 >(db: Db, reach: Reach, event: E): E {
   if (
     reach === null ||
     event.subjectType !== "issue" ||
-    event.payload.about === undefined
+    event.payload.about === undefined ||
+    (event.productId !== null && reach.products.includes(event.productId))
   )
     return event;
   const stored = event.payload as About;

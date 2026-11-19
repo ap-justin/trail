@@ -355,11 +355,18 @@ test("the created entry carries the type the item was created with, on the timel
   const issue = await seed.item(p.key, "issue");
   await v1("PATCH", `/items/${issue}`, { type: "todo" });
   const todo = await seed.item(p.key, "todo");
+  const note = await seed.item(p.key, "note");
+  const retypedNote = await seed.item(p.key, "note");
+  expect(
+    (await v1("PATCH", `/items/${retypedNote}`, { type: "issue" })).status,
+  ).toBe(200);
 
   const feed = (await get(`/feed?product=${p.key}`)).body.items as Body[];
   for (const [key, createdAs] of [
     [issue, "issue"],
     [todo, "todo"],
+    [note, "note"],
+    [retypedNote, "note"],
   ]) {
     const { body } = await get(`/items/${key}`);
     expect(body.timeline[0], key).toMatchObject({

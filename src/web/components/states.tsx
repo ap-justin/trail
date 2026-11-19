@@ -306,17 +306,10 @@ export function IssueError({
 }
 
 /** Rows of key, title and a trailing column: the issue list and the projects table. */
-export function ListSkeleton({
-  rows = 4,
-  className,
-}: {
-  /** As many as the list is known to hold, so it doesn't shrink when they land. */
-  rows?: number;
-  className?: string;
-}) {
+export function ListSkeleton({ className }: { className?: string }) {
   return (
     <LoadingRegion className={cn("flex flex-col gap-3 py-4", className)}>
-      {[...Array(rows).keys()].map((row) => (
+      {[...Array(4).keys()].map((row) => (
         <div key={row} className="flex items-center gap-2.5">
           <SkeletonBlock className="w-12" />
           <SkeletonBlock className="flex-1" />

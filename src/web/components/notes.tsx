@@ -1,12 +1,13 @@
 import { useId, useRef } from "react";
 import { RowLink } from "@/components/app-link";
-import { ErrorState, ListSkeleton } from "@/components/states";
+import { ErrorState, LoadingRegion, SkeletonBlock } from "@/components/states";
 import { Age, AsideHeading } from "@/components/status-updates";
 import { KeyText } from "@/components/text";
 import { Button } from "@/components/ui/button";
 import type { WebItemCountsView, WebItemRowView } from "@/lib/api-types";
 import type { Loadable } from "@/lib/loadable";
 import { paths } from "@/lib/paths";
+import { cn } from "@/lib/utils";
 
 export type NotesSectionProps = {
   /** The current notes, in the list's order. */
@@ -74,6 +75,27 @@ export function NotesSection({
   );
 }
 
+const NOTE_ROW_BOX =
+  "flex min-h-11 items-center gap-2.5 border-b border-rule py-2 max-lg:mx-4 lg:min-h-0 lg:px-2";
+
+/** One placeholder per known note in the rows' own box, so the section doesn't grow when they land. */
+function NoteRowsSkeleton({ rows }: { rows: number }) {
+  return (
+    <LoadingRegion>
+      {[...Array(rows).keys()].map((row) => (
+        <div key={row} className={NOTE_ROW_BOX}>
+          {/* a row is as tall as its text's line at lg, where nothing else holds it open */}
+          <div className="flex h-lh flex-1 items-center gap-2.5">
+            <SkeletonBlock className="w-12" />
+            <SkeletonBlock className="flex-1" />
+            <SkeletonBlock className="w-15" />
+          </div>
+        </div>
+      ))}
+    </LoadingRegion>
+  );
+}
+
 function NotesBody({
   notes,
   current,
@@ -92,8 +114,7 @@ function NotesBody({
       </p>
     );
   }
-  if (notes.status === "loading")
-    return <ListSkeleton rows={current} className="px-4 lg:px-2" />;
+  if (notes.status === "loading") return <NoteRowsSkeleton rows={current} />;
   if (notes.status === "error") {
     return (
       <ErrorState
@@ -110,7 +131,10 @@ function NotesBody({
           key={note.key}
           data-item-key={note.key}
           // the item table rows' hover wash, which this list continues
-          className="relative flex min-h-11 items-center gap-2.5 border-b border-rule py-2 transition-colors hover:bg-muted/50 max-lg:mx-4 lg:min-h-0 lg:px-2"
+          className={cn(
+            NOTE_ROW_BOX,
+            "relative transition-colors hover:bg-muted/50",
+          )}
         >
           <KeyText className="shrink-0">{note.key}</KeyText>
           <RowLink

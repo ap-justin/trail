@@ -1,8 +1,9 @@
 import { eq } from "drizzle-orm";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { activityEventSchema } from "../../shared/schemas.js";
-import { webhookDelivery } from "../db/schema.js";
+import { activityEvent, webhookDelivery } from "../db/schema.js";
 import { createBot, createKey } from "../service/keys.js";
+import { eventForReach, type Reach } from "../service/visible.js";
 import { atFakeTimeAsync, projectKey, setupTestApp } from "../test-app.js";
 
 const { bot, addBot, db, request } = setupTestApp();
@@ -379,6 +380,60 @@ test("GET /activity for a key reaching only the note's product names its own-pro
   for (const event of events) {
     expect(activityEventSchema.safeParse(event).error).toBeUndefined();
   }
+});
+
+test("a note event read by a key reaching the note's product is returned as stored, without a statement", async () => {
+  const owner = await newProduct("about own product");
+  const todo = await ok(
+    await request("POST", "/api/v1/items", {
+      json: { type: "todo", product: owner.key, title: "work" },
+    }),
+    201,
+  );
+  const note = await ok(
+    await request("POST", "/api/v1/items", {
+      json: {
+        type: "note",
+        product: owner.key,
+        title: "record",
+        about: [todo.key],
+      },
+    }),
+    201,
+  );
+  const event = db
+    .select()
+    .from(activityEvent)
+    .where(eq(activityEvent.subjectId, note.id))
+    .get();
+  if (!event) throw new Error("no event for the note");
+  const statementsOf = (reach: Reach) => {
+    const prepare = vi.spyOn(db.$client, "prepare");
+    try {
+      return {
+        read: eventForReach(db, reach, event),
+        statements: prepare.mock.calls.length,
+      };
+    } finally {
+      prepare.mockRestore();
+    }
+  };
+
+  const byProduct = statementsOf({
+    products: [event.productId as string],
+    projects: [],
+    implicitProjects: true,
+  });
+  expect(byProduct.read).toBe(event);
+  expect(byProduct.statements).toBe(0);
+  // a key reaching the product only through a project still has its keys looked up
+  expect(
+    statementsOf({
+      products: [],
+      projects: ["no-project"],
+      implicitProjects: true,
+    }).statements,
+  ).toBeGreaterThan(0);
 });
 
 test("PATCH /items/{key} on a note by a third bot is 403 forbidden, and the note stays as written", async () => {
