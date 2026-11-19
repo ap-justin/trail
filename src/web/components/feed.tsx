@@ -705,7 +705,10 @@ function FeedRow({
           {sentence.verb}
           {sentence.subject}
           {sentence.title && (
-            <span aria-hidden="true" className="max-lg:hidden">
+            <span
+              aria-hidden="true"
+              className="min-w-0 wrap-anywhere max-lg:hidden"
+            >
               {sentence.title}
             </span>
           )}
