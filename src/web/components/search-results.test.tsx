@@ -18,7 +18,7 @@ const results = {
 };
 
 describe("SearchResults", () => {
-  test("products, projects and items as links: products by key and name, projects by name", () => {
+  test("products, projects and items as links: products by key and name, projects by name, items by status and type glyph", () => {
     render(
       <SearchResults
         query="team"
@@ -40,6 +40,12 @@ describe("SearchResults", () => {
     expect(issue).toHaveAccessibleName(
       "TRL-14 Team access: invite people OLD-187",
     );
+    // every item row leads with the same two glyphs, so keys line up whatever the type
+    expect(
+      [...(issue?.querySelectorAll("svg") ?? [])].map(
+        (svg) => svg.dataset.itemType ?? null,
+      ),
+    ).toEqual([null, "issue"]);
   });
 
   test("a note's row carries its status glyph and the Note glyph, and says it's a note; an archived one says so and looks it", () => {

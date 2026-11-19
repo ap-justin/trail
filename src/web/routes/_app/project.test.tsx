@@ -313,19 +313,26 @@ describe("while the next filter loads", () => {
           await held;
           heldAnswered = true;
         }
-        return HttpResponse.json(
-          projectItems([{ product: trail, items: [todoRow(), noteRow()] }]),
-        );
+        const list = projectItems([{ product: trail, items: [todoRow()] }]);
+        return HttpResponse.json({
+          ...list,
+          counts: { ...list.counts, notes: { current: 1, archived: 0 } },
+        });
       }),
     );
     const { queryClient } = renderApp("/projects/human-ui");
-    expect(await screen.findAllByText(noteRow().title)).not.toHaveLength(0);
+    const notes = () => screen.getByRole("region", { name: /^Notes/ });
+    expect(
+      await within(
+        await screen.findByRole("region", { name: /^Notes/ }),
+      ).findByText(noteRow().title),
+    ).toBeVisible();
     await userEvent.click(screen.getByRole("tab", { name: /^Open/ }));
     await userEvent.click(screen.getByRole("tab", { name: /^Done/ }));
     release();
     await waitFor(() => expect(heldAnswered).toBe(true));
     await waitFor(() => expect(queryClient.isFetching()).toBe(0));
-    expect(screen.getAllByText(noteRow().title)).not.toHaveLength(0);
+    expect(within(notes()).getByText(noteRow().title)).toBeVisible();
     expect(notesAsked).toHaveLength(1);
   });
 });

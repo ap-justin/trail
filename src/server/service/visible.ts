@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, or, type SQL, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, type SQL } from "drizzle-orm";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import type { Db } from "../db/client.js";
 import {
@@ -205,6 +205,18 @@ type About =
     };
 
 /**
+ * TRL-12 as its product key and number; none for a string no item's key could
+ * be (product_key_check keeps `-` out of a product key; 012 is not 12's key).
+ */
+function splitItemKey(key: string): { product: string; number: number }[] {
+  const dash = key.indexOf("-");
+  const number = Number(key.slice(dash + 1));
+  return dash > 0 && String(number) === key.slice(dash + 1)
+    ? [{ product: key.slice(0, dash), number }]
+    : [];
+}
+
+/**
  * A note event as `reach` may read it. The stored `about` names the note's
  * own product's items, which a product follower reaches whole; a key reaching
  * the product only through a project gets just the keys of the items it
@@ -229,20 +241,23 @@ export function eventForReach<
     : (stored.aboutOthers as { from: number; to: number });
   const named = [...new Set([...keys.from, ...keys.to])];
   if (named.length === 0) return event;
-  const itemKey = sql<string>`${product.key} || '-' || ${issue.number}`;
+  const parts = named.flatMap(splitItemKey);
+  // keys × numbers over-fetches pairs nobody named; `shown` drops them. Kept as
+  // two lists so product.key and issue_product_number_unique serve the lookup
   const reached = new Set(
     db
-      .select({ key: itemKey })
-      .from(issue)
-      .innerJoin(product, eq(product.id, issue.productId))
+      .select({ key: product.key, number: issue.number })
+      .from(product)
+      .innerJoin(issue, eq(issue.productId, product.id))
       .where(
         and(
-          inArray(itemKey, named),
+          inArray(product.key, [...new Set(parts.map((p) => p.product))]),
+          inArray(issue.number, [...new Set(parts.map((p) => p.number))]),
           itemsReached(db, reach, issue.id, issue.productId),
         ),
       )
       .all()
-      .map((r) => r.key),
+      .map((r) => `${r.key}-${r.number}`),
   );
   const shown = (side: string[]) => side.filter((k) => reached.has(k));
   const from = shown(keys.from);

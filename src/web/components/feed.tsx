@@ -76,7 +76,7 @@ export type FeedViewProps = {
   productFilter: string | null;
   /** A project slug, or null for all projects. */
   projectFilter: string | null;
-  /** Issues or todos only, or null for every kind of entry. */
+  /** Issues, todos or notes only, or null for every kind of entry. */
   typeFilter: WebItemType | null;
   onActorFilterChange: (actorId: string | null) => void;
   onProductFilterChange: (productKey: string | null) => void;

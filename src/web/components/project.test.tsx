@@ -381,6 +381,20 @@ describe("375", () => {
     expect(filtersButton()).toHaveAccessibleName("Filters 1 in use");
   });
 
+  test("under the Notes type the sheet's button counts notes, not items", async () => {
+    const user = userEvent.setup();
+    render(<FilteredProject />);
+    await user.click(filtersButton());
+    const sheet = await screen.findByRole("dialog", { name: "Filters" });
+    await user.click(within(sheet).getByRole("combobox", { name: "Type" }));
+    await user.click(await screen.findByRole("option", { name: "Notes" }));
+    expect(
+      await within(sheet).findByRole("button", {
+        name: /^Show (\d+ notes?|notes)$/,
+      }),
+    ).toBeInTheDocument();
+  });
+
   test("the button counts the product and type in force; while the list loads the sheet has no count", async () => {
     const user = userEvent.setup();
     renderProject({
@@ -627,7 +641,7 @@ describe("notes", () => {
     });
   });
 
-  test("a project with notes and no work lists its notes when asked, not the empty state", () => {
+  test("a project with notes and no work lists its notes when asked, not the empty state, and its group counts notes", () => {
     renderProject({
       filters: { ...NO_PROJECT_FILTERS, type: "note", status: "archived" },
       items: {
@@ -645,6 +659,13 @@ describe("notes", () => {
       screen.getAllByRole("link", { name: "TRL-29 Old deploy steps" }),
     ).not.toHaveLength(0);
     expect(screen.queryByRole("region", { name: /^Notes/ })).toBeNull();
+    // a group of notes counts notes, at both widths
+    expect(
+      within(groupBody("TRL")).getByRole("columnheader"),
+    ).toHaveTextContent("TRL trail 1 note");
+    expect(
+      screen.getByRole("region", { name: "TRL trail 1 note" }),
+    ).toBeInTheDocument();
   });
 
   test("a project with notes and no work: Show archived notes leaves focus on the list", async () => {

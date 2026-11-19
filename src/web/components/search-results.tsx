@@ -38,7 +38,7 @@ const row =
 /**
  * The search box's results, drawn in the shell's `searchResults` slot at both widths:
  * one list of products (package glyph), projects (folder glyph), then items (status
- * glyph, and a note's Note glyph), each a link reachable by Tab from the box. Following one ends the search: the shell clears the box, so
+ * glyph and type glyph, as list rows draw them), each a link reachable by Tab from the box. Following one ends the search: the shell clears the box, so
  * there is no callback here.
  */
 export function SearchResults({
@@ -165,8 +165,7 @@ function SearchResultsBody({ results }: { results: Results }) {
             className={row}
           >
             <StatusIcon status={issue.status} />
-            {/* a note's status glyph alone reads as a work status; the Note glyph beside it says what it is */}
-            {issue.type === "note" && <TypeIcon type="note" decorative />}
+            <TypeIcon type={issue.type} decorative />
             <KeyText>{issue.key}</KeyText>
             <span className="min-w-0 flex-1 truncate">{issue.title}</span>
             {issue.sourceKey && (

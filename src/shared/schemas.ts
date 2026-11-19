@@ -1265,7 +1265,7 @@ export const itemUpdateSchema = z
           "A bot's name (any case) or id, or a person's id; null unassigns an issue (a todo always keeps one, and a note never has one).",
       }),
       about: aboutKeys.optional().meta({
-        description: `A note's: replaces the items it is about; [] clears them. ${ABOUT}`,
+        description: `A note's: replaces the items it is about; [] clears them. A replace keeps the items this key cannot reach. ${ABOUT}`,
       }),
       addAbout: aboutKeys.optional().meta({
         description:

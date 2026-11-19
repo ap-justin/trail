@@ -437,21 +437,29 @@ test("update_item refuses priority and estimate on a note, or with type note, sa
 
 test("update_item takes back a note's own priority 0 and estimate null, as get_item shows them, changing nothing", async () => {
   const owner = await productBot("Echoer");
-  const note = await call(owner.client, "add_note", {
-    product: owner.product,
-    title: "record",
-  });
+  const [note] = await atFakeTimeAsync([
+    () =>
+      call(owner.client, "add_note", {
+        product: owner.product,
+        title: "record",
+      }),
+  ]);
+  const events = async () =>
+    (await call(owner.client, "list_activity", { product: owner.product }))
+      .items.length;
+  const before = await events();
   const echoed = await call(owner.client, "update_item", {
-    item: note.key,
+    item: note?.key,
     priority: 0,
     estimate: null,
   });
   expect(echoed).toMatchObject({
-    key: note.key,
+    key: note?.key,
     priority: 0,
     estimate: null,
-    updatedAt: note.updatedAt,
+    updatedAt: note?.updatedAt,
   });
+  expect(await events()).toBe(before);
 });
 
 test("update_item replaces, adds to and removes from about, never about with addAbout or removeAbout", async () => {

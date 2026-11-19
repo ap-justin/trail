@@ -12,6 +12,7 @@ import {
   ProductView,
   type ProductViewProps,
 } from "@/components/product";
+import { priorityLabel } from "@/components/status";
 import {
   beta,
   countsOf,
@@ -488,7 +489,7 @@ describe("notes", () => {
       items: {
         status: "ready",
         data: {
-          items: [archived],
+          items: [{ ...archived, priority: 2 }],
           nextCursor: null,
           counts: countsOf([...current, archived]),
         },
@@ -504,7 +505,19 @@ describe("notes", () => {
       name: "TRL-29 Old deploy steps",
       description: /Note/,
     });
-    expect(phoneRow).not.toHaveAccessibleDescription(/priority/i);
+    expect(phoneRow).not.toHaveAccessibleDescription(
+      new RegExp(priorityLabel(2)),
+    );
+  });
+
+  test("a work row's phone description carries its priority, so the note row's lack is the rule", () => {
+    renderProduct();
+    const item = document.querySelector('li[data-item-key="TRL-17"]');
+    if (!(item instanceof HTMLElement)) throw new Error("no 375 row");
+    const link = within(item).getByRole("link", {
+      name: "TRL-17 Human UI: feed, projects, issue page",
+    });
+    expect(link).toHaveAccessibleDescription(new RegExp(priorityLabel(2)));
   });
 
   test("a work list keeps its Priority and Assignee columns", () => {

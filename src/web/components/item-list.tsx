@@ -224,9 +224,9 @@ function StatusTabs({
 }
 
 /** The Filters sheet's primary button; without a count while the list loads. */
-function showItemsLabel(count: number | undefined) {
-  if (count === undefined) return "Show items";
-  return `Show ${count} ${itemNoun(count)}`;
+function showItemsLabel(count: number | undefined, type: ItemType | null) {
+  if (count === undefined) return type === "note" ? "Show notes" : "Show items";
+  return `Show ${count} ${itemNoun(count, type === "note" ? "note" : null)}`;
 }
 
 function StatusChips({
@@ -320,7 +320,10 @@ export function ItemFilterBar({
           activeCount={
             [sheet.active, filters.type !== null].filter(Boolean).length
           }
-          doneLabel={showItemsLabel(typeCounts?.[filters.status ?? ALL])}
+          doneLabel={showItemsLabel(
+            typeCounts?.[filters.status ?? ALL],
+            filters.type,
+          )}
           className="mx-4 mt-3 self-start lg:hidden"
         >
           {sheet.select}
@@ -434,22 +437,27 @@ function Labels({
   );
 }
 
-const itemNoun = (count: number) => (count === 1 ? "item" : "items");
+function itemNoun(count: number, type: ItemType | null = null) {
+  const plural = nouns[type ?? "all"];
+  return count === 1 ? plural.slice(0, -1) : plural;
+}
 
-/** `TRL trail 8 items`: a product group's heading, key in mono. */
+/** `TRL trail 8 items`, or `3 notes` in a list of notes: a product group's heading, key in mono. */
 export function GroupHeading({
   product,
   count,
+  notes,
 }: {
   product: WebProductRefView;
   count: number;
+  notes: boolean;
 }) {
   return (
     <span className="flex min-w-0 items-center gap-2">
       <KeyText className="text-foreground">{product.key}</KeyText>{" "}
       <span className="truncate font-medium">{product.name}</span>{" "}
       <span className="shrink-0 text-xs font-normal whitespace-nowrap text-muted-foreground">
-        {count} {itemNoun(count)}
+        {count} {itemNoun(count, notes ? "note" : null)}
       </span>
     </span>
   );
@@ -461,6 +469,10 @@ export type ItemGroup = {
   count: number;
   items: WebItemRowView[];
 };
+
+/** A list holds notes only when filtered to them: without a type it holds issues and todos. */
+const holdsWork = (groups: ItemGroup[]) =>
+  groups.some((group) => group.items.some((item) => item.type !== "note"));
 
 const head = "h-7.5 px-0";
 
@@ -478,10 +490,7 @@ export function ItemTable({
   labels: boolean;
   now: Date;
 }) {
-  // a list holds notes only when filtered to them: without a type it holds issues and todos
-  const work = groups.some((group) =>
-    group.items.some((item) => item.type !== "note"),
-  );
+  const work = holdsWork(groups);
   const columns = 5 + (labels ? 1 : 0) + (work ? 2 : 0);
   return (
     <Table className="table-fixed max-lg:hidden">
@@ -526,7 +535,11 @@ export function ItemTable({
                 )}
               >
                 <div className="flex h-8.5 items-center px-2">
-                  <GroupHeading product={group.product} count={group.count} />
+                  <GroupHeading
+                    product={group.product}
+                    count={group.count}
+                    notes={!work}
+                  />
                 </div>
               </TableHead>
             </TableRow>
@@ -591,6 +604,7 @@ export function ItemTable({
  */
 export function ItemRows({ groups, now }: { groups: ItemGroup[]; now: Date }) {
   const id = useId();
+  const notes = !holdsWork(groups);
   return (
     <div className="lg:hidden">
       {groups.map((group) => (
@@ -606,7 +620,11 @@ export function ItemRows({ groups, now }: { groups: ItemGroup[]; now: Date }) {
               id={`${id}-${group.product.key}`}
               className="flex items-center px-4 pt-5 pb-0.5 font-normal"
             >
-              <GroupHeading product={group.product} count={group.count} />
+              <GroupHeading
+                product={group.product}
+                count={group.count}
+                notes={notes}
+              />
             </h3>
           )}
           <ul>
@@ -645,7 +663,7 @@ export function ItemRows({ groups, now }: { groups: ItemGroup[]; now: Date }) {
                             {statusLabel(item.status)}
                           </span>{" "}
                           <RowAssignee item={item} />{" "}
-                          {item.priority !== 0 && (
+                          {item.type !== "note" && item.priority !== 0 && (
                             <span>{priorityLabel(item.priority)} </span>
                           )}
                           {item.labels.length > 0 && (
