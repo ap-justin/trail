@@ -203,9 +203,10 @@ export function ProductSelect({
 const TYPE_OPTIONS: { value: WebItemType; label: string }[] = [
   { value: "issue", label: "Issues" },
   { value: "todo", label: "Todos" },
+  { value: "note", label: "Notes" },
 ];
 
-/** "All types", Issues or Todos. */
+/** "All types", Issues, Todos or Notes. */
 export function TypeSelect({
   value,
   onChange,

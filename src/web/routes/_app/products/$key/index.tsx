@@ -49,6 +49,13 @@ function ProductPage() {
     !items.data.items.some((item) => matchesFilters(item, filters))
       ? { data: undefined, isError: false }
       : items;
+  // the Notes section's, once the list's counts say there are current notes; a list of
+  // notes has no section
+  const notes = useQuery({
+    ...productItemsQuery(key, { type: "note", status: "current" }),
+    enabled: type !== "note" && (items.data?.counts.notes.current ?? 0) > 0,
+    select: (list) => list.items,
+  });
   const updates = useQuery({
     queryKey: keys.productStatusUpdates(key),
     queryFn: () => api.productStatusUpdates(key),
@@ -72,6 +79,7 @@ function ProductPage() {
         product={ref}
         detail={product.data ?? null}
         items={loadableOf(shownItems)}
+        notes={loadableOf(notes)}
         statusUpdates={loadableOf(updates)}
         filters={filters}
         onFiltersChange={(next) =>
@@ -79,6 +87,7 @@ function ProductPage() {
         }
         onNewIssue={() => openNewIssue(key)}
         onRetryItems={() => void items.refetch()}
+        onRetryNotes={() => void notes.refetch()}
         onRetryStatusUpdates={() => void updates.refetch()}
         footer={
           // the last filter's list stands in until this one loads, and its cap isn't this one's

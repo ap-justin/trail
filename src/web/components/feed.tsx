@@ -449,11 +449,17 @@ const statusUpdateVerb = (on: "product" | "project") => (
   </span>
 );
 
+const createdVerb: Record<WebItemType, string> = {
+  issue: "filed",
+  todo: "planned",
+  note: "wrote",
+};
+
 function sentenceFor(entry: EntryView): Sentence | null {
   switch (entry.kind) {
     case "item_created":
       return {
-        verb: muted(entry.createdAs === "todo" ? "planned" : "filed"),
+        verb: muted(createdVerb[entry.createdAs]),
         subject: itemSubject(entry.item),
         title: entry.item.title,
         sourceAuthor: entry.sourceAuthor,

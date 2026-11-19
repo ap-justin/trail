@@ -478,6 +478,19 @@ describe("item events", () => {
     expect(within(rowFor("person")).getByText("filed")).toBeVisible();
   });
 
+  test("a bot writes a note: the row reads wrote, with the Note glyph before the key", () => {
+    renderFeed({
+      entries: [
+        itemCreatedEntry("note", minutesAgo(1), {
+          item: { key: "TRL-31", title: "Why newest first", type: "note" },
+        }),
+      ],
+    });
+    const row = rowFor("note");
+    expect(within(row).getByText("wrote")).toBeVisible();
+    expect(within(row).getByRole("img", { name: "Note" })).toBeVisible();
+  });
+
   test("an issue a bot filed and the owner accepted as a todo still reads filed", () => {
     renderFeed({
       entries: [
@@ -597,7 +610,7 @@ describe("filters", () => {
     expect(types).toHaveTextContent("All types");
   });
 
-  test("the type menu offers Issues and Todos and chooses by type", async () => {
+  test("the type menu offers Issues, Todos and Notes and chooses by type", async () => {
     const user = userEvent.setup();
     const props = renderFeed();
     await user.click(screen.getByRole("combobox", { name: "Filter by type" }));
@@ -606,10 +619,11 @@ describe("filters", () => {
       "All types",
       "Issues",
       "Todos",
+      "Notes",
     ]);
-    await user.click(screen.getByRole("option", { name: "Todos" }));
+    await user.click(screen.getByRole("option", { name: "Notes" }));
     expect(props.onTypeFilterChange).toHaveBeenCalledWith(
-      "todo",
+      "note",
       expect.anything(),
     );
   });

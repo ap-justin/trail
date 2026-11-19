@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import { AppLink } from "@/components/app-link";
 import { EmptyState, SkeletonBlock } from "@/components/states";
-import { StatusIcon } from "@/components/status";
+import { StatusIcon, TypeIcon } from "@/components/status";
 import { KeyText } from "@/components/text";
 import type { SearchView } from "@/lib/api-types";
 import { paths } from "@/lib/paths";
@@ -149,7 +149,12 @@ function SearchResultsBody({ results }: { results: Results }) {
               .join(" ")}
             className={row}
           >
-            <StatusIcon status={issue.status} />
+            {/* a note has no work status to show, so its row carries the Note glyph */}
+            {issue.type === "note" ? (
+              <TypeIcon type="note" decorative />
+            ) : (
+              <StatusIcon status={issue.status} />
+            )}
             <KeyText>{issue.key}</KeyText>
             <span className="min-w-0 flex-1 truncate">{issue.title}</span>
             {issue.sourceKey && (

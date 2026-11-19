@@ -6,6 +6,8 @@ const statuses = {
   in_progress: true,
   done: true,
   canceled: true,
+  current: true,
+  archived: true,
   // triage is no tab of its own: the Open tab's ?status=open matches it
 } satisfies Record<StatusFilter, true>;
 
@@ -13,7 +15,7 @@ const isStatus = (value: unknown): value is StatusFilter =>
   typeof value === "string" && Object.hasOwn(statuses, value);
 
 const isType = (value: unknown): value is ItemType =>
-  value === "issue" || value === "todo";
+  value === "issue" || value === "todo" || value === "note";
 
 /** `?status=` and `?type=` in an item list's URL; absent is All. */
 export type ItemSearch = { status?: StatusFilter; type?: ItemType };

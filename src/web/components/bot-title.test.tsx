@@ -289,7 +289,9 @@ describe("product", () => {
         }}
         filters={{ type: null, status: null }}
         onFiltersChange={vi.fn()}
+        notes={{ status: "ready", data: [] }}
         onRetryItems={vi.fn()}
+        onRetryNotes={vi.fn()}
         onRetryStatusUpdates={vi.fn()}
         onNewIssue={vi.fn()}
         now={now}

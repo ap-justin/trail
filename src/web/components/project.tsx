@@ -14,6 +14,7 @@ import {
   statusFilterOf,
   statusTabValue,
 } from "@/components/item-list";
+import { NotesSection } from "@/components/notes";
 import {
   EmptyState,
   ErrorState,
@@ -29,6 +30,7 @@ import {
 import { KeyText } from "@/components/text";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import type {
+  WebItemRowView,
   WebProjectDetailView,
   WebProjectItemsView,
   WebProjectView,
@@ -52,12 +54,15 @@ export type ProjectViewProps = {
   project: Loadable<WebProjectDetailView>;
   /** The groups under `filters`; `counts` follow the product filter alone. */
   items: Loadable<WebProjectItemsView>;
+  /** The current notes under the product filter, for the Notes section under the list. */
+  notes: Loadable<WebItemRowView[]>;
   /** Newest first. */
   statusUpdates: Loadable<WebStatusUpdatePageView>;
   filters: ProjectItemFilters;
   onFiltersChange: (filters: ProjectItemFilters) => void;
   onRetryProject: () => void;
   onRetryItems: () => void;
+  onRetryNotes: () => void;
   onRetryStatusUpdates: () => void;
   /** Under the list, before Status updates below lg. */
   footer?: ReactNode;
@@ -251,11 +256,13 @@ function ProjectBody(
   const updatesHeading = useId();
   const listRef = useRef<HTMLDivElement>(null);
   const updatesHeadingRef = useRef<HTMLHeadingElement>(null);
-  // no items at all leaves nothing to filter; none under a product filter is a filter result
+  // no items at all leaves nothing to filter; none under a product filter, or a list of
+  // notes, is a filter result
   const empty =
     items.status === "ready" &&
     items.data.counts.all.all === 0 &&
-    filters.product === null;
+    filters.product === null &&
+    filters.type !== "note";
   const counts = items.status === "ready" ? items.data.counts : null;
   const productSelect = (fieldLabel?: string) => (
     <ProductSelect
@@ -331,6 +338,19 @@ function ProjectBody(
           </Tabs>
         )}
         {props.footer}
+        {counts && filters.type !== "note" && (
+          <NotesSection
+            notes={props.notes}
+            counts={counts.notes}
+            onShowArchived={() => {
+              listRef.current?.focus();
+              onFiltersChange({ ...filters, type: "note", status: "archived" });
+            }}
+            onRetry={props.onRetryNotes}
+            now={now}
+            className="mt-6"
+          />
+        )}
       </div>
       <aside className="flex flex-col gap-5 max-lg:pt-5 max-lg:pb-6 lg:w-75 lg:shrink-0">
         <section aria-labelledby={detailsHeading} className="max-lg:hidden">

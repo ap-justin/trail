@@ -10,8 +10,10 @@ import {
 } from "@/components/product";
 import {
   beta,
+  countsOf,
   issueRow,
   itemList,
+  noteRow,
   productDetail,
   projectRow,
   statusUpdate,
@@ -44,6 +46,7 @@ function props(overrides: Partial<ProductViewProps> = {}): ProductViewProps {
     product: trail,
     detail: productDetail(),
     items: { status: "ready", data: itemList(rows) },
+    notes: { status: "ready", data: [] },
     statusUpdates: {
       status: "ready",
       data: { items: [statusUpdate()], nextCursor: null },
@@ -52,6 +55,7 @@ function props(overrides: Partial<ProductViewProps> = {}): ProductViewProps {
     onFiltersChange: vi.fn(),
     onNewIssue: vi.fn(),
     onRetryItems: vi.fn(),
+    onRetryNotes: vi.fn(),
     onRetryStatusUpdates: vi.fn(),
     now,
     ...overrides,
@@ -387,6 +391,131 @@ describe("type toggle and status tabs", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Couldn't load items");
     await user.click(screen.getByRole("button", { name: "Try again" }));
     expect(p.onRetryItems).toHaveBeenCalledOnce();
+  });
+});
+
+describe("notes", () => {
+  const current = [
+    noteRow(),
+    noteRow({ key: "TRL-33", title: "Release names follow the alphabet" }),
+  ];
+  const archived = noteRow({
+    key: "TRL-29",
+    title: "Old deploy steps",
+    status: "archived",
+  });
+  // the server lists work without type; the counts carry the notes apart
+  const workWithNotes = {
+    ...itemList(rows),
+    counts: countsOf([...rows, ...current, archived]),
+  };
+  const notesSection = () => screen.getByRole("region", { name: /^Notes/ });
+
+  test("current notes show in a Notes section under the work list, each a link, and work counts leave them out", () => {
+    renderProduct({
+      items: { status: "ready", data: workWithNotes },
+      notes: { status: "ready", data: current },
+    });
+    expect(
+      within(notesSection()).getByRole("heading", { name: "Notes 2" }),
+    ).toBeInTheDocument();
+    expect(
+      within(notesSection())
+        .getAllByRole("link")
+        .map((l) => l.getAttribute("href")),
+    ).toEqual(["/products/TRL/31", "/products/TRL/33"]);
+    expect(tableKeys()).not.toContain("TRL-31");
+    expect(
+      within(typeToggle()).getByRole("button", { name: "All 4" }),
+    ).toBeInTheDocument();
+    expect(
+      within(typeToggle()).getByRole("button", { name: "Notes 3" }),
+    ).toBeInTheDocument();
+    expect(within(tabs()).getByRole("tab", { name: "All 4" })).toBeVisible();
+  });
+
+  test("Archived notes lists the archived ones in the page's list, with focus on the list", async () => {
+    const user = userEvent.setup();
+    const p = renderProduct({
+      items: { status: "ready", data: workWithNotes },
+      notes: { status: "ready", data: current },
+    });
+    await user.click(
+      within(notesSection()).getByRole("button", { name: "Archived notes 1" }),
+    );
+    expect(p.onFiltersChange).toHaveBeenCalledWith({
+      type: "note",
+      status: "archived",
+    });
+    expect(screen.getByRole("tabpanel", { name: /^All/ })).toHaveFocus();
+  });
+
+  test("a list of notes has Current and Archived tabs, no Notes section, and no New issue for a product with no work", () => {
+    renderProduct({
+      filters: { type: "note", status: "archived" },
+      items: {
+        status: "ready",
+        data: {
+          items: [archived],
+          nextCursor: null,
+          counts: countsOf([...current, archived]),
+        },
+      },
+    });
+    expect(tableKeys()).toEqual(["TRL-29"]);
+    expect(
+      [...within(tabs()).getAllByRole("tab")].map((t) => t.textContent),
+    ).toEqual(["All 3", "Current 2", "Archived 1"]);
+    expect(screen.queryByRole("region", { name: /^Notes/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "New issue" })).toBeNull();
+  });
+
+  test("leaving Notes for a work type drops a note status", async () => {
+    const user = userEvent.setup();
+    const p = renderProduct({
+      filters: { type: "note", status: "archived" },
+      items: { status: "ready", data: workWithNotes },
+    });
+    await user.click(
+      within(typeToggle()).getByRole("button", { name: /^Issues/ }),
+    );
+    expect(p.onFiltersChange).toHaveBeenCalledWith({
+      type: "issue",
+      status: null,
+    });
+  });
+
+  test("only archived notes: the section says there are no current ones and still links the archived", () => {
+    renderProduct({
+      items: {
+        status: "ready",
+        data: { ...itemList(rows), counts: countsOf([...rows, archived]) },
+      },
+    });
+    expect(notesSection()).toHaveTextContent("No current notes.");
+    expect(
+      within(notesSection()).getByRole("button", { name: "Archived notes 1" }),
+    ).toBeInTheDocument();
+  });
+
+  test("a product with no notes has no Notes section", () => {
+    renderProduct();
+    expect(screen.queryByRole("region", { name: /^Notes/ })).toBeNull();
+  });
+
+  test("a failed notes list says so and retries", async () => {
+    const user = userEvent.setup();
+    const p = renderProduct({
+      items: { status: "ready", data: workWithNotes },
+      notes: { status: "error" },
+    });
+    expect(within(notesSection()).getByRole("alert")).toHaveTextContent(
+      "Couldn't load notes",
+    );
+    await user.click(
+      within(notesSection()).getByRole("button", { name: "Try again" }),
+    );
+    expect(p.onRetryNotes).toHaveBeenCalledOnce();
   });
 });
 

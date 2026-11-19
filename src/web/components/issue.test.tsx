@@ -20,6 +20,7 @@ import {
   humanUi,
   issue,
   maya,
+  note,
   teamAccess,
   todo,
 } from "@/test/fixtures";
@@ -1191,4 +1192,73 @@ test("an assignment line shows the assignee's avatar before their name", () => {
   expect(
     avatar.compareDocumentPosition(name) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
+});
+
+describe("notes", () => {
+  test("a note's page says Note and Current, has no Assignee, and links the items it is about", () => {
+    renderIssue({
+      issueKey: "TRL-31",
+      issue: { status: "ready", data: note() },
+    });
+    const properties = screen.getByRole("region", { name: "Properties" });
+    expect(within(properties).getByText("Note")).toBeInTheDocument();
+    expect(within(properties).getByText("Current")).toBeInTheDocument();
+    expect(within(properties).queryByText("Assignee")).toBeNull();
+    expect(screen.getByText("written by")).toBeInTheDocument();
+    const about = screen.getByRole("region", { name: "About" });
+    const links = within(about).getAllByRole("link");
+    expect(links.map((l) => l.getAttribute("href"))).toEqual([
+      "/products/TRL/14",
+      "/products/TRL/15",
+    ]);
+    expect(links[0]).toHaveAccessibleName(
+      "In progress Issue TRL-14 Team access",
+    );
+    expect(screen.queryByRole("region", { name: "Notes" })).toBeNull();
+  });
+
+  test("an archived note reads Archived", () => {
+    renderIssue({
+      issueKey: "TRL-31",
+      issue: { status: "ready", data: note({ status: "archived" }) },
+    });
+    const properties = screen.getByRole("region", { name: "Properties" });
+    expect(within(properties).getByText("Archived")).toBeInTheDocument();
+  });
+
+  test("its creation reads wrote this note", () => {
+    renderIssue({
+      issueKey: "TRL-31",
+      issue: { status: "ready", data: note() },
+    });
+    expect(screen.getByText("wrote this note")).toBeInTheDocument();
+  });
+
+  test("an item's page lists the notes about it, each a link with its state", () => {
+    renderIssue({
+      issue: {
+        status: "ready",
+        data: issue({
+          notes: [
+            {
+              key: "TRL-31",
+              title: "Why the feed reads newest first",
+              type: "note",
+              status: "current",
+            },
+          ],
+        }),
+      },
+    });
+    const notes = screen.getByRole("region", { name: "Notes" });
+    expect(within(notes).getByRole("link")).toHaveAccessibleName(
+      "Current Note TRL-31 Why the feed reads newest first",
+    );
+    expect(screen.queryByRole("region", { name: "About" })).toBeNull();
+  });
+
+  test("an item no note is about has no Notes section", () => {
+    renderIssue();
+    expect(screen.queryByRole("region", { name: "Notes" })).toBeNull();
+  });
 });

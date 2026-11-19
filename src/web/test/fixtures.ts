@@ -4,6 +4,7 @@ import type {
   WebActorView,
   WebConversationView,
   WebItemListView,
+  WebItemRefView,
   WebItemRowView,
   WebItemView,
   WebMessageView,
@@ -170,7 +171,16 @@ export function issueList(
     ...counts,
   };
   const none = { all: 0, open: 0, in_progress: 0, done: 0, canceled: 0 };
-  return { items, nextCursor: null, counts: { all, issue: all, todo: none } };
+  return {
+    items,
+    nextCursor: null,
+    counts: {
+      all,
+      issue: all,
+      todo: none,
+      notes: { current: 0, archived: 0 },
+    },
+  };
 }
 
 export function issue(overrides: Partial<WebItemView> = {}): WebItemView {
@@ -203,6 +213,8 @@ export function issue(overrides: Partial<WebItemView> = {}): WebItemView {
     createdAt: "2026-11-09T14:02:00.000Z",
     updatedAt: "2026-11-11T09:44:00.000Z",
     completedAt: null,
+    about: [],
+    notes: [],
     timeline: [
       {
         ...on,
@@ -330,7 +342,59 @@ export function todo(overrides: Partial<WebItemView> = {}): WebItemView {
   });
 }
 
-type Item = { key: string; title: string; type: "issue" | "todo" };
+/** TRL-31, a current note Alpha wrote about TRL-14 and TRL-15. */
+export function note(overrides: Partial<WebItemView> = {}): WebItemView {
+  const on = {
+    product: trail,
+    project: null,
+    item: {
+      key: "TRL-31",
+      title: "Why the feed reads newest first",
+      type: "note" as const,
+    },
+  };
+  return issue({
+    key: "TRL-31",
+    type: "note",
+    title: "Why the feed reads newest first",
+    description: "People open the feed to see what just happened.",
+    status: "current",
+    priority: 0,
+    estimate: null,
+    labels: [],
+    links: [],
+    assignee: null,
+    creator: alpha,
+    about: [
+      {
+        key: "TRL-14",
+        title: "Team access",
+        type: "issue",
+        status: "in_progress",
+      },
+      {
+        key: "TRL-15",
+        title: "Back up the volume with Litestream",
+        type: "todo",
+        status: "open",
+      },
+    ],
+    timeline: [
+      {
+        ...on,
+        kind: "item_created",
+        id: "t1",
+        createdAt: "2026-11-11T10:20:00.000Z",
+        actor: alpha,
+        sourceAuthor: null,
+        createdAs: "note",
+      },
+    ],
+    ...overrides,
+  });
+}
+
+type Item = WebItemRefView;
 const teamAccessIssue: Item = {
   key: "TRL-14",
   title: "Team access: invite people",
@@ -475,6 +539,23 @@ export function todoRow(
   });
 }
 
+/** TRL-31, a current note Alpha wrote. */
+export function noteRow(
+  overrides: Partial<WebItemRowView> = {},
+): WebItemRowView {
+  return issueRow({
+    key: "TRL-31",
+    type: "note",
+    title: "Why the feed reads newest first",
+    status: "current",
+    priority: 0,
+    labels: [],
+    assignee: null,
+    updatedAt: "2026-11-11T10:20:00.000Z",
+    ...overrides,
+  });
+}
+
 const tally = (items: WebItemRowView[]): WebStatusCountsView => {
   const of = (status: WebItemRowView["status"]) =>
     items.filter((i) => i.status === status).length;
@@ -487,12 +568,17 @@ const tally = (items: WebItemRowView[]): WebStatusCountsView => {
   };
 };
 
-/** Counts per type and status tab, as the server tallies them, for exactly these rows. */
+/** Counts per type and status tab, as the server tallies them, for exactly these rows: notes apart. */
 export function countsOf(items: WebItemRowView[]) {
+  const notes = items.filter((i) => i.type === "note");
   return {
-    all: tally(items),
+    all: tally(items.filter((i) => i.type !== "note")),
     issue: tally(items.filter((i) => i.type === "issue")),
     todo: tally(items.filter((i) => i.type === "todo")),
+    notes: {
+      current: notes.filter((i) => i.status === "current").length,
+      archived: notes.filter((i) => i.status === "archived").length,
+    },
   };
 }
 

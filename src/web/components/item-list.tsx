@@ -46,19 +46,46 @@ export type ItemFilters = {
 
 export const NO_FILTERS: ItemFilters = { type: null, status: null };
 
-const filterStatuses: StatusFilter[] = [
+const workStatuses: StatusFilter[] = [
   "open",
   "in_progress",
   "done",
   "canceled",
 ];
+const noteStatuses: StatusFilter[] = ["current", "archived"];
 // the 375 chips leave Canceled out, unless it is the filter in force
-const chipStatuses: StatusFilter[] = ["open", "in_progress", "done"];
+const workChipStatuses: StatusFilter[] = ["open", "in_progress", "done"];
 const ALL = "all";
+
+/** The status tabs a type has: a note's two states, or the work statuses for the rest and All. */
+const statusesOf = (type: ItemType | null) =>
+  type === "note" ? noteStatuses : workStatuses;
 
 /** A tab value back to its filter: All and anything unknown are null. */
 export function statusFilterOf(value: string): StatusFilter | null {
-  return filterStatuses.find((status) => status === value) ?? null;
+  return (
+    [...workStatuses, ...noteStatuses].find((status) => status === value) ??
+    null
+  );
+}
+
+/** The filters under another type; a status that type has no tab for falls back to All. */
+function withType(filters: ItemFilters, type: ItemType | null): ItemFilters {
+  const keeps = filters.status && statusesOf(type).includes(filters.status);
+  return { ...filters, type, status: keeps ? filters.status : null };
+}
+
+/** A tab's count by its value, All included; a status the type has no tab for has none. */
+type StatusCounts = Partial<Record<StatusFilter | typeof ALL, number>>;
+
+/** The status tabs' counts under `type`: notes are counted apart from the work types. */
+function tabCounts(
+  counts: WebItemCountsView,
+  type: ItemType | null,
+): StatusCounts {
+  if (type !== "note") return counts[type ?? "all"];
+  const { current, archived } = counts.notes;
+  return { all: current + archived, current, archived };
 }
 
 /**
@@ -73,16 +100,18 @@ export function matchesFilters(item: WebItemRowView, filters: ItemFilters) {
   return item.status === filters.status;
 }
 
-const typeOptions = [
-  { value: ALL, label: "All", count: "all" },
-  { value: "issue", label: "Issues", count: "issue" },
-  { value: "todo", label: "Todos", count: "todo" },
-] as const;
+const typeOptions: { value: string; label: string; type: ItemType | null }[] = [
+  { value: ALL, label: "All", type: null },
+  { value: "issue", label: "Issues", type: "issue" },
+  { value: "todo", label: "Todos", type: "todo" },
+  { value: "note", label: "Notes", type: "note" },
+];
 
 /**
- * All, Issues or Todos, each with its count, on a segmented track: 32px beside the status
- * tabs at 1024px and up; 44px below, like the product select it can share a row with, and
- * as wide as it's let. `countsBelowLg={false}` drops the counts there, on that shared row.
+ * All (issues and todos), Issues, Todos or Notes, each with its count, on a segmented
+ * track: 32px beside the status tabs at 1024px and up; 44px below, like the product select
+ * it can share a row with, and as wide as it's let. `countsBelowLg={false}` drops the
+ * counts there, on that shared row.
  */
 export function TypeToggle({
   value,
@@ -106,7 +135,7 @@ export function TypeToggle({
         // pressing the current item again empties the group; keep the filter instead
         const picked = next[0];
         if (picked === undefined) return;
-        const type = picked === "issue" || picked === "todo" ? picked : null;
+        const type = typeOptions.find((o) => o.value === picked)?.type ?? null;
         if (type !== value) onChange(type);
       }}
       variant="segmented"
@@ -125,7 +154,7 @@ export function TypeToggle({
               <span
                 className={cn("text-2xs", !countsBelowLg && "max-lg:hidden")}
               >
-                {counts[option.count].all}
+                {tabCounts(counts, option.type).all}
               </span>
             </>
           )}
@@ -134,8 +163,6 @@ export function TypeToggle({
     </ToggleGroup>
   );
 }
-
-type StatusCounts = WebItemCountsView["all"];
 
 /** All, then each status, with its count once the list has loaded. */
 function statusOptions(statuses: StatusFilter[], counts: StatusCounts | null) {
@@ -155,9 +182,11 @@ function statusOptions(statuses: StatusFilter[], counts: StatusCounts | null) {
  * rule that scrolls sideways, its right edge masked so a tab cut there reads as more.
  */
 function StatusTabs({
+  type,
   counts,
   belowLg,
 }: {
+  type: ItemType | null;
   counts: StatusCounts | null;
   belowLg: boolean;
 }) {
@@ -174,7 +203,7 @@ function StatusTabs({
           : "max-lg:hidden",
       )}
     >
-      {statusOptions(filterStatuses, counts).map((option) => (
+      {statusOptions(statusesOf(type), counts).map((option) => (
         <TabsTrigger
           key={option.value}
           value={option.value}
@@ -199,12 +228,15 @@ function showItemsLabel(count: number | undefined) {
 }
 
 function StatusChips({
+  type,
   value,
   onChange,
 }: {
+  type: ItemType | null;
   value: StatusFilter | null;
   onChange: (status: StatusFilter | null) => void;
 }) {
+  const chipStatuses = type === "note" ? noteStatuses : workChipStatuses;
   // the row scrolls sideways; its right padding fades out, so a chip cut at the edge reads as more
   return (
     <ToggleGroup
@@ -256,10 +288,16 @@ export function ItemFilterBar({
   /** `select` as the sheet stacks it (with a `fieldLabel`), and whether it is in force. */
   sheet?: { select: ReactNode; active: boolean };
 }) {
-  const typeCounts = counts?.[filters.type ?? "all"];
+  const typeCounts = counts && tabCounts(counts, filters.type);
+  const onTypeChange = (type: ItemType | null) =>
+    onFiltersChange(withType(filters, type));
   return (
     <div className="flex flex-col lg:flex-row lg:items-end lg:border-b">
-      <StatusTabs counts={typeCounts ?? null} belowLg={sheet !== undefined} />
+      <StatusTabs
+        type={filters.type}
+        counts={typeCounts}
+        belowLg={sheet !== undefined}
+      />
       <div
         className={cn(
           "flex items-center gap-2 max-lg:px-4 max-lg:pt-3 lg:mb-0.5 lg:ml-auto",
@@ -270,7 +308,7 @@ export function ItemFilterBar({
         <TypeToggle
           value={filters.type}
           counts={counts}
-          onChange={(type) => onFiltersChange({ ...filters, type })}
+          onChange={onTypeChange}
           countsBelowLg={!select}
           className="max-lg:flex-1"
         />
@@ -287,11 +325,12 @@ export function ItemFilterBar({
           <TypeSelect
             fieldLabel="Type"
             value={filters.type}
-            onChange={(type) => onFiltersChange({ ...filters, type })}
+            onChange={onTypeChange}
           />
         </FiltersSheet>
       ) : (
         <StatusChips
+          type={filters.type}
           value={filters.status}
           onChange={(status) => onFiltersChange({ ...filters, status })}
         />
@@ -307,6 +346,7 @@ const nouns: Record<ItemType | "all", string> = {
   all: "items",
   issue: "issues",
   todo: "todos",
+  note: "notes",
 };
 
 /** Items exist, none under the filters: say which, and offer them all back. */
@@ -336,7 +376,10 @@ export function FilterEmpty({
   );
 }
 
-/** An issue may be unassigned; a todo always has its bot, so it never reads Unassigned. */
+/**
+ * An issue may be unassigned; a todo always has its bot and a note never has one, so
+ * neither reads Unassigned.
+ */
 function Assignee({ item }: { item: WebItemRowView }) {
   if (!item.assignee) {
     return item.type === "issue" ? (

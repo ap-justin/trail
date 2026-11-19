@@ -13,6 +13,7 @@ import {
   statusFilterOf,
   statusTabValue,
 } from "@/components/item-list";
+import { NotesSection } from "@/components/notes";
 import { Pane, PaneTabs } from "@/components/pane-tabs";
 import {
   ItemListEmpty,
@@ -29,6 +30,7 @@ import { KeyText } from "@/components/text";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import type {
   WebItemListView,
+  WebItemRowView,
   WebProductDetailView,
   WebProductRefView,
   WebProductView,
@@ -47,12 +49,15 @@ export type ProductViewProps = {
   detail: WebProductDetailView | null;
   /** The rows under `filters`; `counts` are per type and status whatever the filters. */
   items: Loadable<WebItemListView>;
+  /** The current notes, for the Notes section under the list. */
+  notes: Loadable<WebItemRowView[]>;
   /** Newest first. */
   statusUpdates: Loadable<WebStatusUpdatePageView>;
   filters: ItemFilters;
   onFiltersChange: (filters: ItemFilters) => void;
   onNewIssue: () => void;
   onRetryItems: () => void;
+  onRetryNotes: () => void;
   onRetryStatusUpdates: () => void;
   /** Closes the Items pane, under the list; hidden with the pane below lg. */
   footer?: ReactNode;
@@ -156,7 +161,8 @@ function ItemsBody({
         }}
       />
     );
-  if (items.data.counts.all.all === 0) {
+  // a list of notes is a filter result even where there is no work
+  if (items.data.counts.all.all === 0 && filters.type !== "note") {
     return <ItemListEmpty productKey={product.key} onNewIssue={onNewIssue} />;
   }
   const rows = items.data.items.filter((item) => matchesFilters(item, filters));
@@ -208,9 +214,9 @@ function ProjectItem({ project, now }: { project: WebProjectView; now: Date }) {
 type PaneName = "items" | "projects" | "updates";
 
 /**
- * A product's items, filtered by type and status, beside an aside of its repository,
- * projects and status updates. Below 1024px the repo sits under the heading and Items,
- * Projects and Status updates switch.
+ * A product's items, filtered by type and status, and its current notes under them,
+ * beside an aside of its repository, projects and status updates. Below 1024px the repo
+ * sits under the heading and Items, Projects and Status updates switch.
  */
 export function ProductView(props: ProductViewProps) {
   const now = useMinuteClock(props.now);
@@ -280,6 +286,19 @@ export function ProductView(props: ProductViewProps) {
           </TabsContent>
         </Tabs>
         {props.footer}
+        {counts && filters.type !== "note" && (
+          <NotesSection
+            notes={props.notes}
+            counts={counts.notes}
+            onShowArchived={() => {
+              listRef.current?.focus();
+              onFiltersChange({ type: "note", status: "archived" });
+            }}
+            onRetry={props.onRetryNotes}
+            now={now}
+            className="mt-6"
+          />
+        )}
       </Pane>
       <aside className="flex flex-col gap-5 lg:w-70 lg:shrink-0">
         {detail?.repoUrl && (

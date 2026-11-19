@@ -70,6 +70,14 @@ function ProjectPage() {
     ...projectItemsQuery(slug, filters),
     enabled: !itemsWaitOnProject || project.data !== undefined,
   });
+  // the Notes section's, under the product filter the counts it reads follow, once they say
+  // there are current notes; a list of notes has no section
+  const notes = useQuery({
+    ...projectItemsQuery(slug, { product, type: "note", status: "current" }),
+    enabled:
+      filters.type !== "note" && (items.data?.counts.notes.current ?? 0) > 0,
+    select: (list) => list.groups.flatMap((group) => group.items),
+  });
   const updates = useQuery({
     queryKey: keys.projectStatusUpdates(slug),
     queryFn: () => api.projectStatusUpdates(slug),
@@ -103,6 +111,7 @@ function ProjectPage() {
         items={
           itemsWaitOnProject ? loadableAfter(items, project) : loadableOf(items)
         }
+        notes={loadableOf(notes)}
         statusUpdates={loadableOf(updates)}
         filters={filters}
         onFiltersChange={(next) =>
@@ -120,6 +129,7 @@ function ProjectPage() {
             ? project.refetch()
             : items.refetch())
         }
+        onRetryNotes={() => void notes.refetch()}
         onRetryStatusUpdates={() => void updates.refetch()}
         footer={
           <RowsMissing

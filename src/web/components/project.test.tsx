@@ -12,8 +12,10 @@ import {
 import { applyCompiledCss } from "@/test/compiled-css";
 import {
   beta,
+  countsOf,
   docsSite,
   issueRow,
+  noteRow,
   projectDetail,
   projectItems,
   statusUpdate,
@@ -49,6 +51,7 @@ function props(overrides: Partial<ProjectViewProps> = {}): ProjectViewProps {
       data: projectDetail({ products: [docsSite, trail] }),
     },
     items: { status: "ready", data: projectItems(groups) },
+    notes: { status: "ready", data: [] },
     statusUpdates: {
       status: "ready",
       data: {
@@ -60,6 +63,7 @@ function props(overrides: Partial<ProjectViewProps> = {}): ProjectViewProps {
     onFiltersChange: vi.fn(),
     onRetryProject: vi.fn(),
     onRetryItems: vi.fn(),
+    onRetryNotes: vi.fn(),
     onRetryStatusUpdates: vi.fn(),
     now,
     ...overrides,
@@ -519,4 +523,71 @@ test("the Projects link in the heading draws the shared focus outline", () => {
     "focus-visible:outline-offset-2",
     "focus-visible:outline-ring",
   );
+});
+
+describe("notes", () => {
+  const notes = [noteRow()];
+  const archived = noteRow({
+    key: "TRL-29",
+    title: "Old deploy steps",
+    status: "archived",
+  });
+  const withNotes = (work = groups) => ({
+    ...projectItems(work),
+    counts: countsOf([...work.flatMap((g) => g.items), ...notes, archived]),
+  });
+
+  test("current notes show in a Notes section under the work list; the group counts leave them out", () => {
+    renderProject({
+      items: { status: "ready", data: withNotes() },
+      notes: { status: "ready", data: notes },
+    });
+    const section = screen.getByRole("region", { name: /^Notes/ });
+    expect(
+      within(section).getByRole("link", {
+        name: "TRL-31 Why the feed reads newest first",
+      }),
+    ).toHaveAttribute("href", "/products/TRL/31");
+    expect(screen.getAllByText("3 items")).not.toHaveLength(0);
+  });
+
+  test("Archived notes keeps the product filter and lists the archived ones", async () => {
+    const user = userEvent.setup();
+    const p = renderProject({
+      filters: { ...NO_PROJECT_FILTERS, product: "TRL" },
+      items: { status: "ready", data: withNotes() },
+      notes: { status: "ready", data: notes },
+    });
+    await user.click(screen.getByRole("button", { name: "Archived notes 1" }));
+    expect(p.onFiltersChange).toHaveBeenCalledWith({
+      product: "TRL",
+      type: "note",
+      status: "archived",
+    });
+  });
+
+  test("a project with notes and no work lists its notes when asked, not the empty state", () => {
+    renderProject({
+      filters: { ...NO_PROJECT_FILTERS, type: "note", status: "archived" },
+      items: {
+        status: "ready",
+        data: {
+          ...projectItems([{ product: trail, items: [archived] }]),
+          counts: countsOf([...notes, archived]),
+        },
+      },
+    });
+    expect(
+      screen.queryByRole("heading", { name: "No items in this project yet" }),
+    ).toBeNull();
+    expect(
+      screen.getAllByRole("link", { name: "TRL-29 Old deploy steps" }),
+    ).not.toHaveLength(0);
+    expect(screen.queryByRole("region", { name: /^Notes/ })).toBeNull();
+  });
+
+  test("a project with no notes has no Notes section", () => {
+    renderProject();
+    expect(screen.queryByRole("region", { name: /^Notes/ })).toBeNull();
+  });
 });

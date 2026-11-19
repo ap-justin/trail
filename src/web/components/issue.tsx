@@ -25,6 +25,7 @@ import {
   changedStatusLabel,
   PriorityLabel,
   priorityLabel,
+  StatusIcon,
   StatusLabel,
   TypeIcon,
   typeLabel,
@@ -143,6 +144,12 @@ function ItemType({ type }: { type: WebItemType }) {
   );
 }
 
+const createdBy: Record<WebItemType, string> = {
+  issue: "filed by",
+  todo: "planned by",
+  note: "written by",
+};
+
 /**
  * At lg the title, then one byline: type, key, who filed it and when. Below lg the
  * byline dissolves into the header's flex row so type and key lead above the title,
@@ -161,9 +168,7 @@ function Header({ issue }: { issue: WebItemView }) {
           <ItemType type={issue.type} />
         </span>
         <KeyText className={lead}>{issue.key}</KeyText>
-        <span className={rest}>
-          {createdAs(issue) === "todo" ? "planned by" : "filed by"}
-        </span>
+        <span className={rest}>{createdBy[createdAs(issue)]}</span>
         <span className={cn("flex items-center gap-1.5", rest)}>
           <Actor actor={issue.creator} withTitle={false} />
         </span>
@@ -221,14 +226,15 @@ function Property({
 const none = <span className="text-muted-foreground">None</span>;
 
 // an issue waits in triage for an owner; a todo always has its planning bot
-const noAssignee: Record<WebItemType, ReactNode> = {
+const noAssignee: Record<Exclude<WebItemType, "note">, ReactNode> = {
   issue: <span className="text-muted-foreground">Unassigned</span>,
   todo: none,
 };
 
 /**
  * Read-only on purpose: people never change status, priority, labels, assignee or
- * estimate, so nothing here is a control, has a hover state or carries a chevron.
+ * estimate, so nothing here is a control, has a hover state or carries a chevron. A note
+ * is never assigned, so it has no Assignee row.
  * Below lg every property is a full 44px row; Type and Status sit in the header there
  * and Created drops, so Priority leads.
  */
@@ -253,28 +259,30 @@ function Properties({ issue }: { issue: WebItemView }) {
           {issue.estimate === null ? none : `${issue.estimate} h`}
         </Property>
         {/* at lg the label stays on the name's row, above the title's */}
-        <Property label="Assignee" itemClassName="lg:self-start">
-          {issue.assignee ? (
-            // at lg a grid with the title on a second row, indented past the avatar;
-            // below, one line that wraps the title under a long name
-            <span className="flex min-w-0 items-center gap-2 lg:grid lg:grid-cols-[auto_minmax(0,1fr)] lg:justify-items-start lg:gap-x-2 lg:gap-y-1">
-              <ActorAvatar
-                actor={issue.assignee}
-                size="xs"
-                className="lg:size-5"
-              />
-              <ActorName
-                actor={issue.assignee}
-                className="lg:contents"
-                // start-aligned, a nowrap name is as wide as its text: capped to its track
-                nameClassName="max-w-full"
-                titleClassName="lg:col-start-2 lg:row-start-2"
-              />
-            </span>
-          ) : (
-            noAssignee[issue.type]
-          )}
-        </Property>
+        {issue.type !== "note" && (
+          <Property label="Assignee" itemClassName="lg:self-start">
+            {issue.assignee ? (
+              // at lg a grid with the title on a second row, indented past the avatar;
+              // below, one line that wraps the title under a long name
+              <span className="flex min-w-0 items-center gap-2 lg:grid lg:grid-cols-[auto_minmax(0,1fr)] lg:justify-items-start lg:gap-x-2 lg:gap-y-1">
+                <ActorAvatar
+                  actor={issue.assignee}
+                  size="xs"
+                  className="lg:size-5"
+                />
+                <ActorName
+                  actor={issue.assignee}
+                  className="lg:contents"
+                  // start-aligned, a nowrap name is as wide as its text: capped to its track
+                  nameClassName="max-w-full"
+                  titleClassName="lg:col-start-2 lg:row-start-2"
+                />
+              </span>
+            ) : (
+              noAssignee[issue.type]
+            )}
+          </Property>
+        )}
         <Property label="Labels">
           {issue.labels.length === 0
             ? none
@@ -330,6 +338,49 @@ function Properties({ issue }: { issue: WebItemView }) {
         </Property>
         <Property label="Updated">{formatAbsolute(issue.updatedAt)}</Property>
       </dl>
+    </section>
+  );
+}
+
+/**
+ * Items as links, each its status and type glyphs, key and title: the items a note is about, or the
+ * notes about this item. Nothing when there are none.
+ */
+function ItemRefs({
+  heading,
+  items,
+}: {
+  heading: string;
+  items: WebItemView["about"];
+}) {
+  const headingId = useId();
+  if (items.length === 0) return null;
+  return (
+    <section
+      aria-labelledby={headingId}
+      className="max-lg:px-4 max-lg:py-3.5 lg:mt-7"
+    >
+      <h2 id={headingId} className="mb-1.5 font-medium lg:mb-2">
+        {heading}
+      </h2>
+      <ul>
+        {items.map((item) => (
+          <li key={item.key}>
+            <AppLink
+              href={paths.issue(item.key)}
+              className="group flex min-h-11 items-center gap-2 rounded-md py-1.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring lg:min-h-0"
+            >
+              {/* named by its glyphs and words: "In progress Issue TRL-14 Team access" */}
+              <StatusIcon status={item.status} label />{" "}
+              <TypeIcon type={item.type} />{" "}
+              <KeyText className="shrink-0">{item.key}</KeyText>{" "}
+              <span className="min-w-0 truncate group-hover:underline">
+                {item.title}
+              </span>
+            </AppLink>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }
@@ -473,18 +524,17 @@ function Links({ links }: { links: WebItemView["links"] }) {
   );
 }
 
-const typeLabels: Record<WebItemType, string> = {
-  issue: "Issue",
-  todo: "Todo",
+const createdPhrase: Record<WebItemType, string> = {
+  issue: "filed this issue",
+  todo: "planned this todo",
+  note: "wrote this note",
 };
 
 /** The words after the actor in a one-line timeline entry. */
 function changePhrase(entry: EntryView): ReactNode {
   switch (entry.kind) {
     case "item_created":
-      return entry.createdAs === "todo"
-        ? "planned this todo"
-        : "filed this issue";
+      return createdPhrase[entry.createdAs];
     case "status_changed":
       return (
         <>
@@ -499,8 +549,8 @@ function changePhrase(entry: EntryView): ReactNode {
     case "type_changed":
       return (
         <>
-          changed type from {strong(typeLabels[entry.from])} to{" "}
-          {strong(typeLabels[entry.to])}
+          changed type from {strong(typeLabel(entry.from))} to{" "}
+          {strong(typeLabel(entry.to))}
         </>
       );
     case "added_to_project":
@@ -826,7 +876,7 @@ function CommentBox({
 }
 
 /**
- * An item (issue or todo) as people see it: everything read-only except the comment box
+ * An item (issue, todo or note) as people see it: everything read-only except the comment box
  * at the end of the timeline. At 1440 a main column beside a 280px Properties and Links rail; below,
  * one column in the order title, description, properties, links, activity, comment box.
  */
@@ -851,6 +901,8 @@ export function IssueView(props: IssueViewProps) {
       <aside className="lg:col-start-2 lg:row-span-4 lg:row-start-1">
         <Properties issue={data} />
         <Links links={data.links} />
+        <ItemRefs heading="About" items={data.about} />
+        <ItemRefs heading="Notes" items={data.notes} />
       </aside>
       <section
         aria-labelledby={activityId}

@@ -42,6 +42,34 @@ describe("SearchResults", () => {
     );
   });
 
+  test("a note's row carries the Note glyph where an issue's has its status", () => {
+    render(
+      <SearchResults
+        query="feed"
+        answeredQuery="feed"
+        results={{
+          products: [],
+          projects: [],
+          items: [
+            {
+              key: "TRL-31",
+              sourceKey: null,
+              title: "Why the feed reads newest first",
+              type: "note",
+              status: "current",
+              product: { key: "TRL", name: "trail" },
+            },
+          ],
+        }}
+        status="ready"
+      />,
+    );
+    const note = screen.getByRole("link", {
+      name: "TRL-31 Why the feed reads newest first",
+    });
+    expect(note.querySelector("svg")).toHaveAttribute("data-item-type", "note");
+  });
+
   test("none: the empty state", () => {
     render(
       <SearchResults
