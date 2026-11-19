@@ -38,8 +38,9 @@ const row =
 /**
  * The search box's results, drawn in the shell's `searchResults` slot at both widths:
  * one list of products (package glyph), projects (folder glyph), then items (status
- * glyph and type glyph, as list rows draw them), each a link reachable by Tab from the box. Following one ends the search: the shell clears the box, so
- * there is no callback here.
+ * glyph and type glyph, as list rows draw them), each a link reachable by Tab from the
+ * box. Following one ends the search: the shell clears the box, so there is no callback
+ * here.
  */
 export function SearchResults({
   query,
