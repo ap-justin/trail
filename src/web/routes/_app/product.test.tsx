@@ -3,7 +3,7 @@ import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, test, vi } from "vitest";
-import { ITEM_PAGES_MAX } from "@/lib/queries";
+import { ITEM_PAGES_MAX, keys } from "@/lib/queries";
 import { meView, notFound, renderApp, signedInAs } from "@/test/app";
 import { FakeEventSource } from "@/test/event-source";
 import {
@@ -207,6 +207,36 @@ describe("notes section on load", () => {
     ).toBeInTheDocument();
     answer();
     await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    expect(
+      screen.getByRole("button", { name: "Show 2 archived notes" }),
+    ).toBeInTheDocument();
+  });
+
+  test("an access event drops a note-count read no page shows and keeps the one on screen", async () => {
+    signedInAs("member");
+    serveNoteCounts({ current: 0, archived: 2 });
+    const { queryClient } = renderApp("/products/TRL");
+    await screen.findByRole("button", { name: "Show 2 archived notes" });
+    const stream = FakeEventSource.current;
+    stream.open();
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    // the page's own read is skipToken-disabled, so it has an observer and no active one
+    queryClient.setQueryData(keys.productNoteCounts("OLD"), "left behind");
+    expect(
+      queryClient.getQueryState(keys.productNoteCounts("TRL")),
+    ).toBeDefined();
+    act(() => {
+      stream.dispatchEvent(new MessageEvent("access", { data: "{}" }));
+    });
+    await waitFor(() =>
+      expect(queryClient.getQueryData(keys.productNoteCounts("OLD"))).toBe(
+        undefined,
+      ),
+    );
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    expect(
+      queryClient.getQueryState(keys.productNoteCounts("TRL")),
+    ).toBeDefined();
     expect(
       screen.getByRole("button", { name: "Show 2 archived notes" }),
     ).toBeInTheDocument();

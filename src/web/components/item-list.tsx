@@ -227,8 +227,8 @@ function StatusTabs({
 
 /** The Filters sheet's primary button; without a count while the list loads. */
 function showItemsLabel(count: number | undefined, type: ItemType | null) {
-  if (count === undefined) return type === "note" ? "Show notes" : "Show items";
-  return `Show ${count} ${itemNoun(count, type === "note" ? "note" : null)}`;
+  if (count === undefined) return `Show ${nouns[type ?? "all"]}`;
+  return `Show ${count} ${itemNoun(count, type)}`;
 }
 
 function StatusChips({

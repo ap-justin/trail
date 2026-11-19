@@ -10,10 +10,10 @@ import {
 import type { ActivityEvent, EventBus } from "../events/bus.js";
 import { eventForReach } from "../service/visible.js";
 import {
-  deliveryKeyRefusal,
-  deliveryReach,
+  deliveryKey,
   isPending,
   leftFollowedProjects,
+  sendingKeyReach,
   type WebhookSettings,
 } from "../service/webhooks.js";
 import {
@@ -215,28 +215,28 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
       .filter((d) => d.nextAttemptAt.getTime() <= now);
   }
 
-  /** The envelope a delivery carries: its message's on an inbox subscription, else its event's as the key sending it reads it. */
+  /** The envelope a delivery carries: its message's on an inbox subscription, else its event's as `keyId`, the key sending it, reads it. */
   function envelopeOf(
     delivery: Delivery,
-    sub: Subscription,
+    keyId: string | null,
   ): Envelope | undefined {
     if (delivery.messageId !== null) {
       return buildMessageEnvelope(db, delivery.messageId);
     }
-    if (delivery.eventId === null) return undefined;
+    if (delivery.eventId === null || keyId === null) return undefined;
     const event = db
       .select()
       .from(activityEvent)
       .where(eq(activityEvent.id, delivery.eventId))
       .get();
     if (!event) return undefined;
-    const read = eventForReach(db, deliveryReach(db, sub, event), event);
+    const read = eventForReach(db, sendingKeyReach(db, keyId), event);
     return buildEnvelope(db, read, settings.publicUrl);
   }
 
-  function bodyOf(delivery: Delivery, sub: Subscription): string | null {
+  function bodyOf(delivery: Delivery, keyId: string | null): string | null {
     if (delivery.body !== null) return delivery.body;
-    const envelope = envelopeOf(delivery, sub);
+    const envelope = envelopeOf(delivery, keyId);
     if (!envelope) return null;
     const body = JSON.stringify({
       ...envelope,
@@ -308,29 +308,31 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
   }
 
   /**
-   * Why a delivery mustn't go out now, or null: its event's item has left
-   * the project a follow alone queued it for, or the webhook's key can no
-   * longer send it (`deliveryKeyRefusal`). `tell` is set on the key's refusals,
-   * which only the bot can fix.
+   * The key a delivery goes out on (null when its event is gone), or why it
+   * mustn't go out now: its event's item has left the project a follow alone
+   * queued it for, or the webhook's key can no longer send it (`deliveryKey`).
+   * `tell` is set on the key's refusals, which only the bot can fix.
    */
-  function unsendable(
+  function clearance(
     delivery: Delivery,
     sub: Subscription,
-  ): { reason: string; tell: boolean } | null {
-    const keyRefused = (event: typeof activityEvent.$inferSelect | null) => {
-      const reason = deliveryKeyRefusal(db, sub, event);
-      return reason === null ? null : { reason, tell: true };
+  ): { refused: { reason: string; tell: boolean } } | { keyId: string | null } {
+    const keyFor = (event: typeof activityEvent.$inferSelect | null) => {
+      const key = deliveryKey(db, sub, event);
+      return "refusal" in key
+        ? { refused: { reason: key.refusal, tell: true } }
+        : key;
     };
-    if (delivery.eventId === null) return keyRefused(null);
+    if (delivery.eventId === null) return keyFor(null);
     const event = db
       .select()
       .from(activityEvent)
       .where(eq(activityEvent.id, delivery.eventId))
       .get();
-    if (!event) return null;
+    if (!event) return { keyId: null };
     if (leftFollowedProjects(db, sub.id, event))
-      return { reason: LEFT_PROJECT, tell: false };
-    return keyRefused(event);
+      return { refused: { reason: LEFT_PROJECT, tell: false } };
+    return keyFor(event);
   }
 
   /**
@@ -371,13 +373,13 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
       .where(eq(webhookSubscription.id, delivery.subscriptionId))
       .get();
     if (!sub) return;
-    const refused = unsendable(delivery, sub);
-    if (refused !== null) {
-      drop(delivery, refused);
+    const cleared = clearance(delivery, sub);
+    if ("refused" in cleared) {
+      drop(delivery, cleared.refused);
       return;
     }
     const secret = openSecret(settings.key, sub.id, sub.secretCipher);
-    const body = secret === null ? null : bodyOf(delivery, sub);
+    const body = secret === null ? null : bodyOf(delivery, cleared.keyId);
     let result: SendResult;
     if (secret === null) {
       result = {

@@ -255,9 +255,17 @@ test("the OpenAPI spec documents notes on the items routes", async () => {
   expect(Object.keys(schemas.ItemUpdate.properties)).toEqual(
     expect.arrayContaining(["about", "addAbout", "removeAbout"]),
   );
-  expect(schemas.Item.properties.notes).toBeDefined();
-  expect(schemas.Item.properties.notesCount).toBeDefined();
-  expect(schemas.Project.properties.notes).toBeDefined();
+  expect(schemas.Item.properties.notes).toMatchObject({
+    type: "array",
+    items: { $ref: "#/components/schemas/ItemRef" },
+  });
+  const noteCounts = { $ref: "#/components/schemas/NoteCounts" };
+  expect(schemas.Item.properties.notesCount.allOf[0]).toEqual(noteCounts);
+  expect(schemas.Project.properties.notes.allOf[0]).toEqual(noteCounts);
+  expect(Object.keys(schemas.NoteCounts.properties)).toEqual([
+    "current",
+    "archived",
+  ]);
   expect(
     spec.paths["/items"].get.parameters.map((p: Body) => p.name),
   ).toContain("about");
@@ -271,7 +279,8 @@ test("the OpenAPI spec documents notes on the items routes", async () => {
   );
   const payload = schemas.ActivityEvent.properties.payload;
   expect(Object.keys(payload.properties)).toEqual(["about", "aboutOthers"]);
-  expect(payload.additionalProperties).not.toBe(false);
+  // other actions' fields pass through unchecked
+  expect(payload.additionalProperties).toEqual({});
 });
 
 test("a note's created event lists the keys it is about, as its updated event does", async () => {

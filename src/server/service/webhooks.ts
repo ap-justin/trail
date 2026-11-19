@@ -441,38 +441,39 @@ function keyRefusal(
 }
 
 /**
- * Why `sub` may not be sent this delivery now, as its lastError; null when it
- * may. An activity delivery carries its `event`, needs a key with the read
- * action (as managing an activity webhook does) and is held to `keyRefusal`;
- * an inbox delivery has none and needs only its key live. A webhook with no
- * recorded key, made before keys were recorded and unchanged since, stands on
- * its bot's live keys: an activity delivery goes when any one of them with the
- * read action may send it, and is refused with the oldest's reason when none may.
+ * The key `sub` sends this delivery on now, or why none may, as its lastError.
+ * An activity delivery carries its `event`, needs a key with the read action
+ * (as managing an activity webhook does) and is held to `keyRefusal`; an inbox
+ * delivery has none and needs only its key live. A webhook with no recorded
+ * key, made before keys were recorded and unchanged since, stands on its bot's
+ * live keys, oldest first: an activity delivery goes on the first of them with
+ * the read action that may send it, and is refused with the oldest's reason
+ * when none may.
  */
-export function deliveryKeyRefusal(
+export function deliveryKey(
   db: Db,
   sub: typeof webhookSubscription.$inferSelect,
   event: typeof activityEvent.$inferSelect | null,
-): string | null {
+): { keyId: string } | { refusal: string } {
   if (sub.apiKeyId !== null) {
     const key = liveKeysWhere(db, eq(apiKey.id, sub.apiKeyId))[0];
-    if (!key) return KEY_REVOKED;
-    if (event === null) return null;
-    if (!canRead(key)) return KEY_CANNOT_READ;
-    return keyRefusal(db, key.id, sub.id, event);
+    if (!key) return { refusal: KEY_REVOKED };
+    if (event === null) return { keyId: key.id };
+    if (!canRead(key)) return { refusal: KEY_CANNOT_READ };
+    const refusal = keyRefusal(db, key.id, sub.id, event);
+    return refusal === null ? { keyId: key.id } : { refusal };
   }
   const keys = liveKeysWhere(db, eq(apiKey.actorId, sub.actorId));
-  if (keys.length === 0) return NO_LIVE_KEY;
-  if (event === null) return null;
-  const readers = keys.filter(canRead);
-  if (readers.length === 0) return NO_KEY_CAN_READ;
-  let first: string | null = null;
-  for (const { id } of readers) {
+  const [oldest] = keys;
+  if (oldest === undefined) return { refusal: NO_LIVE_KEY };
+  if (event === null) return { keyId: oldest.id };
+  let first: string | undefined;
+  for (const { id } of keys.filter(canRead)) {
     const refusal = keyRefusal(db, id, sub.id, event);
-    if (refusal === null) return null;
+    if (refusal === null) return { keyId: id };
     first ??= refusal;
   }
-  return first;
+  return { refusal: first ?? NO_KEY_CAN_READ };
 }
 
 // a bot can't mint its own key: only the operator's `trail key create` does
@@ -480,26 +481,9 @@ const NO_LIVE_KEY = `not sent: this bot has no live key: a key must be minted fo
 const KEY_CANNOT_READ = `not sent: this webhook's key lacks the read action: ${toResume("a key that has the read action")}`;
 const NO_KEY_CAN_READ = `not sent: none of this bot's live keys has the read action: ${toResume("a key that has the read action")}`;
 
-/**
- * The reach of the key the subscription sends `event` on: its recorded key,
- * else the first of its bot's reading keys that may send it, as
- * `deliveryKeyRefusal` picks. Reaches nothing when no key may.
- */
-export function deliveryReach(
-  db: Db,
-  sub: typeof webhookSubscription.$inferSelect,
-  event: typeof activityEvent.$inferSelect,
-): Reach {
-  const keyIds =
-    sub.apiKeyId !== null
-      ? [sub.apiKeyId]
-      : liveKeysWhere(db, eq(apiKey.actorId, sub.actorId))
-          .filter(canRead)
-          .map((k) => k.id);
-  const sending = keyIds.find(
-    (id) => keyRefusal(db, id, sub.id, event) === null,
-  );
-  const scope = sending === undefined ? undefined : liveKeyScope(db, sending);
+/** The reach of the key `deliveryKey` picked; nothing once that key is gone. */
+export function sendingKeyReach(db: Db, keyId: string): Reach {
+  const scope = liveKeyScope(db, keyId);
   return scope
     ? reachOfScope(scope, true)
     : { products: [], projects: [], implicitProjects: false };

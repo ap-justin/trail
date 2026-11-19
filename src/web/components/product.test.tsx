@@ -52,8 +52,9 @@ function props(overrides: Partial<ProductViewProps> = {}): ProductViewProps {
     data: itemList(rows),
   };
   return {
-    // the route's: the last list's
-    noteCounts: items.status === "ready" ? items.data.counts.notes : null,
+    // the route's: its own query, held while the list reloads
+    noteCounts: (items.status === "ready" ? items.data : itemList(rows)).counts
+      .notes,
     product: trail,
     detail: productDetail(),
     items,
@@ -718,10 +719,11 @@ describe("notes", () => {
     expect(screen.getByRole("heading", { name: "Notes 2" })).toHaveFocus();
   });
 
-  test("the Notes section stays while the list's counts reload, without Show archived notes until they're back", () => {
+  test("the Notes section and Show archived notes stay while the work list reloads", () => {
     renderProduct({
       filters: { type: "todo", status: null },
       items: { status: "loading" },
+      noteCounts: workWithNotes.counts.notes,
       notes: { status: "ready", data: current },
     });
     expect(
@@ -729,10 +731,10 @@ describe("notes", () => {
     ).toBeInTheDocument();
     expect(within(notesSection()).getAllByRole("link")).toHaveLength(2);
     expect(
-      within(notesSection()).queryByRole("button", {
-        name: /^Show [0-9]+ archived note/,
+      within(notesSection()).getByRole("button", {
+        name: "Show 1 archived note",
       }),
-    ).toBeNull();
+    ).toBeInTheDocument();
   });
 });
 

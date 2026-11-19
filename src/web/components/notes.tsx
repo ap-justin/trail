@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 export type NotesSectionProps = {
   /** The current notes, in the list's order. */
   notes: Loadable<WebItemRowView[]>;
-  /** Null until the page's list first loads them; the section then stands on `notes` alone. */
+  /** Null until the page first counts its items; nothing renders until then. */
   counts: WebItemCountsView["notes"] | null;
   /** Lists the archived notes in the page's own item list. */
   onShowArchived: () => void;
@@ -35,8 +35,7 @@ export function NotesSection({
 }: NotesSectionProps) {
   const headingId = useId();
   const headingRef = useRef<HTMLHeadingElement>(null);
-  const current =
-    counts?.current ?? (notes.status === "ready" ? notes.data.length : 0);
+  const current = counts?.current ?? 0;
   if (current + (counts?.archived ?? 0) === 0) return null;
   return (
     <section aria-labelledby={headingId} className={className}>

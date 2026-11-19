@@ -67,7 +67,7 @@ export type ProductViewProps = {
   onRetryItems: () => void;
   onRetryNotes: () => void;
   onRetryStatusUpdates: () => void;
-  /** Closes the Items pane, under the list; hidden with the pane below lg. */
+  /** Under the list, before its Notes section; hidden with the Items pane below lg. */
   footer?: ReactNode;
   /** The clock relative times are read against; ticks each minute when omitted. */
   now?: Date;

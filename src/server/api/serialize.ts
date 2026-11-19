@@ -33,6 +33,7 @@ import type {
   NoteCounts,
   Page,
   ProductView as Product,
+  ProductDetail,
   ProjectView as Project,
   SentMessage,
   StatusUpdate,
@@ -63,9 +64,9 @@ export function toProduct(row: Product & { notes?: NoteCounts }): ProductView {
   };
 }
 
-/** A product as a key reads it: `toProduct`, or for one named only through a project its id, key and name. */
+/** A product as a key reads it: `toProduct`, with `notes` from get_product, or for one named only through a project its id, key and name. */
 export function toProductRead(
-  row: Product | NamedProduct,
+  row: ProductDetail | Product | NamedProduct,
 ): ProductView | NamedProductView {
   return "createdBy" in row
     ? toProduct(row)

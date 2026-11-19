@@ -1176,6 +1176,7 @@ export const noteCreateSchema = z
       about: aboutKeys.optional().meta({ description: ABOUT }),
       labels: labelNames.optional(),
       links: links.optional(),
+      externalRef: externalRef.optional(),
     },
     renamedFields({ projectId: nowNamed("product") }),
   )

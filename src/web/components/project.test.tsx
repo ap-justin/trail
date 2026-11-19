@@ -50,8 +50,9 @@ function props(overrides: Partial<ProjectViewProps> = {}): ProjectViewProps {
     data: projectItems(groups),
   };
   return {
-    // the route's: the last list's
-    noteCounts: items.status === "ready" ? items.data.counts.notes : null,
+    // the route's: its own query, held while the list reloads
+    noteCounts: (items.status === "ready" ? items.data : projectItems(groups))
+      .counts.notes,
     project: {
       status: "ready",
       data: projectDetail({ products: [docsSite, trail] }),
@@ -359,7 +360,7 @@ describe("375", () => {
     }
   });
 
-  test("the sheet holds Product and Type, applied as chosen, and says how many items show", async () => {
+  test("the sheet holds Product and Type, applied as chosen, and the button counts them in the type's own word", async () => {
     const user = userEvent.setup();
     render(<FilteredProject />);
     await user.click(filtersButton());
@@ -370,7 +371,7 @@ describe("375", () => {
     await user.click(within(sheet).getByRole("combobox", { name: "Type" }));
     await user.click(await screen.findByRole("option", { name: "Todos" }));
     await user.click(
-      within(sheet).getByRole("button", { name: "Show 2 items" }),
+      within(sheet).getByRole("button", { name: "Show 2 todos" }),
     );
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(
@@ -419,7 +420,7 @@ describe("375", () => {
     ).toHaveAccessibleName("Show 2 notes");
   });
 
-  test("the button counts the product and type in force; while the list loads the sheet has no count", async () => {
+  test("the button counts the product and type in force; while the list loads the sheet has no count, only the type", async () => {
     const user = userEvent.setup();
     renderProject({
       filters: { type: "issue", status: null, product: "TRL" },
@@ -428,7 +429,7 @@ describe("375", () => {
     expect(filtersButton()).toHaveAccessibleName("Filters 2 in use");
     await user.click(filtersButton());
     expect(
-      await screen.findByRole("button", { name: "Show items" }),
+      await screen.findByRole("button", { name: "Show issues" }),
     ).toBeInTheDocument();
   });
 });
@@ -762,10 +763,11 @@ describe("notes", () => {
     expect(noWork()).toBeInTheDocument();
   });
 
-  test("the Notes section stays while the list's counts reload, without Show archived notes until they're back", () => {
+  test("the Notes section and Show archived notes stay while the work list reloads", () => {
     renderProject({
       filters: { ...NO_PROJECT_FILTERS, status: "open" },
       items: { status: "loading" },
+      noteCounts: withNotes().counts.notes,
       notes: { status: "ready", data: notes },
     });
     const section = screen.getByRole("region", { name: /^Notes/ });
@@ -778,10 +780,8 @@ describe("notes", () => {
       }),
     ).toBeInTheDocument();
     expect(
-      within(section).queryByRole("button", {
-        name: /^Show [0-9]+ archived note/,
-      }),
-    ).toBeNull();
+      within(section).getByRole("button", { name: "Show 1 archived note" }),
+    ).toBeInTheDocument();
   });
 
   test("Try again on notes leaves focus on their heading", async () => {

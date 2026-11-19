@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { expect, test } from "vitest";
 import {
   activityEvent,
@@ -21,7 +21,7 @@ import { buildEnvelope } from "../webhooks/payload.js";
 import { createWebhookWorker } from "../webhooks/worker.js";
 import { type Body, mcpClients } from "./test-client.js";
 
-const { app, db, bus } = setupTestApp();
+const { app, db, bus, request } = setupTestApp();
 const { connect, call, callError } = mcpClients(app);
 const sent: { url: string; body: Body }[] = [];
 const worker = createWebhookWorker({
@@ -289,6 +289,71 @@ test("add_note with an idempotency key returns the first note on a retry and add
     type: "note",
   });
   expect(notes.items.map((i: Body) => i.key)).toEqual([first.key]);
+});
+
+test("add_note keeps externalRef, and a second note with it in the product is refused, naming the first", async () => {
+  const owner = await productBot("Synced");
+  const writer = await productBot("Syncer");
+  const note = await call(writer.client, "add_note", {
+    product: owner.product,
+    title: "imported record",
+    externalRef: "DOC-7",
+  });
+  expect(note.externalRef).toBe("DOC-7");
+  expect(
+    await callError(writer.client, "add_note", {
+      product: owner.product,
+      title: "imported again",
+      externalRef: "DOC-7",
+    }),
+  ).toBe(
+    `conflict: externalRef DOC-7 is already on item ${note.key}: update that item with update_item, or send a different externalRef`,
+  );
+});
+
+test("REST POST /items with type note and add_note share one externalRef per product: each refuses the other's", async () => {
+  const owner = await productBot("Parity");
+  const writer = await productBot("Twin");
+  const rest = await request("POST", "/api/v1/items", {
+    json: {
+      type: "note",
+      product: owner.product,
+      title: "over rest",
+      externalRef: "DOC-R",
+    },
+    key: writer.key,
+  });
+  expect(rest.status).toBe(201);
+  const restNote = (await rest.json()) as Body;
+  expect(restNote.externalRef).toBe("DOC-R");
+  expect(
+    await callError(writer.client, "add_note", {
+      product: owner.product,
+      title: "over mcp",
+      externalRef: "DOC-R",
+    }),
+  ).toBe(
+    `conflict: externalRef DOC-R is already on item ${restNote.key}: update that item with update_item, or send a different externalRef`,
+  );
+
+  const mcpNote = await call(writer.client, "add_note", {
+    product: owner.product,
+    title: "over mcp",
+    externalRef: "DOC-M",
+  });
+  const again = await request("POST", "/api/v1/items", {
+    json: {
+      type: "note",
+      product: owner.product,
+      title: "over rest",
+      externalRef: "DOC-M",
+    },
+    key: writer.key,
+  });
+  expect(again.status).toBe(409);
+  expect(((await again.json()) as Body).error.message).toBe(
+    `externalRef DOC-M is already on item ${mcpNote.key}: update that item with update_item, or send a different externalRef`,
+  );
 });
 
 test("list_items lists notes only with type note; without type, issues and todos as before", async () => {
@@ -941,11 +1006,12 @@ test("a note's events go out as trail.item.* with type note, and under the depre
   });
   const todo = await call(owner.client, "add_todo", { title: "work" });
   await call(owner.client, "update_item", { item: todo.key, type: "note" });
+  // rowid, not type: the two copies of one event share a seq and go out in insertion order
   const deliveries = db
     .select({ type: webhookDelivery.type })
     .from(webhookDelivery)
     .where(eq(webhookDelivery.subscriptionId, id))
-    .orderBy(webhookDelivery.seq, webhookDelivery.type)
+    .orderBy(webhookDelivery.seq, sql`${webhookDelivery}.rowid`)
     .all()
     .map((d) => d.type);
   expect(deliveries).toEqual([
@@ -1292,7 +1358,7 @@ test("an issue turned into a note sends one last trail.issue.updated carrying ty
     .select({ type: webhookDelivery.type, eventId: webhookDelivery.eventId })
     .from(webhookDelivery)
     .where(eq(webhookDelivery.subscriptionId, id))
-    .orderBy(webhookDelivery.seq, webhookDelivery.type)
+    .orderBy(webhookDelivery.seq, sql`${webhookDelivery}.rowid`)
     .all();
   expect(deliveries.map((d) => d.type)).toEqual([
     "trail.issue.created",
@@ -1335,7 +1401,7 @@ test("a note turned back into a todo or an issue is sent under both trail.issue.
     .select({ type: webhookDelivery.type })
     .from(webhookDelivery)
     .where(eq(webhookDelivery.subscriptionId, id))
-    .orderBy(webhookDelivery.seq, webhookDelivery.type)
+    .orderBy(webhookDelivery.seq, sql`${webhookDelivery}.rowid`)
     .all();
   expect(deliveries.map((d) => d.type)).toEqual([
     "trail.item.created",
