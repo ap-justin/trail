@@ -58,7 +58,7 @@ const workChipStatuses: StatusFilter[] = ["open", "in_progress", "done"];
 const ALL = "all";
 
 /** The status tabs a type has: a note's two states, or the work statuses for the rest and All. */
-const statusesOf = (type: ItemType | null) =>
+export const statusesOf = (type: ItemType | null) =>
   type === "note" ? noteStatuses : workStatuses;
 
 /** A tab value back to its filter: All and anything unknown are null. */

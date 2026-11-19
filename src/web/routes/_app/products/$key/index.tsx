@@ -12,7 +12,7 @@ import {
 import { api, isNotFound } from "@/lib/api";
 import { itemSearchOf, validateItemSearch } from "@/lib/item-search";
 import { loadableOf } from "@/lib/loadable";
-import { keys, productItemsQuery } from "@/lib/queries";
+import { keys, productItemsQuery, productNoteCountsQuery } from "@/lib/queries";
 
 export const Route = createFileRoute("/_app/products/$key/")({
   validateSearch: validateItemSearch,
@@ -49,10 +49,11 @@ function ProductPage() {
     !items.data.items.some((item) => matchesFilters(item, filters))
       ? { data: undefined, isError: false }
       : items;
-  // the placeholder's too: it is this product's, and its counts don't follow the filters
-  const noteCounts = items.data?.counts.notes ?? null;
-  // the Notes section's, once the list's counts say there are current notes; a list of
-  // notes has no section
+  // from the first page of whichever of this product's lists read last, so a long list's
+  // later pages don't hold up the Notes section, and a tab whose read failed keeps them
+  const noteCounts = useQuery(productNoteCountsQuery(key)).data ?? null;
+  // the Notes section's, once the counts say there are current notes; a list of notes has
+  // no section
   const notes = useQuery({
     ...productItemsQuery(key, { type: "note", status: "current" }),
     enabled: type !== "note" && (noteCounts?.current ?? 0) > 0,

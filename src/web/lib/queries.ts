@@ -6,6 +6,7 @@ import {
   QueryClient,
   type QueryClientConfig,
   queryOptions,
+  skipToken,
 } from "@tanstack/react-query";
 import {
   ApiError,
@@ -27,12 +28,15 @@ export const keys = {
   product: (key: string) => ["product", key] as const,
   productItems: (key: string, { type, status }: ItemQuery) =>
     ["product", key, "items", type, status] as const,
+  productNoteCounts: (key: string) => ["product", key, "note-counts"] as const,
   productStatusUpdates: (key: string) =>
     ["product", key, "status-updates"] as const,
   projects: ["projects"] as const,
   project: (slug: string) => ["project", slug] as const,
   projectItems: (slug: string, { product, type, status }: ProjectItemQuery) =>
     ["project", slug, "items", product, type, status] as const,
+  projectNoteCounts: (slug: string, product: string | null) =>
+    ["project", slug, "note-counts", product] as const,
   projectStatusUpdates: (slug: string) =>
     ["project", slug, "status-updates"] as const,
   issue: (key: string) => ["issue", key] as const,
@@ -44,15 +48,20 @@ export const keys = {
   conversation: (a: string, b: string) => ["conversation", a, b] as const,
 };
 
-/** Reads pages in order until one has no `nextCursor` or `max` pages are in; never empty. */
+/**
+ * Reads pages in order until one has no `nextCursor` or `max` pages are in; never empty.
+ * `onFirstPage` sees the first page as soon as it arrives.
+ */
 async function readPages<Page extends { nextCursor: string | null }>(
   read: (cursor: string | null) => Promise<Page>,
   max: number,
+  onFirstPage?: (page: Page) => void,
 ): Promise<Page[]> {
   const pages: Page[] = [];
   let cursor: string | null = null;
   do {
     const page = await read(cursor);
+    if (pages.length === 0) onFirstPage?.(page);
     pages.push(page);
     cursor = page.nextCursor;
   } while (cursor !== null && pages.length < max);
@@ -79,11 +88,13 @@ export const ITEM_PAGES_MAX = 10;
 export const productItemsQuery = (key: string, filters: ItemQuery) =>
   queryOptions({
     queryKey: keys.productItems(key, filters),
-    queryFn: async (): Promise<WebItemListView> =>
+    queryFn: async ({ client }): Promise<WebItemListView> =>
       (
         await readPages(
           (cursor) => api.productItems(key, filters, cursor),
           ITEM_PAGES_MAX,
+          (page) =>
+            client.setQueryData(keys.productNoteCounts(key), page.counts.notes),
         )
       ).reduce((read, page) => ({
         ...page,
@@ -119,17 +130,48 @@ function joinGroups(read: ItemGroup[], page: ItemGroup[]): ItemGroup[] {
 export const projectItemsQuery = (slug: string, filters: ProjectItemQuery) =>
   queryOptions({
     queryKey: keys.projectItems(slug, filters),
-    queryFn: async (): Promise<WebProjectItemsView> =>
+    queryFn: async ({ client }): Promise<WebProjectItemsView> =>
       (
         await readPages(
           (cursor) => api.projectItems(slug, filters, cursor),
           ITEM_PAGES_MAX,
+          (page) =>
+            client.setQueryData(
+              keys.projectNoteCounts(slug, filters.product),
+              page.counts.notes,
+            ),
         )
       ).reduce((read, page) => ({
         ...page,
         groups: joinGroups(read.groups, page.groups),
       })),
-    // no placeholder: a group's count follows every filter, so any other list's would miscount
+    // the same project and product's last list while the next type or status loads, for its
+    // counts, which follow only the product filter; a group's count follows every filter, so
+    // the caller shows none of its groups
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === slug &&
+      previousQuery.queryKey[3] === filters.product
+        ? previous
+        : undefined,
+  });
+
+type NoteCounts = WebItemListView["counts"]["notes"];
+
+/**
+ * A product's note counts as the first page of any of its lists last read them, so they
+ * arrive before a long list's later pages; never fetched on their own.
+ */
+export const productNoteCountsQuery = (key: string) =>
+  queryOptions<NoteCounts>({
+    queryKey: keys.productNoteCounts(key),
+    queryFn: skipToken,
+  });
+
+/** A project's note counts under the product filter, as `productNoteCountsQuery` reads a product's. */
+export const projectNoteCountsQuery = (slug: string, product: string | null) =>
+  queryOptions<NoteCounts>({
+    queryKey: keys.projectNoteCounts(slug, product),
+    queryFn: skipToken,
   });
 
 /** Bots at work across the viewer's products, for the feed's Working now strip. */

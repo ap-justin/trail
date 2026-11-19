@@ -10,6 +10,7 @@ import {
   ProjectView,
 } from "@/components/project";
 import { api, isNotFound } from "@/lib/api";
+import type { WebProjectItemsView } from "@/lib/api-types";
 import {
   type ItemSearch,
   itemSearchOf,
@@ -17,13 +18,18 @@ import {
   validateItemSearch,
 } from "@/lib/item-search";
 import { loadableAfter, loadableOf } from "@/lib/loadable";
-import { keys, projectItemsQuery } from "@/lib/queries";
+import { keys, projectItemsQuery, projectNoteCountsQuery } from "@/lib/queries";
 
 // slugs are lowercase, so a segment with a capital and no lowercase is a product key
 // from before projects: /projects/TRL was the TRL product's page
 const productKey = /^(?=.*[A-Z])[A-Z0-9]{2,10}$/;
 
 type ProjectSearch = ItemSearch & { product?: string };
+
+// module-scoped so the query keeps its last selection, and the notes prop its identity,
+// across renders
+const itemsOfGroups = (list: WebProjectItemsView) =>
+  list.groups.flatMap((group) => group.items);
 
 export const Route = createFileRoute("/_app/projects/$slug")({
   validateSearch: (search: Record<string, unknown>): ProjectSearch => ({
@@ -69,26 +75,21 @@ function ProjectPage() {
   const items = useQuery({
     ...projectItemsQuery(slug, filters),
     enabled: !itemsWaitOnProject || project.data !== undefined,
-    // counts follow only the product filter, so while a new type or status tab loads, the last
-    // list for this project and product holds them; without them the notes query switches off
-    // and back on, which refetches it, and the Notes section loses its archived count
-    placeholderData: (previous, previousQuery) =>
-      previousQuery?.queryKey[1] === slug &&
-      previousQuery.queryKey[3] === product
-        ? previous
-        : undefined,
   });
   // the placeholder lends only its counts: its groups' counts follow the last tab's filters
   const shownItems = items.isPlaceholderData
     ? { data: undefined, isError: false }
     : items;
-  const noteCounts = items.data?.counts.notes ?? null;
+  // from the first page of whichever list under this product filter read last, so a long
+  // list's later pages don't hold up the Notes section, and a tab whose read failed keeps them
+  const noteCounts =
+    useQuery(projectNoteCountsQuery(slug, product)).data ?? null;
   // the Notes section's, under the product filter the counts it reads follow, once they say
   // there are current notes; a list of notes has no section
   const notes = useQuery({
     ...projectItemsQuery(slug, { product, type: "note", status: "current" }),
     enabled: filters.type !== "note" && (noteCounts?.current ?? 0) > 0,
-    select: (list) => list.groups.flatMap((group) => group.items),
+    select: itemsOfGroups,
   });
   const updates = useQuery({
     queryKey: keys.projectStatusUpdates(slug),

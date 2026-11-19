@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { createBot } from "../service/keys.js";
-import { projectKey, setupTestApp } from "../test-app.js";
+import { atFakeTimeAsync, projectKey, setupTestApp } from "../test-app.js";
 
 const { bot, addBot, db, request } = setupTestApp();
 
@@ -126,17 +126,22 @@ test("GET /items/{key} counts the notes about an item in notesCount, and GET /it
     }),
     201,
   );
-  const notes: Body[] = [];
-  for (const title of ["older", "newer"]) {
-    notes.push(
-      await ok(
-        await request("POST", "/api/v1/items", {
-          json: { type: "note", product: owner.key, title, about: [todo.key] },
-        }),
-        201,
-      ),
-    );
-  }
+  const notes = await atFakeTimeAsync(
+    ["older", "newer"].map(
+      (title) => async () =>
+        ok(
+          await request("POST", "/api/v1/items", {
+            json: {
+              type: "note",
+              product: owner.key,
+              title,
+              about: [todo.key],
+            },
+          }),
+          201,
+        ),
+    ),
+  );
   await ok(
     await request("PATCH", `/api/v1/items/${notes[0]?.key}`, {
       json: { status: "archived" },

@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { expect, test } from "vitest";
 import { activityEvent, webhookDelivery } from "../db/schema.js";
 import { createBot } from "../service/keys.js";
-import { projectKey, setupTestApp } from "../test-app.js";
+import { atFakeTimeAsync, projectKey, setupTestApp } from "../test-app.js";
 import { buildEnvelope } from "../webhooks/payload.js";
 import { type Body, mcpClients } from "./test-client.js";
 
@@ -134,18 +134,19 @@ test("get_item lists the 50 newest current notes about an item and counts all it
   const owner = await productBot("Crowded");
   const elsewhere = await productBot("Faraway");
   const todo = await call(owner.client, "add_todo", { title: "popular" });
-  const keys: string[] = [];
-  for (let i = 0; i < 52; i++) {
-    keys.push(
-      (
-        await call(owner.client, "add_note", {
-          product: owner.product,
-          title: `note ${i}`,
-          about: [todo.key],
-        })
-      ).key,
-    );
-  }
+  const keys = await atFakeTimeAsync(
+    Array.from(
+      { length: 52 },
+      (_, i) => async () =>
+        (
+          await call(owner.client, "add_note", {
+            product: owner.product,
+            title: `note ${i}`,
+            about: [todo.key],
+          })
+        ).key,
+    ),
+  );
   await call(owner.client, "update_item", {
     item: keys[51],
     status: "archived",
@@ -173,18 +174,18 @@ test("list_items with about pages every note about the item, with or without typ
   const hidden = await productBot("Hidden");
   const todo = await call(owner.client, "add_todo", { title: "talked about" });
   const other = await call(owner.client, "add_todo", { title: "elsewhere" });
-  const keys: string[] = [];
-  for (const title of ["one", "two", "three"]) {
-    keys.push(
-      (
-        await call(owner.client, "add_note", {
-          product: owner.product,
-          title,
-          about: [todo.key],
-        })
-      ).key,
-    );
-  }
+  const keys = await atFakeTimeAsync(
+    ["one", "two", "three"].map(
+      (title) => async () =>
+        (
+          await call(owner.client, "add_note", {
+            product: owner.product,
+            title,
+            about: [todo.key],
+          })
+        ).key,
+    ),
+  );
   await call(owner.client, "update_item", {
     item: keys[0],
     status: "archived",
@@ -472,6 +473,107 @@ test("update_item replaces, adds to and removes from about, never about with add
   ).toBe(
     `validation_failed: ${keyOf(1)} is a todo, and about, addAbout and removeAbout are a note's, the items it is about: add a note about ${keyOf(1)} with add_note instead`,
   );
+});
+
+test("a scoped author replacing about keeps the items its key doesn't reach", async () => {
+  const owner = await productBot("Keeper");
+  const faraway = await productBot("Faraway keeper");
+  const [a, b] = await atFakeTimeAsync([
+    () => call(owner.client, "add_todo", { title: "a" }),
+    () => call(owner.client, "add_todo", { title: "b" }),
+  ]);
+  const hidden = await call(faraway.client, "add_todo", { title: "hidden" });
+  const scoped = await connect(
+    createBot(db, "Keeper only", { scope: { products: [owner.product] } }).key,
+  );
+  const note = await call(scoped, "add_note", {
+    product: owner.product,
+    title: "record",
+    about: [a?.key],
+  });
+  await call(owner.client, "update_item", {
+    item: note.key,
+    addAbout: [hidden.key],
+  });
+  const replaced = await call(scoped, "update_item", {
+    item: note.key,
+    about: [b?.key],
+  });
+  expect(replaced.about.map((r: Body) => r.key)).toEqual([b?.key]);
+  const whole = await call(owner.client, "get_item", { item: note.key });
+  expect(whole.about.map((r: Body) => r.key).sort()).toEqual(
+    [b?.key, hidden.key].sort(),
+  );
+});
+
+test("an update that leaves about as it is writes nothing: no event, no updatedAt", async () => {
+  const owner = await productBot("Stayer");
+  const todo = await call(owner.client, "add_todo", { title: "work" });
+  const [note] = await atFakeTimeAsync([
+    () =>
+      call(owner.client, "add_note", {
+        product: owner.product,
+        title: "record",
+        about: [todo.key],
+      }),
+  ]);
+  const events = async () =>
+    (await call(owner.client, "list_activity", { product: owner.product }))
+      .items.length;
+  const before = await events();
+  for (const same of [
+    { about: [todo.key] },
+    { addAbout: [todo.key] },
+    { removeAbout: ["ZZ-404"] },
+  ]) {
+    const read = await call(owner.client, "update_item", {
+      item: note?.key,
+      ...same,
+    });
+    expect(read.about.map((r: Body) => r.key)).toEqual([todo.key]);
+    expect(read.updatedAt).toBe(note?.updatedAt);
+  }
+  expect(await events()).toBe(before);
+  await call(owner.client, "update_item", {
+    item: note?.key,
+    removeAbout: [todo.key],
+  });
+  expect(await events()).toBe(before + 1);
+});
+
+test("a note the product's bot wrote itself is edited by it alone: another bot is told only it edits the note", async () => {
+  const owner = await productBot("Soloist");
+  const other = await productBot("Bystander");
+  const note = await call(owner.client, "add_note", {
+    product: owner.product,
+    title: "mine",
+  });
+  expect(
+    await callError(other.client, "update_item", {
+      item: note.key,
+      title: "not yours",
+    }),
+  ).toBe(
+    `forbidden: ${note.key} is a note by Soloist, and only Soloist edits it: add what you know with add_comment on ${note.key}`,
+  );
+});
+
+test("an item turned into a note takes about in the same update", async () => {
+  const owner = await productBot("Retyper");
+  const target = await call(owner.client, "add_todo", { title: "target" });
+  const todo = await call(owner.client, "add_todo", { title: "was work" });
+  const turned = await call(owner.client, "update_item", {
+    item: todo.key,
+    type: "note",
+    about: [target.key],
+  });
+  expect(turned).toMatchObject({ key: todo.key, type: "note" });
+  expect(turned.about.map((r: Body) => r.key)).toEqual([target.key]);
+  expect(
+    (await call(owner.client, "get_item", { item: target.key })).notes.map(
+      (n: Body) => n.key,
+    ),
+  ).toEqual([todo.key]);
 });
 
 test("only the product's bot turns an item into a note: it keeps its key, drops its assignee and leaves triage for current", async () => {

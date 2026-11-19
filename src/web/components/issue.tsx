@@ -396,24 +396,34 @@ function ItemRefs({
 
 /**
  * The notes about an item: the current ones the read carries (newest first, capped), then
- * what the list leaves out as counts. The web list has no about filter, so no count links.
+ * what the list leaves out as one plain sentence. The web list has no about filter, so the
+ * counts link nowhere, and a sentence keeps them from reading as the product page's button.
  */
 function NotesAbout({ item }: { item: WebItemView }) {
   const { current, archived } = item.notesCount;
   if (current + archived === 0) return null;
-  const unlisted = current - item.notes.length;
-  const line = "py-1.5 text-muted-foreground";
+  const left = notesLeftOut(current, current - item.notes.length, archived);
   return (
     <ItemRefs heading="Notes" items={item.notes}>
-      {current === 0 && <p className={line}>No current notes.</p>}
-      {unlisted > 0 && (
-        <p className={line}>
-          {unlisted} more current {unlisted === 1 ? "note" : "notes"}
-        </p>
-      )}
-      {archived > 0 && <p className={line}>Archived notes {archived}</p>}
+      {left && <p className="py-1.5 text-muted-foreground">{left}</p>}
     </ItemRefs>
   );
+}
+
+const notesWord = (n: number) => (n === 1 ? "note" : "notes");
+
+/** "No current notes, 2 archived." · "3 more current notes, 1 archived." · "1 archived note." */
+function notesLeftOut(current: number, unlisted: number, archived: number) {
+  const lead =
+    current === 0
+      ? "No current notes"
+      : unlisted > 0
+        ? `${unlisted} more current ${notesWord(unlisted)}`
+        : null;
+  if (archived === 0) return lead && `${lead}.`;
+  return lead
+    ? `${lead}, ${archived} archived.`
+    : `${archived} archived ${notesWord(archived)}.`;
 }
 
 const webScheme = /^https?:\/\//i;

@@ -1,5 +1,5 @@
 import { beforeAll, expect, test } from "vitest";
-import { setupTestApp } from "../test-app.js";
+import { atFakeTimeAsync, setupTestApp } from "../test-app.js";
 import { type Body, webSeed } from "./test-seed.js";
 
 const { request, addMember, addProject, addBot } = setupTestApp();
@@ -122,7 +122,11 @@ test("an item's page lists the 50 newest current notes about it and counts every
     return ((await res.json()) as Body).key as string;
   };
   const added: string[] = [];
-  for (let i = 0; i < 52; i++) added.push(await add(`note ${i}`));
+  added.push(
+    ...(await atFakeTimeAsync(
+      Array.from({ length: 52 }, (_, i) => () => add(`note ${i}`)),
+    )),
+  );
   const archive = await request("PATCH", `/api/v1/items/${added[51]}`, {
     json: { status: "archived" },
     key: writer.key,

@@ -570,14 +570,16 @@ describe("notes", () => {
     ).toBeNull();
   });
 
-  test("Archived notes keeps the product filter and lists the archived ones", async () => {
+  test("Show archived notes keeps the product filter and lists the archived ones", async () => {
     const user = userEvent.setup();
     const p = renderProject({
       filters: { ...NO_PROJECT_FILTERS, product: "TRL" },
       items: { status: "ready", data: withNotes() },
       notes: { status: "ready", data: notes },
     });
-    await user.click(screen.getByRole("button", { name: "Archived notes 1" }));
+    await user.click(
+      screen.getByRole("button", { name: "Show 1 archived note" }),
+    );
     expect(p.onFiltersChange).toHaveBeenCalledWith({
       product: "TRL",
       type: "note",
@@ -605,7 +607,7 @@ describe("notes", () => {
     expect(screen.queryByRole("region", { name: /^Notes/ })).toBeNull();
   });
 
-  test("a project with notes and no work: Archived notes leaves focus on the list that replaces the empty state", async () => {
+  test("a project with notes and no work: Show archived notes leaves focus on the list that replaces the empty state", async () => {
     const user = userEvent.setup();
     const notesOnly = {
       ...projectItems([]),
@@ -619,7 +621,9 @@ describe("notes", () => {
         })}
       />,
     );
-    await user.click(screen.getByRole("button", { name: "Archived notes 1" }));
+    await user.click(
+      screen.getByRole("button", { name: "Show 1 archived note" }),
+    );
     rerender(
       <ProjectView
         {...props({
@@ -632,7 +636,7 @@ describe("notes", () => {
     expect(screen.getByRole("tabpanel")).toHaveFocus();
   });
 
-  test("the Notes section stays while the list's counts reload, without Archived notes until they're back", () => {
+  test("the Notes section stays while the list's counts reload, without Show archived notes until they're back", () => {
     renderProject({
       filters: { ...NO_PROJECT_FILTERS, status: "open" },
       items: { status: "loading" },
@@ -648,7 +652,9 @@ describe("notes", () => {
       }),
     ).toBeInTheDocument();
     expect(
-      within(section).queryByRole("button", { name: /^Archived notes/ }),
+      within(section).queryByRole("button", {
+        name: /^Show [0-9]+ archived note/,
+      }),
     ).toBeNull();
   });
 

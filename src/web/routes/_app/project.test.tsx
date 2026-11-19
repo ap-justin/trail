@@ -1,3 +1,4 @@
+import type { QueryClient } from "@tanstack/react-query";
 import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
@@ -291,6 +292,12 @@ describe("while the next filter loads", () => {
   });
 });
 
+/** How many of the project's item lists have rows in the cache (the held one counts). */
+const settledLists = (queryClient: QueryClient) =>
+  queryClient
+    .getQueriesData({ queryKey: ["project", "human-ui", "items"] })
+    .filter(([, data]) => data !== undefined).length;
+
 describe("notes section on load", () => {
   /** Human UI launch's items with these note counts; returns the notes requests made. */
   function serveNoteCounts(notes: { current: number; archived: number }) {
@@ -318,7 +325,7 @@ describe("notes section on load", () => {
     expect(screen.getByRole("heading", { name: /^Notes/ })).toBeInTheDocument();
     expect(screen.getByText("No current notes.")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Archived notes 2" }),
+      screen.getByRole("button", { name: "Show 2 archived notes" }),
     ).toBeInTheDocument();
     expect(notesAsked).toEqual([]);
   });
@@ -329,10 +336,17 @@ describe("notes section on load", () => {
     const held = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const notesAsked = serveNoteCounts({ current: 0, archived: 2 });
+    serveNoteCounts({ current: 0, archived: 2 });
+    const notesAsked: string[] = [];
+    let heldAnswered = false;
     server.use(
       http.get("/api/web/projects/human-ui/items", async ({ request }) => {
-        if (new URL(request.url).searchParams.has("status")) await held;
+        const query = new URL(request.url).searchParams;
+        if (query.get("type") === "note") notesAsked.push(request.url);
+        if (query.has("status")) {
+          await held;
+          heldAnswered = true;
+        }
         const list = projectItems([{ product: trail, items: [todoRow()] }]);
         return HttpResponse.json({
           ...list,
@@ -340,14 +354,19 @@ describe("notes section on load", () => {
         });
       }),
     );
-    renderApp("/projects/human-ui");
+    const { queryClient } = renderApp("/projects/human-ui");
     expect(await screen.findAllByText(todoRow().title)).not.toHaveLength(0);
     await userEvent.click(screen.getByRole("tab", { name: /^Open/ }));
     expect(screen.getByText("No current notes.")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Archived notes 2" }),
+      screen.getByRole("button", { name: "Show 2 archived notes" }),
     ).toBeInTheDocument();
     release();
+    await waitFor(() => expect(heldAnswered).toBe(true));
+    await waitFor(() =>
+      expect(settledLists(queryClient)).toBeGreaterThanOrEqual(2),
+    );
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
     expect(notesAsked).toEqual([]);
   });
 
@@ -367,7 +386,7 @@ describe("notes section on load", () => {
     );
     const { router } = renderApp("/projects/human-ui");
     expect(
-      await screen.findByRole("button", { name: "Archived notes 2" }),
+      await screen.findByRole("button", { name: "Show 2 archived notes" }),
     ).toBeInTheDocument();
     await router.navigate({
       to: "/projects/$slug",
@@ -376,9 +395,57 @@ describe("notes section on load", () => {
     });
     await waitFor(() =>
       expect(
-        screen.queryByRole("button", { name: "Archived notes 2" }),
+        screen.queryByRole("button", { name: "Show 2 archived notes" }),
       ).not.toBeInTheDocument(),
     );
+  });
+
+  test("only archived notes: the section stays when the next tab's list fails", async () => {
+    signedInAs("member");
+    serveNoteCounts({ current: 0, archived: 2 });
+    server.use(
+      http.get("/api/web/projects/human-ui/items", ({ request }) => {
+        if (new URL(request.url).searchParams.has("status"))
+          return HttpResponse.json({ error: "bad request" }, { status: 400 });
+        const list = projectItems([{ product: trail, items: [todoRow()] }]);
+        return HttpResponse.json({
+          ...list,
+          counts: { ...list.counts, notes: { current: 0, archived: 2 } },
+        });
+      }),
+    );
+    renderApp("/projects/human-ui");
+    expect(
+      await screen.findByRole("button", { name: "Show 2 archived notes" }),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: /^Open/ }));
+    expect(await screen.findAllByRole("alert")).not.toHaveLength(0);
+    expect(
+      screen.getByRole("button", { name: "Show 2 archived notes" }),
+    ).toBeInTheDocument();
+  });
+
+  test("current notes are read on the list's first page, not after its last", async () => {
+    signedInAs("member");
+    serveProject();
+    const never = new Promise<void>(() => {});
+    server.use(
+      http.get("/api/web/projects/human-ui/items", async ({ request }) => {
+        const query = new URL(request.url).searchParams;
+        const isNotes = query.get("type") === "note";
+        const list = projectItems([
+          { product: trail, items: [isNotes ? noteRow() : todoRow()] },
+        ]);
+        if (query.has("cursor")) await never;
+        return HttpResponse.json({
+          ...list,
+          counts: { ...list.counts, notes: { current: 1, archived: 0 } },
+          nextCursor: isNotes ? null : "after-17",
+        });
+      }),
+    );
+    renderApp("/projects/human-ui");
+    expect(await screen.findAllByText(noteRow().title)).not.toHaveLength(0);
   });
 
   test("no notes at all: no section and no notes request", async () => {

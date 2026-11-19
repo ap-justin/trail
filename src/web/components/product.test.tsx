@@ -440,14 +440,16 @@ describe("notes", () => {
     expect(within(tabs()).getByRole("tab", { name: "All 4" })).toBeVisible();
   });
 
-  test("Archived notes lists the archived ones in the page's list, with focus on the list", async () => {
+  test("Show archived notes lists the archived ones in the page's list, with focus on the list", async () => {
     const user = userEvent.setup();
     const p = renderProduct({
       items: { status: "ready", data: workWithNotes },
       notes: { status: "ready", data: current },
     });
     await user.click(
-      within(notesSection()).getByRole("button", { name: "Archived notes 1" }),
+      within(notesSection()).getByRole("button", {
+        name: "Show 1 archived note",
+      }),
     );
     expect(p.onFiltersChange).toHaveBeenCalledWith({
       type: "note",
@@ -543,7 +545,9 @@ describe("notes", () => {
     });
     expect(notesSection()).toHaveTextContent("No current notes.");
     expect(
-      within(notesSection()).getByRole("button", { name: "Archived notes 1" }),
+      within(notesSection()).getByRole("button", {
+        name: "Show 1 archived note",
+      }),
     ).toBeInTheDocument();
   });
 
@@ -582,7 +586,7 @@ describe("notes", () => {
     expect(screen.getByRole("heading", { name: "Notes 2" })).toHaveFocus();
   });
 
-  test("the Notes section stays while the list's counts reload, without Archived notes until they're back", () => {
+  test("the Notes section stays while the list's counts reload, without Show archived notes until they're back", () => {
     renderProduct({
       filters: { type: "todo", status: null },
       items: { status: "loading" },
@@ -593,7 +597,9 @@ describe("notes", () => {
     ).toBeInTheDocument();
     expect(within(notesSection()).getAllByRole("link")).toHaveLength(2);
     expect(
-      within(notesSection()).queryByRole("button", { name: /^Archived notes/ }),
+      within(notesSection()).queryByRole("button", {
+        name: /^Show [0-9]+ archived note/,
+      }),
     ).toBeNull();
   });
 });

@@ -1,3 +1,4 @@
+import type { QueryClient } from "@tanstack/react-query";
 import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
@@ -8,6 +9,7 @@ import {
   issueList,
   issueRow,
   itemList,
+  noteRow,
   productDetail,
   statusUpdate,
   todoRow,
@@ -78,6 +80,12 @@ describe("product page", () => {
   });
 });
 
+/** How many of TRL's item lists have rows in the cache (the held one counts). */
+const settledLists = (queryClient: QueryClient) =>
+  queryClient
+    .getQueriesData({ queryKey: ["product", "TRL", "items"] })
+    .filter(([, data]) => data !== undefined).length;
+
 describe("notes section on load", () => {
   /** TRL's items with these note counts; returns the notes requests made. */
   function serveNoteCounts(notes: { current: number; archived: number }) {
@@ -107,7 +115,7 @@ describe("notes section on load", () => {
     expect(screen.getByRole("heading", { name: /^Notes/ })).toBeInTheDocument();
     expect(screen.getByText("No current notes.")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Archived notes 2" }),
+      screen.getByRole("button", { name: "Show 2 archived notes" }),
     ).toBeInTheDocument();
     expect(notesAsked).toEqual([]);
   });
@@ -118,11 +126,50 @@ describe("notes section on load", () => {
     const held = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const notesAsked = serveNoteCounts({ current: 0, archived: 2 });
+    serveNoteCounts({ current: 0, archived: 2 });
+    const notesAsked: string[] = [];
+    let heldAnswered = false;
     server.use(
       http.get("/api/web/products/TRL/items", async ({ request }) => {
+        const query = new URL(request.url).searchParams;
+        if (query.get("type") === "note") notesAsked.push(request.url);
         // the open issue's list has nothing under In progress, so it can't stand in
-        if (new URL(request.url).searchParams.has("status")) await held;
+        if (query.has("status")) {
+          await held;
+          heldAnswered = true;
+        }
+        const list = issueList([issueRow({ status: "open" })]);
+        return HttpResponse.json({
+          ...list,
+          counts: { ...list.counts, notes: { current: 0, archived: 2 } },
+        });
+      }),
+    );
+    const { queryClient } = renderApp("/products/TRL");
+    expect(
+      await screen.findAllByText("Human UI: feed, projects, issue page"),
+    ).not.toHaveLength(0);
+    await userEvent.click(screen.getByRole("tab", { name: /^In progress/ }));
+    expect(screen.getByText("No current notes.")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Show 2 archived notes" }),
+    ).toBeInTheDocument();
+    release();
+    await waitFor(() => expect(heldAnswered).toBe(true));
+    await waitFor(() =>
+      expect(settledLists(queryClient)).toBeGreaterThanOrEqual(2),
+    );
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    expect(notesAsked).toEqual([]);
+  });
+
+  test("only archived notes: the section stays when the next tab's list fails", async () => {
+    signedInAs("member");
+    serveNoteCounts({ current: 0, archived: 2 });
+    server.use(
+      http.get("/api/web/products/TRL/items", ({ request }) => {
+        if (new URL(request.url).searchParams.has("status"))
+          return HttpResponse.json({ error: "bad request" }, { status: 400 });
         const list = issueList([issueRow({ status: "open" })]);
         return HttpResponse.json({
           ...list,
@@ -132,15 +179,50 @@ describe("notes section on load", () => {
     );
     renderApp("/products/TRL");
     expect(
-      await screen.findAllByText("Human UI: feed, projects, issue page"),
-    ).not.toHaveLength(0);
-    await userEvent.click(screen.getByRole("tab", { name: /^In progress/ }));
-    expect(screen.getByText("No current notes.")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Archived notes 2" }),
+      await screen.findByRole("button", { name: "Show 2 archived notes" }),
     ).toBeInTheDocument();
-    release();
-    expect(notesAsked).toEqual([]);
+    await userEvent.click(screen.getByRole("tab", { name: /^In progress/ }));
+    expect(await screen.findAllByRole("alert")).not.toHaveLength(0);
+    expect(
+      screen.getByRole("button", { name: "Show 2 archived notes" }),
+    ).toBeInTheDocument();
+  });
+
+  test("current notes are read on the list's first page, not after its last", async () => {
+    signedInAs("member");
+    serveProduct();
+    const never = new Promise<void>(() => {});
+    server.use(
+      http.get("/api/web/products/TRL/items", async ({ request }) => {
+        const query = new URL(request.url).searchParams;
+        const notes = { current: 1, archived: 0 };
+        const list =
+          query.get("type") === "note"
+            ? issueList([noteRow()])
+            : issueList([issueRow()]);
+        if (query.has("cursor")) await never;
+        return HttpResponse.json({
+          ...list,
+          counts: { ...list.counts, notes },
+          nextCursor: query.get("type") === "note" ? null : "after-17",
+        });
+      }),
+    );
+    renderApp("/products/TRL");
+    expect(await screen.findAllByText(noteRow().title)).not.toHaveLength(0);
+  });
+
+  test("current notes: the section reads them once, as type note", async () => {
+    signedInAs("member");
+    const notesAsked = serveNoteCounts({ current: 1, archived: 0 });
+    renderApp("/products/TRL");
+    expect(
+      await screen.findByRole("heading", { name: /^Notes/ }),
+    ).toBeInTheDocument();
+    await waitFor(() => expect(notesAsked).toHaveLength(1));
+    const asked = new URL(notesAsked[0] ?? "", "http://localhost").searchParams;
+    expect(asked.get("type")).toBe("note");
+    expect(asked.get("status")).toBe("current");
   });
 
   test("no notes at all: no section and no notes request", async () => {

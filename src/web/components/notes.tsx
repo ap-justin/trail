@@ -64,7 +64,8 @@ export function NotesSection({
           onClick={onShowArchived}
           className="mt-1 font-normal text-muted-foreground max-lg:mx-4 lg:ml-0.5"
         >
-          Archived notes <span>{counts.archived}</span>
+          Show {counts.archived} archived{" "}
+          {counts.archived === 1 ? "note" : "notes"}
         </Button>
       )}
     </section>

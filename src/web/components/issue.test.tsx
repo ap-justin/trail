@@ -1271,7 +1271,7 @@ describe("notes", () => {
     expect(within(notes).getByRole("link")).toHaveAccessibleName(
       "Current Note TRL-31 Why the feed reads newest first",
     );
-    expect(within(notes).queryByText(/Archived notes/)).toBeNull();
+    expect(within(notes).queryByText(/archived/i)).toBeNull();
     expect(screen.queryByRole("region", { name: "About" })).toBeNull();
   });
 
@@ -1291,7 +1291,7 @@ describe("notes", () => {
     ]);
   });
 
-  test("only archived notes about an item: the section says none are current and counts the archived, as text", () => {
+  test("only archived notes about an item: one plain sentence says none are current and counts the archived", () => {
     renderIssue({
       issue: {
         status: "ready",
@@ -1299,8 +1299,10 @@ describe("notes", () => {
       },
     });
     const notes = screen.getByRole("region", { name: "Notes" });
-    expect(within(notes).getByText("No current notes.")).toBeInTheDocument();
-    expect(within(notes).getByText("Archived notes 2")).toBeInTheDocument();
+    expect(
+      within(notes).getByText("No current notes, 2 archived."),
+    ).toBeInTheDocument();
+    expect(within(notes).queryByRole("button")).toBeNull();
     expect(within(notes).queryByRole("link")).toBeNull();
     expect(within(notes).queryByRole("list")).toBeNull();
   });
@@ -1323,9 +1325,33 @@ describe("notes", () => {
     });
     const notes = screen.getByRole("region", { name: "Notes" });
     expect(within(notes).getAllByRole("link")).toHaveLength(50);
-    expect(within(notes).getByText("3 more current notes")).toBeInTheDocument();
-    expect(within(notes).getByText("Archived notes 1")).toBeInTheDocument();
-    expect(within(notes).queryByText("No current notes.")).toBeNull();
+    expect(
+      within(notes).getByText("3 more current notes, 1 archived."),
+    ).toBeInTheDocument();
+    expect(within(notes).queryByText(/No current notes/)).toBeNull();
+  });
+
+  test("every current note listed and one archived: the archived are a count under the list", () => {
+    renderIssue({
+      issue: {
+        status: "ready",
+        data: issue({
+          notes: [
+            {
+              key: "TRL-31",
+              title: "Why the feed reads newest first",
+              type: "note",
+              status: "current",
+            },
+          ],
+          notesCount: { current: 1, archived: 1 },
+        }),
+      },
+    });
+    const notes = screen.getByRole("region", { name: "Notes" });
+    expect(within(notes).getAllByRole("link")).toHaveLength(1);
+    expect(within(notes).getByText("1 archived note.")).toBeInTheDocument();
+    expect(within(notes).queryByRole("button")).toBeNull();
   });
 
   test("an item no note is about has no Notes section", () => {
