@@ -258,6 +258,63 @@ test("a note's created event lists the keys it is about, as its updated event do
   });
 });
 
+test("GET /activity for a key reaching only the note's product names its own-product about keys and counts the rest, through the note's turn into an issue", async () => {
+  const owner = await newProduct("activity about");
+  const elsewhere = addBot("elsewhere owner");
+  const hidden = await newProduct("hidden about", elsewhere.key);
+  const todo = await ok(
+    await request("POST", "/api/v1/items", {
+      json: { type: "todo", product: owner.key, title: "work" },
+    }),
+    201,
+  );
+  const secret = await ok(
+    await request("POST", "/api/v1/items", {
+      json: { type: "todo", product: hidden.key, title: "secret" },
+      key: elsewhere.key,
+    }),
+    201,
+  );
+  const note = await ok(
+    await request("POST", "/api/v1/items", {
+      json: {
+        type: "note",
+        product: owner.key,
+        title: "record",
+        about: [todo.key, secret.key],
+      },
+    }),
+    201,
+  );
+  await ok(
+    await request("PATCH", `/api/v1/items/${note.key}`, {
+      json: { type: "issue" },
+    }),
+  );
+  const follower = createBot(db, "activity follower", {
+    scope: { products: [owner.key] },
+  });
+  const events = (
+    await ok(
+      await request("GET", `/api/v1/activity?product=${owner.key}`, {
+        key: follower.key,
+      }),
+    )
+  ).items.filter((e: Body) => e.subjectId === note.id);
+  const payloadOf = (action: string) =>
+    events.find((e: Body) => e.action === action)?.payload;
+  expect(payloadOf("issue.created")).toMatchObject({
+    about: [todo.key],
+    aboutOthers: 1,
+  });
+  expect(payloadOf("issue.updated")).toMatchObject({
+    type: { from: "note", to: "issue" },
+    about: { from: [todo.key], to: [] },
+    aboutOthers: { from: 1, to: 0 },
+  });
+  expect(JSON.stringify(events)).not.toContain(secret.key);
+});
+
 test("PATCH /items/{key} on a note by a third bot is 403 forbidden, and the note stays as written", async () => {
   const owner = await newProduct("rest authz");
   const author = addBot("rest author");

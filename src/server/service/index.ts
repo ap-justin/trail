@@ -1434,6 +1434,30 @@ export function createService({
     return about;
   }
 
+  /**
+   * A note's about as its events carry it: the keys of the items in the note's
+   * own product, in key order, and a count of the rest, since anyone who sees
+   * the note's events may not reach another product's items.
+   */
+  function aboutInEvents(
+    tx: Tx,
+    noteId: string,
+    noteProductId: string,
+  ): { keys: string[]; others: number } {
+    const items = tx
+      .select({ key: itemRefColumns.key, productId: issue.productId })
+      .from(noteAbout)
+      .innerJoin(issue, eq(issue.id, noteAbout.itemId))
+      .innerJoin(product, eq(product.id, issue.productId))
+      .where(eq(noteAbout.noteId, noteId))
+      .orderBy(asc(product.key), asc(issue.number))
+      .all();
+    const keys = items
+      .filter((i) => i.productId === noteProductId)
+      .map((i) => i.key);
+    return { keys, others: items.length - keys.length };
+  }
+
   /** Where a note is about the item and `actor` reaches the note. */
   const reachedNotesAbout = (itemId: string, actor: ActingActor) =>
     and(
@@ -2566,7 +2590,11 @@ export function createService({
     labels.map((l) => l.name).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 
   /** The item's create event, with the type and product an item event carries. */
-  function itemCreated(actor: ActingActor, created: Issue): NewEvent {
+  function itemCreated(tx: Tx, actor: ActingActor, created: Issue): NewEvent {
+    const about =
+      created.type === "note"
+        ? aboutInEvents(tx, created.id, created.productId)
+        : undefined;
     return {
       actorId: actor.id,
       subjectType: "issue",
@@ -2586,8 +2614,7 @@ export function createService({
         labels: created.labels,
         links: created.links,
         externalRef: created.externalRef,
-        // keys, as issue.updated's about {from, to} carries them
-        ...(created.about && { about: created.about.map((a) => a.key) }),
+        ...(about && { about: about.keys, aboutOthers: about.others }),
       },
     };
   }
@@ -2853,9 +2880,9 @@ export function createService({
               result: withSkipped(created, skipped),
               event:
                 into === undefined
-                  ? itemCreated(actor, created)
+                  ? itemCreated(tx, actor, created)
                   : [
-                      itemCreated(actor, created),
+                      itemCreated(tx, actor, created),
                       membership(
                         actor,
                         into,
@@ -3732,13 +3759,11 @@ export function createService({
           add: addAbout,
           remove: removeAbout,
         });
-        if (aboutIds !== undefined) {
-          changes.about = {
-            from: (current.about ?? []).map((a) => a.key),
-            to: undefined,
-          };
-        }
-        if (isEmpty(changes)) {
+        const aboutBefore =
+          aboutIds === undefined
+            ? undefined
+            : aboutInEvents(tx, row.id, row.productId);
+        if (isEmpty(changes) && aboutBefore === undefined) {
           return { result: withSkipped(current, skipped), event: null };
         }
         const now = new Date();
@@ -3756,8 +3781,10 @@ export function createService({
         if (links && "links" in changes) setLinks(tx, row.id, links);
         if (aboutIds !== undefined) setAbout(tx, row.id, aboutIds);
         const written = hydrateOne(tx, updatedRow, actor);
-        if (changes.about) {
-          changes.about.to = (written.about ?? []).map((a) => a.key);
+        if (aboutBefore) {
+          const after = aboutInEvents(tx, row.id, row.productId);
+          changes.about = { from: aboutBefore.keys, to: after.keys };
+          changes.aboutOthers = { from: aboutBefore.others, to: after.others };
         }
         return {
           result: withSkipped(written, skipped),

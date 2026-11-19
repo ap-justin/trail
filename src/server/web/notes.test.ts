@@ -159,6 +159,17 @@ test("the feed filters to notes by type", async () => {
   expect([...items].sort()).toEqual([keys.archived, keys.current].sort());
 });
 
+test("a note about an item the viewer can't reach never names it in the feed, search or the note's page", async () => {
+  const feed = await get("/feed", member);
+  expect(feed.body.items.map((e: Body) => e.item?.key)).toContain(keys.current);
+  const found = await get("/search?q=current%20note", member);
+  const page = await get(`/items/${keys.current}`, member);
+  expect(page.body.about.map((r: Body) => r.key)).toEqual([keys.todo]);
+  expect(JSON.stringify([feed.body, found.body, page.body])).not.toContain(
+    keys.secret,
+  );
+});
+
 test("a note in a product the viewer can't reach, about an item they see, is not on that item's page", async () => {
   const issue = await get(`/items/${keys.issue}`, member);
   expect(issue.body.notes).toEqual([]);

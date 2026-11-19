@@ -774,6 +774,58 @@ test("a note's events go out as trail.item.* with type note, and under the depre
   expect(created.payload).toMatchObject({ type: "note", status: "current" });
 });
 
+test("a note's events name only the items in its own product it is about, counting the rest in aboutOthers, for activity and webhooks alike", async () => {
+  const atlas = await productBot("Atlas follower");
+  const boreas = await productBot("Boreas private");
+  const todo = await call(atlas.client, "add_todo", { title: "ship export" });
+  const secret = await call(boreas.client, "add_todo", { title: "secret" });
+  const follower = await connect(
+    createBot(db, "Atlas only", { scope: { products: [atlas.product] } }).key,
+  );
+  const { id } = await call(follower, "create_webhook", {
+    url: "https://follower.example.com/hook",
+    secret: "whsec_follower_0123456789",
+    products: [atlas.product],
+  });
+  const note = await call(atlas.client, "add_note", {
+    product: atlas.product,
+    title: "export and the secret share a dialect",
+    about: [todo.key, secret.key],
+  });
+  expect(
+    (await call(atlas.client, "get_item", { item: note.key })).about.map(
+      (r: Body) => r.key,
+    ),
+  ).toEqual([todo.key, secret.key]);
+  await call(atlas.client, "update_item", {
+    item: note.key,
+    removeAbout: [secret.key],
+  });
+
+  const activity = (
+    await call(follower, "list_activity", { product: atlas.product })
+  ).items.filter((e: Body) => e.subjectId === note.id);
+  const payloadOf = (action: string) =>
+    activity.find((e: Body) => e.action === action)?.payload;
+  expect(payloadOf("issue.created")).toMatchObject({
+    about: [todo.key],
+    aboutOthers: 1,
+  });
+  expect(payloadOf("issue.updated")).toEqual({
+    about: { from: [todo.key], to: [todo.key] },
+    aboutOthers: { from: 1, to: 0 },
+  });
+  const envelopes = db
+    .select()
+    .from(webhookDelivery)
+    .innerJoin(activityEvent, eq(activityEvent.id, webhookDelivery.eventId))
+    .where(eq(webhookDelivery.subscriptionId, id))
+    .all()
+    .map((d) => buildEnvelope(db, d.activity_event, undefined));
+  expect(envelopes.length).toBeGreaterThan(0);
+  expect(JSON.stringify([activity, envelopes])).not.toContain(secret.key);
+});
+
 test("an issue turned into a note sends one last trail.issue.updated carrying type note, and nothing more under trail.issue.*", async () => {
   const owner = await productBot("Retyped");
   const filer = await productBot("Asker");
