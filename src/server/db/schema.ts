@@ -540,7 +540,8 @@ export const issueLink = sqliteTable(
   ],
 );
 
-// the items a note is about, in any product. Nothing here pins note_id to a note; the service must
+// the items a note is about, in any product. Nothing here pins note_id to a note; the service
+// writes rows only for notes and clears them when an item stops being one.
 export const noteAbout = sqliteTable(
   "note_about",
   {
