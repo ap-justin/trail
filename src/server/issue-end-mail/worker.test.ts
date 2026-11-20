@@ -1,13 +1,15 @@
-import { eq, inArray } from "drizzle-orm";
-import { afterEach, expect, test, vi } from "vitest";
+import { eq, inArray, sql } from "drizzle-orm";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { type MailMessage, MailRefused } from "../auth/mail.js";
 import { actor, issue, issueEndMail, product } from "../db/schema.js";
+import { createEventBus } from "../events/bus.js";
 import { createBot, setBotHandler } from "../service/keys.js";
 import { setupTestApp, TEST_ORIGIN, testAuthConfig } from "../test-app.js";
 import { deriveUnsubscribeKey, unsubscribeUrl } from "./unsubscribe.js";
 import {
   createIssueEndMailWorker,
   type IssueEndMailWorkerOptions,
+  MAX_ATTEMPTS,
 } from "./worker.js";
 
 const { app, db, bus, bot, request, inviteEmail, signInWithEmail, addMember } =
@@ -63,20 +65,40 @@ function rowOf(key: string) {
 const unsubscribeKey = deriveUnsubscribeKey(testAuthConfig.BETTER_AUTH_SECRET);
 const FROM = "trail <trail@mail.example.test>";
 
+const made: ReturnType<typeof createIssueEndMailWorker>[] = [];
+
 function worker(
   transport: (m: MailMessage, signal?: AbortSignal) => Promise<void>,
   options: Partial<IssueEndMailWorkerOptions> = {},
 ) {
-  return createIssueEndMailWorker({
+  const w = createIssueEndMailWorker({
     db,
     bus,
     mail: { from: FROM, publicUrl: TEST_ORIGIN, unsubscribeKey, transport },
     ...options,
   });
+  made.push(w);
+  return w;
 }
 
-afterEach(() => {
+// one database per file and tick() sends every due row: whatever a test leaves
+// behind (a started worker, fake timers, an unsubscribed person, a pending row)
+// is undone here, so a failure cannot fail the next test for another reason
+afterEach(async () => {
   vi.restoreAllMocks();
+  const stopping = Promise.all(made.splice(0).map((w) => w.stop()));
+  // stop() cleared the intervals; what is left is the drain's own setImmediate
+  if (vi.isFakeTimers()) await vi.runAllTimersAsync();
+  await stopping;
+  vi.useRealTimers();
+  db.update(actor)
+    .set({ issueEndMailOff: false })
+    .where(eq(actor.id, person.id))
+    .run();
+  db.update(issueEndMail)
+    .set({ state: "failed" })
+    .where(sql`${issueEndMail.state} = 'pending'`)
+    .run();
 });
 
 test("an ended issue's email goes to the person's address once, with the issue, the owner bot's last comment at ending, the links and the unsubscribe headers", async () => {
@@ -141,10 +163,6 @@ test("an email still pending when the person unsubscribes is skipped, not sent",
     state: "skipped",
     lastError: "not sent: the person turned these emails off",
   });
-  db.update(actor)
-    .set({ issueEndMailOff: false })
-    .where(eq(actor.id, person.id))
-    .run();
 });
 
 test("a person with no email address, signed in with GitHub, is skipped with the reason", async () => {
@@ -262,10 +280,6 @@ test("a broken mail side never touches a write: the ending commits and the worke
   const read = await api("GET", `/items/${key}`, bot.key);
   expect(read.status).toBe("done");
   expect(rowOf(key)).toMatchObject({ state: "pending", attempts: 1 });
-  db.update(issueEndMail)
-    .set({ state: "failed" })
-    .where(eq(issueEndMail.id, rowOf(key).id))
-    .run();
 });
 
 test("stop cuts a send in flight and leaves its email pending for the next start", async () => {
@@ -311,4 +325,234 @@ test("purge deletes finished emails past the keep time and keeps pending ones", 
     .where(inArray(issueEndMail.id, [finished.id, pending.id]))
     .all();
   expect(left).toEqual([{ id: pending.id }]);
+});
+
+test("with the real backoff each retry waits longer, the last wait repeats, and the email fails after the last attempt", async () => {
+  const key = await ended();
+  let now = Date.now();
+  let calls = 0;
+  const w = worker(
+    async () => {
+      calls++;
+      throw new TypeError("fetch failed");
+    },
+    { now: () => now, maxAttempts: 8 },
+  );
+  const MIN = 60_000;
+  const HOUR = 60 * MIN;
+  const waits = [
+    MIN,
+    5 * MIN,
+    30 * MIN,
+    2 * HOUR,
+    6 * HOUR,
+    6 * HOUR,
+    6 * HOUR,
+  ];
+  for (const [i, wait] of waits.entries()) {
+    await w.tick();
+    const row = rowOf(key);
+    expect(row, `after attempt ${i + 1}`).toMatchObject({
+      state: "pending",
+      attempts: i + 1,
+    });
+    expect(row.nextAttemptAt.getTime() - now).toBe(wait);
+    // one millisecond short of due: no new attempt
+    now += wait - 1;
+    await w.tick();
+    expect(calls).toBe(i + 1);
+    now += 1;
+  }
+  await w.tick();
+  expect(calls).toBe(8);
+  expect(rowOf(key)).toMatchObject({
+    state: "failed",
+    attempts: 8,
+    lastError: "fetch failed",
+  });
+});
+
+test("a network error that never clears fails the email after the default attempt cap", async () => {
+  const key = await ended();
+  let now = Date.now();
+  let calls = 0;
+  const w = worker(
+    async () => {
+      calls++;
+      throw new TypeError("fetch failed");
+    },
+    { now: () => now },
+  );
+  for (let i = 0; i < 10; i++) {
+    await w.tick();
+    now += 6 * 60 * 60_000;
+  }
+  expect(MAX_ATTEMPTS).toBe(6);
+  expect(calls).toBe(6);
+  expect(rowOf(key)).toMatchObject({ state: "failed", attempts: 6 });
+});
+
+test("a 409, Resend's idempotency key still in use, is retried and then sent", async () => {
+  const key = await ended();
+  let now = Date.now();
+  let calls = 0;
+  const w = worker(
+    async () => {
+      calls++;
+      if (calls === 1) throw new MailRefused(409, "key in use");
+    },
+    { now: () => now, backoffMs: [1_000] },
+  );
+  await w.tick();
+  expect(rowOf(key)).toMatchObject({
+    state: "pending",
+    attempts: 1,
+    lastError: "Resend answered 409: key in use",
+  });
+  now += 1_000;
+  await w.tick();
+  expect(calls).toBe(2);
+  expect(rowOf(key)).toMatchObject({ state: "sent", attempts: 2 });
+});
+
+test("purge keeps a finished email younger than the keep time and removes older ones in any finished state, never a pending one", async () => {
+  const NOW = 10_000;
+  const rows = {
+    oldSent: rowOf(await ended()),
+    oldSkipped: rowOf(await ended()),
+    oldFailed: rowOf(await ended()),
+    youngSent: rowOf(await ended()),
+    oldPending: rowOf(await ended()),
+  };
+  const set = (
+    row: { id: string },
+    state: "sent" | "skipped" | "failed" | "pending",
+    createdAt: number,
+  ) =>
+    db
+      .update(issueEndMail)
+      .set({
+        state,
+        createdAt: new Date(createdAt),
+        // the table requires a send time for sent rows, and only for them
+        sentAt: state === "sent" ? new Date(createdAt) : null,
+      })
+      .where(eq(issueEndMail.id, row.id))
+      .run();
+  set(rows.oldSent, "sent", 0);
+  set(rows.oldSkipped, "skipped", 0);
+  set(rows.oldFailed, "failed", 0);
+  set(rows.youngSent, "sent", NOW - 500);
+  set(rows.oldPending, "pending", 0);
+  await worker(async () => {}, { keepMs: 1_000, now: () => NOW }).purge();
+  const left = db
+    .select({ id: issueEndMail.id })
+    .from(issueEndMail)
+    .where(
+      inArray(
+        issueEndMail.id,
+        Object.values(rows).map((r) => r.id),
+      ),
+    )
+    .all()
+    .map((r) => r.id)
+    .sort();
+  expect(left).toEqual([rows.youngSent.id, rows.oldPending.id].sort());
+});
+
+describe("start", () => {
+  // only the clock-driven pieces: the database and the app need the real event loop
+  const fakeTimers = () =>
+    vi.useFakeTimers({
+      toFake: [
+        "setInterval",
+        "clearInterval",
+        "setImmediate",
+        "clearImmediate",
+      ],
+    });
+  const collect = () => {
+    const sent: MailMessage[] = [];
+    return {
+      sent,
+      transport: async (m: MailMessage) => {
+        sent.push(m);
+      },
+    };
+  };
+  const never = 1_000_000_000;
+
+  test("an issue ended after start is sent by the bus wake, with no tick and no poll", async () => {
+    fakeTimers();
+    const { sent, transport } = collect();
+    const w = worker(transport, { pollMs: never, purgeMs: never });
+    w.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sent).toEqual([]);
+    const key = await ended();
+    // the wake runs after the publisher's turn, not inside it
+    expect(sent).toEqual([]);
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]?.subject).toContain(key);
+  });
+
+  test("only an issue.updated event wakes the worker", async () => {
+    fakeTimers();
+    const isolated = createEventBus();
+    const w = worker(collect().transport, {
+      bus: isolated,
+      pollMs: never,
+      purgeMs: never,
+    });
+    w.start();
+    await vi.advanceTimersByTimeAsync(0);
+    const idle = vi.getTimerCount();
+    isolated.publish({ action: "comment.created" } as never);
+    expect(vi.getTimerCount()).toBe(idle);
+    isolated.publish({ action: "issue.updated" } as never);
+    expect(vi.getTimerCount()).toBe(idle + 1);
+  });
+
+  test("the poll interval sends a row that came due while the bus was silent", async () => {
+    fakeTimers();
+    const { sent, transport } = collect();
+    // the worker listens to a bus nothing publishes on: only the poll can find the row
+    const w = worker(transport, { bus: createEventBus(), pollMs: 5_000 });
+    w.start();
+    await vi.advanceTimersByTimeAsync(0);
+    await ended();
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(sent).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sent).toHaveLength(1);
+  });
+
+  test("the first pass sends what an earlier run left pending", async () => {
+    fakeTimers();
+    const { sent, transport } = collect();
+    await ended();
+    const w = worker(transport, {
+      bus: createEventBus(),
+      pollMs: never,
+      purgeMs: never,
+    });
+    w.start();
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+  });
+
+  test("stop ends the poll, the purge and the bus wake", async () => {
+    fakeTimers();
+    const { sent, transport } = collect();
+    const w = worker(transport, { pollMs: 5_000, purgeMs: 5_000 });
+    w.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vi.getTimerCount()).toBe(2);
+    await w.stop();
+    expect(vi.getTimerCount()).toBe(0);
+    await ended();
+    // a live bus subscription would have queued its wake
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(sent).toEqual([]);
+  });
 });

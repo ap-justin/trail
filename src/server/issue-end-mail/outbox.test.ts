@@ -1,4 +1,4 @@
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { expect, test } from "vitest";
 import { actor, issue, issueEndMail, product } from "../db/schema.js";
 import { createBot, setBotHandler } from "../service/keys.js";
@@ -45,7 +45,8 @@ const comment = (key: string, body: string, as = bot.key) =>
   api("POST", `/items/${key}/comments`, as, { body });
 
 function rowsFor(key: string) {
-  const number = Number(key.split("-")[1]);
+  const [productKey, n] = key.split("-");
+  const number = Number(n);
   return db
     .select({
       status: issueEndMail.status,
@@ -55,7 +56,8 @@ function rowsFor(key: string) {
     })
     .from(issueEndMail)
     .innerJoin(issue, eq(issue.id, issueEndMail.issueId))
-    .where(eq(issue.number, number))
+    .innerJoin(product, eq(product.id, issue.productId))
+    .where(and(eq(issue.number, number), eq(product.key, productKey ?? "")))
     .orderBy(asc(issueEndMail.createdAt), asc(issueEndMail.id))
     .all();
 }
@@ -150,4 +152,26 @@ test("a person who unsubscribed gets no new email", async () => {
       .where(eq(actor.id, person.id))
       .run();
   }
+});
+
+test("a product with no owner still queues the email, with no comment, and does not throw", async () => {
+  await api("POST", "/products", bot.key, { key: "NOO", name: "no owner" });
+  db.update(product).set({ ownerId: null }).where(eq(product.key, "NOO")).run();
+  const filed = await api("POST", "/items", handled.key, {
+    type: "issue",
+    product: "NOO",
+    title: "nobody owns this",
+    filed_for: "handler",
+  });
+  // the bot that made the product commented, as an owner's comment would be kept
+  await comment(filed.key, "closing this out");
+  await setStatus(filed.key, "done");
+  expect(rowsFor(filed.key)).toEqual([
+    {
+      status: "done",
+      recipientId: person.id,
+      commentId: null,
+      state: "pending",
+    },
+  ]);
 });

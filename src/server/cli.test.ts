@@ -698,6 +698,7 @@ test("products set-owner --clear leaves the product with no owner, and says so w
           .pluck()
           .get() ?? null,
     );
+  const before = ownerOf();
   const owner = withDb((db) => {
     const bot = createBot(db, "Beta keeper").actor;
     db.update(product)
@@ -706,20 +707,47 @@ test("products set-owner --clear leaves the product with no owner, and says so w
       .run();
     return bot;
   });
-  const cleared = run("products", "set-owner", "bta", "--clear");
-  expect(cleared).toEqual({
-    code: 0,
-    stdout: `product  BTA\nfrom     Beta keeper (${owner.id})\nto       -\n`,
-    stderr: "",
-  });
-  expect(ownerOf()).toBeNull();
-  const again = run("products", "set-owner", "BTA", "--clear");
-  expect(again).toEqual({
-    code: 0,
-    stdout: "product  BTA\nBTA has no owner: nothing to clear\n",
-    stderr: "",
-  });
-  expect(ownerOf()).toBeNull();
+  try {
+    const cleared = run("products", "set-owner", "bta", "--clear");
+    expect(cleared).toEqual({
+      code: 0,
+      stdout: `product  BTA\nfrom     Beta keeper (${owner.id})\nto       -\n`,
+      stderr: "",
+    });
+    expect(ownerOf()).toBeNull();
+    const again = run("products", "set-owner", "BTA", "--clear");
+    expect(again).toEqual({
+      code: 0,
+      stdout: "product  BTA\nBTA has no owner: nothing to clear\n",
+      stderr: "",
+    });
+    expect(ownerOf()).toBeNull();
+  } finally {
+    withDb((db) =>
+      db
+        .update(product)
+        .set({ ownerId: before })
+        .where(eq(product.key, "BTA"))
+        .run(),
+    );
+  }
+});
+
+test("products set-owner NOPE --clear is exit 1 naming the product, changing nothing", () => {
+  const owners = () => withDb((db) => db.select().from(product).all());
+  const before = owners();
+  const { code, stdout, stderr } = run(
+    "products",
+    "set-owner",
+    "NOPE",
+    "--clear",
+  );
+  expect(code).toBe(1);
+  expect(stdout).toBe("");
+  expect(stderr).toBe(
+    "trail: no product NOPE: `trail products owners` lists every product's key\n",
+  );
+  expect(owners()).toEqual(before);
 });
 
 test("products set-owner --clear with a bot is a usage error, changing nothing", () => {
@@ -1524,6 +1552,30 @@ test("bot handler sets a member as a bot's handler by email in any case, then --
   expect(again.stdout).toBe(
     `actor  ${id}\nHandled Bot has no handler: nothing to clear\n`,
   );
+});
+
+test("bot handler replaces an existing handler, printing the old one as from and the new as to", () => {
+  const key = createdKey(run("bot", "create", "Rehandled Bot").stdout);
+  const id = withDb((db) => resolveKey(db, key))?.id as string;
+  const first = emailMember("first.handler@example.com");
+  const second = emailMember("second.handler@example.com");
+  expect(
+    run("bot", "handler", "Rehandled Bot", "first.handler@example.com").code,
+  ).toBe(0);
+  expect(handlerIdOf(key)).toBe(first.id);
+
+  const replaced = run(
+    "bot",
+    "handler",
+    "Rehandled Bot",
+    "second.handler@example.com",
+  );
+  expect(replaced.stderr).toBe("");
+  expect(replaced.code).toBe(0);
+  expect(replaced.stdout).toBe(
+    `actor  ${id}\nfrom   first.handler <first.handler@example.com>\nto     second.handler <second.handler@example.com>\n`,
+  );
+  expect(handlerIdOf(key)).toBe(second.id);
 });
 
 test("bot handler refuses an address no member has, one not signed in yet, a bot and a person as the bot, with exit 1, changing nothing", () => {

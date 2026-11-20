@@ -3,9 +3,13 @@ import { copyFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, expect, test } from "vitest";
+import { openDatabase } from "./db/client.js";
+import { issueEndMail } from "./db/schema.js";
+import { createBot, setBotHandler } from "./service/keys.js";
 import { readEventStream, setupTestApp, testAuthConfig } from "./test-app.js";
 
-const { db, signIn, owner } = setupTestApp();
+const { db, signIn, owner, bot, request, inviteEmail, signInWithEmail } =
+  setupTestApp();
 const dir = mkdtempSync(join(tmpdir(), "trail-index-shutdown-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 const entry = new URL("./index.ts", import.meta.url).pathname;
@@ -82,5 +86,64 @@ test("SIGTERM ends an open event stream, closes the database and dies by the sig
   } finally {
     await stream?.cancel().catch(() => {});
     child.kill("SIGKILL");
+  }
+}, 40_000);
+
+test("the entrypoint starts the issue-ended email worker: a row left pending is picked up after listening", async () => {
+  const PERSON = "boot.person@example.com";
+  inviteEmail(PERSON);
+  await signInWithEmail(PERSON);
+  const handled = createBot(db, "boot handled");
+  setBotHandler(db, handled.actor.id, PERSON);
+  const send = async (
+    method: string,
+    path: string,
+    key: string,
+    json: object,
+  ) => {
+    const res = await request(method, `/api/v1${path}`, { key, json });
+    expect(res.status, `${method} ${path}`).toBeLessThan(300);
+    return (await res.json()) as { key: string };
+  };
+  await send("POST", "/products", bot.key, { key: "BOOT", name: "boot" });
+  const filed = await send("POST", "/items", handled.key, {
+    type: "issue",
+    product: "BOOT",
+    title: "for the person",
+    filed_for: "handler",
+  });
+  await send("PATCH", `/items/${filed.key}`, bot.key, { status: "done" });
+  db.$client.pragma("wal_checkpoint(TRUNCATE)");
+  const databasePath = join(dir, "pending.db");
+  copyFileSync(db.$client.name, databasePath);
+  const stateOf = () => {
+    const reader = openDatabase(databasePath);
+    try {
+      return reader
+        .select({ state: issueEndMail.state, error: issueEndMail.lastError })
+        .from(issueEndMail)
+        .get();
+    } finally {
+      reader.$client.close();
+    }
+  };
+  expect(stateOf()?.state).toBe("pending");
+
+  // no EMAIL_FROM or RESEND_API_KEY in spawnEntry's env: the worker's visible effect is a skip naming them
+  const child = spawnEntry(databasePath);
+  const done = exited(child);
+  try {
+    await listening(child);
+    const deadline = Date.now() + 15_000;
+    while (stateOf()?.state === "pending" && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    expect(stateOf()).toEqual({
+      state: "skipped",
+      error: expect.stringContaining("email is off until"),
+    });
+  } finally {
+    child.kill("SIGKILL");
+    await done;
   }
 }, 40_000);
