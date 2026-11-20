@@ -570,6 +570,7 @@ test("whoami reports the calling key's scope, null where it is unrestricted", as
     title: null,
     team: null,
     hint: expect.stringContaining("create_team"),
+    handler: null,
   });
   const unscopedMe = await request("GET", "/api/v1/whoami", {
     key: (await unscopedKey()).key,

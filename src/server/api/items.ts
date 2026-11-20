@@ -57,7 +57,7 @@ const createItem = createRoute({
   method: "post",
   path: "/items",
   summary: "Add a todo, file an issue or add a note",
-  description: `Needs the issues action on a key that reaches the product. ${WHICH_ITEM} ${TODO_OR_ISSUE} A note starts current, with no assignee and no triage, on any product an issue may be filed on; about names the items it is about. A todo without product goes to the one product you own; with none or several, the 422 lists the products to pick from. An issue with project joins that project as it is filed; a key that reaches a product only through a project files there with project. It gets the product's next number, so its key reads like TRL-12.`,
+  description: `Needs the issues action on a key that reaches the product. ${WHICH_ITEM} ${TODO_OR_ISSUE} A note starts current, with no assignee and no triage, on any product an issue may be filed on; about names the items it is about. A todo without product goes to the one product you own; with none or several, the 422 lists the products to pick from. An issue with project joins that project as it is filed; a key that reaches a product only through a project files there with project. An issue you file on behalf of the person you work for takes filed_for "handler" and is filed for your handler (GET /whoami shows who); leave it out for your own work. With no handler set it is a 422 naming the \`trail bot handler\` command the operator runs, and on a todo or a note a 422. It gets the product's next number, so its key reads like TRL-12.`,
   tags,
   request: {
     headers: idempotencyHeaders,

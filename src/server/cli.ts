@@ -13,12 +13,14 @@ import {
   createBot,
   createKey,
   editKeyScope,
+  type HandlerView,
   type KeyScopeEdit,
   type KeyScopeInput,
   type KeyScopeView,
   listKeys,
   renameBot,
   revokeKey,
+  setBotHandler,
   setBotLabel,
   setBotTitle,
 } from "./service/keys.js";
@@ -54,6 +56,12 @@ const usage = `Usage:
                                    set a bot's label, unique among bots and
                                    case-sensitive, unlike names; or remove
                                    it; its keys stay
+  trail bot handler <bot-id-label-or-name> <email>
+  trail bot handler <bot-id-label-or-name> --clear
+                                   set the person a bot works for, a member
+                                   let in by that email (any case), whom
+                                   file_issue files for with filed_for
+                                   "handler"; or remove it
   trail key create <bot-id-or-label> [<scope>] [--key-only]
                                    mint another key for an existing bot
   trail key scope <prefix> [--add-product <key>] [--remove-product <key>]
@@ -83,7 +91,8 @@ const usage = `Usage:
   --actions <actions> scope: limit the key to these of read, issues, comments,
                       status_updates and admin, like read,issues,comments
   --key-only          print only the key on stdout; the rest goes to stderr
-  --clear             bot title, bot label: remove it instead of setting one
+  --clear             bot title, bot label, bot handler: remove it instead of
+                      setting one
   --add-product <key>, --remove-product <key>, --add-project <slug>,
   --remove-project <slug>
                       key scope: the products and projects to add or take off;
@@ -599,6 +608,44 @@ const botLabel: Command<{ bot: string; label: string | null }> = {
   },
 };
 
+const botHandler: Command<{ bot: string; email: string | null }> = {
+  flags: ["clear"],
+  parse(args, flags) {
+    if (args.length === 0)
+      throw new UsageError("missing <bot-id-label-or-name>");
+    if (args.length > 2) {
+      throw new UsageError(
+        `expected <bot-id-label-or-name> <email>, got ${args.length} arguments; quote a value containing spaces`,
+      );
+    }
+    const [bot, email] = args as [string, string | undefined];
+    if (flags.clear) {
+      if (email !== undefined) {
+        throw new UsageError("'bot handler --clear' takes no <email>");
+      }
+      return { bot, email: null };
+    }
+    if (email === undefined) {
+      throw new UsageError("missing <email>, or --clear to remove the handler");
+    }
+    return { bot, email };
+  },
+  run(db, { bot, email }, io) {
+    const set = setBotHandler(db, bot, email);
+    if (set.from === null && set.to === null) {
+      io.stdout.write(
+        `actor  ${set.id}\n${set.name} has no handler: nothing to clear\n`,
+      );
+      return;
+    }
+    const person = (h: HandlerView | null) =>
+      h === null ? "-" : `${h.name} <${h.email}>`;
+    io.stdout.write(
+      `actor  ${set.id}\nfrom   ${person(set.from)}\nto     ${person(set.to)}\n`,
+    );
+  },
+};
+
 /** Rows as columns padded to their widest cell, the last left unpadded. */
 function printTable(io: CliIo, rows: string[][]): void {
   const widths = rows[0]?.map((_, i) =>
@@ -671,6 +718,7 @@ const commands: Record<string, Command<unknown> | undefined> = {
   "bot rename": botRename,
   "bot title": botTitle,
   "bot label": botLabel,
+  "bot handler": botHandler,
   "key create": keyCreate,
   "key list": keyList,
   "key revoke": keyRevoke,

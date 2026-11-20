@@ -117,6 +117,8 @@ beforeAll(() => {
   );
   for (const d of legacyDeliveries) insert.run(d);
   migrate(db, through(16));
+  // then to the newest: the service tests below run today's queries
+  migrate(db);
   return () => db.$client.close();
 });
 

@@ -53,6 +53,7 @@ test("POST /items adds a todo, open and assigned to the product's owner", async 
     links: [],
     assignee: tester,
     assigneeId: bot.actor.id,
+    filedFor: null,
     externalRef: null,
     sourceAuthor: null,
     sourceStatus: null,

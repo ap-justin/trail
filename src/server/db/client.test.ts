@@ -47,6 +47,7 @@ test("migrate builds every table STRICT on an empty file", () => {
     { name: "idempotency_key", strict: 1 },
     { name: "invite", strict: 1 },
     { name: "issue", strict: 1 },
+    { name: "issue_end_mail", strict: 1 },
     { name: "issue_label", strict: 1 },
     { name: "issue_link", strict: 1 },
     { name: "label", strict: 1 },

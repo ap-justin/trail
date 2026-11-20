@@ -155,6 +155,7 @@ export function issueRow(
     priority: 2,
     labels: ["ui", "design"],
     assignee: beta,
+    filedFor: null,
     updatedAt: "2026-11-11T11:00:00.000Z",
     ...overrides,
   };
@@ -211,6 +212,7 @@ export function issue(overrides: Partial<WebItemView> = {}): WebItemView {
     ],
     assignee: alpha,
     creator: beta,
+    filedFor: null,
     sourceAuthor: null,
     createdAt: "2026-11-09T14:02:00.000Z",
     updatedAt: "2026-11-11T09:44:00.000Z",

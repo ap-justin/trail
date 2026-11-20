@@ -570,3 +570,28 @@ test("the deprecated POST /issues says a product field is required in a form gen
   });
   expect(none.status).toBe(422);
 });
+
+test("filed_for is offered on both item creates as the one value handler, and the handler's email only on Whoami", async () => {
+  type Schema = {
+    properties?: Record<string, Schema>;
+    allOf?: Schema[];
+  };
+  const { schemas } = (
+    (await (
+      await request("GET", "/api/v1/openapi.json", { key: null })
+    ).json()) as { components: { schemas: Record<string, Schema> } }
+  ).components;
+  for (const name of ["ItemCreate", "IssueCreate"]) {
+    expect(schemas[name]?.properties?.filed_for, name).toMatchObject({
+      type: "string",
+      enum: ["handler"],
+    });
+  }
+  const fieldsOf = (s: Schema | undefined) => Object.keys(s?.properties ?? {});
+  expect(fieldsOf(schemas.Item?.properties?.filedFor)).toEqual(["name"]);
+  expect(fieldsOf(schemas.Bot?.properties?.handler)).toEqual(["name"]);
+  expect(fieldsOf(schemas.Whoami?.allOf?.[1]?.properties?.handler)).toEqual([
+    "name",
+    "email",
+  ]);
+});

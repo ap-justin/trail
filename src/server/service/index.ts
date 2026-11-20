@@ -75,7 +75,13 @@ import {
   normalImport,
   zeroCounts,
 } from "./import.js";
-import { type Actor, andList, type KeyScope } from "./keys.js";
+import {
+  type Actor,
+  andList,
+  type HandlerView,
+  handlerOf,
+  type KeyScope,
+} from "./keys.js";
 import { createMessaging } from "./messages.js";
 import {
   decodeFeedCursor,
@@ -173,6 +179,13 @@ export type ActingActor = Pick<Actor, "id" | "kind"> & {
 };
 /** An actor with the URL of its photo, null without one. */
 export type ActorWithPhoto = Actor & { photoUrl: string | null };
+/** The actor `id` names in `refs` by name alone; null for none. */
+const nameOf = (refs: Map<string, ActorRef>, id: string | null) => {
+  const ref = id === null ? undefined : refs.get(id);
+  return ref ? { name: ref.name } : null;
+};
+/** A bot as list_bots shows it: its handler by name alone. */
+export type Bot = ActorWithPhoto & { handler: { name: string } | null };
 export type Product = typeof product.$inferSelect;
 export type ProjectRow = typeof project.$inferSelect;
 type IssueRow = typeof issue.$inferSelect;
@@ -190,6 +203,8 @@ export type Issue = IssueRow & {
   /** pr: a pull request link's cached state, see `withPullRequests` */
   links: (Link & { pr?: PullRequestState })[];
   assignee: ActorRef | null;
+  /** the person the issue was filed for, by name alone: never their id or address */
+  filedFor: { name: string } | null;
   projects: { slug: string; name: string }[];
   /** On a bot's get_item: why its key reaches the item; see `ItemAccess`. */
   access?: ItemAccess;
@@ -340,6 +355,8 @@ export type ItemInput = {
   externalRef?: string | null;
   /** a note's: keys of the items it is about */
   about?: string[];
+  /** an issue's: "handler" files it for the calling bot's handler */
+  filed_for?: "handler";
 };
 /** How the legacy create and list name a product: `projectId`, or `project` or `product`, its aliases. */
 export type LegacyProductRef = {
@@ -373,6 +390,7 @@ export type IssueInput = LegacyProductRef & {
   labels?: string[];
   links?: LinkInput[];
   externalRef?: string | null;
+  filed_for?: "handler";
 };
 export type IssuePatch = {
   type?: IssueType;
@@ -487,6 +505,8 @@ export type Whoami = ActorWithPhoto & {
   unreadMessages: number;
   /** its own team, whatever its key reaches */
   team: Product | null;
+  /** the person it works for, with their address: whoami is the one place a bot reads it */
+  handler: HandlerView | null;
   /** present only when it owns no product and no team */
   hint?: string;
 };
@@ -1351,7 +1371,7 @@ export function createService({
     return new Map<string, ActorRef>(rows.map((r) => [r.id, r]));
   }
 
-  /** Each row with its keys, labels, links, assignee and the projects `actor` reaches, in the order given. */
+  /** Each row with its keys, labels, links, assignee, whom it was filed for and the projects `actor` reaches, in the order given. */
   function hydrate(tx: Tx | Db, rows: IssueRow[], actor: ActingActor): Issue[] {
     if (rows.length === 0) return [];
     const ids = rows.map((r) => r.id);
@@ -1382,9 +1402,9 @@ export function createService({
       .orderBy(sql`rowid`)
       .all();
     const projects = projectsSeenBy(tx, ids, actor);
-    const assignees = actorRefs(
+    const people = actorRefs(
       tx,
-      rows.map((r) => r.assigneeId),
+      rows.flatMap((r) => [r.assigneeId, r.filedForId]),
     );
     const about = aboutOf(
       tx,
@@ -1400,9 +1420,8 @@ export function createService({
         .filter((l) => l.issueId === row.id)
         .map(({ url, title }) => ({ url, title })),
       assignee:
-        row.assigneeId === null
-          ? null
-          : (assignees.get(row.assigneeId) ?? null),
+        row.assigneeId === null ? null : (people.get(row.assigneeId) ?? null),
+      filedFor: nameOf(people, row.filedForId),
       projects: projects
         .filter((p) => p.issueId === row.id)
         .map(({ slug, name }) => ({ slug, name })),
@@ -2734,7 +2753,8 @@ export function createService({
    * A created item as `actor` sees it now: its projects, and a note's about,
    * are those the caller reaches, since a replay may come from another key of
    * the bot or after a scope edit; a stored replay from before items carried
-   * their product key and projects is brought to today's shape.
+   * their product key and projects, or before migration 0023 gave them
+   * filedFor, is brought to today's shape.
    */
   function currentShape(
     item: WrittenItem | LegacyStoredItem,
@@ -2744,9 +2764,10 @@ export function createService({
       const projects = projectsSeenBy(db, [item.id], actor).map(
         ({ slug, name }) => ({ slug, name }),
       );
-      if (item.type !== "note") return { ...item, projects };
+      const current = { ...item, projects, filedFor: item.filedFor ?? null };
+      if (item.type !== "note") return current;
       const about = aboutOf(db, [item.id], actor).get(item.id) ?? [];
-      return { ...item, projects, about };
+      return { ...current, about };
     }
     const { projectId, ...stored } = item;
     // the stored item has no type: the one migration 0015 gave the row
@@ -2756,6 +2777,21 @@ export function createService({
       .where(eq(issue.id, item.id))
       .get() as { type: IssueType };
     return hydrateOne(db, { ...stored, productId: projectId, type }, actor);
+  }
+
+  /** The calling bot's handler, refused when the operator has set none. */
+  function handlerIdOf(tx: Tx, actor: ActingActor): string {
+    const bot = tx
+      .select({ name: actorTable.displayName, handlerId: actorTable.handlerId })
+      .from(actorTable)
+      .where(eq(actorTable.id, actor.id))
+      .get() as { name: string; handlerId: string | null };
+    if (bot.handlerId === null) {
+      throw new ValidationError(
+        `filed_for "handler" files the issue for the person you work for, and you have no handler: leave filed_for out to file it as your own, or ask the operator to set one with \`trail bot handler "${bot.name}" <email>\``,
+      );
+    }
+    return bot.handlerId;
   }
 
   /**
@@ -2768,7 +2804,8 @@ export function createService({
    * against the input as sent, so what `fallback`, `typeOf` and the default
    * assignee read from current data can't turn a retry into a mismatch.
    * `placement`, when given, replaces how the product is named and picked, and
-   * may put the item in a project.
+   * may put the item in a project. A person's issue is filed for that person, a
+   * bot's with `filed_for` for its handler; `filed_for` on a todo or a note is refused.
    */
   function createItem(
     actor: ActingActor,
@@ -2829,6 +2866,11 @@ export function createService({
               "a person files issues, not todos: file it as an issue, and the product's bot accepts it from triage",
             );
           }
+          if (input.filed_for !== undefined && type !== "issue") {
+            throw new ValidationError(
+              `filed_for is an issue's field, the person an issue is filed for: leave it out of ${aType(type)}, or file an issue with file_issue (POST /items with type issue)`,
+            );
+          }
           if (about !== undefined && type !== "note") {
             throw new ValidationError(
               "about is a note's field, the items it is about: leave it out of a todo or an issue, and add a note about the item with add_note",
@@ -2863,10 +2905,12 @@ export function createService({
             labels: labelNames,
             links,
             about,
+            filed_for: input.filed_for,
           },
           // as issue.create hashed it before migration 0015, when every create named its product and none a project
           legacyRequest: named &&
-            placed.project === undefined && {
+            placed.project === undefined &&
+            input.filed_for === undefined && {
               projectId: named.id,
               ...sent,
               assigneeId: assignee ?? null,
@@ -2887,6 +2931,12 @@ export function createService({
             const assigneeId =
               assignee ??
               (type === "todo" ? (product.ownerId ?? actor.id) : null);
+            const filedForId =
+              actor.kind === "human"
+                ? actor.id
+                : input.filed_for === "handler"
+                  ? handlerIdOf(tx, actor)
+                  : null;
             const aboutIds =
               type === "note"
                 ? aboutRows(tx, actor, about ?? [], "about").map((r) => r.id)
@@ -2915,6 +2965,7 @@ export function createService({
                 productId: product.id,
                 type,
                 assigneeId,
+                filedForId,
                 status: startStatus[type],
                 number: nextIssueNumber(tx, product.id),
                 createdBy: actor.id,
@@ -5109,12 +5160,14 @@ export function createService({
      */
     whoami(actor: ActingActor): Whoami {
       const owned = everythingOwnedBy(db, actor.id);
+      const row = withPhotoUrl(
+        selectWithPhotoHash()
+          .where(eq(actorTable.id, actor.id))
+          .get() as ActorWithHash,
+      );
       return {
-        ...withPhotoUrl(
-          selectWithPhotoHash()
-            .where(eq(actorTable.id, actor.id))
-            .get() as ActorWithHash,
-        ),
+        ...row,
+        handler: handlerOf(db, row.handlerId),
         ownProducts: ownProductsOf(db, actor),
         products: fileableProducts(db, actor),
         impliedProjects: implicitProjectsOf(db, actor).map((p) => p.slug),
@@ -5124,8 +5177,8 @@ export function createService({
       };
     },
 
-    /** Every bot, oldest first. */
-    listBots(actor: ActingActor, query: PageQuery = {}): Page<ActorWithPhoto> {
+    /** Every bot, oldest first, each with its handler's name. */
+    listBots(actor: ActingActor, query: PageQuery = {}): Page<Bot> {
       requireAction(actor, "admin", "list bots");
       const found = page(
         actorTable,
@@ -5139,7 +5192,17 @@ export function createService({
             .limit(limit)
             .all(),
       );
-      return { ...found, items: found.items.map(withPhotoUrl) };
+      const handlers = actorRefs(
+        db,
+        found.items.map((b) => b.handlerId),
+      );
+      return {
+        ...found,
+        items: found.items.map((b) => ({
+          ...withPhotoUrl(b),
+          handler: nameOf(handlers, b.handlerId),
+        })),
+      };
     },
 
     /**

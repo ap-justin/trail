@@ -79,6 +79,7 @@ test("an issue reads with its type, product and fields, its people as actors, an
     links: [{ url: "https://example.com/2", title: "two" }],
     assignee: null,
     creator: tester,
+    filedFor: null,
     sourceAuthor: null,
     createdAt: expect.any(String),
     updatedAt: expect.any(String),

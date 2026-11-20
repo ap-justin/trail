@@ -69,6 +69,8 @@ let db: Db;
 
 beforeAll(() => {
   db = legacyDb("titles.db");
+  // then to the newest: the drizzle table is today's
+  migrate(db);
   return () => db.$client.close();
 });
 

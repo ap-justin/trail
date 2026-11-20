@@ -82,7 +82,7 @@ beforeAll(() => {
     insert into project_item (project_id, issue_id, product_id, added_by, created_at) values ('pr1', 'i1', 'p1', 'alpha', 0), ('pr1', 'i2', 'p1', 'alpha', 0);
   `);
   before = snapshot(db);
-  migrate(db);
+  migrate(db, through(21));
   return () => db.$client.close();
 });
 

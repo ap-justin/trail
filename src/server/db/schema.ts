@@ -144,6 +144,12 @@ export const actor = sqliteTable(
     email: text("email"),
     // the human who signed in first as TRAIL_OWNER_GITHUB
     isOwner: integer("is_owner", { mode: "boolean" }).notNull().default(false),
+    // the person a bot works for; that it names a human is the service's check
+    handlerId: text("handler_id").references((): AnySQLiteColumn => actor.id),
+    // a person's opt-out from the email sent when an issue filed for them ends
+    issueEndMailOff: integer("issue_end_mail_off", { mode: "boolean" })
+      .notNull()
+      .default(false),
     createdAt: createdAt(),
   },
   (t) => [
@@ -177,6 +183,14 @@ export const actor = sqliteTable(
     check(
       "actor_title_check",
       sql`${c(t.title)} is null or (${c(t.kind)} = 'bot' and length(${c(t.title)}) between 1 and 40 and ${c(t.title)} = trim(${c(t.title)}))`,
+    ),
+    check(
+      "actor_handler_check",
+      sql`${c(t.handlerId)} is null or ${c(t.kind)} = 'bot'`,
+    ),
+    check(
+      "actor_issue_end_mail_off_check",
+      sql`${c(t.issueEndMailOff)} = 0 or (${c(t.issueEndMailOff)} = 1 and ${c(t.kind)} = 'human')`,
     ),
     // target of api_key's (actor_id, actor_kind) key, which pins keys to bots
     unique("actor_id_kind_unique").on(t.id, t.kind),
@@ -424,6 +438,8 @@ export const issue = sqliteTable(
     sourceStatus: text("source_status"),
     // the imported row's identifier in its source system, uppercased (ABC-187); a lookup alias for the issue
     sourceKey: text("source_key"),
+    // the person the issue was filed for, who is emailed when it ends
+    filedForId: text("filed_for_id").references(() => actor.id),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
     completedAt: integer("completed_at", { mode: "timestamp_ms" }),
@@ -1138,6 +1154,71 @@ export const webhookDelivery = sqliteTable(
     index("webhook_delivery_failed_idx")
       .on(t.createdAt)
       .where(sql`${c(t.status)} = 'failed'`),
+  ],
+);
+
+export const issueEndMailStates = [
+  "pending",
+  "sent",
+  "skipped",
+  "failed",
+] as const;
+export type IssueEndMailState = (typeof issueEndMailStates)[number];
+
+/**
+ * The outbox for the email telling a person their issue ended: one row per
+ * ending event per recipient, written in the transaction that commits the
+ * ending and sent later by a worker. An issue reopened and ended again is a new
+ * event, so a new row.
+ */
+export const issueEndMail = sqliteTable(
+  "issue_end_mail",
+  {
+    id: id(),
+    issueId: text("issue_id")
+      .notNull()
+      .references(() => issue.id),
+    recipientId: text("recipient_id")
+      .notNull()
+      .references(() => actor.id),
+    eventId: text("event_id")
+      .notNull()
+      .references(() => activityEvent.id),
+    // the issue's status at the ending
+    status: text("status", { enum: completedStatuses }).notNull(),
+    // the product bot's last comment when the row was written, so a later one doesn't change the email
+    commentId: text("comment_id").references(() => comment.id),
+    state: text("state", { enum: issueEndMailStates })
+      .notNull()
+      .default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: integer("next_attempt_at", {
+      mode: "timestamp_ms",
+    }).notNull(),
+    lastError: text("last_error"),
+    createdAt: createdAt(),
+    sentAt: integer("sent_at", { mode: "timestamp_ms" }),
+  },
+  (t) => [
+    check("issue_end_mail_status_check", oneOf(t.status, completedStatuses)),
+    check("issue_end_mail_state_check", oneOf(t.state, issueEndMailStates)),
+    check("issue_end_mail_attempts_check", sql`${c(t.attempts)} >= 0`),
+    check(
+      "issue_end_mail_sent_at_check",
+      sql`(${c(t.state)} = 'sent') = (${c(t.sentAt)} is not null)`,
+    ),
+    unique("issue_end_mail_event_recipient_unique").on(
+      t.eventId,
+      t.recipientId,
+    ),
+    // the head of the queue: the pending emails due soonest
+    index("issue_end_mail_pending_idx")
+      .on(t.nextAttemptAt)
+      .where(sql`${c(t.state)} = 'pending'`),
+    // retention reads finished emails past their keep time
+    index("issue_end_mail_finished_idx")
+      .on(t.createdAt)
+      .where(sql`${c(t.state)} <> 'pending'`),
   ],
 );
 

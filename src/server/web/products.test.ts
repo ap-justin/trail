@@ -228,6 +228,7 @@ describe("GET /products/:key/items", () => {
         photoUrl: null,
         title: null,
       },
+      filedFor: null,
       updatedAt: expect.any(String),
     });
     expect(body.items[4]).toMatchObject({ assignee: null });

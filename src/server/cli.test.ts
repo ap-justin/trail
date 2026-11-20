@@ -4,11 +4,13 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { eq } from "drizzle-orm";
 import { afterAll, expect, test } from "vitest";
+import { syncEmailActor } from "./auth/identity.js";
 import { runCli } from "./cli.js";
 import { migrate, openDatabase } from "./db/client.js";
 import {
   actor,
   apiKey,
+  invite,
   product,
   project,
   projectProduct,
@@ -982,6 +984,16 @@ test.each([
     ["bot", "label", "someone", "x", "--clear"],
   ],
   ["bot label with two labels", ["bot", "label", "someone", "x", "y"]],
+  ["bot handler without a bot", ["bot", "handler"]],
+  ["bot handler without an email or --clear", ["bot", "handler", "someone"]],
+  [
+    "bot handler --clear with an email",
+    ["bot", "handler", "someone", "ada@example.com", "--clear"],
+  ],
+  [
+    "bot handler with two emails",
+    ["bot", "handler", "someone", "a@example.com", "b@example.com"],
+  ],
   ["key scope without a change", ["key", "scope", "00000000"]],
   [
     "key scope with a blank slug",
@@ -1413,6 +1425,99 @@ test("--help names both bot label forms and says labels are case-sensitive", () 
     /^ {2}trail bot label <bot-id-label-or-name> --clear$/m,
   );
   expect(stdout).toMatch(/case-sensitive, unlike names/);
+});
+
+/** A person let in by an email invite and signed in once, as the People page and a sign-in leave them. */
+function emailMember(email: string) {
+  return withDb((db) => {
+    const inviter = createHuman(db, { displayName: `inviter of ${email}` });
+    db.insert(invite).values({ email, invitedBy: inviter.id }).run();
+    return syncEmailActor(db, email)?.actor as { id: string };
+  });
+}
+
+const handlerIdOf = (key: string) =>
+  withDb((db) => resolveKey(db, key))?.handlerId;
+
+test("bot handler sets a member as a bot's handler by email in any case, then --clear removes it", () => {
+  const key = createdKey(
+    run("bot", "create", "Handled Bot", "--label", "handled-agent").stdout,
+  );
+  const id = withDb((db) => resolveKey(db, key))?.id as string;
+  const ada = emailMember("ada.handler@example.com");
+
+  const set = run(
+    "bot",
+    "handler",
+    "handled-agent",
+    " Ada.Handler@Example.COM",
+  );
+  expect(set.stderr).toBe("");
+  expect(set.code).toBe(0);
+  expect(set.stdout).toBe(
+    `actor  ${id}\nfrom   -\nto     ada.handler <ada.handler@example.com>\n`,
+  );
+  expect(handlerIdOf(key)).toBe(ada.id);
+
+  const cleared = run("bot", "handler", "Handled Bot", "--clear");
+  expect(cleared.code).toBe(0);
+  expect(cleared.stdout).toBe(
+    `actor  ${id}\nfrom   ada.handler <ada.handler@example.com>\nto     -\n`,
+  );
+  expect(handlerIdOf(key)).toBeNull();
+
+  const again = run("bot", "handler", id, "--clear");
+  expect(again.code).toBe(0);
+  expect(again.stdout).toBe(
+    `actor  ${id}\nHandled Bot has no handler: nothing to clear\n`,
+  );
+});
+
+test("bot handler refuses an address no member has, one not signed in yet, a bot and a person as the bot, with exit 1, changing nothing", () => {
+  const key = createdKey(run("bot", "create", "Refused Handler").stdout);
+  const other = createdKey(run("bot", "create", "Other Bot").stdout);
+  withDb((db) => {
+    const inviter = createHuman(db, { displayName: "Pending Inviter" });
+    db.insert(invite)
+      .values({ email: "pending@example.com", invitedBy: inviter.id })
+      .run();
+  });
+  const github = withDb((db) =>
+    createHuman(db, { displayName: "Gita Hub", githubId: 4242 }),
+  );
+
+  const unknown = run(
+    "bot",
+    "handler",
+    "Refused Handler",
+    "nobody@example.com",
+  );
+  expect(unknown.code).toBe(1);
+  expect(unknown.stderr).toBe(
+    "trail: no trail member has the email nobody@example.com: invite that address on trail's People page first, then set the handler once they have signed in with it. A person who signs in with GitHub has no email on file in trail, so invite their email to make them a handler\n",
+  );
+  const pending = run(
+    "bot",
+    "handler",
+    "Refused Handler",
+    "PENDING@example.com",
+  );
+  expect(pending.code).toBe(1);
+  expect(pending.stderr).toBe(
+    "trail: pending@example.com is invited but hasn't signed in to trail yet: set the handler after their first sign-in\n",
+  );
+  const otherId = withDb((db) => resolveKey(db, other))?.id as string;
+  for (const ref of ["Other Bot", otherId]) {
+    const bot = run("bot", "handler", "Refused Handler", ref);
+    expect(bot.code).toBe(1);
+    expect(bot.stderr).toMatch(/^trail: no trail member has the email /);
+  }
+  const person = run("bot", "handler", github.id, "pending@example.com");
+  expect(person.code).toBe(1);
+  expect(person.stderr).toBe(
+    `trail: ${github.id} is a person, not a bot: only bots have handlers\n`,
+  );
+  expect(handlerIdOf(key)).toBeNull();
 });
 
 test("--help prints usage on stdout and exits 0, naming key scope and --projects", () => {

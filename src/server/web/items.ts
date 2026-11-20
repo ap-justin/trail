@@ -3,6 +3,7 @@ import { and, asc, desc, eq, inArray, type SQL, sql } from "drizzle-orm";
 import {
   entrySchema,
   errorSchema,
+  type WebActorView,
   type WebItemCountsView,
   type WebItemRowView,
   type WebItemStatus,
@@ -114,6 +115,10 @@ export function visibleItem(db: Db, member: Member, ref: string) {
   };
 }
 
+/** Whom an issue was filed for, by name alone. */
+const nameOf = (actorOf: (id: string) => WebActorView, id: string | null) =>
+  id === null ? null : { name: actorOf(id).name };
+
 /** The item `visibleItem` found, for display, with its projects, timeline and pull request states. */
 export function itemView(
   db: Db,
@@ -136,7 +141,11 @@ export function itemView(
     .where(eq(projectItem.issueId, row.id))
     .orderBy(asc(project.name), asc(project.slug))
     .all();
-  const actorOf = actorsById(db, [row.createdBy, row.assigneeId]);
+  const actorOf = actorsById(db, [
+    row.createdBy,
+    row.assigneeId,
+    row.filedForId,
+  ]);
   return {
     key,
     type: row.type,
@@ -152,6 +161,7 @@ export function itemView(
     links: service.withPullRequestLinks(links).map(toLink),
     assignee: row.assigneeId === null ? null : actorOf(row.assigneeId),
     creator: actorOf(row.createdBy),
+    filedFor: nameOf(actorOf, row.filedForId),
     sourceAuthor: row.sourceAuthor,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -261,7 +271,7 @@ export function itemRows(
   );
   const actorOf = actorsById(
     db,
-    rows.map((r) => r.assigneeId),
+    rows.flatMap((r) => [r.assigneeId, r.filedForId]),
   );
   return rows.map((r) => ({
     key: `${r.productKey}-${r.number}`,
@@ -271,6 +281,7 @@ export function itemRows(
     priority: r.priority,
     labels: labels(r.id),
     assignee: r.assigneeId === null ? null : actorOf(r.assigneeId),
+    filedFor: nameOf(actorOf, r.filedForId),
     updatedAt: r.updatedAt.toISOString(),
   }));
 }

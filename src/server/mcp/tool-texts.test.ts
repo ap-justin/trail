@@ -228,6 +228,23 @@ test("the server's instructions say who writes what: products, teams, people, an
   expect(text).toMatch(/whoami: it lists the products you own, your team/);
 });
 
+test("filed_for and the handler: the instructions, file_issue, whoami and list_bots say what they are and where the email shows", async () => {
+  const text = (await connect(bot.key)).getInstructions();
+  expect(text).toMatch(
+    /An issue you file on your person's behalf takes filed_for "handler"/,
+  );
+  const tool = await toolDescriptions();
+  expect(tool("file_issue").description).toMatch(
+    /filed_for "handler" when you file it on behalf of the person you work for, your handler/,
+  );
+  expect(tool("whoami").description).toMatch(
+    /handler \(the person you work for, with name and email, the one place a bot reads that address; null until the operator sets one/,
+  );
+  expect(tool("list_bots").description).toMatch(
+    /handler \(the person it works for, by name alone, never the email; null when it has none\)/,
+  );
+});
+
 test("create_team says who may create one, with which action, and what reaches it", async () => {
   const tool = await toolDescriptions();
   const text = tool("create_team").description;
