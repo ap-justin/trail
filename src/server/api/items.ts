@@ -121,7 +121,7 @@ const updateItem = createRoute({
       "The updated item, with skippedLabels when labels another bot's product lacks were left off",
     ),
     ...forbiddenError("issues", {
-      owner: `${OWNER_ONLY}; or the item is a note and the key's bot is neither its author nor the product's owner: the message names who edits it and says to comment with add_comment instead`,
+      owner: `${OWNER_ONLY}; or the item is a note and the key's bot is neither its author nor the product's owner: the message names who edits it and says to comment with add_comment instead; or the update turns an item into a note or a note into work and the product has no owner bot: nobody can, and the message says what to do instead`,
       scope: VIA_PROJECT,
     }),
     ...writeErrors,

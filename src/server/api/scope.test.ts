@@ -603,7 +603,7 @@ test("the spec documents each gated operation's 403 with the action it needs", a
     "the product has an owner bot and the call is that bot's alone: adding a todo, moving an issue out of triage, canceling an item another bot filed, reopening a canceled issue another bot filed, or changing an item's type; the message names the owner and what to do instead";
   const owner = `${ownerOnly} (code forbidden)`;
   const noteEditor =
-    "or the item is a note and the key's bot is neither its author nor the product's owner: the message names who edits it and says to comment with add_comment instead";
+    "or the item is a note and the key's bot is neither its author nor the product's owner: the message names who edits it and says to comment with add_comment instead; or the update turns an item into a note or a note into work and the product has no owner bot: nobody can, and the message says what to do instead";
   const viaProject = (scope: string) => `, or ${scope} (code forbidden_scope)`;
   const itemChange = viaProject(VIA_PROJECT);
   const orOwner = (action: string, scope = "") =>
