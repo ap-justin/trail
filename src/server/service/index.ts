@@ -3538,16 +3538,20 @@ export function createService({
       return { ...read, notes };
     },
 
-    /** Newest first; the products the actor may name, with those its projects draw from; of one kind when `kind` is sent. */
+    /** Newest first; the products the actor may name, with those its projects draw from; with `kind`, only those of that kind it reads whole. */
     listProducts(
       actor: ActingActor,
       query: PageQuery & { kind?: ProductKind } = {},
     ): Page<ProductView | NamedProduct> {
       requireAction(actor, "read", "list products");
-      const visible = [
-        productsNamed(db, reachFor(actor), product.id),
-        query.kind && eq(product.kind, query.kind),
-      ];
+      const visible = [productsNamed(db, reachFor(actor), product.id)];
+      // a product named only through a project hides its kind, so a filter on kind leaves it out
+      if (query.kind !== undefined) {
+        visible.push(
+          eq(product.kind, query.kind),
+          amongProducts(product.id, productIdsOf(actor)),
+        );
+      }
       const found = page(
         product,
         "desc",

@@ -251,7 +251,7 @@ test("whoami describes team and hint; list_products, create_product and update_p
     /hint \(only when you own no product and no team.*or which key to ask for when this one can't create a team\)/,
   );
   expect(tool("list_products").description).toMatch(
-    /shows kind \(product or team.*kind lists only one of the two/,
+    /shows kind \(product or team.*kind lists only those of one kind, leaving out every product read only by id, key and name/,
   );
   expect(tool("create_product").description).toMatch(/kind team/);
   expect(tool("update_product").description).toMatch(/kind/);

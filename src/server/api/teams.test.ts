@@ -180,3 +180,43 @@ test("POST /teams with a taken key is a 409 that doesn't name the product holdin
     },
   });
 });
+
+test("GET /products?kind= leaves out products the key reaches only through a project", async () => {
+  const create = async (json: object) =>
+    (await (await request("POST", "/api/v1/products", { json })).json()) as {
+      key: string;
+    };
+  const team = await create({
+    key: projectKey(),
+    name: "rest hidden team",
+    kind: "team",
+    owner: null,
+  });
+  const plain = await create({
+    key: projectKey(),
+    name: "rest hidden product",
+    owner: null,
+  });
+  const project = (await (
+    await request("POST", "/api/v1/projects", {
+      json: { name: "rest kind window", products: [team.key, plain.key] },
+    })
+  ).json()) as { slug: string };
+  const viewer = createBot(db, "Rest kind viewer", {
+    scope: { projects: [project.slug] },
+  });
+  const keys = async (query: string) =>
+    (
+      (await (
+        await request("GET", `/api/v1/products?limit=200${query}`, {
+          key: viewer.key,
+        })
+      ).json()) as { items: { key: string }[] }
+    ).items.map((p) => p.key);
+  expect(await keys("")).toEqual(expect.arrayContaining([team.key, plain.key]));
+  for (const kind of ["team", "product"]) {
+    const filtered = await keys(`&kind=${kind}`);
+    expect(filtered, kind).not.toContain(team.key);
+    expect(filtered, kind).not.toContain(plain.key);
+  }
+});

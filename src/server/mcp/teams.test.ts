@@ -384,3 +384,42 @@ test("whoami's hint offers create_team only to a key that can use it, and otherw
     "You own no product and no team, and this key lacks the issues action, so it can't create your team, add notes or file issues: ask whoever minted it for a key with the issues action and a product list.",
   );
 });
+
+test("list_products with kind leaves out the products a key reaches only through a project, so their kind stays hidden", async () => {
+  const admin = createBot(db, "Kind admin");
+  const adminClient = await connect(admin.key);
+  const hiddenTeam = await call(adminClient, "create_product", {
+    key: projectKey(),
+    name: "hidden team",
+    kind: "team",
+    owner: null,
+  });
+  const hiddenProduct = await call(adminClient, "create_product", {
+    key: projectKey(),
+    name: "hidden product",
+    owner: null,
+  });
+  const project = await call(adminClient, "create_project", {
+    name: "kind window",
+    products: [hiddenTeam.key, hiddenProduct.key],
+  });
+  const viewer = createBot(db, "Kind viewer", {
+    scope: { projects: [project.slug] },
+  });
+  const client = await connect(viewer.key);
+  const keys = async (args: Body) =>
+    (
+      (await call(client, "list_products", { limit: 200, ...args })).items as {
+        key: string;
+      }[]
+    ).map((p) => p.key);
+
+  expect(await keys({})).toEqual(
+    expect.arrayContaining([hiddenTeam.key, hiddenProduct.key]),
+  );
+  for (const kind of ["team", "product"]) {
+    const filtered = await keys({ kind });
+    expect(filtered, kind).not.toContain(hiddenTeam.key);
+    expect(filtered, kind).not.toContain(hiddenProduct.key);
+  }
+});
