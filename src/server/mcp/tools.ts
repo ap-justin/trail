@@ -688,7 +688,7 @@ export function registerTools(
     "create_product",
     {
       description:
-        "Create a product. Its key (like TRL) prefixes its items' keys (TRL-1, TRL-2, ...), must be unused and never changes. You own it unless owner names another bot. kind team makes it a team, a bot's space for its own work, used like a product; a bot that owns nothing creates its own team with create_team, without the admin action. Needs the admin action and a key that reaches every product. To bring a product over from Linear, use import_project instead.",
+        "Create a product. Its key (like TRL) prefixes its items' keys (TRL-1, TRL-2, ...), must be unused and never changes. You own it unless owner names another bot. kind team makes it a team, a bot's space for its own work, used like a product, and its owner's keys limited to a list of products reach it at once (as after update_product sets kind team or a new owner); a bot that owns nothing creates its own team with create_team, without the admin action. Needs the admin action and a key that reaches every product. To bring a product over from Linear, use import_project instead.",
       inputSchema: () => productCreateSchema.extend(idempotencyKey),
       annotations: create,
     },

@@ -3223,11 +3223,7 @@ export function createService({
     };
   }
 
-  /**
-   * Inserts a product or team whose key and externalRef no row holds, with its
-   * product.created event. `nameTaken` names the row holding a taken key: only
-   * for a caller that may see every product.
-   */
+  /** Inserts a product or team whose key and externalRef no row holds, with its product.created event. */
   function insertProduct(
     tx: Tx,
     actor: ActingActor,
@@ -3235,7 +3231,6 @@ export function createService({
       typeof product.$inferInsert,
       "id" | "createdBy" | "createdAt" | "updatedAt" | "issueSeq"
     > & { key: string; kind: ProductKind },
-    { nameTaken }: { nameTaken: boolean },
   ): Write<Product> {
     const taken = tx
       .select()
@@ -3244,9 +3239,7 @@ export function createService({
       .get();
     if (taken) {
       throw new ConflictError(
-        nameTaken
-          ? `product key ${fields.key} is taken by ${taken.kind} "${taken.name}": choose another key`
-          : `product key ${fields.key} is taken: choose another key`,
+        `product key ${fields.key} is taken by ${taken.kind} "${taken.name}": choose another key`,
       );
     }
     requireKeyNoSlug(tx, fields.key);
@@ -3329,6 +3322,23 @@ export function createService({
     );
   }
 
+  /**
+   * Refuses a team's key that a product holds or that is a project's slug, in
+   * words that tell neither apart: create_team's caller may see neither.
+   */
+  function requireKeyAvailable(tx: Tx, key: string): void {
+    const held =
+      productKeyedAs(tx, key) !== undefined ||
+      tx
+        .select({ id: project.id })
+        .from(project)
+        .where(eq(project.slug, key.toLowerCase()))
+        .get() !== undefined;
+    if (held) {
+      throw new ConflictError("that key is not available: choose another key");
+    }
+  }
+
   /** Adds `productId` to every live key of the bot whose product list is limited, so those keys reach it at once. */
   function extendLimitedKeys(tx: Tx, actorId: string, productId: string) {
     const limited = tx
@@ -3338,8 +3348,10 @@ export function createService({
       .where(and(eq(apiKey.actorId, actorId), isNull(apiKey.revokedAt)))
       .all();
     if (limited.length === 0) return;
+    // a key that lists the product already keeps its row
     tx.insert(apiKeyProduct)
       .values(limited.map((k) => ({ apiKeyId: k.id, productId })))
+      .onConflictDoNothing()
       .run();
   }
 
@@ -3391,20 +3403,26 @@ export function createService({
                   externalRef: fields.externalRef,
                 }
               : undefined,
-          write: () =>
-            insertProduct(
-              tx,
-              actor,
-              { ...fields, kind, ownerId },
-              { nameTaken: true },
-            ),
+          write: () => {
+            const written = insertProduct(tx, actor, {
+              ...fields,
+              kind,
+              ownerId,
+            });
+            // a team's owner works in it at once, as after create_team
+            if (kind === "team" && ownerId !== null) {
+              extendLimitedKeys(tx, ownerId, written.result.id);
+            }
+            return written;
+          },
         };
       });
-      // a replay stored before migration 0015 lacks the owner and repoUrl columns: read them from the row
+      // a replay stored before migration 0015 lacks the owner and repoUrl columns, and one before 0022
+      // lacks kind: read them from the row
       const stored: Partial<Product> & Pick<Product, "id"> = row;
       return productView(
         db,
-        "ownerId" in stored
+        "ownerId" in stored && "kind" in stored
           ? row
           : (db.select().from(product).where(eq(product.id, row.id)).get() ??
               row),
@@ -3440,12 +3458,12 @@ export function createService({
         // in write, not before it: a replay of the create finds the team it made
         write: () => {
           requireOwnsNothing(tx, actor);
-          const written = insertProduct(
-            tx,
-            actor,
-            { ...fields, kind: "team", ownerId: actor.id },
-            { nameTaken: false },
-          );
+          requireKeyAvailable(tx, fields.key);
+          const written = insertProduct(tx, actor, {
+            ...fields,
+            kind: "team",
+            ownerId: actor.id,
+          });
           extendLimitedKeys(tx, actor.id, written.result.id);
           return written;
         },
@@ -3496,6 +3514,13 @@ export function createService({
           .where(eq(product.id, current.id))
           .returning()
           .get() as Product;
+        if (
+          updated.kind === "team" &&
+          updated.ownerId !== null &&
+          ("kind" in changes || "ownerId" in changes)
+        ) {
+          extendLimitedKeys(tx, updated.ownerId, updated.id);
+        }
         return {
           result: productView(tx, updated),
           event: {

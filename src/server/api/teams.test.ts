@@ -176,7 +176,7 @@ test("POST /teams with a taken key is a 409 that doesn't name the product holdin
   expect(await res.json()).toEqual({
     error: {
       code: "conflict",
-      message: `product key ${hidden.key} is taken: choose another key`,
+      message: "that key is not available: choose another key",
     },
   });
 });

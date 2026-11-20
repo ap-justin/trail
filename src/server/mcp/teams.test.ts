@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { storeResult } from "../service/idempotency.js";
 import { createBot, createKey } from "../service/keys.js";
 import { projectKey, setupTestApp } from "../test-app.js";
 import { type Body, mcpClients } from "./test-client.js";
@@ -129,7 +130,7 @@ test("create_team with a taken key says so without naming the product holding it
     name: "peek",
   });
   expect(refusal).toBe(
-    `conflict: product key ${hidden.key} is taken: choose another key`,
+    "conflict: that key is not available: choose another key",
   );
   expect(refusal).not.toContain("secret");
 });
@@ -422,4 +423,147 @@ test("list_products with kind leaves out the products a key reaches only through
     expect(filtered, kind).not.toContain(hiddenTeam.key);
     expect(filtered, kind).not.toContain(hiddenProduct.key);
   }
+});
+
+test("create_product's replay of a result stored before products had a kind answers kind product", async () => {
+  const admin = createBot(db, "Replay admin");
+  const client = await connect(admin.key);
+  const made = await call(client, "create_product", {
+    key: projectKey(),
+    name: "replayed before kind",
+  });
+  // the request and the row create_product stored between migrations 0015 and 0022
+  db.transaction((tx) =>
+    storeResult(
+      tx,
+      admin.actor.id,
+      {
+        key: "mcp before kind",
+        scope: "project.create",
+        request: {
+          name: "replayed before kind",
+          key: made.key,
+          description: "",
+          externalRef: null,
+          repoUrl: null,
+          ownerId: undefined,
+        },
+      },
+      {
+        id: made.id,
+        key: made.key,
+        name: made.name,
+        description: "",
+        issueSeq: 0,
+        externalRef: null,
+        ownerId: admin.actor.id,
+        repoUrl: null,
+        createdBy: admin.actor.id,
+        createdAt: made.createdAt,
+        updatedAt: made.updatedAt,
+      },
+    ),
+  );
+  expect(
+    await call(client, "create_product", {
+      key: made.key,
+      name: "replayed before kind",
+      idempotency_key: "mcp before kind",
+    }),
+  ).toMatchObject({ id: made.id, kind: "product" });
+});
+
+test("create_team answers a key held by a hidden product and one equal to a hidden project's slug with the same words", async () => {
+  const admin = createBot(db, "Probe admin");
+  const adminClient = await connect(admin.key);
+  const hidden = await call(adminClient, "create_product", {
+    key: projectKey(),
+    name: "probe target",
+    owner: null,
+  });
+  const slug = `zq${projectKey().toLowerCase()}`;
+  await call(adminClient, "create_project", {
+    name: "probe project",
+    slug,
+    products: [hidden.key],
+  });
+  const visible = await call(adminClient, "create_product", {
+    key: projectKey(),
+    name: "probe visible",
+    owner: null,
+  });
+  const prober = createBot(db, "Prober", {
+    scope: { products: [visible.key], actions: ["read", "issues"] },
+  });
+  const client = await connect(prober.key);
+  const answers = [
+    await callError(client, "create_team", { key: hidden.key, name: "p" }),
+    await callError(client, "create_team", {
+      key: slug.toUpperCase(),
+      name: "p",
+    }),
+    await callError(client, "create_team", { key: visible.key, name: "p" }),
+  ];
+  expect(new Set(answers)).toEqual(
+    new Set(["conflict: that key is not available: choose another key"]),
+  );
+});
+
+test("an admin's team widens its owner's keys limited to products, as create_team does, on create, on a kind change and on a hand-over", async () => {
+  const admin = createBot(db, "Widen admin");
+  const adminClient = await connect(admin.key);
+  const base = await call(adminClient, "create_product", {
+    key: projectKey(),
+    name: "widen base",
+    owner: null,
+  });
+  const ownerOf = (name: string) => {
+    const made = createBot(db, name, {
+      scope: { products: [base.key], actions: ["read", "issues"] },
+    });
+    return { ...made, unlimited: createKey(db, made.actor.id) };
+  };
+  const scopeOf = async (key: string) =>
+    (await call(await connect(key), "whoami")).scope.products;
+
+  const first = ownerOf("Widen first");
+  const team = await call(adminClient, "create_product", {
+    key: projectKey(),
+    name: "admin team",
+    kind: "team",
+    owner: "Widen first",
+  });
+  expect(await scopeOf(first.key)).toEqual([base.key, team.key].sort());
+  expect(await scopeOf(first.unlimited.key)).toBeNull();
+  expect(
+    await call(await connect(first.key), "add_todo", {
+      product: team.key,
+      title: "in the admin's team",
+    }),
+  ).toMatchObject({ key: `${team.key}-1` });
+
+  const second = ownerOf("Widen second");
+  const turned = await call(adminClient, "create_product", {
+    key: projectKey(),
+    name: "turned into a team",
+    owner: null,
+  });
+  await call(adminClient, "update_product", {
+    product: turned.key,
+    owner: "Widen second",
+  });
+  expect(await scopeOf(second.key)).toEqual([base.key]);
+  await call(adminClient, "update_product", {
+    product: turned.key,
+    kind: "team",
+  });
+  expect(await scopeOf(second.key)).toEqual([base.key, turned.key].sort());
+
+  const heir = ownerOf("Widen heir");
+  await call(await connect(first.unlimited.key), "update_product", {
+    product: team.key,
+    owner: "Widen heir",
+  });
+  expect(await scopeOf(heir.key)).toEqual([base.key, team.key].sort());
+  expect(await scopeOf(heir.unlimited.key)).toBeNull();
 });
