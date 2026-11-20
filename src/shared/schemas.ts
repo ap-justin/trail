@@ -2230,7 +2230,7 @@ const feedFilterQuery = {
   }),
   type: itemTypeSchema.optional().meta({
     description:
-      "issue or todo: only the entries of items of that type now (created, changed, commented on, added to or taken out of a project), and no product's or project's own entry.",
+      "issue, todo or note: only the entries of items of that type now (created, changed, commented on, added to or taken out of a project), and no product's or project's own entry.",
   }),
 };
 
