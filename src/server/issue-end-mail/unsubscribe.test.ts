@@ -38,6 +38,11 @@ test("GET shows a page whose button posts back to the same link, and changes not
     `<form method="post" action="${`${path.pathname}${path.search}`.replaceAll("&", "&amp;")}">`,
   );
   expect(page).not.toMatch(/<script|style=/i);
+  expect(page).toContain("<h1>Stop issue emails?</h1>");
+  expect(page).toContain(
+    "<p>trail emails you when an issue filed for you is done or canceled. Nothing else changes.</p>",
+  );
+  expect(page).toContain(">Stop these emails</button>");
   expect(isOff(id)).toBe(false);
 });
 
@@ -51,7 +56,11 @@ test("POST from the page's form turns the emails off, and again is still fine", 
       body: "",
     });
     expect(res.status).toBe(200);
-    expect(await res.text()).toContain("You won't get these emails again");
+    const page = await res.text();
+    expect(page).toContain("<h1>Unsubscribed</h1>");
+    expect(page).toContain(
+      "<p>You won't get these emails again. Issues filed for you still show in trail.</p>",
+    );
     expect(isOff(id)).toBe(true);
   }
 });

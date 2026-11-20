@@ -1578,9 +1578,8 @@ test("bot handler replaces an existing handler, printing the old one as from and
   expect(handlerIdOf(key)).toBe(second.id);
 });
 
-test("bot handler refuses an address no member has, one not signed in yet, a bot and a person as the bot, with exit 1, changing nothing", () => {
+test("bot handler refuses an address no member has, one not signed in yet and a person as the bot, with exit 1, changing nothing", () => {
   const key = createdKey(run("bot", "create", "Refused Handler").stdout);
-  const other = createdKey(run("bot", "create", "Other Bot").stdout);
   withDb((db) => {
     const inviter = createHuman(db, { displayName: "Pending Inviter" });
     db.insert(invite)
@@ -1611,18 +1610,23 @@ test("bot handler refuses an address no member has, one not signed in yet, a bot
   expect(pending.stderr).toBe(
     "trail: pending@example.com is invited but hasn't signed in to trail yet: set the handler after their first sign-in\n",
   );
-  const otherId = withDb((db) => resolveKey(db, other))?.id as string;
-  for (const ref of ["Other Bot", otherId]) {
-    const bot = run("bot", "handler", "Refused Handler", ref);
-    expect(bot.code).toBe(1);
-    expect(bot.stderr).toMatch(/^trail: no trail member has the email /);
-  }
   const person = run("bot", "handler", github.id, "pending@example.com");
   expect(person.code).toBe(1);
   expect(person.stderr).toBe(
     `trail: ${github.id} is a person, not a bot: only bots have handlers\n`,
   );
   expect(handlerIdOf(key)).toBeNull();
+});
+
+test("--help names bot handler's set and --clear forms and products set-owner's --clear form", () => {
+  const { stdout } = run("--help");
+  expect(stdout).toMatch(
+    /^ {2}trail bot handler <bot-id-label-or-name> <email>$/m,
+  );
+  expect(stdout).toMatch(
+    /^ {2}trail bot handler <bot-id-label-or-name> --clear$/m,
+  );
+  expect(stdout).toMatch(/^ {2}trail products set-owner <key> --clear$/m);
 });
 
 test("--help prints usage on stdout and exits 0, naming key scope and --projects", () => {

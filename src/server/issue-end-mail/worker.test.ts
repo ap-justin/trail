@@ -75,6 +75,8 @@ function rowOf(key: string) {
 const unsubscribeKey = deriveUnsubscribeKey(testAuthConfig.BETTER_AUTH_SECRET);
 const FROM = "trail <trail@mail.example.test>";
 
+type Row = typeof issueEndMail.$inferSelect;
+
 const made: ReturnType<typeof createIssueEndMailWorker>[] = [];
 
 function worker(
@@ -292,6 +294,145 @@ test("a broken mail side never touches a write: the ending commits and the worke
   expect(rowOf(key)).toMatchObject({ state: "pending", attempts: 1 });
 });
 
+const rowById = (id: string) =>
+  db.select().from(issueEndMail).where(eq(issueEndMail.id, id)).get() as Row;
+
+/** Points the email of `key` at an issue that isn't there, so building it throws; returns its row id. Foreign keys are off only for the update. */
+function orphan(key: string) {
+  const { id } = rowOf(key);
+  db.$client.pragma("foreign_keys = OFF");
+  try {
+    db.update(issueEndMail)
+      .set({ issueId: "missing-issue" })
+      .where(eq(issueEndMail.id, id))
+      .run();
+  } finally {
+    db.$client.pragma("foreign_keys = ON");
+  }
+  return id;
+}
+
+test("an email whose issue is gone is retried with that reason, and the rest of the pass still sends", async () => {
+  const broken = await ended("done", "broken");
+  const healthy = await ended("done", "healthy");
+  const brokenId = orphan(broken);
+  const sent: MailMessage[] = [];
+  const w = worker(async (m) => {
+    sent.push(m);
+  });
+  await expect(w.tick()).resolves.toBeUndefined();
+  expect(sent.map((m) => m.subject)).toEqual([`${healthy} is done: healthy`]);
+  expect(rowById(brokenId)).toMatchObject({
+    state: "pending",
+    attempts: 1,
+    lastError: "issue missing-issue is gone",
+  });
+});
+
+test("an email whose outcome can't be written is logged and retried after the backoff, and the rest of the pass still sends", async () => {
+  const stuck = await ended("done", "stuck");
+  const healthy = await ended("done", "healthy");
+  const stuckId = rowOf(stuck).id;
+  const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+  db.$client.exec(
+    `create trigger fail_end_mail_sent before update on issue_end_mail when new.id = '${stuckId}' and new.state = 'sent' begin select raise(abort, 'disk on fire'); end`,
+  );
+  try {
+    const sent: MailMessage[] = [];
+    let now = Date.now();
+    const w = worker(
+      async (m) => {
+        sent.push(m);
+      },
+      { now: () => now, backoffMs: [60_000] },
+    );
+    await expect(w.tick()).resolves.toBeUndefined();
+    expect(sent.map((m) => m.subject)).toEqual([
+      `${stuck} is done: stuck`,
+      `${healthy} is done: healthy`,
+    ]);
+    expect(logged).toHaveBeenCalledWith(
+      "issue-ended email crashed",
+      stuckId,
+      expect.anything(),
+    );
+    expect(rowById(stuckId)).toMatchObject({
+      state: "pending",
+      attempts: 1,
+      lastError: "internal error",
+    });
+    expect(rowOf(healthy).state).toBe("sent");
+    // not due until the wait is up, then sent again under the same idempotency key
+    await w.tick();
+    expect(sent).toHaveLength(2);
+    now += 60_000;
+    await w.tick();
+    const again = sent.filter((m) => m.subject.includes(stuck));
+    expect(again).toHaveLength(2);
+    expect(again[1]?.idempotencyKey).toBe(again[0]?.idempotencyKey);
+  } finally {
+    db.$client.exec("drop trigger if exists fail_end_mail_sent");
+  }
+});
+
+test("a crash whose outcome can't be written ends the pass without rejecting, and the row is tried again on the next", async () => {
+  const key = await ended();
+  const id = orphan(key);
+  const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+  db.$client.exec(
+    `create trigger fail_end_mail_update before update on issue_end_mail when new.id = '${id}' begin select raise(abort, 'disk on fire'); end`,
+  );
+  try {
+    const w = worker(async () => {});
+    await expect(w.tick()).resolves.toBeUndefined();
+    expect(logged).toHaveBeenCalledTimes(1);
+    expect(rowById(id)).toMatchObject({ state: "pending", attempts: 0 });
+    await w.tick();
+    expect(logged).toHaveBeenCalledTimes(2);
+  } finally {
+    db.$client.exec("drop trigger if exists fail_end_mail_update");
+  }
+});
+
+test("a backlog past one batch is all sent in one pass", async () => {
+  const keys: string[] = [];
+  for (let i = 0; i < 23; i++) keys.push(await ended("done", `backlog ${i}`));
+  const sent: MailMessage[] = [];
+  await worker(async (m) => {
+    sent.push(m);
+  }).tick();
+  expect(sent).toHaveLength(23);
+  for (const key of keys) expect(rowOf(key).state).toBe("sent");
+});
+
+test("a tick during a pass makes that pass pick up an email that came due meanwhile", async () => {
+  const first = await ended("done", "first");
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let started!: () => void;
+  const inFlight = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const sent: string[] = [];
+  const w = worker(async (m) => {
+    sent.push(m.subject);
+    started();
+    await held;
+  });
+  const pass = w.tick();
+  await inFlight;
+  const second = await ended("done", "second");
+  const joined = w.tick();
+  release();
+  await Promise.all([pass, joined]);
+  expect(sent).toEqual([
+    `${first} is done: first`,
+    `${second} is done: second`,
+  ]);
+});
+
 test("stop cuts a send in flight and leaves its email pending for the next start", async () => {
   const key = await ended();
   let started!: () => void;
@@ -468,6 +609,41 @@ test("purge keeps a finished email younger than the keep time and removes older 
     .map((r) => r.id)
     .sort();
   expect(left).toEqual([rows.youngSent.id, rows.oldPending.id].sort());
+});
+
+test("purge removes more than one batch of finished emails and keeps the young ones", async () => {
+  const NOW = Date.now();
+  const rows = [];
+  for (let i = 0; i < 7; i++) rows.push(rowOf(await ended("done", `old ${i}`)));
+  const young = rowOf(await ended("done", "young"));
+  const finish = (id: string, createdAt: number) =>
+    db
+      .update(issueEndMail)
+      .set({
+        state: "sent",
+        sentAt: new Date(createdAt),
+        createdAt: new Date(createdAt),
+      })
+      .where(eq(issueEndMail.id, id))
+      .run();
+  for (const row of rows) finish(row.id, 0);
+  finish(young.id, NOW - 500);
+  await worker(async () => {}, {
+    keepMs: 1_000,
+    now: () => NOW,
+    purgeBatch: 3,
+  }).purge();
+  const left = db
+    .select({ id: issueEndMail.id })
+    .from(issueEndMail)
+    .where(
+      inArray(
+        issueEndMail.id,
+        [...rows, young].map((r) => r.id),
+      ),
+    )
+    .all();
+  expect(left).toEqual([{ id: young.id }]);
 });
 
 describe("start", () => {

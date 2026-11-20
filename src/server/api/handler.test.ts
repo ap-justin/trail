@@ -102,19 +102,22 @@ test("a retry with the same Idempotency-Key replays the original, and with anoth
     await fileIssue(handled.key, { filed_for: "handler" }, headers)
   ).json()) as Body;
   setBotHandler(db, handled.actor.id, null);
-  const replay = await fileIssue(
-    handled.key,
-    { filed_for: "handler" },
-    headers,
-  );
-  expect(replay.status).toBe(201);
-  expect(((await replay.json()) as Body).key).toBe(first.key);
-  const mismatch = await fileIssue(handled.key, {}, headers);
-  expect(mismatch.status).toBe(422);
-  expect(((await mismatch.json()) as Body).error.code).toBe(
-    "idempotency_key_reused",
-  );
-  setBotHandler(db, handled.actor.id, JUSTIN);
+  try {
+    const replay = await fileIssue(
+      handled.key,
+      { filed_for: "handler" },
+      headers,
+    );
+    expect(replay.status).toBe(201);
+    expect(((await replay.json()) as Body).key).toBe(first.key);
+    const mismatch = await fileIssue(handled.key, {}, headers);
+    expect(mismatch.status).toBe(422);
+    expect(((await mismatch.json()) as Body).error.code).toBe(
+      "idempotency_key_reused",
+    );
+  } finally {
+    setBotHandler(db, handled.actor.id, JUSTIN);
+  }
 });
 
 test("filedFor sent as an argument is a 422 saying to send filed_for, the name items answer with being filedFor", async () => {

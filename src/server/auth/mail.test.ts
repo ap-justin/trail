@@ -37,6 +37,22 @@ test("a refusal from Resend rejects with its status and body", async () => {
   await expect(send(message)).rejects.toThrow(/422.*validation_error/);
 });
 
+test("aborting the signal passed to the transport cuts the request", async () => {
+  const send = resendTransport(
+    "re_key",
+    (_input, init) =>
+      new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        signal?.addEventListener("abort", () => reject(signal.reason));
+      }),
+  );
+  const shutdown = new AbortController();
+  const sending = send(message, shutdown.signal);
+  const reason = new Error("shutting down");
+  shutdown.abort(reason);
+  await expect(sending).rejects.toBe(reason);
+});
+
 const url =
   "https://trail.example/sign-in/confirm?token=b7Xk2mQe9Ls4PvTa8Ncd5JhWrU3yZo0G&callbackURL=%2F";
 
