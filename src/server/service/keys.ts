@@ -481,6 +481,39 @@ export function setBotHandler(
   );
 }
 
+/**
+ * Clears the handler of every bot whose handler `removed` let in: the GitHub
+ * account that claimed it, or the person of its address. The owner keeps
+ * access without an invite, so stays a handler. Call with the invite's
+ * removal; inviting the person again restores nothing.
+ */
+export function clearHandlersOfInvite(
+  tx: Tx,
+  removed: { githubId: number | null; email: string | null },
+): void {
+  const person =
+    removed.githubId !== null
+      ? eq(actor.githubId, removed.githubId)
+      : removed.email !== null
+        ? eq(actor.email, removed.email)
+        : undefined;
+  if (!person) return;
+  tx.update(actor)
+    .set({ handlerId: null })
+    .where(
+      inArray(
+        actor.handlerId,
+        tx
+          .select({ id: actor.id })
+          .from(actor)
+          .where(
+            and(person, eq(actor.kind, "human"), eq(actor.isOwner, false)),
+          ),
+      ),
+    )
+    .run();
+}
+
 /** Mints another key, scoped to `scope`, for the bot with this actor id or label. */
 export function createKey(
   db: Db,

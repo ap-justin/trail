@@ -12,8 +12,18 @@ import {
   MAX_ATTEMPTS,
 } from "./worker.js";
 
-const { app, db, bus, bot, request, inviteEmail, signInWithEmail, addMember } =
-  setupTestApp();
+const {
+  app,
+  db,
+  bus,
+  bot,
+  request,
+  inviteEmail,
+  signInWithEmail,
+  addMember,
+  signIn,
+  owner,
+} = setupTestApp();
 
 const PERSON = "nia.notify@example.com";
 inviteEmail(PERSON);
@@ -554,5 +564,38 @@ describe("start", () => {
     expect(vi.getTimerCount()).toBe(0);
     await vi.advanceTimersByTimeAsync(60_000);
     expect(sent).toEqual([]);
+  });
+});
+
+test("a pending email to a person removed from trail is skipped with the reason, while a member's still goes", async () => {
+  const REMOVED = "rex.removed@example.com";
+  inviteEmail(REMOVED);
+  await signInWithEmail(REMOVED);
+  const removedBot = createBot(db, "worker removed handler");
+  setBotHandler(db, removedBot.actor.id, REMOVED);
+  const filed = await api("POST", "/items", removedBot.key, {
+    type: "issue",
+    product: "WRK",
+    title: "for rex",
+    filed_for: "handler",
+  });
+  await api("PATCH", `/items/${filed.key}`, bot.key, { status: "done" });
+  const kept = await ended("done", "for nia, still a member");
+  const removal = await request("DELETE", `/api/web/people/${REMOVED}`, {
+    key: null,
+    cookie: await signIn(owner),
+  });
+  expect(removal.status).toBe(204);
+
+  const sent: MailMessage[] = [];
+  await worker(async (m) => {
+    sent.push(m);
+  }).tick();
+  expect(sent.map((m) => m.to)).toEqual([PERSON]);
+  expect(rowOf(kept)).toMatchObject({ state: "sent" });
+  expect(rowOf(filed.key)).toMatchObject({
+    state: "skipped",
+    attempts: 0,
+    lastError: "not sent: the person no longer has access to trail",
   });
 });

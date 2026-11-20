@@ -30,17 +30,17 @@ export function enqueueIssueEndMail(
   const ended = tx
     .select({
       id: issue.id,
-      type: issue.type,
       filedForId: issue.filedForId,
       ownerId: product.ownerId,
       off: actor.issueEndMailOff,
     })
     .from(issue)
     .innerJoin(product, eq(product.id, issue.productId))
+    // whatever its type now: an issue accepted as a todo is still filed for that person
     .innerJoin(actor, eq(actor.id, issue.filedForId))
     .where(eq(issue.id, event.subjectId))
     .get();
-  if (ended?.type !== "issue" || ended.off) return;
+  if (!ended || ended.off) return;
   const reason =
     ended.ownerId === null
       ? undefined

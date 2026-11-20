@@ -1,11 +1,28 @@
-import { and, asc, eq, inArray, lt, lte, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  inArray,
+  isNotNull,
+  lt,
+  lte,
+  or,
+  sql,
+} from "drizzle-orm";
 import {
   issueEndedEmail,
   MailRefused,
   type MailTransport,
 } from "../auth/mail.js";
 import type { Db } from "../db/client.js";
-import { actor, comment, issue, issueEndMail, product } from "../db/schema.js";
+import {
+  actor,
+  comment,
+  invite,
+  issue,
+  issueEndMail,
+  product,
+} from "../db/schema.js";
 import type { EventBus } from "../events/bus.js";
 import { type UnsubscribeKey, unsubscribeUrl } from "./unsubscribe.js";
 
@@ -28,6 +45,7 @@ export const PURGE_BATCH = 500;
 const DUE_BATCH = 20;
 
 const TURNED_OFF = "not sent: the person turned these emails off";
+const NO_ACCESS = "not sent: the person no longer has access to trail";
 const NO_ADDRESS =
   "not sent: the person has no email address; only a person let in by email has one";
 
@@ -183,10 +201,27 @@ export function createIssueEndMailWorker(options: IssueEndMailWorkerOptions) {
       return;
     }
     const recipient = db
-      .select({ email: actor.email, off: actor.issueEndMailOff })
+      .select({
+        email: actor.email,
+        off: actor.issueEndMailOff,
+        isOwner: actor.isOwner,
+        inviteId: invite.id,
+      })
       .from(actor)
+      // the invite that lets the person in, matched as inviteOf in auth/identity.ts matches it
+      .leftJoin(
+        invite,
+        or(
+          and(isNotNull(actor.githubId), eq(invite.githubId, actor.githubId)),
+          and(isNotNull(actor.email), eq(invite.email, actor.email)),
+        ),
+      )
       .where(eq(actor.id, row.recipientId))
       .get();
+    const member =
+      recipient !== undefined &&
+      (recipient.isOwner || recipient.inviteId !== null);
+    if (!member) return finish(row, "skipped", NO_ACCESS);
     if (recipient?.off) return finish(row, "skipped", TURNED_OFF);
     if (!recipient?.email) return finish(row, "skipped", NO_ADDRESS);
     try {

@@ -26,6 +26,7 @@ import {
   NotFoundError,
   ValidationError,
 } from "../service/errors.js";
+import { clearHandlersOfInvite } from "../service/keys.js";
 import { photoUrl, photoUrlOf } from "../service/photos.js";
 import type { Tx } from "../service/tx.js";
 import { createWebRouter, ownerOnly } from "./env.js";
@@ -288,6 +289,7 @@ export function peopleRoutes(db: Db, bus: EventBus) {
             .get();
           if (!removed) throw noInvite(invitee);
           endSessionsOfInvite(tx, removed);
+          clearHandlersOfInvite(tx, removed);
           return removed;
         },
         { behavior: "immediate" },

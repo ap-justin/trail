@@ -175,3 +175,12 @@ test("a product with no owner still queues the email, with no comment, and does 
     },
   ]);
 });
+
+test("an issue filed for a person and accepted as a todo still emails them when it ends", async () => {
+  const key = await fileForPerson("accepted as a todo");
+  await api("PATCH", `/items/${key}`, bot.key, { type: "todo" });
+  await setStatus(key, "done");
+  expect(rowsFor(key).map((r) => [r.status, r.recipientId])).toEqual([
+    ["done", person.id],
+  ]);
+});
