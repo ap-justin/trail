@@ -1605,7 +1605,7 @@ test("bot handler refuses an address no member has, one not signed in yet and a 
   );
   expect(unknown.code).toBe(1);
   expect(unknown.stderr).toBe(
-    "trail: no trail member has the email nobody@example.com: invite that address on trail's People page first, then set the handler once they have signed in with it. A person who signs in with GitHub has no email on file in trail, so invite their email to make them a handler\n",
+    "trail: no trail member has the email nobody@example.com: a handler must have an email on file (invited by email, or signed in with GitHub with a verified primary email). Invite that address on trail's People page first, then set the handler once they have signed in with it\n",
   );
   const pending = run(
     "bot",

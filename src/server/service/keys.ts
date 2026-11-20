@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import type { Db } from "../db/client.js";
 import {
   type ApiKeyAction,
@@ -411,17 +411,22 @@ export const handlerOf = (
 ): HandlerView | null => {
   if (id === null) return null;
   const row = tx
-    .select({ id: actor.id, name: actor.displayName, email: actor.email })
+    .select({
+      id: actor.id,
+      name: actor.displayName,
+      email: sql<string>`coalesce(${actor.email}, ${actor.githubEmail})`,
+    })
     .from(actor)
     .where(eq(actor.id, id))
     .get();
-  // a handler is always an email member: setBotHandler finds it by address
-  return row ? { ...row, email: row.email as string } : null;
+  // a handler always has an address: setBotHandler finds it by one
+  return row ?? null;
 };
 
 /**
- * The member whose address is `email`, in any case. Only a person let in by an
- * email invite has an address trail knows: a GitHub sign-in stores none.
+ * The member whose address is `email`, in any case: a person let in by an email
+ * invite, or one who signed in with GitHub, is let in and has a verified
+ * primary address on file from a sign-in.
  */
 function memberByEmail(tx: Tx, email: string): HandlerView {
   const address = email.trim().toLowerCase();
@@ -432,6 +437,19 @@ function memberByEmail(tx: Tx, email: string): HandlerView {
     .where(and(eq(actor.email, address), eq(actor.kind, "human")))
     .get();
   if (found) return { ...found, email: address };
+  const github = tx
+    .select({ id: actor.id, name: actor.displayName, isOwner: actor.isOwner })
+    .from(actor)
+    .leftJoin(invite, eq(invite.githubId, actor.githubId))
+    .where(
+      and(
+        eq(actor.githubEmail, address),
+        eq(actor.kind, "human"),
+        or(eq(actor.isOwner, true), isNotNull(invite.id)),
+      ),
+    )
+    .get();
+  if (github) return { id: github.id, name: github.name, email: address };
   const invited = tx
     .select({ id: invite.id })
     .from(invite)
@@ -443,7 +461,7 @@ function memberByEmail(tx: Tx, email: string): HandlerView {
     );
   }
   throw new NotFoundError(
-    `no trail member has the email ${address}: invite that address on trail's People page first, then set the handler once they have signed in with it. A person who signs in with GitHub has no email on file in trail, so invite their email to make them a handler`,
+    `no trail member has the email ${address}: a handler must have an email on file (invited by email, or signed in with GitHub with a verified primary email). Invite that address on trail's People page first, then set the handler once they have signed in with it`,
   );
 }
 

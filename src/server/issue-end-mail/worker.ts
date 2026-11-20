@@ -197,7 +197,12 @@ export function createIssueEndMailWorker(options: IssueEndMailWorkerOptions) {
       return finish(row, "skipped", NO_ACCESS);
     }
     const recipient = db
-      .select({ email: actor.email, off: actor.issueEndMailOff })
+      .select({
+        email: sql<
+          string | null
+        >`coalesce(${actor.email}, ${actor.githubEmail})`,
+        off: actor.issueEndMailOff,
+      })
       .from(actor)
       .where(eq(actor.id, row.recipientId))
       .get();

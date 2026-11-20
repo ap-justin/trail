@@ -1,4 +1,14 @@
-import { and, asc, eq, inArray, isNull, ne, type SQL, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  inArray,
+  isNull,
+  ne,
+  or,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import type { Db } from "../db/client.js";
 import {
   actor,
@@ -148,6 +158,69 @@ export function accessOf(
 
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
+/**
+ * Whether a person other than `except` holds `address`, as an email invite's
+ * address or a GitHub account's verified one: no two people share an address.
+ */
+const addressHeld = (tx: Tx, address: string, except?: string): boolean =>
+  tx
+    .select({ id: actor.id })
+    .from(actor)
+    .where(
+      and(
+        or(eq(actor.email, address), eq(actor.githubEmail, address)),
+        except === undefined ? undefined : ne(actor.id, except),
+      ),
+    )
+    .get() !== undefined;
+
+/**
+ * Keeps a GitHub person's verified primary address, which only a sign-in that
+ * has just read it from GitHub may pass. A person's address once stored stays
+ * as it is, and an address another person holds is refused with one warning;
+ * null (no verified primary address, or none readable) stores nothing.
+ */
+export function storeGitHubEmail(
+  db: Db,
+  actorId: string,
+  verifiedEmail: string | null,
+): void {
+  if (verifiedEmail === null) return;
+  const address = normalizeEmail(verifiedEmail);
+  db.transaction(
+    (tx) => {
+      const person = tx
+        .select({ githubEmail: actor.githubEmail, githubId: actor.githubId })
+        .from(actor)
+        .where(eq(actor.id, actorId))
+        .get();
+      if (!person || person.githubId === null || person.githubEmail !== null) {
+        return;
+      }
+      if (addressHeld(tx, address, actorId)) {
+        console.warn(
+          `GitHub email of actor ${actorId} not stored: another person already has that address`,
+        );
+        return;
+      }
+      try {
+        tx.update(actor)
+          .set({ githubEmail: address })
+          .where(eq(actor.id, actorId))
+          .run();
+      } catch (e) {
+        // an address the column's check refuses: GitHub's own grammar is wider than ours
+        if ((e as { code?: string }).code !== "SQLITE_CONSTRAINT_CHECK")
+          throw e;
+        console.warn(
+          `GitHub email of actor ${actorId} not stored: not an address trail accepts`,
+        );
+      }
+    },
+    { behavior: "immediate" },
+  );
+}
+
 /** Whether an email invite names `email`: the only addresses a sign-in link is sent to. */
 export const isEmailInvited = (db: Db, email: string): boolean =>
   db
@@ -179,8 +252,19 @@ export function syncEmailActor(
         .where(eq(invite.email, email))
         .get();
       if (!bound) return null;
+      const existing = tx
+        .select()
+        .from(actor)
+        .where(eq(actor.email, email))
+        .get();
+      if (!existing && addressHeld(tx, email)) {
+        console.warn(
+          `${email} is invited but a GitHub person already has that address: no actor made`,
+        );
+        return null;
+      }
       const row =
-        tx.select().from(actor).where(eq(actor.email, email)).get() ??
+        existing ??
         tx
           .insert(actor)
           .values({

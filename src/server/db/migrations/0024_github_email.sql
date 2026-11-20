@@ -1,0 +1,3 @@
+-- a column constraint, not drizzle-kit's rebuild of actor: ADD COLUMN can carry a CHECK, and every NULL passes it
+ALTER TABLE `actor` ADD `github_email` text CONSTRAINT "actor_github_email_check" CHECK("github_email" is null or ("kind" = 'human' and "github_id" is not null and length("github_email") between 3 and 254 and "github_email" = lower("github_email") and "github_email" glob '?*@?*.?*' and "github_email" not glob '*@*@*' and "github_email" not glob ('*[' || char(9, 10, 13, 32) || ']*')));--> statement-breakpoint
+CREATE UNIQUE INDEX `actor_github_email_unique` ON `actor` (`github_email`) WHERE "github_email" is not null;

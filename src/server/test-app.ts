@@ -63,6 +63,11 @@ export type GitHubAccount = {
   login: string;
   name: string | null;
   email?: string;
+  /**
+   * Replaces /user/emails' whole answer; null is GitHub's refusal of a token
+   * without the `user:email` scope.
+   */
+  emails?: { email: string; primary: boolean; verified: boolean }[] | null;
 };
 
 /**
@@ -102,8 +107,13 @@ function fakeGitHub() {
       case "https://api.github.com/user/emails": {
         const account = accounts.get(token ?? "");
         if (!account) return new Response(null, { status: 401 });
+        if (account.emails === null) {
+          return Response.json({ message: "Not Found" }, { status: 404 });
+        }
         const email = account.email ?? `${account.id}@users.noreply.github.com`;
-        return Response.json([{ email, primary: true, verified: true }]);
+        return Response.json(
+          account.emails ?? [{ email, primary: true, verified: true }],
+        );
       }
       default:
         // a test's own server on the loopback is not the network
@@ -267,12 +277,19 @@ export function setupTestApp({
         ? TEST_OWNER_ID
         : ++githubIds,
       name = null,
-    }: { githubId?: number; name?: string | null } = {},
+      emails,
+    }: {
+      githubId?: number;
+      name?: string | null;
+      /** what /user/emails answers; see `GitHubAccount.emails` */
+      emails?: GitHubAccount["emails"];
+    } = {},
   ): Promise<string> {
     const { callback, cookie } = await signInWithGitHub({
       id: githubId,
       login,
       name,
+      emails,
     });
     if (!cookie) {
       throw new Error(
