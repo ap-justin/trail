@@ -42,16 +42,25 @@ const serverSchema = databaseSchema
     // the sign-in email's From, e.g. `trail <trail@mail.example.com>`, on a domain Resend has verified
     EMAIL_FROM: optional,
     RESEND_API_KEY: optional,
+    // a Sky preview's test sign-in; never set on a real deploy. Only "1" turns it on
+    TRAIL_PREVIEW_MODE: optional,
+    TRAIL_PREVIEW_PASSWORD: optional,
   })
   .transform(
-    ({
-      GITHUB_CLIENT_ID,
-      GITHUB_CLIENT_SECRET,
-      EMAIL_FROM,
-      RESEND_API_KEY,
-      ...rest
-    }) => ({
+    (
+      {
+        GITHUB_CLIENT_ID,
+        GITHUB_CLIENT_SECRET,
+        EMAIL_FROM,
+        RESEND_API_KEY,
+        TRAIL_PREVIEW_MODE,
+        TRAIL_PREVIEW_PASSWORD,
+        ...rest
+      },
+      ctx,
+    ) => ({
       ...rest,
+      preview: previewMode(TRAIL_PREVIEW_MODE, TRAIL_PREVIEW_PASSWORD, ctx),
       github: githubOAuth({
         GITHUB_CLIENT_ID,
         GITHUB_CLIENT_SECRET,
@@ -107,6 +116,28 @@ function emailSignIn(
   const { EMAIL_FROM: from, RESEND_API_KEY: resendApiKey } = vars;
   if (missing.length > 0 || !from || !resendApiKey) return { missing };
   return { from, resendApiKey };
+}
+
+/** A Sky preview's test sign-in, or null when preview mode is off. */
+export type Preview = { password: string } | null;
+
+const PREVIEW_PASSWORD_MIN = 24;
+
+function previewMode(
+  mode: string | undefined,
+  password: string | undefined,
+  ctx: z.RefinementCtx,
+): Preview {
+  if (mode !== "1") return null;
+  if (!password || password.length < PREVIEW_PASSWORD_MIN) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["TRAIL_PREVIEW_PASSWORD"],
+      message: `TRAIL_PREVIEW_PASSWORD must be set to at least ${PREVIEW_PASSWORD_MIN} characters when TRAIL_PREVIEW_MODE=1`,
+    });
+    return z.NEVER;
+  }
+  return { password };
 }
 
 export type DatabaseConfig = z.infer<typeof databaseSchema>;

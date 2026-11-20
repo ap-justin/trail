@@ -10,6 +10,7 @@ import type { Db } from "../db/client.js";
 import { account, session, user, verification } from "../db/schema.js";
 import type { EventBus } from "../events/bus.js";
 import { githubPhotos } from "./avatar.js";
+import { errorJson } from "./error-json.js";
 import {
   type Access,
   accessOf,
@@ -21,6 +22,7 @@ import {
 } from "./identity.js";
 import { windowLimiter } from "./limit.js";
 import { type MailTransport, resendTransport, signInEmail } from "./mail.js";
+import { forwardedOrigin, previewSessions, previewSignIn } from "./preview.js";
 import type { Viewer, ViewerEnv } from "./viewer.js";
 
 export type AuthConfig = Pick<
@@ -30,6 +32,7 @@ export type AuthConfig = Pick<
   | "BETTER_AUTH_URL"
   | "github"
   | "email"
+  | "preview"
 >;
 
 /** Human sign-in as the rest of the server sees it, with better-auth kept inside. */
@@ -55,9 +58,12 @@ export interface TrailAuth {
   emailSignIn: boolean;
   /**
    * Whether the request's Origin is one better-auth trusts: BETTER_AUTH_URL's
-   * origin (and any trustedOrigins), or without it the request's own origin.
+   * origin (and any trustedOrigins), or without it the request's own origin;
+   * in preview mode the origin X-Forwarded-Proto and X-Forwarded-Host name too.
    */
   isTrustedOrigin(request: Request): Promise<boolean>;
+  /** Serves `POST /api/preview/sign-in`; null unless preview mode is on. */
+  previewSignIn: ((request: Request) => Promise<Response>) | null;
 }
 
 const noTokens = { accessToken: null, refreshToken: null, idToken: null };
@@ -109,14 +115,6 @@ const minutes = (seconds: number) => {
 
 const notFound = () => new Response("Not Found", { status: 404 });
 
-/** A JSON error as the rest of trail's API answers one. */
-const errorJson = (
-  status: number,
-  code: string,
-  message: string,
-  headers?: Record<string, string>,
-) => Response.json({ error: { code, message } }, { status, headers });
-
 type UserRow = {
   email: string;
   githubId?: number | null;
@@ -156,6 +154,7 @@ export function createAuth({
       : null;
   const sendMail =
     mailTransport ?? (email ? resendTransport(email.resendApiKey) : null);
+  const preview = config.preview;
 
   // every request counts, invited or not, so the limits say nothing about who is invited.
   // Per address across IPs only loosely: a strict one would let anyone lock a person out
@@ -218,20 +217,30 @@ export function createAuth({
         githubLogin: { type: "string", required: false, input: true },
       },
     },
-    plugins: email
-      ? [
-          magicLink({
-            expiresIn: LINK_MINUTES * 60,
-            // a leaked database holds no live link
-            storeToken: "hashed",
-            // called for every address alike, so the answer and its timing don't tell who is invited
-            sendMagicLink: async ({ email: to, token, metadata }) => {
-              const callbackURL = samePath(metadata?.callbackURL) ?? "/";
-              if (isEmailInvited(db, to)) deliverLink(to, token, callbackURL);
-            },
-          }),
-        ]
-      : [],
+    plugins: [
+      ...(email
+        ? [
+            magicLink({
+              expiresIn: LINK_MINUTES * 60,
+              // a leaked database holds no live link
+              storeToken: "hashed",
+              // called for every address alike, so the answer and its timing don't tell who is invited
+              sendMagicLink: async ({ email: to, token, metadata }) => {
+                const callbackURL = samePath(metadata?.callbackURL) ?? "/";
+                if (isEmailInvited(db, to)) deliverLink(to, token, callbackURL);
+              },
+            }),
+          ]
+        : []),
+      ...(preview ? [previewSessions(owner)] : []),
+    ],
+    // behind Sky's preview proxy the browser's origin is the forwarded one, not Host's
+    ...(preview && {
+      trustedOrigins: (request?: Request) => {
+        const forwarded = request && forwardedOrigin(request.headers);
+        return forwarded ? [forwarded] : [];
+      },
+    }),
     socialProviders: github
       ? {
           github: {
@@ -266,6 +275,13 @@ export function createAuth({
     onAPIError: { errorURL: "/sign-in" },
     advanced: {
       ipAddress: { ipAddressHeaders: clientIpHeaders },
+      ...(preview && {
+        // a preview is served over https by Sky's proxy, which better-auth can't see from
+        // the loopback Host; set once since the cookie's name carries the prefix
+        useSecureCookies: true,
+        // better-auth skips its origin check under NODE_ENV=test; this keeps it on there too
+        disableOriginCheck: false,
+      }),
     },
     databaseHooks: {
       // trail never calls GitHub as a person, so their tokens are never kept
@@ -337,6 +353,7 @@ export function createAuth({
   async function isTrustedOrigin(request: Request): Promise<boolean> {
     const origin = request.headers.get("origin");
     if (!origin) return false;
+    if (preview && origin === forwardedOrigin(request.headers)) return true;
     // without a baseURL better-auth trusts the origin it infers from each request
     if (!config.BETTER_AUTH_URL) return origin === new URL(request.url).origin;
     return (await auth.$context).isTrustedOrigin(origin);
@@ -471,6 +488,14 @@ export function createAuth({
     ownerLogin: owner,
     emailSignIn: email !== null,
     isTrustedOrigin,
+    previewSignIn: preview
+      ? previewSignIn({
+          password: preview.password,
+          isTrustedOrigin,
+          sessionForOwner: (headers) =>
+            auth.api.previewSessionForOwner({ headers, asResponse: true }),
+        })
+      : null,
     async handler(request) {
       const link = await magicLinkRoute(request);
       if (link) return link;

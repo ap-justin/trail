@@ -98,3 +98,45 @@ test("GITHUB_TOKEN is optional, and empty reads as unset", () => {
   );
   expect(loadConfig(required).GITHUB_TOKEN).toBe(undefined);
 });
+
+const previewPassword = "made-up-preview-password-24";
+
+test.each([undefined, "", "0", "true", "yes", " 1"])(
+  "preview mode is off with TRAIL_PREVIEW_MODE=%j, even with a password",
+  (mode) => {
+    const env = { ...required, TRAIL_PREVIEW_PASSWORD: previewPassword };
+    expect(loadConfig({ ...env, TRAIL_PREVIEW_MODE: mode }).preview).toBe(null);
+  },
+);
+
+test.each([undefined, "", "p".repeat(23)])(
+  "preview mode refuses to start with TRAIL_PREVIEW_PASSWORD=%j, naming the variable and never the value",
+  (password) => {
+    const env = {
+      ...required,
+      TRAIL_PREVIEW_MODE: "1",
+      TRAIL_PREVIEW_PASSWORD: password,
+    };
+    expect(() => loadConfig(env)).toThrow(
+      /TRAIL_PREVIEW_PASSWORD.*24 characters/,
+    );
+    let message = "";
+    try {
+      loadConfig(env);
+    } catch (e) {
+      message = String(e);
+    }
+    if (password) expect(message).not.toContain(password);
+  },
+);
+
+test("preview mode starts with a 24-character password", () => {
+  const password = "p".repeat(24);
+  expect(
+    loadConfig({
+      ...required,
+      TRAIL_PREVIEW_MODE: "1",
+      TRAIL_PREVIEW_PASSWORD: password,
+    }).preview,
+  ).toEqual({ password });
+});

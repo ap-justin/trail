@@ -8,6 +8,7 @@ import {
   BAD_LINK,
   type EmailLink,
   NotInvitedView,
+  type PreviewSignIn,
   SIGN_IN_FAILED,
   SignInView,
 } from "@/components/sign-in";
@@ -64,6 +65,12 @@ function SignIn() {
   const emailLink = useMutation({
     mutationFn: (email: string) => api.emailLink(email, returnTo),
   });
+  // the session cookie is set: a fresh /me lets this viewer in, and the member branch below
+  // goes on to the return address; returned, so the mutation stays pending until /me settles
+  const preview = useMutation({
+    mutationFn: api.previewSignIn,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.me }),
+  });
 
   // a /me refetch can let this viewer in while the page is open; href wins over to
   if (isMember(me)) return <Navigate to="/" href={returnTo} />;
@@ -95,6 +102,14 @@ function SignIn() {
       emailLink={linkStateOf(emailLink)}
       onEmailLink={(email) => emailLink.mutate(email)}
       onUseDifferentAddress={() => emailLink.reset()}
+      preview={
+        me.previewSignIn
+          ? {
+              state: previewStateOf(preview),
+              onSignIn: (password) => preview.mutate(password),
+            }
+          : undefined
+      }
     />
   );
 }
@@ -118,5 +133,34 @@ function linkStateOf(mutation: {
       };
     default:
       return { status: "failed", message: mutation.error.message };
+  }
+}
+
+const UNCONFIRMED =
+  "Signed in, but the page couldn't tell. Reload to continue.";
+
+function previewStateOf(mutation: {
+  isPending: boolean;
+  isSuccess: boolean;
+  error: Error | null;
+}): PreviewSignIn {
+  if (mutation.isPending) return { status: "signing_in" };
+  // settled with /me refetched and the viewer still not a member: the cookie didn't stick or
+  // the refetch failed, and a member would have left this page already
+  if (mutation.isSuccess) return { status: "failed", message: UNCONFIRMED };
+  if (!mutation.error) return { status: "idle" };
+  const { error } = mutation;
+  switch (codeOf(error)) {
+    case "invalid_password":
+      return { status: "wrong_password" };
+    case "rate_limited":
+      return {
+        status: "rate_limited",
+        retryAfterSeconds: error instanceof ApiError ? error.retryAfter : null,
+      };
+    case "network":
+      return { status: "failed", message: error.message };
+    default:
+      return { status: "failed", message: SIGN_IN_FAILED };
   }
 }

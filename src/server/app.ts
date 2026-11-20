@@ -52,6 +52,10 @@ export function createApp({
   });
   app.get("/health", (c) => c.json({ status: "ok" }));
   app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
+  const { previewSignIn } = auth;
+  if (previewSignIn) {
+    app.post("/api/preview/sign-in", (c) => previewSignIn(c.req.raw));
+  }
   app.route("/api/v1", createApi({ db, service }));
   app.route("/mcp", mcpRoutes({ db, service }));
   app.route("/api/web", createWeb({ db, service, bus, auth, streams }));

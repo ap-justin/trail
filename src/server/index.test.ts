@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import Database from "better-sqlite3";
 import { afterAll, expect, test } from "vitest";
 
 const dir = mkdtempSync(join(tmpdir(), "trail-index-"));
@@ -80,3 +81,36 @@ test.each([
   },
   30_000,
 );
+
+/** The keys of the products in the database a boot left, A to Z. */
+function productKeys(databasePath: string): string[] {
+  const db = new Database(databasePath, { readonly: true });
+  try {
+    return (
+      db.prepare("select key from product order by key").all() as {
+        key: string;
+      }[]
+    ).map((r) => r.key);
+  } finally {
+    db.close();
+  }
+}
+
+test("a boot in preview mode seeds its empty database", async () => {
+  const run = await boot(
+    {
+      ...valid,
+      TRAIL_PREVIEW_MODE: "1",
+      TRAIL_PREVIEW_PASSWORD: "boot-preview-password-of-24+",
+    },
+    "preview",
+  );
+  expect(run.listening).toBe(true);
+  expect(productKeys(run.databasePath)).toEqual(["HBR", "LTN", "NGT"]);
+}, 30_000);
+
+test("a boot outside preview mode seeds nothing", async () => {
+  const run = await boot(valid, "not-preview");
+  expect(run.listening).toBe(true);
+  expect(productKeys(run.databasePath)).toEqual([]);
+}, 30_000);

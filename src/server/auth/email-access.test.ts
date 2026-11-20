@@ -51,6 +51,7 @@ test("an email invitee signs in as a member and sees exactly its products", asyn
     products: [{ key: mine.key, name: "Mine", kind: "product" }],
     ownerName: owner,
     emailSignIn: true,
+    previewSignIn: false,
   });
   expect(await productKeys(cookie)).toEqual([mine.key]);
   expect(await isLetIn(cookie)).toBe(true);

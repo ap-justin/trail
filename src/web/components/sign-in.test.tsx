@@ -6,6 +6,8 @@ import {
   ConfirmSignInView,
   EMAIL_HINT,
   NotInvitedView,
+  type PreviewSignIn,
+  SIGN_IN_FAILED,
   SignInView,
 } from "@/components/sign-in";
 
@@ -352,5 +354,94 @@ describe("confirming a sign-in link", () => {
     expect(status).toHaveTextContent(
       "Something went wrong on our side. Try again.",
     );
+  });
+});
+
+describe("test sign-in on a preview", () => {
+  const passwordBox = () => screen.getByLabelText("Preview password");
+  const previewButton = () =>
+    screen.getByRole("button", { name: "Sign in to the preview" });
+
+  function renderPreview(state: PreviewSignIn = { status: "idle" }) {
+    const onSignIn = vi.fn();
+    const view = renderSignIn({ preview: { state, onSignIn } });
+    return {
+      onSignIn,
+      rerender: (next: PreviewSignIn) =>
+        view.rerender({ preview: { state: next, onSignIn } }),
+    };
+  }
+
+  test("absent unless the page is given a preview", () => {
+    renderSignIn();
+    expect(
+      screen.queryByRole("heading", { name: "Test sign-in (preview only)" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Preview password")).not.toBeInTheDocument();
+  });
+
+  test("on a preview: a labelled section after the other ways in, with a password field kept out of autofill", () => {
+    renderPreview();
+    const heading = screen.getByRole("heading", {
+      name: "Test sign-in (preview only)",
+    });
+    expect(
+      screen
+        .getByText("Only invited people can sign in.")
+        .compareDocumentPosition(heading),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(passwordBox()).toHaveAttribute("type", "password");
+    expect(passwordBox()).toHaveAttribute("autocomplete", "off");
+    expect(previewButton()).toBeInTheDocument();
+  });
+
+  test("sends the typed password", async () => {
+    const user = userEvent.setup();
+    const { onSignIn } = renderPreview();
+    await user.type(passwordBox(), "plum-otter-lantern-quartz");
+    await user.click(previewButton());
+    expect(onSignIn).toHaveBeenCalledWith("plum-otter-lantern-quartz");
+  });
+
+  test("while signing in: the button reads Signing in… and holds", async () => {
+    const user = userEvent.setup();
+    const { onSignIn } = renderPreview({ status: "signing_in" });
+    const button = screen.getByRole("button", { name: "Signing in…" });
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    expect(button).toHaveAttribute("aria-busy", "true");
+    await user.click(button);
+    expect(onSignIn).not.toHaveBeenCalled();
+  });
+
+  test("a wrong password marks the field and moves focus to it; an edit clears the mark", async () => {
+    const user = userEvent.setup();
+    const { rerender } = renderPreview();
+    await user.type(passwordBox(), "wrong");
+    await user.click(previewButton());
+    rerender({ status: "signing_in" });
+    rerender({ status: "wrong_password" });
+    expect(passwordBox()).toHaveFocus();
+    expect(passwordBox()).toHaveAttribute("aria-invalid", "true");
+    expect(passwordBox()).toHaveAccessibleDescription(
+      "That password didn't work.",
+    );
+    await user.type(passwordBox(), "x");
+    expect(passwordBox()).not.toHaveAttribute("aria-invalid");
+  });
+
+  test("rate-limited and other failures say so under the button", () => {
+    const { rerender } = renderPreview({
+      status: "rate_limited",
+      retryAfterSeconds: 45,
+    });
+    const status = screen.getAllByRole("status").at(-1);
+    expect(status).toHaveTextContent(
+      "Too many requests, try again in 1 minute.",
+    );
+    expect(previewButton().compareDocumentPosition(status as Node)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    rerender({ status: "failed", message: SIGN_IN_FAILED });
+    expect(status).toHaveTextContent(SIGN_IN_FAILED);
   });
 });

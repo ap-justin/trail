@@ -399,3 +399,151 @@ describe("signed in by email with an address not on the list", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("test sign-in on a preview", () => {
+  const onPreview = () =>
+    http.get("/api/web/me", () =>
+      HttpResponse.json({ ...meView("anonymous"), previewSignIn: true }),
+    );
+
+  async function signInWith(password: string) {
+    await userEvent.type(
+      await screen.findByLabelText("Preview password"),
+      password,
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Sign in to the preview" }),
+    );
+  }
+
+  test("off a preview there is no test sign-in", async () => {
+    signedInAs("anonymous");
+    renderApp("/sign-in");
+    await screen.findByRole("heading", { name: "Sign in to trail" });
+    expect(
+      screen.queryByRole("heading", { name: "Test sign-in (preview only)" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Preview password")).not.toBeInTheDocument();
+  });
+
+  test("the right password posts it as JSON, then goes on to the return address", async () => {
+    const sent: { type: string | null; body: unknown }[] = [];
+    server.use(
+      onPreview(),
+      http.post("/api/preview/sign-in", async ({ request }) => {
+        sent.push({
+          type: request.headers.get("content-type"),
+          body: await request.json(),
+        });
+        signedInAs("member");
+        return HttpResponse.json({ redirectTo: "/" });
+      }),
+      http.get("/api/web/items/TRL-14", () => HttpResponse.json(issue())),
+    );
+    const { router } = renderApp("/sign-in?redirect=%2Fproducts%2FTRL%2F14");
+    await signInWith("plum-otter-lantern-quartz");
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe("/products/TRL/14"),
+    );
+    expect(sent).toEqual([
+      {
+        type: "application/json",
+        body: { password: "plum-otter-lantern-quartz" },
+      },
+    ]);
+    // the issue read is still in flight at the pathname change: wait for it to land so it
+    // cannot reach a later test's handlers
+    await screen.findByRole("heading", { name: issue().title });
+  });
+
+  test("a sign-in /me doesn't confirm says so and frees the form", async () => {
+    let meReads = 0;
+    server.use(
+      http.get("/api/web/me", () => {
+        meReads++;
+        return HttpResponse.json({
+          ...meView("anonymous"),
+          previewSignIn: true,
+        });
+      }),
+      http.post("/api/preview/sign-in", () =>
+        HttpResponse.json({ redirectTo: "/" }),
+      ),
+    );
+    const { router } = renderApp("/sign-in");
+    await signInWith("plum-otter-lantern-quartz");
+    expect(
+      await screen.findByText(
+        "Signed in, but the page couldn't tell. Reload to continue.",
+      ),
+    ).toBeInTheDocument();
+    expect(meReads).toBe(2);
+    expect(screen.getByLabelText("Preview password")).not.toHaveAttribute(
+      "readonly",
+    );
+    expect(
+      screen.getByRole("button", { name: "Sign in to the preview" }),
+    ).not.toHaveAttribute("aria-disabled");
+    expect(router.state.location.pathname).toBe("/sign-in");
+  });
+
+  test("a wrong password says so at the field and stays on sign-in", async () => {
+    server.use(
+      onPreview(),
+      http.post("/api/preview/sign-in", () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: "invalid_password",
+              message: "that is not this preview's password",
+            },
+          },
+          { status: 401 },
+        ),
+      ),
+    );
+    const { router } = renderApp("/sign-in");
+    await signInWith("not-it");
+    expect(
+      await screen.findByText("That password didn't work."),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Preview password")).toHaveFocus();
+    expect(screen.queryByText(/not this preview's/)).not.toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/sign-in");
+  });
+
+  test("429 rate_limited says how long to wait", async () => {
+    server.use(
+      onPreview(),
+      http.post("/api/preview/sign-in", () =>
+        HttpResponse.json(
+          { error: { code: "rate_limited", message: "too many" } },
+          { status: 429, headers: { "retry-after": "50" } },
+        ),
+      ),
+    );
+    renderApp("/sign-in");
+    await signInWith("not-it");
+    expect(
+      await screen.findByText("Too many requests, try again in 1 minute."),
+    ).toBeInTheDocument();
+  });
+
+  test("any other refusal shows the generic failure, not the server's words", async () => {
+    server.use(
+      onPreview(),
+      http.post("/api/preview/sign-in", () =>
+        HttpResponse.json(
+          { error: { code: "INVALID_ORIGIN", message: "send the request" } },
+          { status: 403 },
+        ),
+      ),
+    );
+    renderApp("/sign-in");
+    await signInWith("plum-otter-lantern-quartz");
+    expect(
+      await screen.findByText("Something went wrong on our side. Try again."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/send the request/)).not.toBeInTheDocument();
+  });
+});

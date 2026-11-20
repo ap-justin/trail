@@ -20,6 +20,7 @@ test("an anonymous visitor gets 200 with no login, actor or products, and the ow
       products: [],
       ownerName: owner,
       emailSignIn: true,
+      previewSignIn: false,
     },
   });
 });
@@ -36,6 +37,7 @@ test("an account not on the list gets 200 not_invited with its login and nothing
       products: [],
       ownerName: owner,
       emailSignIn: true,
+      previewSignIn: false,
     },
   });
 });
@@ -61,6 +63,7 @@ test("a member gets its actor and exactly its products; the owner's display name
       products: [{ key: mine.key, name: "Mine", kind: "product" }],
       ownerName: "Olive Owner",
       emailSignIn: true,
+      previewSignIn: false,
     },
   });
 });

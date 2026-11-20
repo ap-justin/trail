@@ -10,6 +10,7 @@ import { createEventBus } from "./events/bus.js";
 import { createPullRequests } from "./github/pull-requests.js";
 import { deriveUnsubscribeKey } from "./issue-end-mail/unsubscribe.js";
 import { createIssueEndMailWorker } from "./issue-end-mail/worker.js";
+import { seedPreview } from "./preview/seed.js";
 import { webhookSettings } from "./service/webhooks.js";
 import { onShutdownSignal } from "./shutdown.js";
 import { LiveStreams } from "./web/events.js";
@@ -19,6 +20,9 @@ import { createWebhookWorker } from "./webhooks/worker.js";
 const config = loadConfig();
 const db = openDatabase(config.DATABASE_PATH);
 migrate(db);
+if (config.preview) {
+  seedPreview(db, { ownerLogin: config.TRAIL_OWNER_GITHUB });
+}
 if ("missing" in config.github) {
   console.warn(
     `GitHub sign-in is off until ${config.github.missing.join(" and ")} is set; bots are unaffected`,
@@ -27,6 +31,11 @@ if ("missing" in config.github) {
 if ("missing" in config.email) {
   console.warn(
     `Email sign-in is off until ${config.email.missing.join(" and ")} is set; GitHub sign-in is unaffected`,
+  );
+}
+if (config.preview) {
+  console.warn(
+    "TRAIL_PREVIEW_MODE is on: test sign-in is open to anyone with the preview password; never set this on a real deploy",
   );
 }
 // vite builds the SPA to dist/web, beside this module once bundled to dist/index.js;
