@@ -60,7 +60,17 @@ process.on("message", (message) => {
     });
   } else if (message.type === "snapshot") {
     global.gc?.();
-    const file = v8.writeHeapSnapshot(message.file);
-    process.send({ type: "snapshot", file });
+    // a bad path or a full disk is the soak's to report, not a reason for the server to die
+    try {
+      process.send({
+        type: "snapshot",
+        file: v8.writeHeapSnapshot(message.file),
+      });
+    } catch (error) {
+      process.send({ type: "snapshot", error: String(error) });
+    }
   }
 });
+
+// the soak is gone, killed without a chance to clean up: don't keep serving on its port
+process.on("disconnect", () => process.exit(0));

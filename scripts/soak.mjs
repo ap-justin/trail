@@ -13,7 +13,8 @@ import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import Database from "better-sqlite3";
 
@@ -65,9 +66,11 @@ if (values.only !== undefined && !LOADS.includes(values.only))
   usage(`--only must be one of ${LOADS.join(", ")}, got ${values.only}`);
 // a request or CLI call that takes longer is counted as failed, so a stalled answer can't outlast --minutes
 const REQUEST_TIMEOUT_MS = 30_000;
-const root = new URL("..", import.meta.url).pathname;
+const root = fileURLToPath(new URL("..", import.meta.url));
 const dir = mkdtempSync(join(tmpdir(), "trail-soak-"));
-if (values.snapshots) mkdirSync(values.snapshots, { recursive: true });
+// absolute, because the server runs from the repo root and would not find a path relative to here
+const snapshotDir = values.snapshots ? resolve(values.snapshots) : undefined;
+if (snapshotDir) mkdirSync(snapshotDir, { recursive: true });
 let server;
 // sync, so it also runs from 'exit' after a crash: the server is killed rather than drained
 const cleanUp = () => {
@@ -76,7 +79,7 @@ const cleanUp = () => {
   rmSync(dir, { recursive: true, force: true });
 };
 process.on("exit", cleanUp);
-for (const signal of ["SIGINT", "SIGTERM"])
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"])
   process.once(signal, () => {
     cleanUp();
     process.kill(process.pid, signal);
@@ -142,8 +145,13 @@ const githubPort = await listen(github);
 const receiverPort = await listen(receiver);
 const resendPort = await listen(resend);
 
+// the server's calls go to local stand-ins: a proxy or preloaded options from the shell must not take them elsewhere
+const inherited = { ...process.env };
+for (const name of Object.keys(inherited))
+  if (/^(https?_proxy|all_proxy|node_options|node_use_env_proxy)$/i.test(name))
+    delete inherited[name];
 const env = {
-  ...process.env,
+  ...inherited,
   NODE_ENV: "production",
   DATABASE_PATH: join(dir, "trail.db"),
   PORT: "0",
@@ -184,6 +192,10 @@ const heapWaiters = [];
 server.on("message", (m) => heapWaiters.shift()?.(m));
 // a heap snapshot of a large heap takes seconds; a server that answers none in this time is stuck
 const ASK_TIMEOUT_MS = 60_000;
+const askSnapshot = async (file) => {
+  const m = await ask({ type: "snapshot", file });
+  if (m?.error) console.error(`soak: heap snapshot failed: ${m.error}`);
+};
 // answers null once the server is gone, so a sample never waits on a dead process
 const ask = (message) =>
   new Promise((resolve) => {
@@ -452,6 +464,8 @@ async function mcpRound(bot) {
   // a dropped call is abandoned with no close, as a bot that crashed leaves it
   if (drop) setTimeout(() => ctl.abort(), Math.random() * 5);
   await init;
+  // aborted during initialize: the tool call would fail before any request, so it isn't sent or counted
+  if (ctl.signal.aborted) return;
   const tool = pick(mcpTools(bot));
   await mcpCall(
     bot,
@@ -682,21 +696,15 @@ await report(" (start)");
 let snap = 0;
 const ticker = setInterval(async () => {
   await report();
-  if (values.snapshots && ++snap % 2 === 0) {
-    await ask({
-      type: "snapshot",
-      file: join(values.snapshots, `heap-${snap}.heapsnapshot`),
-    });
+  if (snapshotDir && ++snap % 2 === 0) {
+    await askSnapshot(join(snapshotDir, `heap-${snap}.heapsnapshot`));
   }
 }, intervalS * 1000);
 await Promise.all(workers);
 clearInterval(ticker);
 await report(" (end)");
-if (values.snapshots)
-  await ask({
-    type: "snapshot",
-    file: join(values.snapshots, "heap-final.heapsnapshot"),
-  });
+if (snapshotDir)
+  await askSnapshot(join(snapshotDir, "heap-final.heapsnapshot"));
 console.log(
   `${[...answers]
     .sort()
@@ -713,9 +721,22 @@ console.log(
 stopping = true;
 server.kill();
 // the server drains for up to 4 s (src/server/index.ts deadlineMs); the 'exit' cleanup kills what is left
-await Promise.race([exited, new Promise((r) => setTimeout(r, 6000))]);
+const shutdown = await Promise.race([
+  exited,
+  new Promise((r) => setTimeout(r, 6000, "timeout")),
+]);
+let cleanShutdown = true;
+if (shutdown === "timeout") {
+  console.error("soak: the server did not exit within 6 s of SIGTERM; killed");
+  cleanShutdown = false;
+} else if (!serverDied && (server.exitCode ?? 0) !== 0) {
+  console.error(
+    `soak: the server exited with code ${server.exitCode} on SIGTERM`,
+  );
+  cleanShutdown = false;
+}
 for (const fake of [github, receiver, resend]) {
   fake.closeAllConnections();
   fake.close();
 }
-process.exit(serverDied ? 1 : 0);
+process.exit(serverDied || !cleanShutdown ? 1 : 0);
