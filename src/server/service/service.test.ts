@@ -994,6 +994,7 @@ test("whoami is the calling actor's row, label included", () => {
     photoUrl: null,
     unreadMessages: 0,
     team: null,
+    handler: null,
     hint: expect.stringContaining("create_team"),
     ownProducts: [],
     impliedProjects: [],
@@ -1027,7 +1028,7 @@ test("listBots pages every bot oldest first, never a human", () => {
   const ids = all.map((a) => a.id);
   expect(ids.indexOf(first.id)).toBe(0);
   expect(ids.indexOf(labelled.id)).toBe(1);
-  expect(all[1]).toEqual({ ...labelled, photoUrl: null });
+  expect(all[1]).toEqual({ ...labelled, photoUrl: null, handler: null });
   expect(ids).toContain(bot.id);
 });
 

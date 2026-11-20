@@ -8,6 +8,7 @@ import {
   apiKeyActions,
   apiKeyProduct,
   apiKeyProject,
+  invite,
   product,
   project,
   type WebhookSubscriptionKind,
@@ -398,6 +399,119 @@ export function setBotLabel(
     },
     { behavior: "immediate" },
   );
+}
+
+/** A bot's handler as the operator and the bot itself see it. */
+export type HandlerView = { id: string; name: string; email: string };
+
+/** The handler with this actor id, null for none. */
+export const handlerOf = (
+  tx: Tx | Db,
+  id: string | null,
+): HandlerView | null => {
+  if (id === null) return null;
+  const row = tx
+    .select({ id: actor.id, name: actor.displayName, email: actor.email })
+    .from(actor)
+    .where(eq(actor.id, id))
+    .get();
+  // a handler is always an email member: setBotHandler finds it by address
+  return row ? { ...row, email: row.email as string } : null;
+};
+
+/**
+ * The member whose address is `email`, in any case. Only a person let in by an
+ * email invite has an address trail knows: a GitHub sign-in stores none.
+ */
+function memberByEmail(tx: Tx, email: string): HandlerView {
+  const address = email.trim().toLowerCase();
+  const found = tx
+    .select({ id: actor.id, name: actor.displayName, email: actor.email })
+    .from(actor)
+    .innerJoin(invite, eq(invite.email, actor.email))
+    .where(and(eq(actor.email, address), eq(actor.kind, "human")))
+    .get();
+  if (found) return { ...found, email: address };
+  const invited = tx
+    .select({ id: invite.id })
+    .from(invite)
+    .where(eq(invite.email, address))
+    .get();
+  if (invited) {
+    throw new NotFoundError(
+      `${address} is invited but hasn't signed in to trail yet: set the handler after their first sign-in`,
+    );
+  }
+  throw new NotFoundError(
+    `no trail member has the email ${address}: invite that address on trail's People page first, then set the handler once they have signed in with it. A person who signs in with GitHub has no email on file in trail, so invite their email to make them a handler`,
+  );
+}
+
+/**
+ * Sets the person a bot works for, a member found by email, or clears it with
+ * null; `botRef` finds the bot as `renameBot`'s does. `from` is the handler it
+ * had, so clearing a bot with none is `{from: null, to: null}`.
+ */
+export function setBotHandler(
+  db: Db,
+  botRef: string,
+  email: string | null,
+): {
+  id: string;
+  name: string;
+  from: HandlerView | null;
+  to: HandlerView | null;
+} {
+  return db.transaction(
+    (tx) => {
+      const bot = botByRef(tx, botRef, "only bots have handlers");
+      const to = email === null ? null : memberByEmail(tx, email);
+      tx.update(actor)
+        .set({ handlerId: to?.id ?? null })
+        .where(eq(actor.id, bot.id))
+        .run();
+      return {
+        id: bot.id,
+        name: bot.displayName,
+        from: handlerOf(tx, bot.handlerId),
+        to,
+      };
+    },
+    { behavior: "immediate" },
+  );
+}
+
+/**
+ * Clears the handler of every bot whose handler `removed` let in: the GitHub
+ * account that claimed it, or the person of its address. The owner keeps
+ * access without an invite, so stays a handler. Call with the invite's
+ * removal; inviting the person again restores nothing.
+ */
+export function clearHandlersOfInvite(
+  tx: Tx,
+  removed: { githubId: number | null; email: string | null },
+): void {
+  const person =
+    removed.githubId !== null
+      ? eq(actor.githubId, removed.githubId)
+      : removed.email !== null
+        ? eq(actor.email, removed.email)
+        : undefined;
+  if (!person) return;
+  tx.update(actor)
+    .set({ handlerId: null })
+    .where(
+      inArray(
+        actor.handlerId,
+        tx
+          .select({ id: actor.id })
+          .from(actor)
+          .where(
+            and(person, eq(actor.kind, "human"), eq(actor.isOwner, false)),
+          ),
+      ),
+    )
+    .run();
 }
 
 /** Mints another key, scoped to `scope`, for the bot with this actor id or label. */

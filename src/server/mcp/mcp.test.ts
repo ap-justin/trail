@@ -575,6 +575,7 @@ test("whoami answers the key's bot and list_bots pages every bot with id, name, 
     title: null,
     team: null,
     hint: expect.stringContaining("create_team"),
+    handler: null,
   });
 
   const items: Body[] = [];
@@ -595,10 +596,12 @@ test("whoami answers the key's bot and list_bots pages every bot with id, name, 
     label: "agent-mcp",
     photoUrl: null,
     title: null,
+    handler: null,
   });
   expect(ids).toContain(bot.actor.id);
   for (const item of items) {
     expect(Object.keys(item).sort()).toEqual([
+      "handler",
       "id",
       "label",
       "name",

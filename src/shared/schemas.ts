@@ -232,6 +232,13 @@ export const issueSchema = z
     links: z.array(itemLinkSchema),
     assignee: actorRefSchema.nullable(),
     assigneeId: id.nullable(),
+    filedFor: z
+      .object({ name: z.string().meta({ example: "justin" }) })
+      .nullable()
+      .meta({
+        description:
+          "The person it was filed for as an issue, by name: a bot's issue filed with filed_for \"handler\" is filed for its handler, and a person's own issue for that person. Kept when the issue becomes a todo or a note. Null when filed for nobody, as an item added as a todo or a note always is.",
+      }),
     externalRef: z.string().nullable(),
     sourceAuthor,
     sourceStatus: z.string().nullable().meta({
@@ -523,6 +530,9 @@ const actorTitle = z
     example: "Release manager",
   });
 
+const HANDLER =
+  'The person the bot works for, whom file_issue files for with filed_for "handler".';
+
 export const actorSchema = z
   .object({
     id,
@@ -589,6 +599,15 @@ export const whoamiSchema = actorSchema
       description:
         "Present only when you own no product and no team: where your own work, your records and your requests for work go, or which key to ask for when this one can't create a team.",
     }),
+    handler: z
+      .object({
+        name: z.string().meta({ example: "justin" }),
+        email: z.string().meta({ example: "justin@example.com" }),
+      })
+      .nullable()
+      .meta({
+        description: `${HANDLER} Only here does a bot read its handler's email; list_bots shows other bots' handlers by name alone. Null until the operator sets one with \`trail bot handler\`.`,
+      }),
   })
   .openapi("Whoami");
 
@@ -599,6 +618,12 @@ export const botSchema = z
     label: actorLabel,
     photoUrl,
     title: actorTitle,
+    handler: z
+      .object({ name: z.string().meta({ example: "justin" }) })
+      .nullable()
+      .meta({
+        description: `${HANDLER} By name only, never the email. Null when the bot has none.`,
+      }),
   })
   .openapi("Bot");
 
@@ -1145,9 +1170,17 @@ const nowNamed = (field: string) =>
   `it is ${field} now, so send ${field} instead`;
 const onLegacyRoute = (field: string, current: string) =>
   `on this deprecated route it is ${current}, so send ${current}, or use PATCH /items/{key} (update_item), which takes ${field}`;
+const FILED_FOR_ARGUMENT =
+  "the argument is filed_for, so send filed_for instead; filedFor is the field items answer with";
 const itemCreateRenames = renamedFields({
   projectId: nowNamed("product"),
   assigneeId: nowNamed("assignee"),
+  filedFor: FILED_FOR_ARGUMENT,
+});
+
+const filedFor = z.literal("handler").optional().meta({
+  description:
+    'Issues only. "handler" files the issue for the person you work for, your handler (whoami shows it), when you file on their behalf; they get an email each time the issue ends unless they have unsubscribed from these emails or can\'t see its product. Leave it out for your own work. With no handler set it is a 422 naming the `trail bot handler` command the operator runs; on a todo or a note it is a 422.',
 });
 
 const assigneeRef = botRef.meta({
@@ -1193,6 +1226,7 @@ export const issueFileSchema = z
         description:
           "Usually left out: the product's bot assigns it when it accepts the issue from triage (status open with an assignee).",
       }),
+      filed_for: filedFor,
     },
     itemCreateRenames,
   )
@@ -1265,6 +1299,7 @@ export const itemCreateSchema = z
           "Who works on it: a bot's name (any case) or id, or a person's id. A note takes none.",
       }),
       about: aboutKeys.optional().meta({ description: `Notes only. ${ABOUT}` }),
+      filed_for: filedFor,
     },
     itemCreateRenames,
   )
@@ -1276,10 +1311,12 @@ export const issueCreateSchema = z
       ...legacyProductFields(true),
       ...itemFields,
       assigneeId: id.nullable().optional(),
+      filed_for: filedFor,
     },
     renamedFields({
       assignee:
         "on this deprecated route it is assigneeId, so send assigneeId, or use POST /items (add_todo or file_issue), which takes assignee",
+      filedFor: FILED_FOR_ARGUMENT,
     }),
   )
   // documents legacyProduct's rule (service/index.ts), which enforces it: a refine here would change the 422's message
@@ -1852,6 +1889,11 @@ export const webProductDetailSchema = webProductSchema.extend({
   }),
 });
 
+const webFiledForSchema = z.object({ name: z.string() }).nullable().meta({
+  description:
+    "The person an item was filed for as an issue, by name: a bot's handler, or the person who filed it in the web app. Kept when the issue becomes a todo or a note. Null when filed for nobody, as an item added as a todo or a note always is.",
+});
+
 export const webItemRowSchema = z.object({
   key: z.string(),
   type: webItemTypeSchema,
@@ -1862,6 +1904,7 @@ export const webItemRowSchema = z.object({
   assignee: webActorSchema
     .nullable()
     .meta({ description: "Null: unassigned, which a todo never is." }),
+  filedFor: webFiledForSchema,
   updatedAt: timestamp,
 });
 
@@ -2067,6 +2110,7 @@ export const webItemSchema = z.object({
     description:
       "Who filed the issue, or planned the todo: the byline reads `filed by` or `planned by` after `type`.",
   }),
+  filedFor: webFiledForSchema,
   sourceAuthor,
   createdAt: timestamp,
   updatedAt: timestamp,

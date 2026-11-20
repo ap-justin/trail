@@ -3,12 +3,14 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { eq } from "drizzle-orm";
-import { afterAll, expect, test } from "vitest";
+import { afterAll, afterEach, expect, test } from "vitest";
+import { syncEmailActor } from "./auth/identity.js";
 import { runCli } from "./cli.js";
 import { migrate, openDatabase } from "./db/client.js";
 import {
   actor,
   apiKey,
+  invite,
   product,
   project,
   projectProduct,
@@ -642,47 +644,135 @@ test("products owners prints each product's current owner, one line per product,
   expect(productRows()).toEqual(before);
 });
 
+const scratchKeys: string[] = [];
+afterEach(() => {
+  // the products the set-owner tests made leave, so later tests still see only the file's own
+  withDb((db) => {
+    for (const key of scratchKeys.splice(0)) {
+      db.delete(product).where(eq(product.key, key)).run();
+    }
+  });
+});
+
+/** A product of this test's own, optionally owned by a fresh bot, and a reader of its owner. */
+function scratchProduct(key: string, ownerName?: string) {
+  scratchKeys.push(key);
+  const owner = withDb((db) => {
+    const maker = createBot(db, `${key} maker`).actor;
+    const bot = ownerName ? createBot(db, ownerName).actor : null;
+    db.insert(product)
+      .values({
+        key,
+        name: key,
+        createdBy: maker.id,
+        ownerId: bot?.id ?? null,
+      })
+      .run();
+    return bot;
+  });
+  const ownerId = () =>
+    withDb(
+      (db) =>
+        db
+          .select({ ownerId: product.ownerId })
+          .from(product)
+          .where(eq(product.key, key))
+          .get()?.ownerId ?? null,
+    );
+  return { owner, ownerId };
+}
+
 test("products set-owner sets the owner by bot name, label or id, and prints from and to", () => {
+  const { ownerId } = scratchProduct("SOA");
   const owner = withDb(
     (db) => createBot(db, "Atlas", { label: "agent-atlas" }).actor,
   );
-  const first = run("products", "set-owner", "atl", "agent-atlas");
+  const second = withDb((db) => createBot(db, "second keeper").actor);
+  const first = run("products", "set-owner", "soa", "agent-atlas");
   expect(first.code).toBe(0);
   expect(first.stdout).toBe(
-    `product  ATL\nfrom     -\nto       Atlas (${owner.id})\n`,
+    `product  SOA\nfrom     -\nto       Atlas (${owner.id})\n`,
   );
-  const ownerOf = () =>
-    withDb(
-      (db) =>
-        db.$client
-          .prepare<[], string | null>(
-            "select owner_id from product where key = 'ATL'",
-          )
-          .pluck()
-          .get() ?? null,
-    );
-  expect(ownerOf()).toBe(owner.id);
-  const again = run("products", "set-owner", "ATL", "product owner");
+  expect(ownerId()).toBe(owner.id);
+  const again = run("products", "set-owner", "SOA", "second keeper");
   expect(again.code).toBe(0);
-  expect(again.stdout).toMatch(/^from {5}Atlas \(\S+\)\nto {7}product owner /m);
-  expect(ownerOf()).not.toBe(owner.id);
+  expect(again.stdout).toMatch(/^from {5}Atlas \(\S+\)\nto {7}second keeper /m);
+  expect(ownerId()).toBe(second.id);
 });
 
 test("products set-owner refuses a person and an unknown product or bot with exit 1, changing nothing", () => {
+  const { owner, ownerId } = scratchProduct("SOB", "sob keeper");
   const person = withDb((db) => createHuman(db, { displayName: "Pat" }));
   for (const argv of [
-    ["products", "set-owner", "BTA", person.id],
-    ["products", "set-owner", "BTA", "nobody-at-all"],
-    ["products", "set-owner", "NOPE", "alpha"],
+    ["products", "set-owner", "SOB", person.id],
+    ["products", "set-owner", "SOB", "nobody-at-all"],
+    ["products", "set-owner", "NOPE", "sob keeper"],
   ]) {
     const { code, stdout, stderr } = run(...argv);
     expect(code, argv.join(" ")).toBe(1);
     expect(stdout).toBe("");
     expect(stderr).toMatch(/^trail: /);
   }
-  expect(run("products", "set-owner", "NOPE", "alpha").stderr).toBe(
+  expect(ownerId()).toBe(owner?.id);
+  expect(run("products", "set-owner", "NOPE", "sob keeper").stderr).toBe(
     "trail: no product NOPE: `trail products owners` lists every product's key\n",
   );
+});
+
+test("products set-owner --clear leaves the product with no owner, and says so when it had none", () => {
+  const { owner, ownerId } = scratchProduct("SOC", "Beta keeper");
+  const cleared = run("products", "set-owner", "soc", "--clear");
+  expect(cleared).toEqual({
+    code: 0,
+    stdout: `product  SOC\nfrom     Beta keeper (${owner?.id})\nto       -\n`,
+    stderr: "",
+  });
+  expect(ownerId()).toBeNull();
+  const again = run("products", "set-owner", "SOC", "--clear");
+  expect(again).toEqual({
+    code: 0,
+    stdout: "product  SOC\nSOC has no owner: nothing to clear\n",
+    stderr: "",
+  });
+  expect(ownerId()).toBeNull();
+});
+
+test("products set-owner NOPE --clear is exit 1 naming the product, changing nothing", () => {
+  const owners = () => withDb((db) => db.select().from(product).all());
+  const before = owners();
+  const { code, stdout, stderr } = run(
+    "products",
+    "set-owner",
+    "NOPE",
+    "--clear",
+  );
+  expect(code).toBe(1);
+  expect(stdout).toBe("");
+  expect(stderr).toBe(
+    "trail: no product NOPE: `trail products owners` lists every product's key\n",
+  );
+  expect(owners()).toEqual(before);
+});
+
+test("products set-owner --clear with a bot is a usage error, changing nothing", () => {
+  const { owner, ownerId } = scratchProduct("SOD", "sod keeper");
+  const { code, stdout, stderr } = run(
+    "products",
+    "set-owner",
+    "SOD",
+    "sod keeper",
+    "--clear",
+  );
+  expect(code).toBe(2);
+  expect(stdout).toBe("");
+  expect(stderr.split("\n")[0]).toBe(
+    "trail: 'products set-owner --clear' takes no <bot-id-label-or-name>",
+  );
+  expect(ownerId()).toBe(owner?.id);
+  const missing = run("products", "set-owner", "--clear");
+  expect(missing.code).toBe(2);
+  expect(missing.stderr).toMatch(/^trail: missing <key>/);
+  expect(ownerId()).toBe(owner?.id);
 });
 
 test("products set-repo sets a GitHub URL, a trailing .git dropped; anything else is exit 2", () => {
@@ -982,6 +1072,16 @@ test.each([
     ["bot", "label", "someone", "x", "--clear"],
   ],
   ["bot label with two labels", ["bot", "label", "someone", "x", "y"]],
+  ["bot handler without a bot", ["bot", "handler"]],
+  ["bot handler without an email or --clear", ["bot", "handler", "someone"]],
+  [
+    "bot handler --clear with an email",
+    ["bot", "handler", "someone", "ada@example.com", "--clear"],
+  ],
+  [
+    "bot handler with two emails",
+    ["bot", "handler", "someone", "a@example.com", "b@example.com"],
+  ],
   ["key scope without a change", ["key", "scope", "00000000"]],
   [
     "key scope with a blank slug",
@@ -1413,6 +1513,127 @@ test("--help names both bot label forms and says labels are case-sensitive", () 
     /^ {2}trail bot label <bot-id-label-or-name> --clear$/m,
   );
   expect(stdout).toMatch(/case-sensitive, unlike names/);
+});
+
+/** A person let in by an email invite and signed in once, as the People page and a sign-in leave them. */
+function emailMember(email: string) {
+  return withDb((db) => {
+    const inviter = createHuman(db, { displayName: `inviter of ${email}` });
+    db.insert(invite).values({ email, invitedBy: inviter.id }).run();
+    return syncEmailActor(db, email)?.actor as { id: string };
+  });
+}
+
+const handlerIdOf = (key: string) =>
+  withDb((db) => resolveKey(db, key))?.handlerId;
+
+test("bot handler sets a member as a bot's handler by email in any case, then --clear removes it", () => {
+  const key = createdKey(
+    run("bot", "create", "Handled Bot", "--label", "handled-agent").stdout,
+  );
+  const id = withDb((db) => resolveKey(db, key))?.id as string;
+  const ada = emailMember("ada.handler@example.com");
+
+  const set = run(
+    "bot",
+    "handler",
+    "handled-agent",
+    " Ada.Handler@Example.COM",
+  );
+  expect(set.stderr).toBe("");
+  expect(set.code).toBe(0);
+  expect(set.stdout).toBe(
+    `actor  ${id}\nfrom   -\nto     ada.handler <ada.handler@example.com>\n`,
+  );
+  expect(handlerIdOf(key)).toBe(ada.id);
+
+  const cleared = run("bot", "handler", "Handled Bot", "--clear");
+  expect(cleared.code).toBe(0);
+  expect(cleared.stdout).toBe(
+    `actor  ${id}\nfrom   ada.handler <ada.handler@example.com>\nto     -\n`,
+  );
+  expect(handlerIdOf(key)).toBeNull();
+
+  const again = run("bot", "handler", id, "--clear");
+  expect(again.code).toBe(0);
+  expect(again.stdout).toBe(
+    `actor  ${id}\nHandled Bot has no handler: nothing to clear\n`,
+  );
+});
+
+test("bot handler replaces an existing handler, printing the old one as from and the new as to", () => {
+  const key = createdKey(run("bot", "create", "Rehandled Bot").stdout);
+  const id = withDb((db) => resolveKey(db, key))?.id as string;
+  const first = emailMember("first.handler@example.com");
+  const second = emailMember("second.handler@example.com");
+  expect(
+    run("bot", "handler", "Rehandled Bot", "first.handler@example.com").code,
+  ).toBe(0);
+  expect(handlerIdOf(key)).toBe(first.id);
+
+  const replaced = run(
+    "bot",
+    "handler",
+    "Rehandled Bot",
+    "second.handler@example.com",
+  );
+  expect(replaced.stderr).toBe("");
+  expect(replaced.code).toBe(0);
+  expect(replaced.stdout).toBe(
+    `actor  ${id}\nfrom   first.handler <first.handler@example.com>\nto     second.handler <second.handler@example.com>\n`,
+  );
+  expect(handlerIdOf(key)).toBe(second.id);
+});
+
+test("bot handler refuses an address no member has, one not signed in yet and a person as the bot, with exit 1, changing nothing", () => {
+  const key = createdKey(run("bot", "create", "Refused Handler").stdout);
+  withDb((db) => {
+    const inviter = createHuman(db, { displayName: "Pending Inviter" });
+    db.insert(invite)
+      .values({ email: "pending@example.com", invitedBy: inviter.id })
+      .run();
+  });
+  const github = withDb((db) =>
+    createHuman(db, { displayName: "Gita Hub", githubId: 4242 }),
+  );
+
+  const unknown = run(
+    "bot",
+    "handler",
+    "Refused Handler",
+    "nobody@example.com",
+  );
+  expect(unknown.code).toBe(1);
+  expect(unknown.stderr).toBe(
+    "trail: no trail member has the email nobody@example.com: invite that address on trail's People page first, then set the handler once they have signed in with it. A person who signs in with GitHub has no email on file in trail, so invite their email to make them a handler\n",
+  );
+  const pending = run(
+    "bot",
+    "handler",
+    "Refused Handler",
+    "PENDING@example.com",
+  );
+  expect(pending.code).toBe(1);
+  expect(pending.stderr).toBe(
+    "trail: pending@example.com is invited but hasn't signed in to trail yet: set the handler after their first sign-in\n",
+  );
+  const person = run("bot", "handler", github.id, "pending@example.com");
+  expect(person.code).toBe(1);
+  expect(person.stderr).toBe(
+    `trail: ${github.id} is a person, not a bot: only bots have handlers\n`,
+  );
+  expect(handlerIdOf(key)).toBeNull();
+});
+
+test("--help names bot handler's set and --clear forms and products set-owner's --clear form", () => {
+  const { stdout } = run("--help");
+  expect(stdout).toMatch(
+    /^ {2}trail bot handler <bot-id-label-or-name> <email>$/m,
+  );
+  expect(stdout).toMatch(
+    /^ {2}trail bot handler <bot-id-label-or-name> --clear$/m,
+  );
+  expect(stdout).toMatch(/^ {2}trail products set-owner <key> --clear$/m);
 });
 
 test("--help prints usage on stdout and exits 0, naming key scope and --projects", () => {

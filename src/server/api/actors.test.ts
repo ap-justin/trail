@@ -25,6 +25,7 @@ test("GET /whoami answers the key's bot: id, kind, name, label, photoUrl and tit
     unreadMessages: 0,
     team: null,
     hint: expect.stringContaining("create_team"),
+    handler: null,
   });
 });
 
@@ -89,10 +90,12 @@ test("GET /bots pages every bot oldest first with id, name, label photoUrl and t
     label: "agent-8",
     photoUrl: null,
     title: null,
+    handler: null,
   });
   expect(ids).toContain(bot.actor.id);
   for (const item of items) {
     expect(Object.keys(item).sort()).toEqual([
+      "handler",
       "id",
       "label",
       "name",

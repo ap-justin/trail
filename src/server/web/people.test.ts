@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { expect, test } from "vitest";
 import { accessOfEmail, syncEmailActor } from "../auth/identity.js";
 import { actor } from "../db/schema.js";
+import { createBot, setBotHandler } from "../service/keys.js";
 import { setupTestApp } from "../test-app.js";
 
 const {
@@ -393,3 +394,54 @@ test.each(["@@double", "@dana@example.com", "@"])(
     ).toBe(422);
   },
 );
+
+test("removing a GitHub-invited person through DELETE clears them as the handler of their bots", async () => {
+  await addMember("gh-handled", [alpha.id], { githubId: 9101 });
+  // a GitHub account has no address, so setBotHandler can't name it: write the handler column as the data would hold it
+  const person = db.select().from(actor).where(eq(actor.githubId, 9101)).get();
+  const handled = createBot(db, "github removal");
+  const other = createBot(db, "github removal bystander");
+  db.update(actor)
+    .set({ handlerId: person?.id })
+    .where(eq(actor.id, handled.actor.id))
+    .run();
+  const handlerOf = async (key: string) =>
+    ((await (await request("GET", "/api/v1/whoami", { key })).json()) as Body)
+      .handler;
+  expect(await handlerOf(handled.key)).toMatchObject({ name: "gh-handled" });
+
+  expect((await people("DELETE", "/people/gh-handled")).status).toBe(204);
+  expect(await handlerOf(handled.key)).toBeNull();
+  expect(await handlerOf(other.key)).toBeNull();
+});
+
+test("removing a person clears them as every bot's handler, and inviting them again doesn't restore it", async () => {
+  const email = "hal.handled@example.com";
+  await people("POST", "/people", { username: email, products: [alpha.key] });
+  syncEmailActor(db, email);
+  const bots = [createBot(db, "removal one"), createBot(db, "removal two")];
+  for (const b of bots) setBotHandler(db, b.actor.id, email);
+  const whoami = async (key: string) =>
+    ((await (await request("GET", "/api/v1/whoami", { key })).json()) as Body)
+      .handler;
+  expect(await whoami(bots[0]?.key ?? "")).toEqual({
+    name: "hal.handled",
+    email,
+  });
+
+  expect((await people("DELETE", `/people/${email}`)).status).toBe(204);
+  for (const b of bots) expect(await whoami(b.key)).toBeNull();
+  const filed = await request("POST", "/api/v1/items", {
+    key: bots[0]?.key,
+    json: {
+      type: "issue",
+      product: alpha.key,
+      title: "for hal",
+      filed_for: "handler",
+    },
+  });
+  expect(filed.status).toBe(422);
+
+  await people("POST", "/people", { username: email, products: [alpha.key] });
+  for (const b of bots) expect(await whoami(b.key)).toBeNull();
+});

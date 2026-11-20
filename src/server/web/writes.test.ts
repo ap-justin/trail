@@ -67,6 +67,7 @@ test("filing takes only product, title and description: any other field is a 422
     { estimate: 2 },
     { links: [] },
     { externalRef: "x" },
+    { filed_for: "handler" },
   ]) {
     const { status } = await web("POST", "/issues", {
       product: p.key,
@@ -76,6 +77,22 @@ test("filing takes only product, title and description: any other field is a 422
     expect(status, JSON.stringify(extra)).toBe(422);
   }
   expect(db.select().from(activityEvent).all()).toHaveLength(before);
+});
+
+test("a member's own issue is filed for that member: the item, its list row and a bot's get_item name them", async () => {
+  const filed = await web("POST", "/issues", { product: p.key, title: "mine" });
+  expect(filed.body.filedFor).toEqual({ name: "Wendy Writer" });
+  expect((await web("GET", `/items/${filed.body.key}`)).body.filedFor).toEqual({
+    name: "Wendy Writer",
+  });
+  const rows = (await web("GET", `/products/${p.key}/items`)).body.items;
+  expect(rows.find((r: Body) => r.key === filed.body.key).filedFor).toEqual({
+    name: "Wendy Writer",
+  });
+  const read = await request("GET", `/api/v1/items/${filed.body.key}`);
+  expect(((await read.json()) as Body).filedFor).toEqual({
+    name: "Wendy Writer",
+  });
 });
 
 test("a member comments as itself: 201 with the timeline entry, and the comment reaches the feed and the timeline", async () => {

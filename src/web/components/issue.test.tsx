@@ -984,6 +984,46 @@ describe("item type", () => {
     ).toBeInTheDocument();
   });
 
+  test("an issue filed for someone: filed by the filer for the person, in neutral text", () => {
+    renderIssue({
+      issue: {
+        status: "ready",
+        data: issue({ filedFor: { name: "Justin Park" } }),
+      },
+    });
+    const line = byline();
+    expect(line).toHaveTextContent(/filed by.*Beta\s*for\s*Justin Park\s*on/);
+    const person = within(line).getByText("Justin Park");
+    expect(person).toHaveClass("text-foreground");
+    expect(person).not.toHaveClass("text-bot");
+  });
+
+  test("an issue a person filed for themself reads filed by them, once", () => {
+    renderIssue({
+      issue: {
+        status: "ready",
+        data: issue({ creator: maya, filedFor: { name: maya.name } }),
+      },
+    });
+    const line = byline();
+    expect(line).toHaveTextContent(/filed by.*Maya Chen\s*on/);
+    expect(line).not.toHaveTextContent(/\bfor\s/);
+  });
+
+  test("an issue filed for nobody reads filed by its filer alone", () => {
+    renderIssue();
+    expect(byline()).toHaveTextContent(/filed by.*Beta\s*on/);
+    expect(byline()).not.toHaveTextContent(/\bfor\s/);
+  });
+
+  test.each([
+    ["a todo", () => todo({ filedFor: { name: "Justin Park" } })],
+    ["a note", () => note({ filedFor: { name: "Justin Park" } })],
+  ])("%s never names who it was filed for", (_, data) => {
+    renderIssue({ issue: { status: "ready", data: data() } });
+    expect(byline()).not.toHaveTextContent("Justin Park");
+  });
+
   test("an issue a bot filed and the owner accepted as a todo is still filed by it", () => {
     renderIssue({
       issueKey: "TRL-15",

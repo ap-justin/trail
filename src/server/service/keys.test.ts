@@ -15,6 +15,7 @@ import {
 import { NotFoundError, ValidationError } from "./errors.js";
 import {
   authenticateKey,
+  clearHandlersOfInvite,
   createBot,
   createHuman,
   createKey,
@@ -617,5 +618,68 @@ describe("editKeyScope", () => {
     expect(() =>
       editKeyScope(db, prefixOf(key), { addProjects: ["recon"] }),
     ).toThrow(NotFoundError);
+  });
+});
+
+describe("clearHandlersOfInvite", () => {
+  const person = (values: Partial<typeof actor.$inferInsert>) =>
+    db
+      .insert(actor)
+      .values({ kind: "human", displayName: "handler", ...values })
+      .returning()
+      .get();
+  const botOf = (handlerId: string) => {
+    const { actor: bot } = createBot(db, `handled by ${handlerId}`);
+    db.update(actor).set({ handlerId }).where(eq(actor.id, bot.id)).run();
+    return bot.id;
+  };
+  const handlerOfBot = (id: string) =>
+    db.select().from(actor).where(eq(actor.id, id)).get()?.handlerId;
+  const clear = (removed: { githubId: number | null; email: string | null }) =>
+    db.transaction((tx) => clearHandlersOfInvite(tx, removed));
+
+  test("a removed GitHub invite clears the bots of the account that claimed it, and only those", () => {
+    const gone = person({ githubId: 41001, githubLogin: "gone-gh" });
+    const other = person({ githubId: 41002, githubLogin: "other-gh" });
+    const goneBot = botOf(gone.id);
+    const otherBot = botOf(other.id);
+    clear({ githubId: 41001, email: null });
+    expect(handlerOfBot(goneBot)).toBeNull();
+    expect(handlerOfBot(otherBot)).toBe(other.id);
+  });
+
+  test("a removed email invite clears the bots of that address's person", () => {
+    const gone = person({ email: "gone.handler@example.com" });
+    const other = person({ email: "other.handler@example.com" });
+    const goneBot = botOf(gone.id);
+    const otherBot = botOf(other.id);
+    clear({ githubId: null, email: "gone.handler@example.com" });
+    expect(handlerOfBot(goneBot)).toBeNull();
+    expect(handlerOfBot(otherBot)).toBe(other.id);
+  });
+
+  test("the owner stays a handler when the invite for their GitHub account is removed", () => {
+    const owner = person({
+      githubId: 41003,
+      githubLogin: "owner-gh",
+      isOwner: true,
+    });
+    const member = person({ githubId: 41005, githubLogin: "member-gh" });
+    const ownerBot = botOf(owner.id);
+    const memberBot = botOf(member.id);
+    clear({ githubId: 41003, email: null });
+    expect(handlerOfBot(ownerBot)).toBe(owner.id);
+    clear({ githubId: 41005, email: null });
+    expect(handlerOfBot(memberBot)).toBeNull();
+  });
+
+  test("an invite with neither a GitHub id nor an address clears nothing", () => {
+    const kept = person({ githubId: 41004, githubLogin: "kept-gh" });
+    const keptBot = botOf(kept.id);
+    clear({ githubId: null, email: null });
+    expect(handlerOfBot(keptBot)).toBe(kept.id);
+    // the same bot is cleared once the invite names the person
+    clear({ githubId: 41004, email: null });
+    expect(handlerOfBot(keptBot)).toBeNull();
   });
 });

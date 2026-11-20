@@ -151,13 +151,17 @@ const createdBy: Record<WebItemType, string> = {
 };
 
 /**
- * At lg the title, then one byline: type, key, who filed it and when. Below lg the
- * byline dissolves into the header's flex row so type and key lead above the title,
- * with the status at their right, and the rest follows under it.
+ * At lg the title, then one byline: type, key, who filed it, for whom, and when. Below
+ * lg the byline dissolves into the header's flex row so type and key lead above the
+ * title, with the status at their right, and the rest follows under it.
  */
 function Header({ issue }: { issue: WebItemView }) {
   const lead = "max-lg:order-1";
   const rest = "max-lg:order-3";
+  const filedFor =
+    issue.type === "issue" && issue.filedFor?.name !== issue.creator.name
+      ? issue.filedFor
+      : null;
   return (
     <header className="flex flex-wrap items-center gap-x-1.5 gap-y-2 px-4 pt-4 pb-3 text-muted-foreground lg:flex-col lg:flex-nowrap lg:items-stretch lg:gap-2 lg:p-0">
       <h1 className="basis-full text-xl leading-tight font-semibold text-foreground max-lg:order-2">
@@ -172,6 +176,7 @@ function Header({ issue }: { issue: WebItemView }) {
         <span className={cn("flex items-center gap-1.5", rest)}>
           <Actor actor={issue.creator} withTitle={false} />
         </span>
+        {filedFor && <span className={rest}>for {strong(filedFor.name)}</span>}
         <time dateTime={issue.createdAt} className={rest}>
           on {formatDay(new Date(issue.createdAt), new Date())}
         </time>

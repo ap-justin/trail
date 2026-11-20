@@ -294,6 +294,16 @@ test("the legacy item schemas leave out a note's type and fields, which the lega
   );
 });
 
+test("PATCH /items/{key} says what update_item says about the email an ending sends, so a REST bot comments first too", async () => {
+  const res = await request("GET", "/api/v1/openapi.json", { key: null });
+  const spec = (await res.json()) as {
+    paths: Record<string, Record<string, { description?: string }>>;
+  };
+  expect(spec.paths["/items/{key}"]?.patch?.description).toContain(
+    "The email quotes your latest comment on the item, else the product's own bot's: comment the result or the reason first.",
+  );
+});
+
 test("the deprecated label list says what its replacement says about implicitly named products", async () => {
   const res = await request("GET", "/api/v1/openapi.json", { key: null });
   const spec = (await res.json()) as {
@@ -569,4 +579,29 @@ test("the deprecated POST /issues says a product field is required in a form gen
     json: { title: "no product" },
   });
   expect(none.status).toBe(422);
+});
+
+test("filed_for is offered on both item creates as the one value handler, and the handler's email only on Whoami", async () => {
+  type Schema = {
+    properties?: Record<string, Schema>;
+    allOf?: Schema[];
+  };
+  const { schemas } = (
+    (await (
+      await request("GET", "/api/v1/openapi.json", { key: null })
+    ).json()) as { components: { schemas: Record<string, Schema> } }
+  ).components;
+  for (const name of ["ItemCreate", "IssueCreate"]) {
+    expect(schemas[name]?.properties?.filed_for, name).toMatchObject({
+      type: "string",
+      enum: ["handler"],
+    });
+  }
+  const fieldsOf = (s: Schema | undefined) => Object.keys(s?.properties ?? {});
+  expect(fieldsOf(schemas.Item?.properties?.filedFor)).toEqual(["name"]);
+  expect(fieldsOf(schemas.Bot?.properties?.handler)).toEqual(["name"]);
+  expect(fieldsOf(schemas.Whoami?.allOf?.[1]?.properties?.handler)).toEqual([
+    "name",
+    "email",
+  ]);
 });

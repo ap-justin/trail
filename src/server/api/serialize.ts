@@ -22,7 +22,7 @@ import type {
 import type {
   ActivityEntry,
   Actor,
-  ActorWithPhoto,
+  Bot,
   Comment,
   ImportResult,
   Issue,
@@ -133,6 +133,7 @@ export function toIssue(row: Issue): IssueView {
     links: row.links.map(toLink),
     assignee: row.assignee,
     assigneeId: row.assigneeId,
+    filedFor: row.filedFor,
     externalRef: row.externalRef,
     sourceAuthor: row.sourceAuthor,
     sourceStatus: row.sourceStatus,
@@ -270,16 +271,21 @@ export function toWhoami(row: Whoami, scope: KeyScope): WhoamiView {
     unreadMessages: row.unreadMessages,
     team: row.team && ref(row.team),
     ...(row.hint !== undefined && { hint: row.hint }),
+    handler: row.handler && {
+      name: row.handler.name,
+      email: row.handler.email,
+    },
   };
 }
 
-export function toBot(row: ActorWithPhoto): BotView {
+export function toBot(row: Bot): BotView {
   return {
     id: row.id,
     name: row.displayName,
     label: row.label,
     photoUrl: row.photoUrl,
     title: row.title,
+    handler: row.handler,
   };
 }
 
