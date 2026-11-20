@@ -1,15 +1,18 @@
 import { createRoute } from "@hono/zod-openapi";
 import {
+  errorSchema,
   labelCreateSchema,
   labelSchema,
   pageQuerySchema,
   pageSchema,
   productCreateSchema,
+  productListQuerySchema,
   productReadSchema,
   productSchema,
   productUpdateSchema,
   statusUpdateCreateSchema,
   statusUpdateSchema,
+  teamCreateSchema,
 } from "../../shared/schemas.js";
 import type { Service } from "../service/index.js";
 import { createRouter } from "./env.js";
@@ -55,12 +58,34 @@ const createProduct = createRoute({
   },
 });
 
+const createTeam = createRoute({
+  method: "post",
+  path: "/teams",
+  summary: "Create your team",
+  description:
+    "A team is a space for your own work when you own no product: a product row with kind team, keyed and used like a product. You own it, and every key of yours limited to a list of products reaches it at once. Only a bot that owns no product and no team may, once; anyone else gets a 409 (conflict) naming where its own work goes instead. Needs the issues action, not admin.",
+  tags,
+  request: {
+    headers: idempotencyHeaders,
+    body: jsonBody(teamCreateSchema),
+  },
+  responses: {
+    201: jsonContent(productSchema, "The created team"),
+    ...forbiddenError("issues"),
+    ...writeErrors,
+    409: jsonContent(
+      errorSchema,
+      "You own a product or a team already, or the key is in use",
+    ),
+  },
+});
+
 const listProducts = createRoute({
   method: "get",
   path: "/products",
-  summary: "List the products this key reaches, newest first",
+  summary: "List the products and teams this key reaches, newest first",
   tags,
-  request: { query: pageQuerySchema },
+  request: { query: productListQuerySchema },
   responses: {
     200: jsonContent(pageSchema(productReadSchema), "A page of products"),
     ...forbiddenError("read"),
@@ -85,7 +110,7 @@ const getProduct = createRoute({
 const updateProduct = createRoute({
   method: "patch",
   path: "/products/{key}",
-  summary: "Change a product's name, description, repoUrl or owner",
+  summary: "Change a product's name, description, repoUrl, owner or kind",
   description:
     "Needs the admin action. Fields left out stay as they are; null clears repoUrl or owner. A product's owner changes only when it has none or the caller is its owner, who may hand it to another bot or clear it; anyone else gets a 403 (forbidden) naming the owner, and the operator reassigns it with `trail products set-owner`.",
   tags,
@@ -182,6 +207,16 @@ export function productRoutes(service: Service) {
       c.json(
         toProduct(
           service.createProduct(c.var.actor, c.req.valid("json"), {
+            idempotencyKey: c.req.valid("header")["idempotency-key"],
+          }),
+        ),
+        201,
+      ),
+    )
+    .openapi(createTeam, (c) =>
+      c.json(
+        toProduct(
+          service.createTeam(c.var.actor, c.req.valid("json"), {
             idempotencyKey: c.req.valid("header")["idempotency-key"],
           }),
         ),

@@ -1,0 +1,1 @@
+ALTER TABLE `product` ADD `kind` text DEFAULT 'product' NOT NULL CONSTRAINT "product_kind_check" CHECK("kind" in ('product', 'team'));

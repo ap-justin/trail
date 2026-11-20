@@ -48,7 +48,7 @@ test("an email invitee signs in as a member and sees exactly its products", asyn
       photoUrl: null,
       title: null,
     },
-    products: [{ key: mine.key, name: "Mine" }],
+    products: [{ key: mine.key, name: "Mine", kind: "product" }],
     ownerName: owner,
     emailSignIn: true,
   });

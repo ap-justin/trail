@@ -1,0 +1,131 @@
+import { expect, test } from "vitest";
+import { createBot } from "../service/keys.js";
+import { projectKey, setupTestApp } from "../test-app.js";
+
+const { db, request } = setupTestApp();
+
+/** A bot that owns nothing, on a key with the issues action and no admin. */
+const newcomer = (name: string) =>
+  createBot(db, name, { scope: { actions: ["read", "issues", "comments"] } });
+
+test("POST /teams creates the caller's team with 201; a retry under the same Idempotency-Key returns it, and a second team is a 409", async () => {
+  const bot = newcomer("Tova");
+  const key = projectKey();
+  const send = (json: unknown, idempotencyKey?: string) =>
+    request("POST", "/api/v1/teams", {
+      json,
+      key: bot.key,
+      headers: idempotencyKey ? { "idempotency-key": idempotencyKey } : {},
+    });
+
+  const res = await send({ key, name: "Tova's desk" }, "tova-1");
+  expect(res.status).toBe(201);
+  const team = await res.json();
+  expect(team).toMatchObject({
+    key,
+    name: "Tova's desk",
+    kind: "team",
+    description: "",
+    owner: { id: bot.actor.id, name: "Tova", kind: "bot" },
+  });
+
+  const retry = await send({ key, name: "Tova's desk" }, "tova-1");
+  expect(retry.status).toBe(201);
+  expect(await retry.json()).toEqual(team);
+
+  const second = await send({ key: projectKey(), name: "another" });
+  expect(second.status).toBe(409);
+  expect(await second.json()).toEqual({
+    error: {
+      code: "conflict",
+      message: `you already own team ${key}, and a bot owns at most one team: keep your own work there (add_todo, add_note with product ${key}); an admin creates more products or teams with create_product (POST /products)`,
+    },
+  });
+});
+
+test("POST /teams without the issues action is a 403", async () => {
+  const reader = createBot(db, "Rufus", { scope: { actions: ["read"] } });
+  const res = await request("POST", "/api/v1/teams", {
+    json: { key: projectKey(), name: "nope" },
+    key: reader.key,
+  });
+  expect(res.status).toBe(403);
+  expect(await res.json()).toMatchObject({
+    error: { code: "forbidden_action" },
+  });
+});
+
+test("POST /teams refuses a field it doesn't take, like owner", async () => {
+  const bot = newcomer("Fenna");
+  const res = await request("POST", "/api/v1/teams", {
+    json: { key: projectKey(), name: "x", owner: "tester" },
+    key: bot.key,
+  });
+  expect(res.status).toBe(422);
+});
+
+test("POST and PATCH /products take kind, and GET /products filters on it", async () => {
+  const created = await request("POST", "/api/v1/products", {
+    json: {
+      key: projectKey(),
+      name: "admin's team",
+      kind: "team",
+      owner: null,
+    },
+  });
+  expect(created.status).toBe(201);
+  const team = (await created.json()) as { key: string; kind: string };
+  expect(team.kind).toBe("team");
+
+  const plain = (await (
+    await request("POST", "/api/v1/products", {
+      json: { key: projectKey(), name: "plain" },
+    })
+  ).json()) as { key: string; kind: string };
+  expect(plain.kind).toBe("product");
+
+  const patched = await request("PATCH", `/api/v1/products/${plain.key}`, {
+    json: { kind: "team" },
+  });
+  expect(patched.status).toBe(200);
+  expect(await patched.json()).toMatchObject({ kind: "team" });
+  await request("PATCH", `/api/v1/products/${plain.key}`, {
+    json: { kind: "product" },
+  });
+
+  const keys = async (query: string) =>
+    (
+      (await (
+        await request("GET", `/api/v1/products?limit=200${query}`)
+      ).json()) as { items: { key: string }[] }
+    ).items.map((p) => p.key);
+  expect(await keys("&kind=team")).toContain(team.key);
+  expect(await keys("&kind=team")).not.toContain(plain.key);
+  expect(await keys("&kind=product")).toContain(plain.key);
+  expect(await keys("&kind=product")).not.toContain(team.key);
+  expect(await keys("")).toEqual(expect.arrayContaining([team.key, plain.key]));
+
+  const wrong = await request("GET", "/api/v1/products?kind=crew");
+  expect(wrong.status).toBe(422);
+});
+
+test("GET /whoami carries team and, for a bot that owns nothing, hint", async () => {
+  const bot = newcomer("Wyn");
+  const before = await (
+    await request("GET", "/api/v1/whoami", { key: bot.key })
+  ).json();
+  expect(before).toMatchObject({
+    team: null,
+    hint: expect.stringContaining("create_team"),
+  });
+  const key = projectKey();
+  await request("POST", "/api/v1/teams", {
+    json: { key, name: "Wyn's desk" },
+    key: bot.key,
+  });
+  const after = (await (
+    await request("GET", "/api/v1/whoami", { key: bot.key })
+  ).json()) as { team: unknown };
+  expect(after.team).toEqual({ key, name: "Wyn's desk" });
+  expect(after).not.toHaveProperty("hint");
+});

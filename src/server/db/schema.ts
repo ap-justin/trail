@@ -36,6 +36,7 @@ export const noteStatuses = [
   "archived",
 ] as const satisfies readonly IssueStatus[];
 export const issueTypes = ["issue", "todo", "note"] as const;
+export const productKinds = ["product", "team"] as const;
 export const projectHealths = ["on_track", "at_risk", "off_track"] as const;
 export const activitySubjectTypes = [
   "product",
@@ -49,6 +50,7 @@ export const activitySubjectTypes = [
 export type ActorKind = (typeof actorKinds)[number];
 export type IssueStatus = (typeof issueStatuses)[number];
 export type IssueType = (typeof issueTypes)[number];
+export type ProductKind = (typeof productKinds)[number];
 export type ProjectHealth = (typeof projectHealths)[number];
 export type ActivitySubjectType = (typeof activitySubjectTypes)[number];
 export const apiKeyActions = [
@@ -256,6 +258,7 @@ export const product = sqliteTable(
     // prefix of its items' identifiers, as in TRL-12
     key: text("key").notNull().unique(),
     name: text("name").notNull(),
+    kind: text("kind", { enum: productKinds }).notNull().default("product"),
     description: text("description").notNull().default(""),
     // the highest item number in this product, handed out or kept by an import
     issueSeq: integer("issue_seq").notNull().default(0),
@@ -277,6 +280,7 @@ export const product = sqliteTable(
       "product_key_check",
       sql`length(${c(t.key)}) between 2 and 10 and ${c(t.key)} not glob '*[^A-Z0-9]*'`,
     ),
+    check("product_kind_check", oneOf(t.kind, productKinds)),
     check("product_issue_seq_check", sql`${c(t.issueSeq)} >= 0`),
     // "https://github.com/" is 19 characters; one slash after it, both parts non-empty
     check(

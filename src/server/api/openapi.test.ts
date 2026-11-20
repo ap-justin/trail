@@ -58,6 +58,7 @@ test("GET /api/v1/openapi.json serves the spec without a key", async () => {
       "POST /projects/{ref}/labels",
       "POST /projects/{ref}/status-updates",
       "POST /projects/{slug}/items",
+      "POST /teams",
       "DELETE /projects/{slug}/items/{key}",
       "GET /webhooks",
       "POST /webhooks",
@@ -131,6 +132,7 @@ test("the spec lists the error statuses each operation can return", async () => 
     "POST /issues": created,
     "POST /issues/{id}/comments": created,
     "POST /products": withConflict(withForbidden(write("201"))),
+    "POST /teams": withConflict(withForbidden(write("201"))),
     "POST /products/{key}/labels": created,
     "POST /products/{key}/status-updates": created,
     "POST /projects": created,
@@ -214,6 +216,7 @@ test("every create documents the Idempotency-Key header, and no other operation 
       "POST /projects",
       "POST /projects/{ref}/labels",
       "POST /projects/{ref}/status-updates",
+      "POST /teams",
       "POST /messages",
     ].sort(),
   );

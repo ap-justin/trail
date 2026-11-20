@@ -101,6 +101,7 @@ test("tools/list offers one tool per operation, none naming who writes", async (
       "list_products",
       "get_product",
       "create_product",
+      "create_team",
       "update_product",
       "post_status_update",
       "list_status_updates",
@@ -572,6 +573,8 @@ test("whoami answers the key's bot and list_bots pages every bot with id, name, 
     unreadMessages: 0,
     photoUrl: null,
     title: null,
+    team: null,
+    hint: expect.stringContaining("create_team"),
   });
 
   const items: Body[] = [];

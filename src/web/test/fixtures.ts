@@ -131,6 +131,7 @@ export function product(
 ): WebProductView {
   return {
     ...trail,
+    kind: "product",
     description: "Agent-first issue tracker",
     repoUrl: null,
     health: "on_track",

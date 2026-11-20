@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { ActorAvatar, actorNameGroup, BotTitle } from "@/components/actor";
 import { RowLink } from "@/components/app-link";
 import { MarkdownText } from "@/components/markdown-text";
@@ -9,12 +10,13 @@ import {
 } from "@/components/states";
 import {
   Age,
+  AsideHeading,
   LatestUpdate,
   NO_HEALTH,
   NO_STATUS_UPDATE,
   UpdateHealth,
 } from "@/components/status-updates";
-import { KeyPill } from "@/components/text";
+import { KeyPill, TeamBadge } from "@/components/text";
 import {
   Table,
   TableBody,
@@ -25,13 +27,16 @@ import {
 } from "@/components/ui/table";
 import type { WebProductView } from "@/lib/api-types";
 import { paths } from "@/lib/paths";
+import { isTeam, splitByKind, type WithKind } from "@/lib/product-kind";
 import { useMinuteClock } from "@/lib/use-minute-clock";
 import { cn } from "@/lib/utils";
 
+type ListedProduct = WebProductView & WithKind;
+
 export type ProductsViewProps = {
   status: "loading" | "error" | "ready";
-  /** The products the viewer can see, A to Z by key. */
-  products: WebProductView[];
+  /** The products and teams the viewer can see, A to Z by key; teams list apart under Teams. */
+  products: ListedProduct[];
   /** Named in the empty state a person with no products sees. */
   ownerName: string;
   isOwner: boolean;
@@ -40,7 +45,7 @@ export type ProductsViewProps = {
   now?: Date;
 };
 
-function ProductName({ product }: { product: WebProductView }) {
+function ProductName({ product }: { product: ListedProduct }) {
   return (
     <RowLink
       href={paths.product(product.key)}
@@ -48,6 +53,12 @@ function ProductName({ product }: { product: WebProductView }) {
     >
       <span className="truncate font-medium">{product.name}</span>{" "}
       <KeyPill>{product.key}</KeyPill>
+      {isTeam(product) && (
+        <>
+          {" "}
+          <TeamBadge />
+        </>
+      )}
     </RowLink>
   );
 }
@@ -70,16 +81,19 @@ const figure = cn(cell, "text-right");
 
 function ProductsTable({
   products,
+  noun,
   now,
 }: {
-  products: WebProductView[];
+  products: ListedProduct[];
+  /** The first column's header. */
+  noun: "Product" | "Team";
   now: Date;
 }) {
   return (
     <Table className="table-fixed max-lg:hidden">
       <TableHeader>
         <TableRow className="hover:bg-transparent">
-          <TableHead className={cn(head, "w-70")}>Product</TableHead>
+          <TableHead className={cn(head, "w-70")}>{noun}</TableHead>
           <TableHead className={cn(head, "w-29")}>Health</TableHead>
           <TableHead className={head}>Latest status update</TableHead>
           <TableHead className={cn(head, "w-25 text-right")}>
@@ -157,7 +171,7 @@ function ProductCards({
   products,
   now,
 }: {
-  products: WebProductView[];
+  products: ListedProduct[];
   now: Date;
 }) {
   return (
@@ -217,11 +231,13 @@ function ProductCards({
 }
 
 /**
- * Every product the viewer can see: a table at 1024px and up, a card each below. Open
+ * Every product the viewer can see: a table at 1024px and up, a card each below. Teams follow
+ * in their own table and cards under a Teams heading, drawn only when there is one. Open
  * issues count triage and open; open todos count open.
  */
 export function ProductsView(props: ProductsViewProps) {
   const now = useMinuteClock(props.now);
+  const teamsHeading = useId();
   if (props.status === "loading")
     return <ListSkeleton className="px-4 lg:px-6" />;
   if (props.status === "error")
@@ -231,10 +247,27 @@ export function ProductsView(props: ProductsViewProps) {
       <ProductsEmpty ownerName={props.ownerName} isOwner={props.isOwner} />
     );
   }
+  const { products, teams } = splitByKind(props.products);
   return (
     <div className="flex flex-col max-lg:pt-3 lg:px-6 lg:py-2">
-      <ProductsTable products={props.products} now={now} />
-      <ProductCards products={props.products} now={now} />
+      {products.length > 0 && (
+        <>
+          <ProductsTable products={products} noun="Product" now={now} />
+          <ProductCards products={products} now={now} />
+        </>
+      )}
+      {teams.length > 0 && (
+        <section
+          aria-labelledby={teamsHeading}
+          className={cn(products.length > 0 && "mt-6")}
+        >
+          <AsideHeading id={teamsHeading} className="max-lg:px-4 lg:px-3">
+            Teams
+          </AsideHeading>
+          <ProductsTable products={teams} noun="Team" now={now} />
+          <ProductCards products={teams} now={now} />
+        </section>
+      )}
     </div>
   );
 }

@@ -7,6 +7,7 @@ import {
   gt,
   inArray,
   isNotNull,
+  isNull,
   lt,
   notInArray,
   type SQL,
@@ -15,11 +16,13 @@ import {
 import type { z } from "zod";
 import type { Db } from "../db/client.js";
 import { newId } from "../db/id.js";
-import type { ActorKind, ApiKeyAction } from "../db/schema.js";
+import type { ActorKind, ApiKeyAction, ProductKind } from "../db/schema.js";
 import {
   activityEvent,
   actorPhoto,
   actor as actorTable,
+  apiKey,
+  apiKeyProduct,
   comment,
   type IssueStatus,
   type IssueType,
@@ -309,13 +312,17 @@ export type ProductInput = {
   repoUrl?: string | null;
   /** a bot's id or name; the caller by default */
   owner?: string | null;
+  kind?: ProductKind;
 };
+/** A team as its own bot creates it with create_team. */
+export type TeamInput = Pick<ProductInput, "name" | "key" | "description">;
 export type ProductPatch = {
   name?: string;
   description?: string;
   repoUrl?: string | null;
   /** a bot's id or name; null leaves the product without an owner */
   owner?: string | null;
+  kind?: ProductKind;
 };
 /** An item to create. `product` takes the product's key or id. */
 export type ItemInput = {
@@ -478,7 +485,14 @@ export type Whoami = ActorWithPhoto & {
   /** The slugs of the projects its key reads through its products, A to Z; see `implicitProjectsOf`. */
   impliedProjects: string[];
   unreadMessages: number;
+  /** its own team, whatever its key reaches */
+  team: Product | null;
+  /** present only when it owns no product and no team */
+  hint?: string;
 };
+
+const OWNS_NOTHING_HINT =
+  "You own no product and no team. For your own work, create your team with create_team and add todos there; write records with add_note; to ask a product's bot for work, file an issue on its product with file_issue.";
 
 /** What an activity webhook follows: product keys and project slugs. */
 export type Follows = { products?: string[]; projects?: string[] };
@@ -3200,6 +3214,110 @@ export function createService({
     };
   }
 
+  /** Inserts a product or team whose key and externalRef no row holds, with its product.created event. */
+  function insertProduct(
+    tx: Tx,
+    actor: ActingActor,
+    fields: Omit<
+      typeof product.$inferInsert,
+      "id" | "createdBy" | "createdAt" | "updatedAt" | "issueSeq"
+    > & { key: string; kind: ProductKind },
+  ): Write<Product> {
+    const taken = tx
+      .select()
+      .from(product)
+      .where(eq(product.key, fields.key))
+      .get();
+    if (taken) {
+      throw new ConflictError(
+        `product key ${fields.key} is taken by ${taken.kind} "${taken.name}": choose another key`,
+      );
+    }
+    requireKeyNoSlug(tx, fields.key);
+    if (fields.externalRef != null) {
+      const twin = tx
+        .select()
+        .from(product)
+        .where(eq(product.externalRef, fields.externalRef))
+        .get();
+      if (twin) {
+        throw new ConflictError(
+          `externalRef ${fields.externalRef} is already on product ${twin.key}: use that product, or send a different externalRef`,
+        );
+      }
+    }
+    const created = tx
+      .insert(product)
+      .values({ ...fields, createdBy: actor.id })
+      .returning()
+      .get();
+    return {
+      result: created,
+      event: {
+        actorId: actor.id,
+        subjectType: "product",
+        subjectId: created.id,
+        productId: created.id,
+        action: "product.created",
+        payload: {
+          name: created.name,
+          key: created.key,
+          kind: created.kind,
+          description: created.description,
+          externalRef: created.externalRef,
+          repoUrl: created.repoUrl,
+          ownerId: created.ownerId,
+        },
+      },
+    };
+  }
+
+  /**
+   * The products and teams the bot owns, whatever its key reaches, A to Z by
+   * key: who may create a team is decided on these.
+   */
+  function everythingOwnedBy(tx: Tx | Db, actorId: string): Product[] {
+    return tx
+      .select()
+      .from(product)
+      .where(eq(product.ownerId, actorId))
+      .orderBy(asc(product.key))
+      .all();
+  }
+
+  /** Refuses a team to a bot that owns a product or a team already, naming where its work goes instead. */
+  function requireOwnsNothing(tx: Tx, actor: ActingActor): void {
+    const owned = everythingOwnedBy(tx, actor.id);
+    if (owned.length === 0) return;
+    const admin =
+      "an admin creates more products or teams with create_product (POST /products)";
+    const products = owned.filter((p) => p.kind === "product");
+    if (products.length > 0) {
+      const keys = andList(products.map((p) => p.key));
+      throw new ConflictError(
+        `you own product${plural(products.length)} ${keys}, and a team is only for a bot that owns no product or team: keep your own work in ${products.length > 1 ? "one of them" : keys} (add_todo, add_note with product ${products[0]?.key}); ${admin}`,
+      );
+    }
+    const team = owned[0] as Product;
+    throw new ConflictError(
+      `you already own team ${team.key}, and a bot owns at most one team: keep your own work there (add_todo, add_note with product ${team.key}); ${admin}`,
+    );
+  }
+
+  /** Adds `productId` to every live key of the bot whose product list is limited, so those keys reach it at once. */
+  function extendLimitedKeys(tx: Tx, actorId: string, productId: string) {
+    const limited = tx
+      .selectDistinct({ id: apiKeyProduct.apiKeyId })
+      .from(apiKeyProduct)
+      .innerJoin(apiKey, eq(apiKey.id, apiKeyProduct.apiKeyId))
+      .where(and(eq(apiKey.actorId, actorId), isNull(apiKey.revokedAt)))
+      .all();
+    if (limited.length === 0) return;
+    tx.insert(apiKeyProduct)
+      .values(limited.map((k) => ({ apiKeyId: k.id, productId })))
+      .run();
+  }
+
   return {
     /** A bot with the admin action and an unrestricted key creates a product; it owns it unless `owner` names another bot. */
     createProduct(
@@ -3223,6 +3341,7 @@ export function createService({
         externalRef: optionalRef(input.externalRef),
         repoUrl: validRepoUrl(input.repoUrl) ?? null,
       };
+      const kind = input.kind ?? "product";
       // the stored scope keeps the name it had before products and projects split
       const row = create(actor, options, "project.create", (tx) => {
         const owner =
@@ -3231,10 +3350,15 @@ export function createService({
             : (productFields(tx, { owner: input.owner }).ownerId ?? null);
         const ownerId = owner === undefined ? actor.id : owner;
         return {
-          request: { ...fields, ownerId: owner },
+          // kind only when a team, so a retry of a create stored before kind still matches
+          request: {
+            ...fields,
+            ownerId: owner,
+            ...(kind === "team" && { kind }),
+          },
           // as project.create hashed it before migration 0015, which had no repoUrl or owner to send
           legacyRequest:
-            owner === undefined && fields.repoUrl === null
+            owner === undefined && fields.repoUrl === null && kind === "product"
               ? {
                   name: fields.name,
                   key: fields.key,
@@ -3242,54 +3366,7 @@ export function createService({
                   externalRef: fields.externalRef,
                 }
               : undefined,
-          write: () => {
-            const taken = tx
-              .select()
-              .from(product)
-              .where(eq(product.key, fields.key))
-              .get();
-            if (taken) {
-              throw new ConflictError(
-                `product key ${fields.key} is taken by product "${taken.name}": choose another key`,
-              );
-            }
-            requireKeyNoSlug(tx, fields.key);
-            if (fields.externalRef !== null) {
-              const twin = tx
-                .select()
-                .from(product)
-                .where(eq(product.externalRef, fields.externalRef))
-                .get();
-              if (twin) {
-                throw new ConflictError(
-                  `externalRef ${fields.externalRef} is already on product ${twin.key}: use that product, or send a different externalRef`,
-                );
-              }
-            }
-            const created = tx
-              .insert(product)
-              .values({ ...fields, ownerId, createdBy: actor.id })
-              .returning()
-              .get();
-            return {
-              result: created,
-              event: {
-                actorId: actor.id,
-                subjectType: "product",
-                subjectId: created.id,
-                productId: created.id,
-                action: "product.created",
-                payload: {
-                  name: created.name,
-                  key: created.key,
-                  description: created.description,
-                  externalRef: created.externalRef,
-                  repoUrl: created.repoUrl,
-                  ownerId: created.ownerId,
-                },
-              },
-            };
-          },
+          write: () => insertProduct(tx, actor, { ...fields, kind, ownerId }),
         };
       });
       // a replay stored before migration 0015 lacks the owner and repoUrl columns: read them from the row
@@ -3301,6 +3378,39 @@ export function createService({
           : (db.select().from(product).where(eq(product.id, row.id)).get() ??
               row),
       );
+    },
+
+    /**
+     * A bot that owns no product and no team creates its one team, owned by
+     * itself, with the issues action and a key of any reach.
+     */
+    createTeam(
+      actor: ActingActor,
+      input: TeamInput,
+      options: WriteOptions = {},
+    ): ProductView {
+      requireBot(actor, "create a team");
+      requireAction(actor, "issues", "create a team");
+      const fields = {
+        name: nonBlank(input.name, "name"),
+        key: validProductKey(input.key),
+        description: input.description ?? "",
+      };
+      const row = create(actor, options, "team.create", (tx) => ({
+        request: fields,
+        // in write, not before it: a replay of the create finds the team it made
+        write: () => {
+          requireOwnsNothing(tx, actor);
+          const written = insertProduct(tx, actor, {
+            ...fields,
+            kind: "team",
+            ownerId: actor.id,
+          });
+          extendLimitedKeys(tx, actor.id, written.result.id);
+          return written;
+        },
+      }));
+      return productView(db, row);
     },
 
     /**
@@ -3323,6 +3433,7 @@ export function createService({
         const next = {
           name,
           description: patch.description,
+          kind: patch.kind,
           ...productFields(tx, patch),
         };
         // the CLI's products set-owner (service/product-admin.ts) reassigns without this check
@@ -3387,13 +3498,16 @@ export function createService({
       return { ...read, notes };
     },
 
-    /** Newest first; the products the actor may name, with those its projects draw from. */
+    /** Newest first; the products the actor may name, with those its projects draw from; of one kind when `kind` is sent. */
     listProducts(
       actor: ActingActor,
-      query: PageQuery = {},
+      query: PageQuery & { kind?: ProductKind } = {},
     ): Page<ProductView | NamedProduct> {
       requireAction(actor, "read", "list products");
-      const visible = [productsNamed(db, reachFor(actor), product.id)];
+      const visible = [
+        productsNamed(db, reachFor(actor), product.id),
+        query.kind && eq(product.kind, query.kind),
+      ];
       const found = page(
         product,
         "desc",
@@ -4920,10 +5034,12 @@ export function createService({
 
     /**
      * The calling actor, as stored, with its photo URL, the products it owns,
-     * those it files on and the projects it reads through its products;
+     * those it files on, the projects it reads through its products and its
+     * team, or a hint when it owns nothing;
      * actors are never deleted, so the row is there.
      */
     whoami(actor: ActingActor): Whoami {
+      const owned = everythingOwnedBy(db, actor.id);
       return {
         ...withPhotoUrl(
           selectWithPhotoHash()
@@ -4934,6 +5050,8 @@ export function createService({
         products: fileableProducts(db, actor),
         impliedProjects: implicitProjectsOf(db, actor).map((p) => p.slug),
         unreadMessages: messaging.unreadMessages(actor),
+        team: owned.find((p) => p.kind === "team") ?? null,
+        ...(owned.length === 0 && { hint: OWNS_NOTHING_HINT }),
       };
     },
 

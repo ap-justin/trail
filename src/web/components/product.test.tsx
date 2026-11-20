@@ -1042,3 +1042,14 @@ test("the Products link in the heading draws the shared focus outline", () => {
     "focus-visible:outline-ring",
   );
 });
+
+test("a team's heading carries the neutral Team badge after its key; a product's carries none", () => {
+  const { unmount } = render(
+    <ProductHeading product={{ key: "LDG", name: "Ledger", kind: "team" }} />,
+  );
+  expect(screen.getByText("Team")).toHaveClass("text-muted-foreground");
+  expect(screen.getByText("Team").className).not.toMatch(/-bot\b/);
+  unmount();
+  render(<ProductHeading product={{ key: "TRL", name: "trail" }} />);
+  expect(screen.queryByText("Team")).toBeNull();
+});

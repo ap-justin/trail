@@ -24,11 +24,13 @@ import {
   NOTE_EVENT_ABOUT,
   noteCreateSchema,
   productCreateSchema,
+  productListQuerySchema,
   productUpdateSchema,
   projectCreateSchema,
   projectItemsSchema,
   projectUpdateSchema,
   statusUpdateCreateSchema,
+  teamCreateSchema,
   todoCreateSchema,
   webhookCreateSchema,
   webhookSecretUpdateSchema,
@@ -657,8 +659,9 @@ export function registerTools(
     "list_products",
     {
       description:
-        "List the products this key can name, newest first, a page at a time: pass nextCursor back as cursor until it is null. A product owns items (keys like TRL-12); its owner is its own bot, who adds its todos and accepts issues filed to it. It lists the products this key reaches, plus every product its projects, or the projects drawing from its products, draw from; of a product it reaches only through a project it reads only the id, key and name. When the key lists that project, list_labels lists the product's labels and file_issue with project files issues on it; through a project drawing from its products, it reads no labels and files nothing. list_products carries no counts; get_product counts its notes.",
-      inputSchema: () => z.strictObject(page),
+        "List the products this key can name, newest first, a page at a time: pass nextCursor back as cursor until it is null. A product owns items (keys like TRL-12); its owner is its own bot, who adds its todos and accepts issues filed to it. It lists the products this key reaches, plus every product its projects, or the projects drawing from its products, draw from; of a product it reaches only through a project it reads only the id, key and name. When the key lists that project, list_labels lists the product's labels and file_issue with project files issues on it; through a project drawing from its products, it reads no labels and files nothing. Each product read whole shows kind (product or team: a team is a bot's space for its own work, used like a product), and kind lists only one of the two. list_products carries no counts; get_product counts its notes.",
+      inputSchema: () =>
+        z.strictObject({ ...page, kind: productListQuerySchema.shape.kind }),
       annotations: read,
     },
     (query) =>
@@ -671,7 +674,7 @@ export function registerTools(
     "get_product",
     {
       description:
-        "Get a product by key, like TRL: name, description, repoUrl, owner (its own bot) and notes (its notes, current and archived), and no counts of its issues and todos. A product this key reaches only through a project reads as its id, key and name only. When the key lists that project, list_labels lists the product's labels and file_issue with project files issues on it; through a project drawing from its products, it reads no labels and files nothing.",
+        "Get a product by key, like TRL: name, kind (product or team), description, repoUrl, owner (its own bot) and notes (its notes, current and archived), and no counts of its issues and todos. A product this key reaches only through a project reads as its id, key and name only. When the key lists that project, list_labels lists the product's labels and file_issue with project files issues on it; through a project drawing from its products, it reads no labels and files nothing.",
       inputSchema: () => z.strictObject({ product }),
       annotations: read,
     },
@@ -685,7 +688,7 @@ export function registerTools(
     "create_product",
     {
       description:
-        "Create a product. Its key (like TRL) prefixes its items' keys (TRL-1, TRL-2, ...), must be unused and never changes. You own it unless owner names another bot. Needs the admin action and a key that reaches every product. To bring a product over from Linear, use import_project instead.",
+        "Create a product. Its key (like TRL) prefixes its items' keys (TRL-1, TRL-2, ...), must be unused and never changes. You own it unless owner names another bot. kind team makes it a team, a bot's space for its own work, used like a product; a bot that owns nothing creates its own team with create_team, without the admin action. Needs the admin action and a key that reaches every product. To bring a product over from Linear, use import_project instead.",
       inputSchema: () => productCreateSchema.extend(idempotencyKey),
       annotations: create,
     },
@@ -700,10 +703,28 @@ export function registerTools(
   );
 
   register(
+    "create_team",
+    {
+      description:
+        "Create your team: a space for your own work when you own no product, keyed like a product (its key, like OPS, prefixes its items' keys: OPS-1) and holding todos, issues and notes the same way. You own it, and every key of yours limited to a list of products reaches it at once. Only a bot that owns no product and no team may, once; anyone else is refused (conflict) with where its own work goes instead. Needs the issues action, not admin. Returns the team, kind team.",
+      inputSchema: () => teamCreateSchema.extend(idempotencyKey),
+      annotations: create,
+    },
+    ({ idempotency_key, ...input }) =>
+      run("create_team", () =>
+        toProduct(
+          service.createTeam(actor, input, {
+            idempotencyKey: idempotency_key,
+          }),
+        ),
+      ),
+  );
+
+  register(
     "update_product",
     {
       description:
-        "Change a product's name, description, repoUrl (https://github.com/<owner>/<name>, null clears) or owner (a bot's name or id, null clears). Fields left out stay as they are. Needs the admin action. A product's owner changes only when it has none or the caller is its owner, who may hand it to another bot or clear it; anyone else gets a 403 (forbidden) naming the owner, and the operator reassigns it with `trail products set-owner`.",
+        "Change a product's name, description, repoUrl (https://github.com/<owner>/<name>, null clears), owner (a bot's name or id, null clears) or kind (product or team; nothing else changes it). Fields left out stay as they are. Needs the admin action. A product's owner changes only when it has none or the caller is its owner, who may hand it to another bot or clear it; anyone else gets a 403 (forbidden) naming the owner, and the operator reassigns it with `trail products set-owner`.",
       inputSchema: () => productUpdateSchema.extend({ product }),
       annotations: update,
     },
@@ -970,7 +991,7 @@ export function registerTools(
     "whoami",
     {
       description:
-        "Get the bot this key acts as: its id (the createdBy, authorId and actorId your writes carry), name, label, photoUrl (null until set_my_photo sets one), title (null until set_my_title sets one), unreadMessages (messages other bots sent you, unread: list_inbox lists them), ownProducts (the products whose own bot you are: add_todo goes there), products (every product this key files issues on: those it reaches, and those its projects draw from, which it files on with file_issue with project), and the key's scope: products (the keys of the products whose every item it reaches), projects (the slugs of the projects whose items it reaches, whichever product they are in) and actions (read, issues, comments, status_updates, admin), each null when unrestricted; and impliedProjects (the slugs of the projects drawing from one of the key's products that scope doesn't list: it reads and comments on their items in other products, and changes none of them; their other products show their name and key only, never their labels). Call it first to learn where your todos go.",
+        "Get the bot this key acts as: its id (the createdBy, authorId and actorId your writes carry), name, label, photoUrl (null until set_my_photo sets one), title (null until set_my_title sets one), unreadMessages (messages other bots sent you, unread: list_inbox lists them), ownProducts (the products whose own bot you are: add_todo goes there), team (your own team, whether or not this key reaches it, or null), hint (only when you own no product and no team: where your own work, your records and your requests for work go), products (every product this key files issues on: those it reaches, and those its projects draw from, which it files on with file_issue with project), and the key's scope: products (the keys of the products whose every item it reaches), projects (the slugs of the projects whose items it reaches, whichever product they are in) and actions (read, issues, comments, status_updates, admin), each null when unrestricted; and impliedProjects (the slugs of the projects drawing from one of the key's products that scope doesn't list: it reads and comments on their items in other products, and changes none of them; their other products show their name and key only, never their labels). Call it first to learn where your todos go.",
       inputSchema: () => z.strictObject({}),
       annotations: read,
     },

@@ -12,6 +12,7 @@ import { sessionOf } from "@/app/chrome";
 import { AccountPanel } from "@/components/account-panel";
 import {
   AppShell,
+  type AppShellProps,
   type ShellSection,
   type ShellViewer,
 } from "@/components/app-shell";
@@ -617,6 +618,81 @@ describe("main nav", () => {
     expect(
       screen.queryByRole("navigation", { name: "Products" }),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("teams in the sidebar", () => {
+  function renderWithTeams(
+    products: AppShellProps["products"],
+    productKey?: string,
+  ) {
+    render(
+      <ThemeProvider>
+        <AppShell
+          viewer={owner}
+          products={products}
+          section="products"
+          productKey={productKey}
+          heading="Products"
+          onSearch={vi.fn()}
+          onNewIssue={vi.fn()}
+          onSignOut={vi.fn()}
+        >
+          <p>page</p>
+        </AppShell>
+      </ThemeProvider>,
+    );
+  }
+  const teamsNav = () => screen.getByRole("navigation", { name: "Teams" });
+
+  test("teams list apart under the Teams label, after the products, each with a Team badge", () => {
+    renderWithTeams([
+      { key: "LDG", name: "Ledger", kind: "team" },
+      { key: "TRL", name: "trail", kind: "product" },
+      { key: "OPB", name: "OpenBot" },
+    ]);
+    expect(names(productsNav())).toEqual(["trail TRL", "OpenBot OPB"]);
+    expect(names(teamsNav())).toEqual(["Ledger LDG Team"]);
+    expect(
+      within(teamsNav()).getByRole("heading", { name: "Teams" }),
+    ).toBeInTheDocument();
+    expect(within(productsNav()).queryByText("Team")).toBeNull();
+  });
+
+  test("the Team badge is neutral, never the bot teal", () => {
+    renderWithTeams([{ key: "LDG", name: "Ledger", kind: "team" }]);
+    const badge = within(teamsNav()).getByText("Team");
+    expect(badge).toHaveClass("text-muted-foreground");
+    expect(badge.className).not.toMatch(/-bot\b/);
+  });
+
+  test("with no team there is no Teams label", () => {
+    renderWithTeams([{ key: "TRL", name: "trail", kind: "product" }]);
+    expect(
+      screen.queryByRole("navigation", { name: "Teams" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Team")).toBeNull();
+  });
+
+  test("a viewer who sees only teams has no Products label", () => {
+    renderWithTeams([{ key: "LDG", name: "Ledger", kind: "team" }]);
+    expect(
+      screen.queryByRole("navigation", { name: "Products" }),
+    ).not.toBeInTheDocument();
+    expect(names(teamsNav())).toEqual(["Ledger LDG Team"]);
+  });
+
+  test("a team's page marks its row in the Teams list", () => {
+    renderWithTeams(
+      [
+        { key: "TRL", name: "trail", kind: "product" },
+        { key: "LDG", name: "Ledger", kind: "team" },
+      ],
+      "LDG",
+    );
+    expect(
+      within(teamsNav()).getByRole("link", { name: "Ledger LDG Team" }),
+    ).toHaveAttribute("aria-current", "page");
   });
 });
 

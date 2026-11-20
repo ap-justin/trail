@@ -101,6 +101,7 @@ export function productSummaries(db: Db, ids: string[]): WebProductView[] {
     return {
       key: p.key,
       name: p.name,
+      kind: p.kind,
       description: p.description,
       repoUrl: p.repoUrl,
       health: update?.health ?? null,

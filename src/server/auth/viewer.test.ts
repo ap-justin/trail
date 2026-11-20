@@ -69,7 +69,7 @@ test("an invited account is a member with exactly its products, and gets an acto
       githubId: 42,
       githubLogin: "sam",
     },
-    products: [{ id: mine.id, key: mine.key, name: "p" }],
+    products: [{ id: mine.id, key: mine.key, name: "p", kind: "product" }],
   });
 });
 

@@ -23,7 +23,7 @@ import {
 import { ActorAvatar } from "@/components/actor";
 import { AppLink, type AppLinkProps } from "@/components/app-link";
 import { Logo } from "@/components/logo";
-import { KeyPill, KeyText } from "@/components/text";
+import { KeyPill, KeyText, TeamBadge } from "@/components/text";
 import { useTheme } from "@/components/theme-provider";
 import { Button } from "@/components/ui/button";
 import {
@@ -40,6 +40,7 @@ import {
 import { Input } from "@/components/ui/input";
 import type { WebProductRefView } from "@/lib/api-types";
 import { paths } from "@/lib/paths";
+import { isTeam, splitByKind, type WithKind } from "@/lib/product-kind";
 import { type ThemeChoice, themeChoices, themeLabels } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 
@@ -61,8 +62,8 @@ export type ShellSection =
 
 export type AppShellProps = {
   viewer: ShellViewer;
-  /** The products the viewer can see, as key plus name. */
-  products: WebProductRefView[];
+  /** The products and teams the viewer can see, as key plus name; teams list apart under Teams. */
+  products: (WebProductRefView & WithKind)[];
   /** The nav item for the current page; null on pages under none (an item, Not found). */
   section: ShellSection | null;
   /** The product the page sits in: a product page's own key, or an item's product. */
@@ -180,7 +181,7 @@ function Sidebar({
   AppShellProps,
   "viewer" | "products" | "section" | "productKey" | "onSignOut"
 >) {
-  const productsLabel = useId();
+  const groups = splitByKind(products);
   return (
     <aside className="sticky top-0 hidden h-dvh w-58 shrink-0 flex-col gap-0.5 px-2 py-3 lg:flex">
       <Logo className="h-8 px-2" />
@@ -202,38 +203,73 @@ function Sidebar({
       {products.length > 0 && (
         // scrolls on its own so a long list never pushes the account menu off-screen; the
         // inline padding keeps the links' focus rings inside the clip
-        <nav
-          aria-labelledby={productsLabel}
-          className="-mx-1 flex min-h-0 flex-col gap-0.5 overflow-y-auto px-1 pb-1"
-        >
-          <h2
-            id={productsLabel}
-            className="px-2 pt-3.5 pb-1 text-xs font-normal text-muted-foreground"
-          >
-            Products
-          </h2>
-          {products.map((product) => {
-            const current = productCurrent(product.key, section, productKey);
-            return (
-              <AppLink
-                key={product.key}
-                href={paths.product(product.key)}
-                aria-current={current}
-                className={sideItem}
-              >
-                <span className="truncate">{product.name}</span>{" "}
-                <KeyPill className={cn(current && "text-current")}>
-                  {product.key}
-                </KeyPill>
-              </AppLink>
-            );
-          })}
-        </nav>
+        <div className="-mx-1 flex min-h-0 flex-col gap-0.5 overflow-y-auto px-1 pb-1">
+          {groups.products.length > 0 && (
+            <ProductGroup
+              label="Products"
+              products={groups.products}
+              section={section}
+              productKey={productKey}
+            />
+          )}
+          {groups.teams.length > 0 && (
+            <ProductGroup
+              label="Teams"
+              products={groups.teams}
+              section={section}
+              productKey={productKey}
+            />
+          )}
+        </div>
       )}
       <div className="mt-auto pt-2.5">
         <AccountMenu viewer={viewer} onSignOut={onSignOut} />
       </div>
     </aside>
+  );
+}
+
+/** A labelled list of sidebar rows: the products, or the teams. */
+function ProductGroup({
+  label,
+  products,
+  section,
+  productKey,
+}: Pick<AppShellProps, "products" | "section" | "productKey"> & {
+  label: "Products" | "Teams";
+}) {
+  const labelId = useId();
+  return (
+    <nav aria-labelledby={labelId} className="flex flex-col gap-0.5">
+      <h2
+        id={labelId}
+        className="px-2 pt-3.5 pb-1 text-xs font-normal text-muted-foreground"
+      >
+        {label}
+      </h2>
+      {products.map((product) => {
+        const current = productCurrent(product.key, section, productKey);
+        return (
+          <AppLink
+            key={product.key}
+            href={paths.product(product.key)}
+            aria-current={current}
+            className={sideItem}
+          >
+            <span className="truncate">{product.name}</span>{" "}
+            <KeyPill className={cn(current && "text-current")}>
+              {product.key}
+            </KeyPill>
+            {isTeam(product) && (
+              <>
+                {" "}
+                <TeamBadge className={cn(current && "text-current")} />
+              </>
+            )}
+          </AppLink>
+        );
+      })}
+    </nav>
   );
 }
 
