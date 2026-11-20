@@ -2708,10 +2708,10 @@ export function createService({
     skipped.length === 0 ? item : { ...item, skippedLabels: skipped };
 
   /**
-   * A created item as `actor` sees it now: its projects are those the caller
-   * reaches, since a replay may come from another key of the bot or after a
-   * scope edit; a stored replay from before items carried their product key
-   * and projects is brought to today's shape.
+   * A created item as `actor` sees it now: its projects, and a note's about,
+   * are those the caller reaches, since a replay may come from another key of
+   * the bot or after a scope edit; a stored replay from before items carried
+   * their product key and projects is brought to today's shape.
    */
   function currentShape(
     item: WrittenItem | LegacyStoredItem,
@@ -2721,7 +2721,9 @@ export function createService({
       const projects = projectsSeenBy(db, [item.id], actor).map(
         ({ slug, name }) => ({ slug, name }),
       );
-      return { ...item, projects };
+      if (item.type !== "note") return { ...item, projects };
+      const about = aboutOf(db, [item.id], actor).get(item.id) ?? [];
+      return { ...item, projects, about };
     }
     const { projectId, ...stored } = item;
     // the stored item has no type: the one migration 0015 gave the row

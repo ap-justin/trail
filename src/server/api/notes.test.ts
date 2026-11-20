@@ -887,6 +887,41 @@ test("POST /items replaying a todo's Idempotency-Key as a note is refused as a r
   expect(await ok(await send("todo"), 201)).toEqual(todo);
 });
 
+test("a note replayed by a narrower key of the same bot shows only the about items that key reaches, as GET does", async () => {
+  const owner = await newProduct("rest note replay reach");
+  const elsewhere = addBot("replay elsewhere");
+  const hidden = await newProduct("replay hidden", elsewhere.key);
+  const secret = await ok(
+    await request("POST", "/api/v1/items", {
+      json: { type: "todo", product: hidden.key, title: "secret" },
+      key: elsewhere.key,
+    }),
+    201,
+  );
+  const send = (key: string) =>
+    request("POST", "/api/v1/items", {
+      json: {
+        type: "note",
+        product: owner.key,
+        title: "spans products",
+        about: [secret.key],
+      },
+      key,
+      headers: { "idempotency-key": "note-replay-reach" },
+    });
+  const first = await ok(await send(bot.key), 201);
+  expect(first.about.map((r: Body) => r.key)).toEqual([secret.key]);
+  const narrow = createKey(db, bot.actor.id, { products: [owner.key] }).key;
+
+  const replay = await ok(await send(narrow), 201);
+  expect(replay.id).toBe(first.id);
+  expect(replay.about).toEqual([]);
+  const read = await ok(
+    await request("GET", `/api/v1/items/${first.key}`, { key: narrow }),
+  );
+  expect(replay.about).toEqual(read.about);
+});
+
 test("a note replayed by a key that lost the product is the 404 a new note gets, and writes nothing", async () => {
   const owner = await newProduct("rest note lost reach");
   const other = await newProduct("rest note kept reach");
