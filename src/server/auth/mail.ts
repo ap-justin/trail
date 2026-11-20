@@ -107,7 +107,7 @@ export type IssueEnded = {
   key: string;
   title: string;
   status: "done" | "canceled";
-  /** the product's bot's last comment on the issue when it ended */
+  /** the ender's newest comment on the issue, else the product owner's, as of the ending */
   comment: { author: string; body: string } | null;
   url: string;
   unsubscribeUrl: string;

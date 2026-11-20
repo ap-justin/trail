@@ -1186,7 +1186,7 @@ export const issueEndMail = sqliteTable(
       .references(() => activityEvent.id),
     // the issue's status at the ending
     status: text("status", { enum: completedStatuses }).notNull(),
-    // the product bot's last comment when the row was written, so a later one doesn't change the email
+    // the comment the email quotes (the ender's newest, else the owner's), fixed when the row was written so a later one doesn't change the email
     commentId: text("comment_id").references(() => comment.id),
     state: text("state", { enum: issueEndMailStates })
       .notNull()
