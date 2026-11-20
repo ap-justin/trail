@@ -1139,12 +1139,15 @@ export const todoCreateSchema = z
   )
   .openapi("TodoCreate");
 
+/** Where file_issue and add_note file, as requireFilingGrant (service/index.ts) enforces it. */
+const FILABLE_PRODUCTS =
+  "a product this key lists (an unrestricted key, any product) or one a project it lists draws from. list_products also lists the products this key reads only through a project drawing from its own products, and those take nothing: that is forbidden_scope, naming the product to file on instead and the grant to ask for";
+
 export const issueFileSchema = z
   .strictObject(
     {
       product: productRef.optional().meta({
-        description:
-          "The key (like TRL) of the product the issue is for: any product list_products lists. Left out, the project's one product.",
+        description: `The key (like TRL) of the product the issue is for: ${FILABLE_PRODUCTS}. Left out, the project's one product.`,
       }),
       project: projectSlug.optional().meta({
         description: joiningProject(
@@ -1177,8 +1180,7 @@ export const noteCreateSchema = z
   .strictObject(
     {
       product: productRef.optional().meta({
-        description:
-          "The key (like TRL) of the product the note belongs to: any product list_products lists, as with file_issue. Left out, the project's one product.",
+        description: `The key (like TRL) of the product the note belongs to: ${FILABLE_PRODUCTS}. Left out, the project's one product.`,
       }),
       project: projectSlug.optional().meta({
         description: joiningProject(
@@ -1216,13 +1218,13 @@ export const itemCreateSchema = z
         description: `Issues and notes only (a todo with it is a 422). ${joiningProject("the issue or note joins that project as it is added")}`,
       }),
       ...itemFields,
-      estimate: estimate.optional().meta({
+      estimate: estimate.nullable().optional().meta({
         description:
-          "Hours. A note holds no rank, so on a note only null is taken.",
+          "Hours; null or left out, none. A note takes no estimate: on a note, any value sent, null included, is a 422.",
       }),
       priority: priority.optional().meta({
         description:
-          "0 none, 1 urgent, 2 high, 3 medium, 4 low. A note holds no rank, so on a note only 0 is taken.",
+          "0 none, 1 urgent, 2 high, 3 medium, 4 low. A note takes no priority: on a note, any value sent, 0 included, is a 422.",
       }),
       labels: labelNames.optional(),
       assignee: assigneeRef.nullable().optional().meta({
@@ -1303,11 +1305,11 @@ export const itemUpdateSchema = z
       ...itemPatchFields,
       estimate: itemPatchFields.estimate.meta({
         description:
-          "Hours; null clears. A note holds no rank, so on a note only null is taken.",
+          "Hours; null clears. A note holds none: on a note, or with type note, null is taken and any number is a 422.",
       }),
       priority: priority.optional().meta({
         description:
-          "0 none, 1 urgent, 2 high, 3 medium, 4 low. A note holds no rank, so on a note only 0 is taken.",
+          "0 none, 1 urgent, 2 high, 3 medium, 4 low. A note holds none: on a note, or with type note, 0 is taken and any other value is a 422.",
       }),
       assignee: assigneeRef.nullable().optional().meta({
         description:

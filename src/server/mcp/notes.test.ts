@@ -697,6 +697,23 @@ test("a note's status is current or archived, an issue's or a todo's never is, a
   ).toBe(
     `validation_failed: ${note.key} is a note, and a note has no assignee: file an issue (file_issue) for work someone has to do, and list it in the note's about`,
   );
+  expect(
+    await callError(owner.client, "update_item", {
+      item: note.key,
+      assignee: "no such bot",
+    }),
+  ).toBe(
+    `validation_failed: ${note.key} is a note, and a note has no assignee: file an issue (file_issue) for work someone has to do, and list it in the note's about`,
+  );
+  expect(
+    await callError(owner.client, "update_item", {
+      item: issue.key,
+      type: "note",
+      assignee: "no such bot",
+    }),
+  ).toBe(
+    `validation_failed: type note makes ${issue.key} a note, and a note has no assignee: file an issue (file_issue) for work someone has to do, and list it in the note's about`,
+  );
   for (const item of [todo, issue]) {
     expect(
       await callError(owner.client, "update_item", {
@@ -1345,6 +1362,54 @@ async function noteInProject(name: string) {
   );
   return { owner, slug, inside, outside, follower };
 }
+
+test("add_note and file_issue take a product a project the key lists draws from, and refuse one the key reads only through a project drawing from its own products, naming the product to file on and the grant to ask for", async () => {
+  const { owner, slug, follower } = await noteInProject("Quill");
+  expect(
+    await call(follower, "add_note", { product: owner.product, title: "kept" }),
+  ).toMatchObject({ type: "note", key: expect.stringMatching(owner.product) });
+  expect(
+    await call(follower, "file_issue", {
+      product: owner.product,
+      title: "asked",
+    }),
+  ).toMatchObject({ type: "issue", status: "triage" });
+
+  const reader = await productBot("Quill reader");
+  const joining = await call(reader.client, "add_todo", { title: "joins" });
+  await call(owner.client, "add_to_project", {
+    project: slug,
+    items: [joining.key],
+  });
+  const scoped = await connect(
+    createKey(db, reader.actor.id, { products: [reader.product] }).key,
+  );
+  const reads = `this key reads product ${owner.product} only through project ${slug}, which lets it read ${slug}'s ${owner.product} items and comment on them and`;
+  const grant = `or get a key that lists product ${owner.product} or project ${slug}. Ask Quill, the owner of ${owner.product}, for that grant.`;
+  expect(
+    await callError(scoped, "add_note", {
+      product: owner.product,
+      title: "no",
+    }),
+  ).toBe(
+    `forbidden_scope: ${reads} add no notes on ${owner.product}: add the note on ${reader.product} (with project: "${slug}" to put the note in ${slug}), ${grant}`,
+  );
+  expect(
+    await callError(scoped, "file_issue", {
+      product: owner.product,
+      title: "no",
+    }),
+  ).toBe(
+    `forbidden_scope: ${reads} file nothing on ${owner.product}: file on ${reader.product} (with project: "${slug}" to put the issue in ${slug}), ${grant}`,
+  );
+  expect(
+    await call(scoped, "add_note", {
+      product: reader.product,
+      project: slug,
+      title: "on its own product",
+    }),
+  ).toMatchObject({ type: "note" });
+});
 
 test("list_activity on a key reaching the note only through a project names only the about items it reaches, counting the rest", async () => {
   const { owner, slug, inside, outside, follower } =

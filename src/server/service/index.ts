@@ -2809,7 +2809,10 @@ export function createService({
               "about is a note's field, the items it is about: leave it out of a todo or an issue, and add a note about the item with add_note",
             );
           }
-          if (type === "note" && !holdsANotesRank(input)) {
+          if (
+            type === "note" &&
+            (input.priority !== undefined || input.estimate !== undefined)
+          ) {
             throw new ValidationError(
               "a note has no priority or estimate, since nobody has to act on it: leave both out, and file an issue (file_issue) for work someone has to do, listing it in the note's about",
             );
@@ -3628,10 +3631,11 @@ export function createService({
             `${current.key} is a todo, and a todo is never in triage: send type issue with status triage in the same update to put it in triage as an issue, or another status to keep it a todo`,
           );
         }
+        // a note refuses any assignee below, so the name is never resolved first to be refused as unknown
         let assigneeId =
           patch.assigneeId === undefined
             ? row.assigneeId
-            : patch.assigneeId === null
+            : patch.assigneeId === null || type === "note"
               ? null
               : resolveAssignee(tx, patch.assigneeId);
         if (type === "todo" && assigneeId === null) {

@@ -106,9 +106,28 @@ test.each([
   );
 });
 
+test("PATCH /items/{key} refuses an assignee no bot has on a note for being an assignee, not for the name", async () => {
+  const owner = await newProduct("rest unassigned");
+  const note = await ok(
+    await request("POST", "/api/v1/items", {
+      json: { type: "note", product: owner.key, title: "record" },
+    }),
+    201,
+  );
+  const refused = await request("PATCH", `/api/v1/items/${note.key}`, {
+    json: { assignee: "no such bot" },
+  });
+  expect(refused.status).toBe(422);
+  expect(((await refused.json()) as Body).error.message).toBe(
+    `${note.key} is a note, and a note has no assignee: file an issue (file_issue) for work someone has to do, and list it in the note's about`,
+  );
+});
+
 test.each([
   ["priority", { priority: 2 }],
+  ["priority 0", { priority: 0 }],
   ["estimate", { estimate: 3 }],
+  ["estimate null", { estimate: null }],
 ])("POST /items refuses %s on a note", async (_, field) => {
   const owner = await newProduct("rest unranked");
   const note = await request("POST", "/api/v1/items", {
@@ -118,17 +137,6 @@ test.each([
   expect(((await note.json()) as Body).error.message).toBe(
     "a note has no priority or estimate, since nobody has to act on it: leave both out, and file an issue (file_issue) for work someone has to do, listing it in the note's about",
   );
-});
-
-test("POST /items takes priority 0 on a note, the priority a note holds", async () => {
-  const owner = await newProduct("rest unranked echo");
-  const note = await ok(
-    await request("POST", "/api/v1/items", {
-      json: { type: "note", product: owner.key, title: "record", priority: 0 },
-    }),
-    201,
-  );
-  expect(note).toMatchObject({ type: "note", priority: 0, estimate: null });
 });
 
 test("PATCH /items/{key} with type note and estimate null turns an issue into a note, and still refuses a nonzero priority", async () => {
@@ -159,6 +167,32 @@ test("PATCH /items/{key} with type note and estimate null turns an issue into a 
       }),
     ),
   ).toMatchObject({ type: "note", priority: 0, estimate: null });
+});
+
+test("PATCH /items/{key} on a note takes priority 0 and estimate null, the values it holds, and refuses any other", async () => {
+  const owner = await newProduct("rest note rank patch");
+  const note = await ok(
+    await request("POST", "/api/v1/items", {
+      json: { type: "note", product: owner.key, title: "record" },
+    }),
+    201,
+  );
+  expect(
+    await ok(
+      await request("PATCH", `/api/v1/items/${note.key}`, {
+        json: { priority: 0, estimate: null },
+      }),
+    ),
+  ).toMatchObject({ type: "note", priority: 0, estimate: null });
+  for (const field of [{ priority: 2 }, { estimate: 0 }]) {
+    const refused = await request("PATCH", `/api/v1/items/${note.key}`, {
+      json: field,
+    });
+    expect(refused.status).toBe(422);
+    expect(((await refused.json()) as Body).error.message).toBe(
+      `${note.key} is a note, and a note has no priority or estimate: leave both out, and file an issue (file_issue) for work someone has to do, listing it in the note's about`,
+    );
+  }
 });
 
 test("GET /items/{key} counts the notes about an item in notesCount, and GET /items?about= lists them, refusing a type other than note", async () => {
