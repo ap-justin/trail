@@ -1,29 +1,13 @@
-import {
-  and,
-  asc,
-  eq,
-  inArray,
-  isNotNull,
-  lt,
-  lte,
-  or,
-  sql,
-} from "drizzle-orm";
+import { and, asc, eq, inArray, lt, lte, sql } from "drizzle-orm";
 import {
   issueEndedEmail,
   MailRefused,
   type MailTransport,
 } from "../auth/mail.js";
 import type { Db } from "../db/client.js";
-import {
-  actor,
-  comment,
-  invite,
-  issue,
-  issueEndMail,
-  product,
-} from "../db/schema.js";
+import { actor, comment, issue, issueEndMail, product } from "../db/schema.js";
 import type { EventBus } from "../events/bus.js";
+import { seesProduct } from "./outbox.js";
 import { type UnsubscribeKey, unsubscribeUrl } from "./unsubscribe.js";
 
 const MINUTE = 60_000;
@@ -45,7 +29,7 @@ export const PURGE_BATCH = 500;
 const DUE_BATCH = 20;
 
 const TURNED_OFF = "not sent: the person turned these emails off";
-const NO_ACCESS = "not sent: the person no longer has access to trail";
+const NO_ACCESS = "not sent: the person can't see the issue's product";
 const NO_ADDRESS =
   "not sent: the person has no email address; only a person let in by email has one";
 
@@ -74,6 +58,7 @@ export type IssueEndMailWorkerOptions = {
 };
 
 type Row = typeof issueEndMail.$inferSelect;
+type EndedIssue = { number: number; title: string; key: string };
 
 /** Network errors, 5xx, 429 and 409 (Resend's idempotency key still in use) are worth another try. */
 const isRetryable = (error: unknown) =>
@@ -142,19 +127,13 @@ export function createIssueEndMailWorker(options: IssueEndMailWorkerOptions) {
       .run();
   }
 
-  /** The email for `row` to `to`, read now: the issue's current title, the comment the ending kept. */
+  /** The email for `row` to `to`: `ended` as it reads now, the comment the ending kept. */
   function messageOf(
     row: Row,
+    ended: EndedIssue,
     to: string,
     settings: Extract<IssueEndMailSettings, { from: string }>,
   ) {
-    const ended = db
-      .select({ number: issue.number, title: issue.title, key: product.key })
-      .from(issue)
-      .innerJoin(product, eq(product.id, issue.productId))
-      .where(eq(issue.id, row.issueId))
-      .get();
-    if (!ended) throw new Error(`issue ${row.issueId} is gone`);
     const reason =
       row.commentId === null
         ? undefined
@@ -200,32 +179,35 @@ export function createIssueEndMailWorker(options: IssueEndMailWorkerOptions) {
       finish(row, "skipped", `not sent: email is off until ${missing} is set`);
       return;
     }
-    const recipient = db
+    const ended = db
       .select({
-        email: actor.email,
-        off: actor.issueEndMailOff,
-        isOwner: actor.isOwner,
-        inviteId: invite.id,
+        number: issue.number,
+        title: issue.title,
+        key: product.key,
+        productId: issue.productId,
       })
+      .from(issue)
+      .innerJoin(product, eq(product.id, issue.productId))
+      .where(eq(issue.id, row.issueId))
+      .get();
+    if (!ended)
+      return retryOrFail(row, new Error(`issue ${row.issueId} is gone`));
+    // checked again at send: an invite removed or narrowed since the ending
+    if (!seesProduct(db, row.recipientId, ended.productId)) {
+      return finish(row, "skipped", NO_ACCESS);
+    }
+    const recipient = db
+      .select({ email: actor.email, off: actor.issueEndMailOff })
       .from(actor)
-      // the invite that lets the person in, matched as inviteOf in auth/identity.ts matches it
-      .leftJoin(
-        invite,
-        or(
-          and(isNotNull(actor.githubId), eq(invite.githubId, actor.githubId)),
-          and(isNotNull(actor.email), eq(invite.email, actor.email)),
-        ),
-      )
       .where(eq(actor.id, row.recipientId))
       .get();
-    const member =
-      recipient !== undefined &&
-      (recipient.isOwner || recipient.inviteId !== null);
-    if (!member) return finish(row, "skipped", NO_ACCESS);
     if (recipient?.off) return finish(row, "skipped", TURNED_OFF);
     if (!recipient?.email) return finish(row, "skipped", NO_ADDRESS);
     try {
-      await mail.transport(messageOf(row, recipient.email, mail), abort.signal);
+      await mail.transport(
+        messageOf(row, ended, recipient.email, mail),
+        abort.signal,
+      );
     } catch (error) {
       // a shutdown cut the request: the email stays pending for the next start
       if (abort.signal.aborted) return;

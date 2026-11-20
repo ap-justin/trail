@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { eq } from "drizzle-orm";
-import { afterAll, expect, test } from "vitest";
+import { afterAll, afterEach, expect, test } from "vitest";
 import { syncEmailActor } from "./auth/identity.js";
 import { runCli } from "./cli.js";
 import { migrate, openDatabase } from "./db/client.js";
@@ -644,93 +644,97 @@ test("products owners prints each product's current owner, one line per product,
   expect(productRows()).toEqual(before);
 });
 
+const scratchKeys: string[] = [];
+afterEach(() => {
+  // the products the set-owner tests made leave, so later tests still see only the file's own
+  withDb((db) => {
+    for (const key of scratchKeys.splice(0)) {
+      db.delete(product).where(eq(product.key, key)).run();
+    }
+  });
+});
+
+/** A product of this test's own, optionally owned by a fresh bot, and a reader of its owner. */
+function scratchProduct(key: string, ownerName?: string) {
+  scratchKeys.push(key);
+  const owner = withDb((db) => {
+    const maker = createBot(db, `${key} maker`).actor;
+    const bot = ownerName ? createBot(db, ownerName).actor : null;
+    db.insert(product)
+      .values({
+        key,
+        name: key,
+        createdBy: maker.id,
+        ownerId: bot?.id ?? null,
+      })
+      .run();
+    return bot;
+  });
+  const ownerId = () =>
+    withDb(
+      (db) =>
+        db
+          .select({ ownerId: product.ownerId })
+          .from(product)
+          .where(eq(product.key, key))
+          .get()?.ownerId ?? null,
+    );
+  return { owner, ownerId };
+}
+
 test("products set-owner sets the owner by bot name, label or id, and prints from and to", () => {
+  const { ownerId } = scratchProduct("SOA");
   const owner = withDb(
     (db) => createBot(db, "Atlas", { label: "agent-atlas" }).actor,
   );
-  const first = run("products", "set-owner", "atl", "agent-atlas");
+  const second = withDb((db) => createBot(db, "second keeper").actor);
+  const first = run("products", "set-owner", "soa", "agent-atlas");
   expect(first.code).toBe(0);
   expect(first.stdout).toBe(
-    `product  ATL\nfrom     -\nto       Atlas (${owner.id})\n`,
+    `product  SOA\nfrom     -\nto       Atlas (${owner.id})\n`,
   );
-  const ownerOf = () =>
-    withDb(
-      (db) =>
-        db.$client
-          .prepare<[], string | null>(
-            "select owner_id from product where key = 'ATL'",
-          )
-          .pluck()
-          .get() ?? null,
-    );
-  expect(ownerOf()).toBe(owner.id);
-  const again = run("products", "set-owner", "ATL", "product owner");
+  expect(ownerId()).toBe(owner.id);
+  const again = run("products", "set-owner", "SOA", "second keeper");
   expect(again.code).toBe(0);
-  expect(again.stdout).toMatch(/^from {5}Atlas \(\S+\)\nto {7}product owner /m);
-  expect(ownerOf()).not.toBe(owner.id);
+  expect(again.stdout).toMatch(/^from {5}Atlas \(\S+\)\nto {7}second keeper /m);
+  expect(ownerId()).toBe(second.id);
 });
 
 test("products set-owner refuses a person and an unknown product or bot with exit 1, changing nothing", () => {
+  const { owner, ownerId } = scratchProduct("SOB", "sob keeper");
   const person = withDb((db) => createHuman(db, { displayName: "Pat" }));
   for (const argv of [
-    ["products", "set-owner", "BTA", person.id],
-    ["products", "set-owner", "BTA", "nobody-at-all"],
-    ["products", "set-owner", "NOPE", "alpha"],
+    ["products", "set-owner", "SOB", person.id],
+    ["products", "set-owner", "SOB", "nobody-at-all"],
+    ["products", "set-owner", "NOPE", "sob keeper"],
   ]) {
     const { code, stdout, stderr } = run(...argv);
     expect(code, argv.join(" ")).toBe(1);
     expect(stdout).toBe("");
     expect(stderr).toMatch(/^trail: /);
   }
-  expect(run("products", "set-owner", "NOPE", "alpha").stderr).toBe(
+  expect(ownerId()).toBe(owner?.id);
+  expect(run("products", "set-owner", "NOPE", "sob keeper").stderr).toBe(
     "trail: no product NOPE: `trail products owners` lists every product's key\n",
   );
 });
 
 test("products set-owner --clear leaves the product with no owner, and says so when it had none", () => {
-  const ownerOf = () =>
-    withDb(
-      (db) =>
-        db.$client
-          .prepare<[], string | null>(
-            "select owner_id from product where key = 'BTA'",
-          )
-          .pluck()
-          .get() ?? null,
-    );
-  const before = ownerOf();
-  const owner = withDb((db) => {
-    const bot = createBot(db, "Beta keeper").actor;
-    db.update(product)
-      .set({ ownerId: bot.id })
-      .where(eq(product.key, "BTA"))
-      .run();
-    return bot;
+  const { owner, ownerId } = scratchProduct("SOC", "Beta keeper");
+  const cleared = run("products", "set-owner", "soc", "--clear");
+  expect(cleared).toEqual({
+    code: 0,
+    stdout: `product  SOC\nfrom     Beta keeper (${owner?.id})\nto       -\n`,
+    stderr: "",
   });
-  try {
-    const cleared = run("products", "set-owner", "bta", "--clear");
-    expect(cleared).toEqual({
-      code: 0,
-      stdout: `product  BTA\nfrom     Beta keeper (${owner.id})\nto       -\n`,
-      stderr: "",
-    });
-    expect(ownerOf()).toBeNull();
-    const again = run("products", "set-owner", "BTA", "--clear");
-    expect(again).toEqual({
-      code: 0,
-      stdout: "product  BTA\nBTA has no owner: nothing to clear\n",
-      stderr: "",
-    });
-    expect(ownerOf()).toBeNull();
-  } finally {
-    withDb((db) =>
-      db
-        .update(product)
-        .set({ ownerId: before })
-        .where(eq(product.key, "BTA"))
-        .run(),
-    );
-  }
+  expect(ownerId()).toBeNull();
+  const again = run("products", "set-owner", "SOC", "--clear");
+  expect(again).toEqual({
+    code: 0,
+    stdout: "product  SOC\nSOC has no owner: nothing to clear\n",
+    stderr: "",
+  });
+  expect(ownerId()).toBeNull();
 });
 
 test("products set-owner NOPE --clear is exit 1 naming the product, changing nothing", () => {
@@ -751,11 +755,12 @@ test("products set-owner NOPE --clear is exit 1 naming the product, changing not
 });
 
 test("products set-owner --clear with a bot is a usage error, changing nothing", () => {
+  const { owner, ownerId } = scratchProduct("SOD", "sod keeper");
   const { code, stdout, stderr } = run(
     "products",
     "set-owner",
-    "ATL",
-    "alpha",
+    "SOD",
+    "sod keeper",
     "--clear",
   );
   expect(code).toBe(2);
@@ -763,9 +768,11 @@ test("products set-owner --clear with a bot is a usage error, changing nothing",
   expect(stderr.split("\n")[0]).toBe(
     "trail: 'products set-owner --clear' takes no <bot-id-label-or-name>",
   );
+  expect(ownerId()).toBe(owner?.id);
   const missing = run("products", "set-owner", "--clear");
   expect(missing.code).toBe(2);
   expect(missing.stderr).toMatch(/^trail: missing <key>/);
+  expect(ownerId()).toBe(owner?.id);
 });
 
 test("products set-repo sets a GitHub URL, a trailing .git dropped; anything else is exit 2", () => {

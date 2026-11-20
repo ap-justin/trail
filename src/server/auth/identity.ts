@@ -126,7 +126,7 @@ export function syncActor(
  * off SQLite's single write lock and claims nothing; `login` is the one shown.
  */
 export function accessOf(
-  db: Db,
+  db: Db | Tx,
   githubId: number,
   login: string,
 ): GitHubAccess | null {
@@ -202,7 +202,7 @@ export function syncEmailActor(
  * out on its next request.
  */
 export function accessOfEmail(
-  db: Db,
+  db: Db | Tx,
   email: string,
 ): MemberAccess<EmailHuman> | null {
   const found = db
@@ -346,7 +346,7 @@ const emailHuman = (row: ActorRow): EmailHuman => ({
 });
 
 /** Every product for the owner; for a member, those listed under its invite. */
-export function visibleProducts(db: Db, access: Access): VisibleProduct[] {
+export function visibleProducts(db: Db | Tx, access: Access): VisibleProduct[] {
   const columns = {
     id: product.id,
     key: product.key,

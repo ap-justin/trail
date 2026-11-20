@@ -52,7 +52,7 @@ export const NOTE_EDITS =
 
 /** What ending an issue filed for a person sends: update_item and PATCH /items/{key} both say it. */
 export const ENDING_EMAIL =
-  "Done or canceled on an item with a filedFor person emails them, again on each later ending after a reopen, unless they have unsubscribed from these emails. The email quotes the product's own bot's latest comment on the item: as that bot, comment the result or the reason first.";
+  "Done or canceled on an item with a filedFor person let in by email, not GitHub, who can see its product emails them, again on each later ending after a reopen, unless they have unsubscribed from these emails. The email quotes your latest comment on the item, else the product's own bot's: comment the result or the reason first.";
 
 export const COMMENT_HOLDS =
   "A comment holds what changed for the work and why, a decision or scope change, a blocker and who clears it, or that it is done. It leaves out commit SHAs, CI runs and logs, review findings and agent run ids: those stay on the pull request, and the pull request goes in the item's links.";

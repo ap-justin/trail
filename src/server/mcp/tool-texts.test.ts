@@ -167,11 +167,11 @@ test("POST /items' project field says an issue or a note joins the project", asy
   );
 });
 
-test("update_item says ending an issue filed for a person emails them the owner bot's latest comment, unless they unsubscribed", async () => {
+test("update_item says ending an issue filed for a person with an address and access emails them the ender's or owner bot's latest comment, unless they unsubscribed", async () => {
   const tool = await toolDescriptions();
   expect(tool("update_item").description).toContain(ENDING_EMAIL);
   expect(ENDING_EMAIL).toMatch(
-    /^Done or canceled on an item with a filedFor person emails them, again on each later ending after a reopen, unless they have unsubscribed from these emails\. The email quotes the product's own bot's latest comment on the item: as that bot, comment the result or the reason first\.$/,
+    /^Done or canceled on an item with a filedFor person let in by email, not GitHub, who can see its product emails them, again on each later ending after a reopen, unless they have unsubscribed from these emails\. The email quotes your latest comment on the item, else the product's own bot's: comment the result or the reason first\.$/,
   );
 });
 

@@ -115,7 +115,10 @@ test("a refusal carries Resend's status, and a dropped connection none", async (
   const dropped = resendTransport("re_key", async () => {
     throw new TypeError("fetch failed");
   });
-  await expect(dropped(message)).rejects.not.toBeInstanceOf(MailRefused);
+  const error = await dropped(message).catch((e: unknown) => e);
+  expect(error).toBeInstanceOf(TypeError);
+  expect(error).toMatchObject({ message: "fetch failed" });
+  expect(error).not.toBeInstanceOf(MailRefused);
 });
 
 test("the request is cut by the transport's own timeout even when the caller passes a signal", async () => {

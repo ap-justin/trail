@@ -40,7 +40,7 @@ test("GET shows a page whose button posts back to the same link, and changes not
   expect(page).not.toMatch(/<script|style=/i);
   expect(page).toContain("<h1>Stop issue emails?</h1>");
   expect(page).toContain(
-    "<p>trail emails you when an issue filed for you is done or canceled. Nothing else changes.</p>",
+    "<p>trail emails you when an issue filed for you on a product you can see is done or canceled. Nothing else changes.</p>",
   );
   expect(page).toContain(">Stop these emails</button>");
   expect(isOff(id)).toBe(false);

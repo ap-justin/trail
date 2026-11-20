@@ -1,7 +1,13 @@
 import { eq, inArray, sql } from "drizzle-orm";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { type MailMessage, MailRefused } from "../auth/mail.js";
-import { actor, issue, issueEndMail, product } from "../db/schema.js";
+import {
+  actor,
+  issue,
+  issueEndMail,
+  product,
+  productMember,
+} from "../db/schema.js";
 import { createEventBus } from "../events/bus.js";
 import { createBot, setBotHandler } from "../service/keys.js";
 import { setupTestApp, TEST_ORIGIN, testAuthConfig } from "../test-app.js";
@@ -25,7 +31,7 @@ const {
 } = setupTestApp();
 
 const PERSON = "nia.notify@example.com";
-inviteEmail(PERSON);
+const personInvite = inviteEmail(PERSON);
 await signInWithEmail(PERSON);
 const person = db.select().from(actor).where(eq(actor.email, PERSON)).get();
 if (!person) throw new Error("no person");
@@ -42,7 +48,13 @@ async function api(method: string, path: string, key: string, json?: object) {
   return body as any;
 }
 
-await api("POST", "/products", bot.key, { key: "WRK", name: "worker" });
+const wrk = await api("POST", "/products", bot.key, {
+  key: "WRK",
+  name: "worker",
+});
+db.insert(productMember)
+  .values({ inviteId: personInvite, productId: wrk.id })
+  .run();
 
 /** Files an issue for the person and ends it as the owner; returns its key. */
 async function ended(
@@ -784,7 +796,7 @@ describe("start", () => {
 
 test("a pending email to a person removed from trail is skipped with the reason, while a member's still goes", async () => {
   const REMOVED = "rex.removed@example.com";
-  inviteEmail(REMOVED);
+  inviteEmail(REMOVED, [wrk.id]);
   await signInWithEmail(REMOVED);
   const removedBot = createBot(db, "worker removed handler");
   setBotHandler(db, removedBot.actor.id, REMOVED);
@@ -811,6 +823,39 @@ test("a pending email to a person removed from trail is skipped with the reason,
   expect(rowOf(filed.key)).toMatchObject({
     state: "skipped",
     attempts: 0,
-    lastError: "not sent: the person no longer has access to trail",
+    lastError: "not sent: the person can't see the issue's product",
+  });
+});
+
+test("a pending email to a handler whose invite no longer lists the issue's product is skipped, not failed or retried", async () => {
+  const NARROWED = "nell.narrowed@example.com";
+  inviteEmail(NARROWED, [wrk.id]);
+  await signInWithEmail(NARROWED);
+  const narrowedBot = createBot(db, "worker narrowed handler");
+  setBotHandler(db, narrowedBot.actor.id, NARROWED);
+  const filed = await api("POST", "/items", narrowedBot.key, {
+    type: "issue",
+    product: "WRK",
+    title: "for nell",
+    filed_for: "handler",
+  });
+  await api("PATCH", `/items/${filed.key}`, bot.key, { status: "done" });
+  expect(rowOf(filed.key)).toMatchObject({ state: "pending" });
+  const narrowing = await request("PUT", `/api/web/people/${NARROWED}`, {
+    key: null,
+    cookie: await signIn(owner),
+    json: { products: [] },
+  });
+  expect(narrowing.status).toBe(200);
+
+  const sent: MailMessage[] = [];
+  await worker(async (m) => {
+    sent.push(m);
+  }).tick();
+  expect(sent).toEqual([]);
+  expect(rowOf(filed.key)).toMatchObject({
+    state: "skipped",
+    attempts: 0,
+    lastError: "not sent: the person can't see the issue's product",
   });
 });

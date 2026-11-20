@@ -300,7 +300,7 @@ test("PATCH /items/{key} says what update_item says about the email an ending se
     paths: Record<string, Record<string, { description?: string }>>;
   };
   expect(spec.paths["/items/{key}"]?.patch?.description).toContain(
-    "The email quotes the product's own bot's latest comment on the item: as that bot, comment the result or the reason first.",
+    "The email quotes your latest comment on the item, else the product's own bot's: comment the result or the reason first.",
   );
 });
 

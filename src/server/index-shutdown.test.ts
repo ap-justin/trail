@@ -11,7 +11,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { eq } from "drizzle-orm";
+import { eq, ne } from "drizzle-orm";
 import { afterAll, expect, test } from "vitest";
 import { openDatabase } from "./db/client.js";
 import { actor, issueEndMail } from "./db/schema.js";
@@ -112,10 +112,6 @@ test("SIGTERM ends an open event stream, closes the database and dies by the sig
 async function pendingCopy(tag: string) {
   const person = `${tag}.person@example.com`;
   const productKey = tag.toUpperCase();
-  inviteEmail(person);
-  await signInWithEmail(person);
-  const handled = createBot(db, `${tag} handled`);
-  setBotHandler(db, handled.actor.id, person);
   const send = async (
     method: string,
     path: string,
@@ -124,9 +120,16 @@ async function pendingCopy(tag: string) {
   ) => {
     const res = await request(method, `/api/v1${path}`, { key, json });
     expect(res.status, `${method} ${path}`).toBeLessThan(300);
-    return (await res.json()) as { key: string };
+    return (await res.json()) as { id: string; key: string };
   };
-  await send("POST", "/products", bot.key, { key: productKey, name: tag });
+  const made = await send("POST", "/products", bot.key, {
+    key: productKey,
+    name: tag,
+  });
+  inviteEmail(person, [made.id]);
+  await signInWithEmail(person);
+  const handled = createBot(db, `${tag} handled`);
+  setBotHandler(db, handled.actor.id, person);
   const filed = await send("POST", "/items", handled.key, {
     type: "issue",
     product: productKey,
@@ -137,11 +140,32 @@ async function pendingCopy(tag: string) {
   db.$client.pragma("wal_checkpoint(TRUNCATE)");
   const databasePath = join(dir, `${tag}.db`);
   copyFileSync(db.$client.name, databasePath);
+  // the shared database also holds earlier tests' pending rows; the copy keeps only this person's,
+  // so the child can attempt nothing else and every assertion is about this row
+  const trimmed = openDatabase(databasePath);
+  try {
+    const mine = trimmed
+      .select({ id: actor.id })
+      .from(actor)
+      .where(eq(actor.email, person))
+      .get();
+    trimmed
+      .delete(issueEndMail)
+      .where(ne(issueEndMail.recipientId, mine?.id ?? ""))
+      .run();
+    expect(trimmed.select().from(issueEndMail).all()).toHaveLength(1);
+  } finally {
+    trimmed.$client.close();
+  }
   const stateOf = () => {
     const reader = openDatabase(databasePath);
     try {
       return reader
-        .select({ state: issueEndMail.state, error: issueEndMail.lastError })
+        .select({
+          state: issueEndMail.state,
+          attempts: issueEndMail.attempts,
+          error: issueEndMail.lastError,
+        })
         .from(issueEndMail)
         .innerJoin(actor, eq(actor.id, issueEndMail.recipientId))
         .where(eq(actor.email, person))
@@ -169,7 +193,7 @@ test("the entrypoint starts the issue-ended email worker: a row left pending is 
   try {
     await listening(child);
     await untilNotPending(stateOf);
-    expect(stateOf()).toEqual({
+    expect(stateOf()).toMatchObject({
       state: "skipped",
       error: expect.stringContaining("email is off until"),
     });
@@ -230,11 +254,10 @@ globalThis.fetch = (input, init) => {
   try {
     await listening(child);
     await untilNotPending(stateOf);
-    expect(stateOf()).toEqual({ state: "sent", error: null });
-    // the copy also holds the other test's pending email: it goes out too
-    const mine = received.filter((r) => JSON.parse(r.body).to[0] === person);
-    expect(mine).toHaveLength(1);
-    const [req] = mine;
+    expect(stateOf()).toMatchObject({ state: "sent", error: null });
+    // the copy holds this one row, so exactly one request reaches Resend
+    expect(received).toHaveLength(1);
+    const [req] = received;
     expect(req).toMatchObject({ method: "POST", url: "/emails" });
     expect(req?.headers).toMatchObject({
       authorization: "Bearer re_entry_key",
@@ -306,7 +329,8 @@ globalThis.fetch = (input, init) => {
     expect(await done).toEqual({ code: null, signal: "SIGTERM" });
     // only the worker's stop() aborts that request, and the drain waits for it
     expect(output).toContain("resend request aborted");
-    expect(stateOf()).toMatchObject({ state: "pending" });
+    // the one row was in flight: still pending, no attempt burned, no error recorded
+    expect(stateOf()).toEqual({ state: "pending", attempts: 0, error: null });
   } finally {
     child.kill("SIGKILL");
   }

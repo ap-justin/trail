@@ -395,6 +395,26 @@ test.each(["@@double", "@dana@example.com", "@"])(
   },
 );
 
+test("removing a GitHub-invited person through DELETE clears them as the handler of their bots", async () => {
+  await addMember("gh-handled", [alpha.id], { githubId: 9101 });
+  // a GitHub account has no address, so setBotHandler can't name it: write the handler column as the data would hold it
+  const person = db.select().from(actor).where(eq(actor.githubId, 9101)).get();
+  const handled = createBot(db, "github removal");
+  const other = createBot(db, "github removal bystander");
+  db.update(actor)
+    .set({ handlerId: person?.id })
+    .where(eq(actor.id, handled.actor.id))
+    .run();
+  const handlerOf = async (key: string) =>
+    ((await (await request("GET", "/api/v1/whoami", { key })).json()) as Body)
+      .handler;
+  expect(await handlerOf(handled.key)).toMatchObject({ name: "gh-handled" });
+
+  expect((await people("DELETE", "/people/gh-handled")).status).toBe(204);
+  expect(await handlerOf(handled.key)).toBeNull();
+  expect(await handlerOf(other.key)).toBeNull();
+});
+
 test("removing a person clears them as every bot's handler, and inviting them again doesn't restore it", async () => {
   const email = "hal.handled@example.com";
   await people("POST", "/people", { username: email, products: [alpha.key] });

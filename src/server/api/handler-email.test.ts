@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { productMember } from "../db/schema.js";
 import { createBot, setBotHandler } from "../service/keys.js";
 import { setupTestApp, testWebhookSettings } from "../test-app.js";
 import { createWebhookWorker } from "../webhooks/worker.js";
@@ -17,7 +18,7 @@ const worker = createWebhookWorker({
 });
 
 const ADDRESS = "Justin.Sweep@example.com";
-inviteEmail(ADDRESS.toLowerCase());
+const handlerInvite = inviteEmail(ADDRESS.toLowerCase());
 await signInWithEmail(ADDRESS.toLowerCase());
 const handled = createBot(db, "sweep handled");
 const watcher = createBot(db, "sweep watcher");
@@ -30,7 +31,13 @@ async function body(method: string, path: string, key: string, json?: object) {
 }
 
 test("the handler's email reaches a bot only in its own whoami: never items, comments, lists, activity, webhooks or other bots", async () => {
-  await body("POST", "/products", bot.key, { key: "SWP", name: "sweep" });
+  const swp = JSON.parse(
+    await body("POST", "/products", bot.key, { key: "SWP", name: "sweep" }),
+  ) as { id: string };
+  // a handler is emailed only about products their invite lists
+  db.insert(productMember)
+    .values({ inviteId: handlerInvite, productId: swp.id })
+    .run();
   await body("POST", "/webhooks", watcher.key, {
     url: "https://bot.example.com/hooks/sweep",
     secret: "whsec_sweep_0123456789abcdef",
