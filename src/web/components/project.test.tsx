@@ -264,6 +264,26 @@ describe("groups", () => {
     expect(types.map((t) => t.dataset.itemType)).toEqual(["todo", "todo"]);
   });
 
+  test.each([
+    ["issue", issueRow(), "trail TRL 1 issue"],
+    ["todo", todoRow(), "trail TRL 1 todo"],
+  ] as const)(
+    "under a %s filter each group's heading names that type alone, in the table and below 1024px",
+    (type, row, name) => {
+      renderProject({
+        items: {
+          status: "ready",
+          data: projectItems([{ product: trail, items: [row] }]),
+        },
+        filters: { ...NO_PROJECT_FILTERS, type },
+      });
+      expect(
+        within(groupBody("TRL")).getByRole("columnheader").textContent,
+      ).toBe(name);
+      expect(screen.getByRole("region", { name })).toBeInTheDocument();
+    },
+  );
+
   test("an unassigned issue reads Unassigned; rows have no Labels column", () => {
     renderProject();
     expect(

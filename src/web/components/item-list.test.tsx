@@ -49,10 +49,25 @@ describe("GroupHeading", () => {
   test.each([
     [1, "trail TRL 1 issue or todo"],
     [8, "trail TRL 8 issues and todos"],
-  ])("%i in a work group names issues and todos, not items", (count, text) => {
+  ])("%i under All names issues and todos, not items", (count, text) => {
     const { container } = render(
-      <GroupHeading product={trail} count={count} notes={false} />,
+      <GroupHeading product={trail} count={count} type={null} />,
     );
     expect(container).toHaveTextContent(text);
+  });
+
+  test.each([
+    ["issue", 1, "trail TRL 1 issue"],
+    ["issue", 8, "trail TRL 8 issues"],
+    ["todo", 1, "trail TRL 1 todo"],
+    ["todo", 8, "trail TRL 8 todos"],
+    ["note", 1, "trail TRL 1 note"],
+    ["note", 8, "trail TRL 8 notes"],
+  ] as const)("a %s filter names its own type, %i", (type, count, text) => {
+    const { container } = render(
+      <GroupHeading product={trail} count={count} type={type} />,
+    );
+    // exact: "8 issues" alone would also match "8 issues and todos"
+    expect(container.textContent?.replace(/\s+/g, " ").trim()).toBe(text);
   });
 });

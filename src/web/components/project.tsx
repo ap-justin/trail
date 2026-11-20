@@ -243,8 +243,8 @@ function ItemsBody({
   }
   return (
     <>
-      <ItemTable groups={groups} labels={false} now={now} />
-      <ItemRows groups={groups} now={now} />
+      <ItemTable groups={groups} type={filters.type} labels={false} now={now} />
+      <ItemRows groups={groups} type={filters.type} now={now} />
     </>
   );
 }

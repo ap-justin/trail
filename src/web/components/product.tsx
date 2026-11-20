@@ -192,8 +192,8 @@ function ItemsBody({
   const groups = [{ product: null, count: rows.length, items: rows }];
   return (
     <>
-      <ItemTable groups={groups} labels now={now} />
-      <ItemRows groups={groups} now={now} />
+      <ItemTable groups={groups} type={filters.type} labels now={now} />
+      <ItemRows groups={groups} type={filters.type} now={now} />
     </>
   );
 }

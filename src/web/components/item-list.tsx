@@ -451,22 +451,23 @@ function itemNoun(count: number, type: ItemType | null = null) {
   return type ? nouns[type].slice(0, -1) : "issue or todo";
 }
 
-/** `trail TRL 8 issues and todos`, or `3 notes` in a list of notes: a product group's heading, its key as a pill after the name. */
+/** `trail TRL 8 issues and todos`, or `3 todos` under the type filter's Todos: a product group's heading, its key as a pill after the name. */
 export function GroupHeading({
   product,
   count,
-  notes,
+  type,
 }: {
   product: WebProductRefView;
   count: number;
-  notes: boolean;
+  /** The page's type filter; null is All. */
+  type: ItemType | null;
 }) {
   return (
     <span className="flex min-w-0 items-center gap-2">
       <span className="truncate font-medium">{product.name}</span>{" "}
       <KeyPill>{product.key}</KeyPill>{" "}
       <span className="shrink-0 text-xs font-normal whitespace-nowrap text-muted-foreground">
-        {count} {itemNoun(count, notes ? "note" : null)}
+        {count} {itemNoun(count, type)}
       </span>
     </span>
   );
@@ -492,10 +493,13 @@ const head = "h-7.5 px-0";
  */
 export function ItemTable({
   groups,
+  type,
   labels,
   now,
 }: {
   groups: ItemGroup[];
+  /** The page's type filter, which names the rows in a group's heading. */
+  type: ItemType | null;
   labels: boolean;
   now: Date;
 }) {
@@ -547,7 +551,7 @@ export function ItemTable({
                   <GroupHeading
                     product={group.product}
                     count={group.count}
-                    notes={!work}
+                    type={type}
                   />
                 </div>
               </TableHead>
@@ -611,9 +615,17 @@ export function ItemTable({
  * key and title and described by its type, status, assignee, priority and labels. A
  * group with a product gets a heading.
  */
-export function ItemRows({ groups, now }: { groups: ItemGroup[]; now: Date }) {
+export function ItemRows({
+  groups,
+  type,
+  now,
+}: {
+  groups: ItemGroup[];
+  /** The page's type filter, which names the rows in a group's heading. */
+  type: ItemType | null;
+  now: Date;
+}) {
   const id = useId();
-  const notes = !holdsWork(groups);
   return (
     <div className="lg:hidden">
       {groups.map((group) => (
@@ -632,7 +644,7 @@ export function ItemRows({ groups, now }: { groups: ItemGroup[]; now: Date }) {
               <GroupHeading
                 product={group.product}
                 count={group.count}
-                notes={notes}
+                type={type}
               />
             </h3>
           )}

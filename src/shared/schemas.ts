@@ -140,7 +140,7 @@ export const productSchema = z
     updatedAt: timestamp,
     notes: noteCountsSchema.optional().meta({
       description:
-        "On get_product (GET /products/{key}) only: its notes per status. Notes are records, not work, so nothing else counts them.",
+        "On get_product (GET /products/{key}) only: its notes per status. No work count or progress includes notes: they are counted only here, in a project's `notes` and in an item's `notesCount`.",
     }),
   })
   .openapi("Product");
