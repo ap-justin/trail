@@ -113,7 +113,7 @@ export function unsubscribeRoutes({
     return c.html(
       page(
         "Stop issue emails?",
-        `<p>trail emails you once when an issue filed for you is done or canceled. Stop these emails? Nothing else changes.</p>
+        `<p>trail emails you once when an issue filed for you is done or canceled. Nothing else changes.</p>
 <form method="post" action="${escapeHtml(pathFor(key, person))}"><button type="submit">Stop these emails</button></form>`,
       ),
     );
