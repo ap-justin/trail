@@ -1579,7 +1579,7 @@ export const pageQuerySchema = z.object({
 export const productListQuerySchema = pageQuerySchema.extend({
   kind: productKindSchema.optional().meta({
     description:
-      "Only products, or only teams, among those the key reads whole: a product it reaches only through a project is left out. Both kinds, and those products, when left out.",
+      "Only products, or only teams, among those the key reads whole: a product it reaches only through a project is left out. Without kind, both kinds are listed, and so are those products.",
   }),
 });
 
