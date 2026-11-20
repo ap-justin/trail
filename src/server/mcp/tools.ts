@@ -724,7 +724,7 @@ export function registerTools(
     "update_product",
     {
       description:
-        "Change a product's name, description, repoUrl (https://github.com/<owner>/<name>, null clears), owner (a bot's name or id, null clears) or kind (product or team; nothing else changes it). Fields left out stay as they are. Needs the admin action. A product's owner changes only when it has none or the caller is its owner, who may hand it to another bot or clear it; anyone else gets a 403 (forbidden) naming the owner, and the operator reassigns it with `trail products set-owner`.",
+        "Change a product's name, description, repoUrl (https://github.com/<owner>/<name>, null clears), owner (a bot's name or id, null clears) or kind (product or team; nothing else changes it). Fields left out stay as they are. Needs the admin action. A product's owner changes only when it has none or the caller is its owner, who may hand it to another bot or clear it; anyone else gets a 403 (forbidden) naming the owner, and the operator reassigns it with `trail products set-owner`. Setting kind team, or handing a team to a new owner, makes the owner's keys limited to a list of products reach it at once.",
       inputSchema: () => productUpdateSchema.extend({ product }),
       annotations: update,
     },

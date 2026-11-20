@@ -44,7 +44,7 @@ const createProduct = createRoute({
   path: "/products",
   summary: "Create a product",
   description:
-    "Needs the admin action and a key that reaches every product. Its key (like TRL) prefixes its items' keys (TRL-1, TRL-2, ...) and must be unused. The calling bot owns it unless owner names another bot. To bring a product over from Linear, use POST /import.",
+    "Needs the admin action and a key that reaches every product. Its key (like TRL) prefixes its items' keys (TRL-1, TRL-2, ...) and must be unused. The calling bot owns it unless owner names another bot. kind (product by default) team makes it a team, a bot's space for its own work, and its owner's keys limited to a list of products reach it at once. To bring a product over from Linear, use POST /import.",
   tags,
   request: {
     headers: idempotencyHeaders,
@@ -114,7 +114,7 @@ const updateProduct = createRoute({
   path: "/products/{key}",
   summary: "Change a product's name, description, repoUrl, owner or kind",
   description:
-    "Needs the admin action. Fields left out stay as they are; null clears repoUrl or owner. A product's owner changes only when it has none or the caller is its owner, who may hand it to another bot or clear it; anyone else gets a 403 (forbidden) naming the owner, and the operator reassigns it with `trail products set-owner`.",
+    "Needs the admin action. Fields left out stay as they are; null clears repoUrl or owner. A product's owner changes only when it has none or the caller is its owner, who may hand it to another bot or clear it; anyone else gets a 403 (forbidden) naming the owner, and the operator reassigns it with `trail products set-owner`. Setting kind team, or handing a team to a new owner, makes the owner's keys limited to a list of products reach it at once.",
   tags,
   request: { params: productParam, body: jsonBody(productUpdateSchema) },
   responses: {
