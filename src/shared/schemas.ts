@@ -2015,6 +2015,7 @@ export const entrySchema = z
       statusUpdate: statusUpdateBody,
     }),
     z.object({ ...onProduct, kind: z.literal("product_created") }),
+    z.object({ ...onProduct, kind: z.literal("team_created") }),
     z.object({
       ...onProduct,
       kind: z.literal("product_imported"),

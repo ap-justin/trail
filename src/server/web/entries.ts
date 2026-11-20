@@ -49,6 +49,10 @@ function createdAs(
   return recorded ?? (creator.kind === "human" ? "issue" : current);
 }
 
+/** Whether a `product.created` payload records a team. */
+const isTeamPayload = (payload: unknown) =>
+  (payload as { kind?: unknown } | undefined)?.kind === "team";
+
 /** A `project.updated` payload's field names, as the entry names them. */
 const projectFieldOf: Record<string, (typeof webProjectFields)[number]> = {
   name: "name",
@@ -300,7 +304,14 @@ export function entriesByEvent(db: Db, events: ActivityEvent[]): EntryView[][] {
     function partsOf(e: ActivityEvent) {
       switch (e.action) {
         case "product.created":
-          return onProduct([{ kind: "product_created" }]);
+          // a payload from before kind carries none, and was a product's
+          return onProduct([
+            {
+              kind: isTeamPayload(e.payload)
+                ? "team_created"
+                : "product_created",
+            },
+          ]);
         case "product.imported": {
           const counts = importedEventPayload.safeParse(e.payload);
           if (!counts.success) return [];

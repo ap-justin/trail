@@ -593,6 +593,27 @@ describe("status update rows", () => {
     ).toHaveTextContent(/^TRL$/);
   });
 
+  test("a team created reads created team, naming the team by name and key", () => {
+    renderFeed({
+      entries: [
+        {
+          kind: "team_created",
+          id: "team",
+          createdAt: minutesAgo(1),
+          actor: alpha,
+          product: { key: "LDG", name: "Ledger" },
+          project: null,
+          item: null,
+        },
+      ],
+    });
+    const row = rowFor("team");
+    expect(row).toHaveTextContent(/created team\s*Ledger\s*LDG/);
+    expect(
+      within(row).getByRole("link", { name: "Ledger LDG" }),
+    ).toHaveAttribute("href", "/products/LDG");
+  });
+
   test("a project created or edited names the project, with no product key", () => {
     renderFeed({
       entries: [
