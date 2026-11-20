@@ -28,8 +28,8 @@ const hasNoActorsOrProducts = (db: Db): boolean =>
  * issue the preview person filed. The preview person is the owner, under
  * `ownerLogin`, as their first preview sign-in finds them.
  *
- * Writes nothing to a database anyone has written to, so a restart keeps a
- * preview's edits; returns whether it seeded. Every write goes through one
+ * Seeds only a database with no person or bot and no product, so a restart
+ * keeps a preview's edits; returns whether it seeded. Every write goes through one
  * transaction: a failed seed leaves the database empty, to seed on the next
  * boot. No bot key leaves this function.
  */
@@ -73,7 +73,7 @@ function seed(db: Db, ownerLogin: string): void {
   }
   const owner: ActingActor = { id: access.actor.id, kind: "human" };
 
-  // each key is dropped unread, so nobody can act as these bots after the seed
+  // each key is dropped unread, so no key the seed made survives it; the owner can mint new ones
   const bot = (name: string, label: string): ActingActor => ({
     id: createBot(db, name, { label }).actor.id,
     kind: "bot",
@@ -193,8 +193,14 @@ function seed(db: Db, ownerLogin: string): void {
     .values({ email: handlerEmail, invitedBy: owner.id })
     .returning({ id: invite.id })
     .get();
+  // LTN too: the issue filed for them below is on LTN, and its end mail goes only to a member
   db.insert(productMember)
-    .values({ inviteId, productId: service.getProduct(owner, "HBR").id })
+    .values(
+      ["HBR", "LTN"].map((key) => ({
+        inviteId,
+        productId: service.getProduct(owner, key).id,
+      })),
+    )
     .run();
   syncEmailActor(db, handlerEmail);
   setBotHandler(db, "wren", handlerEmail);

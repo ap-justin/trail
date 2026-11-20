@@ -161,6 +161,24 @@ test("an empty database gets every kind of record a screen shows", () => {
   ).toBeGreaterThan(0);
 });
 
+test("a bot's handler is a member of the product of the issue filed for them", () => {
+  const db = freshDb();
+  seedPreview(db, { ownerLogin: OWNER_LOGIN });
+
+  const filedForHandler = `issue i
+    join actor h on h.id = i.filed_for_id
+    join actor b on b.handler_id = h.id`;
+  expect(count(db, filedForHandler)).toBeGreaterThan(0);
+  expect(
+    count(
+      db,
+      `${filedForHandler} where not exists (
+        select 1 from product_member m join invite v on v.id = m.invite_id
+        where v.email = h.email and m.product_id = i.product_id)`,
+    ),
+  ).toBe(0);
+});
+
 test("a seed that fails part-way leaves the database empty, to seed on the next boot", () => {
   const db = freshDb();
   // an invite alone leaves the database empty as the seed counts it, and the

@@ -15,6 +15,8 @@ export TRAIL_OWNER_GITHUB=smoke-owner
 # as on Fly and in the image: production-only branches run here too
 export NODE_ENV=production
 export BETTER_AUTH_SECRET=smoke-secret-that-is-at-least-32-characters
+# the preview-off assertions must not inherit a caller's preview mode
+unset TRAIL_PREVIEW_MODE TRAIL_PREVIEW_PASSWORD
 PORT=$(node -e 'const s=require("node:net").createServer().listen(0,()=>{console.log(s.address().port);s.close()})')
 export PORT
 base="http://127.0.0.1:$PORT"

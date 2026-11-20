@@ -105,7 +105,7 @@ export function previewSignIn({
   // compared as digests, so the comparison takes as long whatever the guess's length
   const expected = digest(password);
   // one window for every caller: a preview has one tester, and the password resists guessing anyway
-  const failures = windowLimiter({ max: 10, windowMs: 60_000 });
+  const attempts = windowLimiter({ max: 10, windowMs: 60_000 });
 
   return async (request) => {
     if (!(await isTrustedOrigin(request))) {
@@ -115,15 +115,18 @@ export function previewSignIn({
         "send the request from trail's own pages: its Origin header is missing or another site's",
       );
     }
-    const wait = failures.wait("all");
+    const wait = attempts.wait("all");
     if (wait > 0) {
       return errorJson(
         429,
         "rate_limited",
-        `too many wrong preview passwords: try again in ${wait} seconds`,
+        `too many preview sign-in attempts: try again in ${wait} seconds`,
         { "retry-after": String(wait) },
       );
     }
+    // taken with the check, before any await, so guesses sent at once can't all pass it;
+    // a right password is charged too, since the limiter can't hand a slot back
+    attempts.take("all");
     let body: unknown;
     try {
       body = await request.json();
@@ -142,7 +145,6 @@ export function previewSignIn({
       typeof given !== "string" ||
       !timingSafeEqual(digest(given), expected)
     ) {
-      failures.take("all");
       return errorJson(
         401,
         "invalid_password",

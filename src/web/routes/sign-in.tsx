@@ -66,7 +66,7 @@ function SignIn() {
     mutationFn: (email: string) => api.emailLink(email, returnTo),
   });
   // the session cookie is set: a fresh /me lets this viewer in, and the member branch below
-  // goes on to the return address
+  // goes on to the return address; returned, so the mutation stays pending until /me settles
   const preview = useMutation({
     mutationFn: api.previewSignIn,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.me }),
@@ -136,13 +136,18 @@ function linkStateOf(mutation: {
   }
 }
 
+const UNCONFIRMED =
+  "Signed in, but the page couldn't tell. Reload to continue.";
+
 function previewStateOf(mutation: {
   isPending: boolean;
   isSuccess: boolean;
   error: Error | null;
 }): PreviewSignIn {
-  // still signing in once it succeeded: the page is waiting on /me to let the viewer in
-  if (mutation.isPending || mutation.isSuccess) return { status: "signing_in" };
+  if (mutation.isPending) return { status: "signing_in" };
+  // settled with /me refetched and the viewer still not a member: the cookie didn't stick or
+  // the refetch failed, and a member would have left this page already
+  if (mutation.isSuccess) return { status: "failed", message: UNCONFIRMED };
   if (!mutation.error) return { status: "idle" };
   const { error } = mutation;
   switch (codeOf(error)) {

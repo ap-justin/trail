@@ -165,7 +165,7 @@ function EmailForm({
 /** Where a preview's test sign-in stands. */
 export type PreviewSignIn =
   | { status: "idle" }
-  /** From the press until the page has left as a member. */
+  /** From the press until /me has settled; a member leaves the page then. */
   | { status: "signing_in" }
   | { status: "wrong_password" }
   /** `retryAfterSeconds`: the server's Retry-After; null without one. */

@@ -456,6 +456,37 @@ describe("test sign-in on a preview", () => {
     await screen.findByRole("heading", { name: issue().title });
   });
 
+  test("a sign-in /me doesn't confirm says so and frees the form", async () => {
+    let meReads = 0;
+    server.use(
+      http.get("/api/web/me", () => {
+        meReads++;
+        return HttpResponse.json({
+          ...meView("anonymous"),
+          previewSignIn: true,
+        });
+      }),
+      http.post("/api/preview/sign-in", () =>
+        HttpResponse.json({ redirectTo: "/" }),
+      ),
+    );
+    const { router } = renderApp("/sign-in");
+    await signInWith("plum-otter-lantern-quartz");
+    expect(
+      await screen.findByText(
+        "Signed in, but the page couldn't tell. Reload to continue.",
+      ),
+    ).toBeInTheDocument();
+    expect(meReads).toBe(2);
+    expect(screen.getByLabelText("Preview password")).not.toHaveAttribute(
+      "readonly",
+    );
+    expect(
+      screen.getByRole("button", { name: "Sign in to the preview" }),
+    ).not.toHaveAttribute("aria-disabled");
+    expect(router.state.location.pathname).toBe("/sign-in");
+  });
+
   test("a wrong password says so at the field and stays on sign-in", async () => {
     server.use(
       onPreview(),

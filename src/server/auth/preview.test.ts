@@ -130,6 +130,25 @@ test("the session-making endpoint is not served over HTTP", async () => {
   expect(res.headers.getSetCookie()).toEqual([]);
 });
 
+// its own app, so its limit starts empty and leaves the shared one alone
+const burst = setupTestApp({
+  auth: { preview: { password }, BETTER_AUTH_URL: undefined },
+});
+
+test("wrong passwords sent all at once still meet the limit", async () => {
+  const statuses = await Promise.all(
+    Array.from({ length: 15 }, async () => {
+      const res = await burst.request("POST", "/api/preview/sign-in", {
+        key: null,
+        json: { password: "a-wrong-guess" },
+      });
+      return res.status;
+    }),
+  );
+  expect(statuses.filter((s) => s === 401)).toHaveLength(10);
+  expect(statuses.filter((s) => s === 429)).toHaveLength(5);
+});
+
 // last in the file: it fills the one limit every caller shares
 test("after 10 wrong passwords in a minute, even the right one waits", async () => {
   for (let i = 0; i < 10; i++) await signIn({ password: "a-wrong-guess" });
