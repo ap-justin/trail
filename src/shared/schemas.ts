@@ -587,7 +587,7 @@ export const whoamiSchema = actorSchema
     }),
     hint: z.string().optional().meta({
       description:
-        "Present only when you own no product and no team: where your own work, your records and your requests for work go.",
+        "Present only when you own no product and no team: where your own work, your records and your requests for work go, or which key to ask for when this one can't create a team.",
     }),
   })
   .openapi("Whoami");

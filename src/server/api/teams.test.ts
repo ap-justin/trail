@@ -38,7 +38,7 @@ test("POST /teams creates the caller's team with 201; a retry under the same Ide
   expect(await second.json()).toEqual({
     error: {
       code: "conflict",
-      message: `you already own team ${key}, and a bot owns at most one team: keep your own work there (add_todo, add_note with product ${key}); an admin creates more products or teams with create_product (POST /products)`,
+      message: `you already own team ${key}, and a bot creates at most one team itself: keep your own work there (add_todo, add_note with product ${key}); an admin creates more products or teams with create_product (POST /products)`,
     },
   });
 });
@@ -159,4 +159,24 @@ test("POST /teams with a key limited only to projects is a 403 forbidden_scope, 
     await request("GET", "/api/v1/whoami", { key: bot.key })
   ).json()) as { team: unknown };
   expect(me.team).toBeNull();
+});
+
+test("POST /teams with a taken key is a 409 that doesn't name the product holding it", async () => {
+  const hidden = (await (
+    await request("POST", "/api/v1/products", {
+      json: { key: projectKey(), name: "a secret rest product", owner: null },
+    })
+  ).json()) as { key: string };
+  const bot = newcomer("Rest Peeker");
+  const res = await request("POST", "/api/v1/teams", {
+    json: { key: hidden.key, name: "peek" },
+    key: bot.key,
+  });
+  expect(res.status).toBe(409);
+  expect(await res.json()).toEqual({
+    error: {
+      code: "conflict",
+      message: `product key ${hidden.key} is taken: choose another key`,
+    },
+  });
 });

@@ -42,17 +42,34 @@ test("create_team: a bot that owns a team already is refused, pointed at its tea
   expect(
     await callError(bot.client, "create_team", { key: second, name: "again" }),
   ).toBe(
-    `conflict: you already own team ${first.key}, and a bot owns at most one team: keep your own work there (add_todo, add_note with product ${first.key}); an admin creates more products or teams with create_product (POST /products)`,
+    `conflict: you already own team ${first.key}, and a bot creates at most one team itself: keep your own work there (add_todo, add_note with product ${first.key}); an admin creates more products or teams with create_product (POST /products)`,
   );
   const listed = await call(bot.client, "list_products", { limit: 200 });
   expect(listed.items.map((p: { key: string }) => p.key)).not.toContain(second);
 });
 
-test("create_team: a bot that owns a product is refused, pointed at its product, even when its key doesn't reach it", async () => {
+test("create_team: a bot that owns a product its key reaches is refused, pointed at that product", async () => {
   const admin = createBot(db, "Petra");
-  const product = await call(await connect(admin.key), "create_product", {
+  const client = await connect(admin.key);
+  const product = await call(client, "create_product", {
     key: projectKey(),
     name: "Petra's product",
+  });
+  expect(
+    await callError(client, "create_team", {
+      key: projectKey(),
+      name: "a team too",
+    }),
+  ).toBe(
+    `conflict: you own product ${product.key}, and a team is only for a bot that owns no product or team: keep your own work in ${product.key} (add_todo, add_note with product ${product.key}); an admin creates more products or teams with create_product (POST /products)`,
+  );
+});
+
+test("create_team: a bot that owns a product its key doesn't reach is refused without the product's key, and told whom to ask", async () => {
+  const admin = createBot(db, "Perrin");
+  const product = await call(await connect(admin.key), "create_product", {
+    key: projectKey(),
+    name: "Perrin's product",
   });
   const elsewhere = await call(await connect(admin.key), "create_product", {
     key: projectKey(),
@@ -63,14 +80,58 @@ test("create_team: a bot that owns a product is refused, pointed at its product,
     products: [elsewhere.key],
     actions: ["read", "issues"],
   });
-  expect(
-    await callError(await connect(narrow.key), "create_team", {
-      key: projectKey(),
-      name: "a team too",
-    }),
-  ).toBe(
-    `conflict: you own product ${product.key}, and a team is only for a bot that owns no product or team: keep your own work in ${product.key} (add_todo, add_note with product ${product.key}); an admin creates more products or teams with create_product (POST /products)`,
+  const refusal = await callError(await connect(narrow.key), "create_team", {
+    key: projectKey(),
+    name: "a team too",
+  });
+  expect(refusal).toBe(
+    "conflict: you own a product this key doesn't reach, and a team is only for a bot that owns no product or team: ask whoever minted the key to add your product to it and keep your own work there, or ask an admin, who creates more products or teams with create_product (POST /products)",
   );
+  expect(refusal).not.toContain(product.key);
+});
+
+test("create_team: a bot whose team its key doesn't reach is refused without the team's key", async () => {
+  const bot = await newcomer("Tess");
+  const team = await call(bot.client, "create_team", {
+    key: projectKey(),
+    name: "Tess's desk",
+  });
+  const admin = createBot(db, "Tess's admin");
+  const other = await call(await connect(admin.key), "create_product", {
+    key: projectKey(),
+    name: "other",
+    owner: null,
+  });
+  const later = createKey(db, bot.actor.id, {
+    products: [other.key],
+    actions: ["read", "issues"],
+  });
+  const refusal = await callError(await connect(later.key), "create_team", {
+    key: projectKey(),
+    name: "again",
+  });
+  expect(refusal).toBe(
+    "conflict: you already own a team this key doesn't reach, and a bot creates at most one team itself: ask whoever minted the key to add your team to it, or ask an admin, who creates more products or teams with create_product (POST /products)",
+  );
+  expect(refusal).not.toContain(team.key);
+});
+
+test("create_team with a taken key says so without naming the product holding it", async () => {
+  const admin = createBot(db, "Hidden Owner");
+  const hidden = await call(await connect(admin.key), "create_product", {
+    key: projectKey(),
+    name: "a secret product name",
+    owner: null,
+  });
+  const bot = await newcomer("Peeker");
+  const refusal = await callError(bot.client, "create_team", {
+    key: hidden.key,
+    name: "peek",
+  });
+  expect(refusal).toBe(
+    `conflict: product key ${hidden.key} is taken: choose another key`,
+  );
+  expect(refusal).not.toContain("secret");
 });
 
 test("create_team: a key without the issues action is refused before anything is written", async () => {
@@ -289,4 +350,37 @@ test("create_team: a key limited only to projects is refused before anything is 
     limit: 200,
   });
   expect(listed.items.map((p: { key: string }) => p.key)).not.toContain(key);
+});
+
+test("whoami's hint offers create_team only to a key that can use it, and otherwise says what key to ask for", async () => {
+  const admin = createBot(db, "Hint admin");
+  const adminClient = await connect(admin.key);
+  const shared = await call(adminClient, "create_product", {
+    key: projectKey(),
+    name: "hint shared",
+    owner: null,
+  });
+  const project = await call(adminClient, "create_project", {
+    name: "hint project",
+    products: [shared.key],
+  });
+  const hintOf = async (scope: Parameters<typeof createBot>[2]) => {
+    const made = createBot(db, `hint ${projectKey()}`, scope);
+    return (await call(await connect(made.key), "whoami")).hint;
+  };
+  expect(
+    await hintOf({
+      scope: { projects: [project.slug], actions: ["read", "issues"] },
+    }),
+  ).toBe(
+    "You own no product and no team, and this key reaches only projects, so it can't create your team: ask whoever minted it for a key with a product list. Write records with add_note; to ask a product's bot for work, file an issue on its product with file_issue.",
+  );
+  expect(await hintOf({ scope: { actions: ["read", "comments"] } })).toBe(
+    "You own no product and no team, and this key lacks the issues action, so it can't create your team, add notes or file issues: ask whoever minted it for a key with the issues action.",
+  );
+  expect(
+    await hintOf({ scope: { projects: [project.slug], actions: ["read"] } }),
+  ).toBe(
+    "You own no product and no team, and this key lacks the issues action, so it can't create your team, add notes or file issues: ask whoever minted it for a key with the issues action and a product list.",
+  );
 });

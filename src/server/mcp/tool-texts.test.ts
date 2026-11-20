@@ -248,7 +248,7 @@ test("whoami describes team and hint; list_products, create_product and update_p
     /team \(your own team, whether or not this key reaches it, or null; the first by key if an admin gave you several\)/,
   );
   expect(tool("whoami").description).toMatch(
-    /hint \(only when you own no product and no team/,
+    /hint \(only when you own no product and no team.*or which key to ask for when this one can't create a team\)/,
   );
   expect(tool("list_products").description).toMatch(
     /shows kind \(product or team.*kind lists only one of the two/,
