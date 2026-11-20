@@ -11,9 +11,10 @@ import {
   ItemRows,
   ItemTable,
   matchesFilters,
-  statusFilterOf,
+  showAllFilters,
   statusTabValue,
 } from "@/components/item-list";
+import { type NotesRead, NotesSection } from "@/components/notes";
 import {
   EmptyState,
   ErrorState,
@@ -29,11 +30,13 @@ import {
 import { KeyPill } from "@/components/text";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import type {
+  WebItemCountsView,
   WebProjectDetailView,
   WebProjectItemsView,
   WebProjectView,
   WebStatusUpdatePageView,
 } from "@/lib/api-types";
+import { statusFilterOf } from "@/lib/item-status";
 import type { Loadable } from "@/lib/loadable";
 import { paths } from "@/lib/paths";
 import { useMinuteClock } from "@/lib/use-minute-clock";
@@ -52,12 +55,22 @@ export type ProjectViewProps = {
   project: Loadable<WebProjectDetailView>;
   /** The groups under `filters`; `counts` follow the product filter alone. */
   items: Loadable<WebProjectItemsView>;
+  /**
+   * The tab counts under the product filter, held while the next tab's list loads; null
+   * before any. A ready `items` draws its own.
+   */
+  counts: WebItemCountsView | null;
+  /** The current notes under the product filter, for the Notes section under the list. */
+  notes: Loadable<NotesRead>;
+  /** The last note counts under the product filter, held while the next list loads; null before any. */
+  noteCounts: WebItemCountsView["notes"] | null;
   /** Newest first. */
   statusUpdates: Loadable<WebStatusUpdatePageView>;
   filters: ProjectItemFilters;
   onFiltersChange: (filters: ProjectItemFilters) => void;
   onRetryProject: () => void;
   onRetryItems: () => void;
+  onRetryNotes: () => void;
   onRetryStatusUpdates: () => void;
   /** Under the list, before Status updates below lg. */
   footer?: ReactNode;
@@ -214,21 +227,24 @@ function ItemsBody({
       />
     );
   const groups = visibleGroups(items.data, filters);
+  // no filter to clear: the project's only items are its notes, under the list
+  const unfiltered = !filters.type && !filters.status && !filters.product;
+  if (groups.length === 0 && unfiltered) return <NoWork />;
   if (groups.length === 0) {
     return (
       <FilterEmpty
         filters={filters}
         onShowAll={() => {
           focusList();
-          onFiltersChange(NO_PROJECT_FILTERS);
+          onFiltersChange(showAllFilters(filters, NO_PROJECT_FILTERS));
         }}
       />
     );
   }
   return (
     <>
-      <ItemTable groups={groups} labels={false} now={now} />
-      <ItemRows groups={groups} now={now} />
+      <ItemTable groups={groups} type={filters.type} labels={false} now={now} />
+      <ItemRows groups={groups} type={filters.type} now={now} />
     </>
   );
 }
@@ -239,6 +255,16 @@ function NoItems() {
       icon={PackageIcon}
       title="No items in this project yet"
       description="Bots add issues and todos to a project. They show up here, grouped by product."
+    />
+  );
+}
+
+function NoWork() {
+  return (
+    <EmptyState
+      icon={PackageIcon}
+      title="No issues or todos in this project yet"
+      description="They show up here, grouped by product, once bots add them."
     />
   );
 }
@@ -254,12 +280,14 @@ function ProjectBody(
   const updatesHeading = useId();
   const listRef = useRef<HTMLDivElement>(null);
   const updatesHeadingRef = useRef<HTMLHeadingElement>(null);
-  // no items at all leaves nothing to filter; none under a product filter is a filter result
+  // no items at all leaves nothing to filter; none under a product filter is a filter
+  // result, and notes alone keep the filters that list them
   const empty =
     items.status === "ready" &&
     items.data.counts.all.all === 0 &&
+    items.data.counts.notes.current + items.data.counts.notes.archived === 0 &&
     filters.product === null;
-  const counts = items.status === "ready" ? items.data.counts : null;
+  const counts = items.status === "ready" ? items.data.counts : props.counts;
   const productSelect = (fieldLabel?: string) => (
     <ProductSelect
       products={project.products}
@@ -334,6 +362,21 @@ function ProjectBody(
           </Tabs>
         )}
         {props.footer}
+        {filters.type !== "note" && (
+          <NotesSection
+            notes={props.notes}
+            counts={props.noteCounts}
+            // a project's notes run A to Z by product, newest first within one
+            order={filters.product === null ? "first" : "newest"}
+            onShowArchived={() => {
+              listRef.current?.focus();
+              onFiltersChange({ ...filters, type: "note", status: "archived" });
+            }}
+            onRetry={props.onRetryNotes}
+            now={now}
+            className="mt-6"
+          />
+        )}
       </div>
       <aside className="flex flex-col gap-5 max-lg:pt-5 max-lg:pb-6 lg:w-75 lg:shrink-0">
         <section aria-labelledby={detailsHeading} className="max-lg:hidden">

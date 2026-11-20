@@ -35,7 +35,7 @@ type Subject = {
   /** an item's key (ATL-12) for an item or a comment on one; a project's slug for a project; the product's key otherwise */
   key: string | null;
   title: string | null;
-  /** issue or todo, on an item or a comment on one */
+  /** issue, todo or note, on an item or a comment on one */
   itemType?: string;
 };
 

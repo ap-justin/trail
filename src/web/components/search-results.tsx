@@ -6,7 +6,14 @@ import {
 } from "lucide-react";
 import { AppLink } from "@/components/app-link";
 import { EmptyState, SkeletonBlock } from "@/components/states";
-import { StatusIcon } from "@/components/status";
+import {
+  type IssueStatus,
+  type ItemType,
+  StatusIcon,
+  statusLabel,
+  TypeIcon,
+  typeLabel,
+} from "@/components/status";
 import { KeyPill, KeyText } from "@/components/text";
 import type { SearchView } from "@/lib/api-types";
 import { paths } from "@/lib/paths";
@@ -31,9 +38,10 @@ const row =
 
 /**
  * The search box's results, drawn in the shell's `searchResults` slot at both widths:
- * one list of products (package glyph), projects (folder glyph), then items (status glyph), each a link reachable
- * by Tab from the box. Following one ends the search: the shell clears the box, so
- * there is no callback here.
+ * one list of products (package glyph), projects (folder glyph), then items (status
+ * glyph and type glyph, as list rows draw them), each a link reachable by Tab from the
+ * box. Following one ends the search: the shell clears the box, so there is no callback
+ * here.
  */
 export function SearchResults({
   query,
@@ -65,6 +73,15 @@ export function SearchResults({
 }
 
 type Results = NonNullable<SearchResultsProps["results"]>;
+
+/**
+ * How an item's link begins, the type its glyph shows only by sight: `Issue`, `Todo`,
+ * `Note`, or `Archived note` once a note is archived.
+ */
+const typeName = (type: ItemType, status: IssueStatus) =>
+  type === "note" && status === "archived"
+    ? `${statusLabel(status)} note`
+    : typeLabel(type);
 
 function announcement(shown: Results | "loading" | "error" | null): string {
   if (shown === "loading" || shown === null) return "Loading";
@@ -144,12 +161,18 @@ function SearchResultsBody({ results }: { results: Results }) {
         <li key={issue.key}>
           <AppLink
             href={paths.issue(issue.key)}
-            aria-label={[issue.key, issue.title, issue.sourceKey]
+            aria-label={[
+              typeName(issue.type, issue.status),
+              issue.key,
+              issue.title,
+              issue.sourceKey,
+            ]
               .filter(Boolean)
               .join(" ")}
             className={row}
           >
             <StatusIcon status={issue.status} />
+            <TypeIcon type={issue.type} decorative />
             <KeyText>{issue.key}</KeyText>
             <span className="min-w-0 flex-1 truncate">{issue.title}</span>
             {issue.sourceKey && (

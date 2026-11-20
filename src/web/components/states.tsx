@@ -209,17 +209,24 @@ export function LoadingRegion({
   );
 }
 
+/** No items in the product; `onlyNotes` when it has notes, which list under this. */
 export function ItemListEmpty({
   productKey,
+  onlyNotes = false,
   onNewIssue,
 }: {
   productKey: string;
+  onlyNotes?: boolean;
   onNewIssue: () => void;
 }) {
   return (
     <EmptyState
       icon={FolderIcon}
-      title={`No items in ${productKey} yet`}
+      title={
+        onlyNotes
+          ? `No issues or todos in ${productKey} yet`
+          : `No items in ${productKey} yet`
+      }
       description="Bots plan todos and file issues here. You can file an issue too."
       action={
         <Button size="sm" className={panelAction} onClick={onNewIssue}>
@@ -302,7 +309,7 @@ export function IssueError({
 export function ListSkeleton({ className }: { className?: string }) {
   return (
     <LoadingRegion className={cn("flex flex-col gap-3 py-4", className)}>
-      {[0, 1, 2, 3].map((row) => (
+      {[...Array(4).keys()].map((row) => (
         <div key={row} className="flex items-center gap-2.5">
           <SkeletonBlock className="w-12" />
           <SkeletonBlock className="flex-1" />

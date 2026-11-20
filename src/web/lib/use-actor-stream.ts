@@ -3,7 +3,7 @@ import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { type ActorUpdate, applyActorUpdate } from "@/lib/actor-photos";
 import { api } from "@/lib/api";
 import { feedStreamHeld, useFeedStreamHeld } from "@/lib/feed-stream-holds";
-import { keys } from "@/lib/queries";
+import { isOffScreen, keys } from "@/lib/queries";
 import { RECONNECT_MS } from "@/lib/use-live-feed";
 
 /**
@@ -35,8 +35,8 @@ export function useActorStream() {
       type: "inactive",
     });
     queryClient.removeQueries({
-      type: "inactive",
-      predicate: (query) => query.queryKey[0] !== keys.workingNow[0],
+      predicate: (query) =>
+        isOffScreen(query) && query.queryKey[0] !== keys.workingNow[0],
     });
     readEverything();
   });

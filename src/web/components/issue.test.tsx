@@ -20,8 +20,10 @@ import {
   humanUi,
   issue,
   maya,
+  note,
   teamAccess,
   todo,
+  trail,
 } from "@/test/fixtures";
 
 function renderIssue(overrides: Partial<IssueViewProps> = {}) {
@@ -863,6 +865,51 @@ describe("reading order", () => {
     ).toBeTruthy();
   });
 
+  test("below lg the page reads description, properties, links, about, notes, activity, comment box", () => {
+    renderIssue({
+      issue: {
+        status: "ready",
+        data: issue({
+          about: [
+            {
+              key: "TRL-15",
+              title: "Back up the volume with Litestream",
+              type: "todo",
+              status: "open",
+            },
+          ],
+          notes: [
+            {
+              key: "TRL-31",
+              title: "Why the feed reads newest first",
+              type: "note",
+              status: "current",
+            },
+          ],
+          notesCount: { current: 1, archived: 0 },
+        }),
+      },
+    });
+    const inOrder = [
+      screen.getByRole("heading", { level: 1 }),
+      screen.getByText("Invited people sign in with GitHub."),
+      propertiesRegion(),
+      screen.getByRole("region", { name: "Links" }),
+      screen.getByRole("region", { name: "About" }),
+      screen.getByRole("region", { name: "Notes" }),
+      screen.getByRole("region", { name: "Activity" }),
+      screen.getByRole("textbox", { name: "Comment" }),
+    ];
+    inOrder.slice(1).forEach((later, i) => {
+      const earlier = inOrder[i] as HTMLElement;
+      expect(
+        earlier.compareDocumentPosition(later) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+        `${later.textContent?.slice(0, 20)} after ${earlier.textContent?.slice(0, 20)}`,
+      ).toBeTruthy();
+    });
+  });
+
   test("the header carries the item's status for the phone, where Properties drops it", () => {
     renderIssue();
     const header = screen.getByRole("banner");
@@ -943,6 +990,49 @@ describe("item type", () => {
       issue: { status: "ready", data: acceptedAsTodo() },
     });
     expect(byline()).toHaveTextContent(/Todo\s*TRL-15\s*filed by.*Alpha/);
+  });
+
+  test("an issue made a note: the byline says Note and filed by, the timeline says issue then Note", () => {
+    const base = note();
+    const on = {
+      product: trail,
+      project: null,
+      item: { key: "TRL-31", title: base.title, type: "note" as const },
+    };
+    renderIssue({
+      issueKey: "TRL-31",
+      issue: {
+        status: "ready",
+        data: note({
+          timeline: [
+            {
+              ...on,
+              kind: "item_created",
+              id: "a",
+              createdAt: "2026-11-11T10:20:00.000Z",
+              actor: alpha,
+              sourceAuthor: null,
+              createdAs: "issue",
+            },
+            {
+              ...on,
+              kind: "type_changed",
+              id: "b",
+              createdAt: "2026-11-11T10:25:00.000Z",
+              actor: maya,
+              from: "issue",
+              to: "note",
+            },
+          ],
+        }),
+      },
+    });
+    expect(byline()).toHaveTextContent(/Note\s*TRL-31\s*filed by.*Alpha/);
+    const [created, typed] = [
+      ...document.querySelectorAll<HTMLElement>("[data-entry-id]"),
+    ];
+    expect(created).toHaveTextContent("filed this issue");
+    expect(typed).toHaveTextContent("changed type from Issue to Note");
   });
 
   test("with no created entry in the timeline, the byline follows the current type", () => {
@@ -1191,4 +1281,297 @@ test("an assignment line shows the assignee's avatar before their name", () => {
   expect(
     avatar.compareDocumentPosition(name) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
+});
+
+describe("notes", () => {
+  test("a note's page says Note and Current, has no Assignee, and links the items it is about", () => {
+    renderIssue({
+      issueKey: "TRL-31",
+      issue: { status: "ready", data: note() },
+    });
+    const properties = screen.getByRole("region", { name: "Properties" });
+    expect(within(properties).getByText("Note")).toBeInTheDocument();
+    expect(within(properties).getByText("Current")).toBeInTheDocument();
+    expect(within(properties).queryByText("Assignee")).toBeNull();
+    expect(screen.getByText("written by")).toBeInTheDocument();
+    const about = screen.getByRole("region", { name: "About" });
+    const links = within(about).getAllByRole("link");
+    expect(links.map((l) => l.getAttribute("href"))).toEqual([
+      "/products/TRL/14",
+      "/products/TRL/15",
+    ]);
+    expect(links[0]).toHaveAccessibleName(
+      "In progress Issue TRL-14 Team access",
+    );
+  });
+
+  test("a note's page lists the notes about it beside the items it is about", () => {
+    renderIssue({
+      issueKey: "TRL-31",
+      issue: {
+        status: "ready",
+        data: note({
+          notes: [
+            {
+              key: "TRL-40",
+              title: "A follow-up on this note",
+              type: "note",
+              status: "current",
+            },
+          ],
+          notesCount: { current: 1, archived: 0 },
+        }),
+      },
+    });
+    const notes = screen.getByRole("region", { name: "Notes" });
+    expect(within(notes).getByRole("link")).toHaveAccessibleName(
+      "TRL-40 A follow-up on this note",
+    );
+    expect(screen.getByRole("region", { name: "About" })).toBeVisible();
+  });
+
+  test("a note about nothing the viewer reaches has no About section", () => {
+    renderIssue({
+      issueKey: "TRL-31",
+      issue: { status: "ready", data: note({ about: [] }) },
+    });
+    expect(screen.getByRole("region", { name: "Properties" })).toBeVisible();
+    expect(screen.queryByRole("region", { name: "About" })).toBeNull();
+  });
+
+  test("a person comments on a note: the box is there and Comment sends the trimmed body", async () => {
+    const user = userEvent.setup();
+    const { props } = renderIssue({
+      issueKey: "TRL-31",
+      issue: { status: "ready", data: note() },
+    });
+    await user.type(
+      screen.getByRole("textbox", { name: "Comment" }),
+      "  Thanks, this saved me an hour  ",
+    );
+    await user.click(screen.getByRole("button", { name: "Comment" }));
+    expect(props.onComment).toHaveBeenCalledWith(
+      "Thanks, this saved me an hour",
+    );
+  });
+
+  test("an archived note reads Archived", () => {
+    renderIssue({
+      issueKey: "TRL-31",
+      issue: { status: "ready", data: note({ status: "archived" }) },
+    });
+    const properties = screen.getByRole("region", { name: "Properties" });
+    expect(within(properties).getByText("Archived")).toBeInTheDocument();
+  });
+
+  test("its creation reads wrote this note", () => {
+    renderIssue({
+      issueKey: "TRL-31",
+      issue: { status: "ready", data: note() },
+    });
+    expect(screen.getByText("wrote this note")).toBeInTheDocument();
+  });
+
+  test("an item's page lists the notes about it, each a link named by its key and title alone", () => {
+    renderIssue({
+      issue: {
+        status: "ready",
+        data: issue({
+          notes: [
+            {
+              key: "TRL-31",
+              title: "Why the feed reads newest first",
+              type: "note",
+              status: "current",
+            },
+          ],
+          notesCount: { current: 1, archived: 0 },
+        }),
+      },
+    });
+    const notes = screen.getByRole("region", { name: "Notes" });
+    // every note listed is current, under a Notes heading: each link is its key and title
+    expect(within(notes).getByRole("link")).toHaveAccessibleName(
+      "TRL-31 Why the feed reads newest first",
+    );
+    expect(within(notes).queryByRole("img")).toBeNull();
+    expect(within(notes).queryByText(/archived/i)).toBeNull();
+    expect(screen.queryByRole("region", { name: "About" })).toBeNull();
+  });
+
+  test("a note's properties have no Priority or Estimate", () => {
+    renderIssue({
+      issueKey: "TRL-31",
+      issue: { status: "ready", data: note() },
+    });
+    expect(termsOf(propertiesRegion())).toEqual([
+      "Type",
+      "Status",
+      "Labels",
+      "Product",
+      "Projects",
+      "Created",
+      "Updated",
+    ]);
+  });
+
+  test("only archived notes about an item: one plain sentence says none are current and counts the archived", () => {
+    renderIssue({
+      issue: {
+        status: "ready",
+        data: issue({ notes: [], notesCount: { current: 0, archived: 2 } }),
+      },
+    });
+    const notes = screen.getByRole("region", { name: "Notes" });
+    expect(
+      within(notes).getByText("No current notes, 2 archived."),
+    ).toBeInTheDocument();
+    expect(within(notes).queryByRole("button")).toBeNull();
+    expect(within(notes).queryByRole("link")).toBeNull();
+    expect(within(notes).queryByRole("list")).toBeNull();
+  });
+
+  test("more current notes than the read carries: the rest are a count", () => {
+    const shown = Array.from({ length: 50 }, (_, n) => ({
+      key: `TRL-${100 + n}`,
+      title: `Note ${n}`,
+      type: "note" as const,
+      status: "current" as const,
+    }));
+    renderIssue({
+      issue: {
+        status: "ready",
+        data: issue({
+          notes: shown,
+          notesCount: { current: 53, archived: 1 },
+        }),
+      },
+    });
+    const notes = screen.getByRole("region", { name: "Notes" });
+    expect(within(notes).getAllByRole("link")).toHaveLength(50);
+    expect(
+      within(notes).getByText("3 more current notes, 1 archived."),
+    ).toBeInTheDocument();
+    expect(within(notes).queryByText(/No current notes/)).toBeNull();
+  });
+
+  test("every current note listed and one archived: the archived are a count under the list", () => {
+    renderIssue({
+      issue: {
+        status: "ready",
+        data: issue({
+          notes: [
+            {
+              key: "TRL-31",
+              title: "Why the feed reads newest first",
+              type: "note",
+              status: "current",
+            },
+          ],
+          notesCount: { current: 1, archived: 1 },
+        }),
+      },
+    });
+    const notes = screen.getByRole("region", { name: "Notes" });
+    expect(within(notes).getAllByRole("link")).toHaveLength(1);
+    expect(within(notes).getByText("1 archived note.")).toBeInTheDocument();
+    expect(within(notes).queryByRole("button")).toBeNull();
+  });
+
+  test("an item no note is about has no Notes section", () => {
+    renderIssue();
+    expect(screen.queryByRole("region", { name: "Notes" })).toBeNull();
+  });
+});
+
+describe("about edits on a note's timeline", () => {
+  const aboutChanged = (
+    id: string,
+    change: {
+      added: string[];
+      removed: string[];
+      others: { from: number; to: number };
+    },
+  ) => ({
+    product: trail,
+    project: null,
+    item: {
+      key: "TRL-31",
+      title: "Why the feed reads newest first",
+      type: "note" as const,
+    },
+    kind: "about_changed" as const,
+    id,
+    createdAt: "2026-11-09T14:05:00.000Z",
+    actor: alpha,
+    ...change,
+  });
+  const line = (id: string) => {
+    const found = document.querySelector<HTMLElement>(
+      `[data-entry-id="${id}"]`,
+    );
+    if (!found) throw new Error(`no ${id} line`);
+    return found;
+  };
+
+  test("added and removed keys read as one sentence, the keys in mono, and an unchanged other-product count says nothing", () => {
+    renderIssue({
+      issueKey: "TRL-31",
+      issue: {
+        status: "ready",
+        data: note({
+          timeline: [
+            aboutChanged("both", {
+              added: ["TRL-3", "TRL-5"],
+              removed: ["TRL-1"],
+              others: { from: 1, to: 1 },
+            }),
+          ],
+        }),
+      },
+    });
+    expect(line("both")).toHaveTextContent(
+      "Alpha changed what this note is about: added TRL-3, TRL-5; removed TRL-1",
+    );
+    expect(line("both")).not.toHaveTextContent(/other products/);
+    for (const key of ["TRL-3", "TRL-5", "TRL-1"])
+      expect(within(line("both")).getByText(key)).toHaveClass("font-mono");
+  });
+
+  test("other products' items are counted in a plain clause, never named", () => {
+    renderIssue({
+      issueKey: "TRL-31",
+      issue: {
+        status: "ready",
+        data: note({
+          timeline: [
+            aboutChanged("gained", {
+              added: ["TRL-3"],
+              removed: [],
+              others: { from: 0, to: 2 },
+            }),
+            aboutChanged("lost", {
+              added: [],
+              removed: [],
+              others: { from: 1, to: 0 },
+            }),
+            aboutChanged("moved", {
+              added: [],
+              removed: ["TRL-1"],
+              others: { from: 2, to: 3 },
+            }),
+          ],
+        }),
+      },
+    });
+    expect(line("gained")).toHaveTextContent(
+      "changed what this note is about: added TRL-3; added 2 items in other products",
+    );
+    expect(line("lost")).toHaveTextContent(
+      "changed what this note is about: removed 1 item in other products",
+    );
+    expect(line("moved")).toHaveTextContent(
+      "changed what this note is about: removed TRL-1; went from 2 to 3 items in other products",
+    );
+  });
 });

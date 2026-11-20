@@ -2,16 +2,24 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, test, vi } from "vitest";
-import type { ItemFilters } from "@/components/item-list";
+import {
+  type ItemFilters,
+  matchesFilters,
+  NO_FILTERS,
+} from "@/components/item-list";
 import {
   ProductHeading,
   ProductView,
   type ProductViewProps,
 } from "@/components/product";
+import { priorityLabel } from "@/components/status";
 import {
   beta,
+  countsOf,
   issueRow,
   itemList,
+  noteRow,
+  notesRead,
   productDetail,
   projectRow,
   statusUpdate,
@@ -40,10 +48,19 @@ const rows = [
 ];
 
 function props(overrides: Partial<ProductViewProps> = {}): ProductViewProps {
+  const items: ProductViewProps["items"] = overrides.items ?? {
+    status: "ready",
+    data: itemList(rows),
+  };
   return {
+    // the route's: its own query, held while the list reloads
+    noteCounts: (items.status === "ready" ? items.data : itemList(rows)).counts
+      .notes,
     product: trail,
     detail: productDetail(),
-    items: { status: "ready", data: itemList(rows) },
+    items,
+    counts: null,
+    notes: { status: "ready", data: notesRead([]) },
     statusUpdates: {
       status: "ready",
       data: { items: [statusUpdate()], nextCursor: null },
@@ -52,6 +69,7 @@ function props(overrides: Partial<ProductViewProps> = {}): ProductViewProps {
     onFiltersChange: vi.fn(),
     onNewIssue: vi.fn(),
     onRetryItems: vi.fn(),
+    onRetryNotes: vi.fn(),
     onRetryStatusUpdates: vi.fn(),
     now,
     ...overrides,
@@ -203,6 +221,27 @@ describe("items", () => {
 });
 
 describe("type toggle and status tabs", () => {
+  test("while the next type's list loads, the toggle and tabs keep the counts the route holds; without them, they drop", () => {
+    const { counts } = itemList(rows);
+    const loading = (held?: ProductViewProps["counts"]) =>
+      props({
+        filters: { type: "issue", status: null },
+        items: { status: "loading" },
+        noteCounts: counts.notes,
+        counts: held,
+      });
+    const { rerender } = render(<ProductView {...loading(counts)} />);
+    expect(
+      within(typeToggle()).getByRole("button", { name: "Issues 2" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(within(tabs()).getByRole("tab", { name: "All 2" })).toBeVisible();
+    rerender(<ProductView {...loading()} />);
+    expect(
+      within(typeToggle()).getByRole("button", { name: "Issues" }),
+    ).toBeInTheDocument();
+    expect(within(tabs()).getByRole("tab", { name: "All" })).toBeVisible();
+  });
+
   test("the toggle shows each type's count and All is pressed", () => {
     renderProduct();
     expect(
@@ -295,6 +334,23 @@ describe("type toggle and status tabs", () => {
     expect(tableKeys()).toEqual(["TRL-22", "TRL-17"]);
   });
 
+  test("Tab goes from the status tabs to the type toggle, and the bar draws them in that order", async () => {
+    const user = userEvent.setup();
+    renderProduct();
+    within(tabs()).getByRole("tab", { selected: true }).focus();
+    await user.tab();
+    expect(typeToggle()).toContainElement(
+      document.activeElement as HTMLElement,
+    );
+    // a reversed flow (wrap-reverse, row-reverse, order-*) would draw the toggle before the tabs
+    const bar = tabs().parentElement as HTMLElement;
+    expect(bar).toContainElement(typeToggle());
+    const reversing = [bar, ...bar.querySelectorAll("[class]")].flatMap((el) =>
+      [...el.classList].filter((c) => /(^|:)(order-|.*-reverse$)/.test(c)),
+    );
+    expect(reversing).toEqual([]);
+  });
+
   test("the 375 chips are All, Open, In progress and Done, and carry the same filter", async () => {
     const user = userEvent.setup();
     const p = renderProduct();
@@ -381,12 +437,413 @@ describe("type toggle and status tabs", () => {
     expect(p.onNewIssue).toHaveBeenCalledOnce();
   });
 
+  test("a product whose only items are notes says it has no issues or todos, still offers New issue, and lists the notes", async () => {
+    const user = userEvent.setup();
+    const p = renderProduct({
+      items: {
+        status: "ready",
+        data: { items: [], nextCursor: null, counts: countsOf([noteRow()]) },
+      },
+      notes: { status: "ready", data: notesRead([noteRow()]) },
+    });
+    expect(
+      screen.getByRole("heading", { name: "No issues or todos in TRL yet" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "No items in TRL yet" }),
+    ).toBeNull();
+    expect(screen.getByRole("region", { name: /^Notes/ })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "New issue" }));
+    expect(p.onNewIssue).toHaveBeenCalledOnce();
+  });
+
   test("a failed list says so and retries", async () => {
     const user = userEvent.setup();
     const p = renderProduct({ items: { status: "error" } });
     expect(screen.getByRole("alert")).toHaveTextContent("Couldn't load items");
     await user.click(screen.getByRole("button", { name: "Try again" }));
     expect(p.onRetryItems).toHaveBeenCalledOnce();
+  });
+});
+
+describe("notes", () => {
+  const current = [
+    noteRow(),
+    noteRow({ key: "TRL-33", title: "Release names follow the alphabet" }),
+  ];
+  const archived = noteRow({
+    key: "TRL-29",
+    title: "Old deploy steps",
+    status: "archived",
+  });
+  // the server lists work without type; the counts carry the notes apart
+  const workWithNotes = {
+    ...itemList(rows),
+    counts: countsOf([...rows, ...current, archived]),
+  };
+  const notesSection = () => screen.getByRole("region", { name: /^Notes/ });
+
+  test("current notes show in a Notes section under the work list, each a link, and work counts leave them out", () => {
+    renderProduct({
+      items: { status: "ready", data: workWithNotes },
+      notes: { status: "ready", data: notesRead(current) },
+    });
+    expect(
+      within(notesSection()).getByRole("heading", { name: "Notes 2" }),
+    ).toBeInTheDocument();
+    expect(
+      within(notesSection())
+        .getAllByRole("link")
+        .map((l) => l.getAttribute("href")),
+    ).toEqual(["/products/TRL/31", "/products/TRL/33"]);
+    expect(tableKeys()).not.toContain("TRL-31");
+    expect(
+      within(typeToggle()).getByRole("button", { name: "All 4" }),
+    ).toBeInTheDocument();
+    expect(
+      within(typeToggle()).getByRole("button", { name: "Notes 3" }),
+    ).toBeInTheDocument();
+    expect(within(tabs()).getByRole("tab", { name: "All 4" })).toBeVisible();
+  });
+
+  test("Show archived notes lists the archived ones in the page's list, with focus on the list", async () => {
+    const user = userEvent.setup();
+    const p = renderProduct({
+      items: { status: "ready", data: workWithNotes },
+      notes: { status: "ready", data: notesRead(current) },
+    });
+    await user.click(
+      within(notesSection()).getByRole("button", {
+        name: "Show 1 archived note",
+      }),
+    );
+    expect(p.onFiltersChange).toHaveBeenCalledWith({
+      type: "note",
+      status: "archived",
+    });
+    expect(screen.getByRole("tabpanel", { name: /^All/ })).toHaveFocus();
+  });
+
+  test("every note archived and the notes list not loaded: the section says none are current and still offers the archived, whose list then shows", async () => {
+    const user = userEvent.setup();
+    const onlyArchived = {
+      ...itemList(rows),
+      counts: countsOf([...rows, archived]),
+    };
+    const p = props({
+      items: { status: "ready", data: onlyArchived },
+      // the route's read of current notes never runs for a count of 0
+      notes: { status: "loading" },
+    });
+    const { rerender } = render(<ProductView {...p} />);
+    const section = notesSection();
+    expect(
+      within(section).getByRole("heading", { name: "Notes 0" }),
+    ).toBeInTheDocument();
+    expect(within(section).getByText("No current notes.")).toBeInTheDocument();
+    expect(within(section).queryByRole("status")).toBeNull();
+    await user.click(
+      within(section).getByRole("button", { name: "Show 1 archived note" }),
+    );
+    expect(p.onFiltersChange).toHaveBeenCalledWith({
+      type: "note",
+      status: "archived",
+    });
+    rerender(
+      <ProductView
+        {...p}
+        filters={{ type: "note", status: "archived" }}
+        items={{
+          status: "ready",
+          data: {
+            items: [archived],
+            nextCursor: null,
+            counts: onlyArchived.counts,
+          },
+        }}
+      />,
+    );
+    expect(tableKeys()).toEqual(["TRL-29"]);
+  });
+
+  test("Show all on an empty notes filter keeps the notes and clears only the status", async () => {
+    const user = userEvent.setup();
+    const p = renderProduct({
+      filters: { type: "note", status: "current" },
+      items: {
+        status: "ready",
+        data: {
+          items: [archived],
+          nextCursor: null,
+          counts: countsOf([archived]),
+        },
+      },
+    });
+    expect(
+      screen.getByRole("heading", { name: "No notes are current" }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Show all" }));
+    expect(p.onFiltersChange).toHaveBeenCalledWith({
+      type: "note",
+      status: null,
+    });
+  });
+
+  test("a list of notes has Current and Archived tabs, no Notes section, and no New issue for a product with no work", () => {
+    renderProduct({
+      filters: { type: "note", status: "archived" },
+      items: {
+        status: "ready",
+        data: {
+          items: [archived],
+          nextCursor: null,
+          counts: countsOf([...current, archived]),
+        },
+      },
+    });
+    expect(tableKeys()).toEqual(["TRL-29"]);
+    expect(
+      [...within(tabs()).getAllByRole("tab")].map((t) => t.textContent),
+    ).toEqual(["All 3", "Current 2", "Archived 1"]);
+    expect(screen.queryByRole("region", { name: /^Notes/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "New issue" })).toBeNull();
+  });
+
+  test("a list of notes has no Priority or Assignee column, and its rows no priority", () => {
+    renderProduct({
+      filters: { type: "note", status: "archived" },
+      items: {
+        status: "ready",
+        data: {
+          items: [{ ...archived, priority: 2 }],
+          nextCursor: null,
+          counts: countsOf([...current, archived]),
+        },
+      },
+    });
+    expect(
+      within(table())
+        .getAllByRole("columnheader")
+        .map((h) => h.textContent),
+    ).toEqual(["Status", "Type", "Key", "Title", "Labels", "Updated"]);
+    expect(tableRow("TRL-29").querySelectorAll("td")).toHaveLength(6);
+    const phoneRow = screen.getByRole("link", {
+      name: "TRL-29 Old deploy steps",
+      description: /Note/,
+    });
+    expect(phoneRow).not.toHaveAccessibleDescription(
+      new RegExp(priorityLabel(2)),
+    );
+  });
+
+  test("a work row's phone description carries its priority, so the note row's lack is the rule", () => {
+    renderProduct();
+    const item = document.querySelector('li[data-item-key="TRL-17"]');
+    if (!(item instanceof HTMLElement)) throw new Error("no 375 row");
+    const link = within(item).getByRole("link", {
+      name: "TRL-17 Human UI: feed, projects, issue page",
+    });
+    expect(link).toHaveAccessibleDescription(new RegExp(priorityLabel(2)));
+  });
+
+  test("a work list keeps its Priority and Assignee columns", () => {
+    renderProduct();
+    expect(
+      within(table())
+        .getAllByRole("columnheader")
+        .map((h) => h.textContent),
+    ).toEqual([
+      "Status",
+      "Type",
+      "Key",
+      "Title",
+      "Priority",
+      "Labels",
+      "Assignee",
+      "Updated",
+    ]);
+  });
+
+  test("leaving Notes for a work type drops a note status", async () => {
+    const user = userEvent.setup();
+    const p = renderProduct({
+      filters: { type: "note", status: "archived" },
+      items: { status: "ready", data: workWithNotes },
+    });
+    await user.click(
+      within(typeToggle()).getByRole("button", { name: /^Issues/ }),
+    );
+    expect(p.onFiltersChange).toHaveBeenCalledWith({
+      type: "issue",
+      status: null,
+    });
+  });
+
+  test("leaving Notes for All: the notes list still answering Notes is not drawn as All, so its notes show once, in the Notes section", async () => {
+    const user = userEvent.setup();
+    const notesList = {
+      items: [...current, archived],
+      nextCursor: null,
+      counts: workWithNotes.counts,
+    };
+    render(
+      <FilteredProduct
+        items={{ status: "ready", data: notesList }}
+        notes={{ status: "ready", data: notesRead(current) }}
+      />,
+    );
+    await user.click(
+      within(typeToggle()).getByRole("button", { name: /^Notes/ }),
+    );
+    expect(tableKeys()).toEqual(["TRL-31", "TRL-33", "TRL-29"]);
+    // the route lends this list to All until the work list lands, unless no row belongs there
+    await user.click(
+      within(typeToggle()).getByRole("button", { name: /^All/ }),
+    );
+    expect(
+      notesList.items.some((note) => matchesFilters(note, NO_FILTERS)),
+    ).toBe(false);
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(
+      screen.getAllByRole("link", {
+        name: "TRL-31 Why the feed reads newest first",
+      }),
+    ).toHaveLength(1);
+    expect(notesSection()).toBeInTheDocument();
+  });
+
+  test("a product with no notes has no Notes section", () => {
+    renderProduct();
+    expect(screen.queryByRole("region", { name: /^Notes/ })).toBeNull();
+  });
+
+  test("a failed notes list says so and retries", async () => {
+    const user = userEvent.setup();
+    const p = renderProduct({
+      items: { status: "ready", data: workWithNotes },
+      notes: { status: "error" },
+    });
+    expect(within(notesSection()).getByRole("alert")).toHaveTextContent(
+      "Couldn't load notes",
+    );
+    await user.click(
+      within(notesSection()).getByRole("button", { name: "Try again" }),
+    );
+    expect(p.onRetryNotes).toHaveBeenCalledOnce();
+  });
+
+  test("loading notes hold as many placeholder rows as the heading counts", () => {
+    renderProduct({
+      items: { status: "ready", data: workWithNotes },
+      notes: { status: "loading" },
+    });
+    expect(
+      within(notesSection()).getByRole("heading", { name: "Notes 2" }),
+    ).toBeInTheDocument();
+    const placeholder = within(notesSection()).getByRole("status");
+    expect(placeholder.querySelectorAll(":scope > div")).toHaveLength(2);
+  });
+
+  test("Try again on notes leaves focus on their heading", async () => {
+    const user = userEvent.setup();
+    const items = { status: "ready", data: workWithNotes } as const;
+    const { rerender } = render(
+      <ProductView {...props({ items, notes: { status: "error" } })} />,
+    );
+    await user.click(
+      within(notesSection()).getByRole("button", { name: "Try again" }),
+    );
+    rerender(
+      <ProductView {...props({ items, notes: { status: "loading" } })} />,
+    );
+    expect(screen.getByRole("heading", { name: "Notes 2" })).toHaveFocus();
+  });
+
+  test("the Notes section and Show archived notes stay while the work list reloads", () => {
+    renderProduct({
+      filters: { type: "todo", status: null },
+      items: { status: "loading" },
+      noteCounts: workWithNotes.counts.notes,
+      notes: { status: "ready", data: notesRead(current) },
+    });
+    expect(
+      within(notesSection()).getByRole("heading", { name: "Notes 2" }),
+    ).toBeInTheDocument();
+    expect(within(notesSection()).getAllByRole("link")).toHaveLength(2);
+    expect(
+      within(notesSection()).getByRole("button", {
+        name: "Show 1 archived note",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  test("a notes read the page cap cut short says how many of its count show, with no way to more", () => {
+    renderProduct({
+      items: { status: "ready", data: workWithNotes },
+      noteCounts: { current: 2134, archived: 1 },
+      notes: {
+        status: "ready",
+        data: { items: current, nextCursor: "after-33", total: 2134 },
+      },
+    });
+    expect(
+      within(notesSection()).getByText("Showing the newest 2 of 2,134 notes"),
+    ).toBeInTheDocument();
+    // the list filtered to current notes is the same read under the same cap
+    expect(
+      within(notesSection()).queryByRole("button", { name: /notes$/ }),
+    ).toBeNull();
+    expect(
+      within(notesSection()).getByRole("button", {
+        name: "Show 1 archived note",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  test("every current note shown: no Showing line and no button but the archived one", () => {
+    renderProduct({
+      items: { status: "ready", data: workWithNotes },
+      notes: { status: "ready", data: notesRead(current) },
+    });
+    expect(within(notesSection()).queryByText(/^Showing/)).toBeNull();
+    expect(within(notesSection()).getAllByRole("button")).toHaveLength(1);
+  });
+
+  test("counts from a later list above the rows of an older read that wasn't capped: no Showing line", () => {
+    // a failed refetch keeps the older read's rows while another list's counts moved on
+    renderProduct({
+      items: { status: "ready", data: workWithNotes },
+      noteCounts: { current: 5, archived: 1 },
+      notes: { status: "ready", data: notesRead(current) },
+    });
+    expect(
+      within(notesSection()).getByRole("heading", { name: "Notes 5" }),
+    ).toBeInTheDocument();
+    expect(within(notesSection()).queryByText(/^Showing/)).toBeNull();
+  });
+
+  test("an older capped read under later counts says its own count", () => {
+    renderProduct({
+      items: { status: "ready", data: workWithNotes },
+      noteCounts: { current: 2500, archived: 1 },
+      notes: {
+        status: "ready",
+        data: { items: current, nextCursor: "after-33", total: 2134 },
+      },
+    });
+    expect(
+      within(notesSection()).getByText("Showing the newest 2 of 2,134 notes"),
+    ).toBeInTheDocument();
+  });
+
+  test("a failed notes read with counts known: no Showing line", () => {
+    renderProduct({
+      items: { status: "ready", data: workWithNotes },
+      noteCounts: { current: 2134, archived: 1 },
+      notes: { status: "error" },
+    });
+    expect(within(notesSection()).getByRole("alert")).toBeInTheDocument();
+    expect(within(notesSection()).queryByText(/^Showing/)).toBeNull();
   });
 });
 

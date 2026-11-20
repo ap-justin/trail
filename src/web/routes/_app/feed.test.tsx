@@ -888,6 +888,18 @@ describe("filters in the URL", () => {
     );
   });
 
+  test("a link with ?type=note reads and streams the feed by notes, and shows Notes chosen", async () => {
+    signedInAs("member");
+    const asked = serveNeutralFeed();
+    renderApp("/?type=note");
+    await waitFor(() => expect(rowFor("e2")).not.toBeNull());
+    expect(asked[0]?.get("type")).toBe("note");
+    expect(FakeEventSource.current.url).toBe("/api/web/events?type=note");
+    expect(
+      screen.getByRole("combobox", { name: "Filter by type" }),
+    ).toHaveTextContent("Notes");
+  });
+
   test("an all-digit ?project= and ?product= read and stream the feed as text", async () => {
     signedInAs("member");
     const asked = serveNeutralFeed();

@@ -76,7 +76,7 @@ export type FeedViewProps = {
   productFilter: string | null;
   /** A project slug, or null for all projects. */
   projectFilter: string | null;
-  /** Issues or todos only, or null for every kind of entry. */
+  /** Issues, todos or notes only, or null for every kind of entry. */
   typeFilter: WebItemType | null;
   onActorFilterChange: (actorId: string | null) => void;
   onProductFilterChange: (productKey: string | null) => void;
@@ -330,6 +330,7 @@ function FeedFilters({
       />
       <TypeSelect
         fieldLabel={inSheet ? "Type" : undefined}
+        allLabel="All types"
         value={typeFilter}
         onChange={onTypeFilterChange}
       />
@@ -449,11 +450,17 @@ const statusUpdateVerb = (on: "product" | "project") => (
   </span>
 );
 
+const createdVerb: Record<WebItemType, string> = {
+  issue: "filed",
+  todo: "planned",
+  note: "wrote",
+};
+
 function sentenceFor(entry: EntryView): Sentence | null {
   switch (entry.kind) {
     case "item_created":
       return {
-        verb: muted(entry.createdAs === "todo" ? "planned" : "filed"),
+        verb: muted(createdVerb[entry.createdAs]),
         subject: itemSubject(entry.item),
         title: entry.item.title,
         sourceAuthor: entry.sourceAuthor,
@@ -637,6 +644,9 @@ function sentenceFor(entry: EntryView): Sentence | null {
         verb: muted("updated project"),
         subject: projectSubject(entry.project),
       };
+    // an item's timeline only: the feed never lists it
+    case "about_changed":
+      return null;
     default:
       // typechecks only while every known kind has a case; at runtime, a kind the server added later lands here
       entry satisfies never;
@@ -695,7 +705,10 @@ function FeedRow({
           {sentence.verb}
           {sentence.subject}
           {sentence.title && (
-            <span aria-hidden="true" className="max-lg:hidden">
+            <span
+              aria-hidden="true"
+              className="min-w-0 wrap-anywhere max-lg:hidden"
+            >
               {sentence.title}
             </span>
           )}

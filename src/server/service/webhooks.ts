@@ -18,6 +18,8 @@ import {
   activityEvent,
   apiKey,
   comment,
+  type IssueType,
+  issue,
   product,
   project,
   projectItem,
@@ -38,7 +40,12 @@ import {
 import { ValidationError } from "./errors.js";
 import { canRead, liveKeyScope } from "./keys.js";
 import type { Tx } from "./tx.js";
-import { eventsReached, projectsReached, reachOfScope } from "./visible.js";
+import {
+  eventsReached,
+  projectsReached,
+  type Reach,
+  reachOfScope,
+} from "./visible.js";
 
 /** What the service needs to store secrets and to send a test call. */
 export type WebhookSettings = SendDeps & {
@@ -434,44 +441,53 @@ function keyRefusal(
 }
 
 /**
- * Why `sub` may not be sent this delivery now, as its lastError; null when it
- * may. An activity delivery carries its `event`, needs a key with the read
- * action (as managing an activity webhook does) and is held to `keyRefusal`;
- * an inbox delivery has none and needs only its key live. A webhook with no
- * recorded key, made before keys were recorded and unchanged since, stands on
- * its bot's live keys: an activity delivery goes when any one of them with the
- * read action may send it, and is refused with the oldest's reason when none may.
+ * The key `sub` sends this delivery on now, or why none may, as its lastError.
+ * An activity delivery carries its `event`, needs a key with the read action
+ * (as managing an activity webhook does) and is held to `keyRefusal`; an inbox
+ * delivery has none and needs only its key live. A webhook with no recorded
+ * key, made before keys were recorded and unchanged since, stands on its bot's
+ * live keys, oldest first: an activity delivery goes on the first of them with
+ * the read action that may send it, and is refused with the oldest's reason
+ * when none may.
  */
-export function deliveryKeyRefusal(
+export function deliveryKey(
   db: Db,
   sub: typeof webhookSubscription.$inferSelect,
   event: typeof activityEvent.$inferSelect | null,
-): string | null {
+): { keyId: string } | { refusal: string } {
   if (sub.apiKeyId !== null) {
     const key = liveKeysWhere(db, eq(apiKey.id, sub.apiKeyId))[0];
-    if (!key) return KEY_REVOKED;
-    if (event === null) return null;
-    if (!canRead(key)) return KEY_CANNOT_READ;
-    return keyRefusal(db, key.id, sub.id, event);
+    if (!key) return { refusal: KEY_REVOKED };
+    if (event === null) return { keyId: key.id };
+    if (!canRead(key)) return { refusal: KEY_CANNOT_READ };
+    const refusal = keyRefusal(db, key.id, sub.id, event);
+    return refusal === null ? { keyId: key.id } : { refusal };
   }
   const keys = liveKeysWhere(db, eq(apiKey.actorId, sub.actorId));
-  if (keys.length === 0) return NO_LIVE_KEY;
-  if (event === null) return null;
-  const readers = keys.filter(canRead);
-  if (readers.length === 0) return NO_KEY_CAN_READ;
-  let first: string | null = null;
-  for (const { id } of readers) {
+  const [oldest] = keys;
+  if (oldest === undefined) return { refusal: NO_LIVE_KEY };
+  if (event === null) return { keyId: oldest.id };
+  let first: string | undefined;
+  for (const { id } of keys.filter(canRead)) {
     const refusal = keyRefusal(db, id, sub.id, event);
-    if (refusal === null) return null;
+    if (refusal === null) return { keyId: id };
     first ??= refusal;
   }
-  return first;
+  return { refusal: first ?? NO_KEY_CAN_READ };
 }
 
 // a bot can't mint its own key: only the operator's `trail key create` does
 const NO_LIVE_KEY = `not sent: this bot has no live key: a key must be minted for it first (trail key create), then ${toResume("that key (with the read action, on an activity webhook)")}`;
 const KEY_CANNOT_READ = `not sent: this webhook's key lacks the read action: ${toResume("a key that has the read action")}`;
 const NO_KEY_CAN_READ = `not sent: none of this bot's live keys has the read action: ${toResume("a key that has the read action")}`;
+
+/** The reach of the key `deliveryKey` picked; nothing once that key is gone. */
+export function sendingKeyReach(db: Db, keyId: string): Reach {
+  const scope = liveKeyScope(db, keyId);
+  return scope
+    ? reachOfScope(scope, true)
+    : { products: [], projects: [], implicitProjects: false };
+}
 
 /** The unrevoked keys matching `where`, oldest first, with their actions. */
 const liveKeysWhere = (db: Db, where: SQL) =>
@@ -614,7 +630,11 @@ export function enqueueDeliveries(
     .all();
   const followers = [...new Set([...byProduct, ...byProject].map((f) => f.id))];
   if (followers.length === 0) return;
-  const types = deliveryTypesOf(event.action);
+  const types = deliveryTypesOf(
+    event.action,
+    itemTypeOf(tx, event),
+    madeANote(event.payload),
+  );
   // in this order: the worker sends one event's deliveries in insertion order
   tx.insert(webhookDelivery)
     .values(
@@ -631,17 +651,47 @@ export function enqueueDeliveries(
     .run();
 }
 
+/** The type of the item an item event is on, as the item is now; undefined for any other event. */
+function itemTypeOf(
+  tx: Tx,
+  event: typeof activityEvent.$inferSelect,
+): IssueType | undefined {
+  if (event.subjectType !== "issue") return undefined;
+  return tx
+    .select({ type: issue.type })
+    .from(issue)
+    .where(eq(issue.id, event.subjectId))
+    .get()?.type;
+}
+
+/** Whether an item update's payload turned an issue or a todo into a note. */
+function madeANote(payload: unknown): boolean {
+  const type = (payload as { type?: { from?: unknown; to?: unknown } } | null)
+    ?.type;
+  return type?.to === "note" && type.from !== "note";
+}
+
 /**
  * The webhook types an event goes out as: trail.<action>, and for one release
  * a second type beside it: a product event also as the trail.project.* it was
  * sent as before products and projects split, an item event also as the
- * trail.item.* that replaces trail.issue.*.
+ * trail.item.* that replaces trail.issue.*. A note's item events, which came
+ * after trail.issue.* was deprecated, go out as trail.item.* alone, but for the
+ * update that turned an issue or a todo into one (`madeNote`): a trail.issue.*
+ * follower gets that one, to see the item leave.
  */
-export function deliveryTypesOf(action: string): string[] {
+export function deliveryTypesOf(
+  action: string,
+  itemType?: IssueType,
+  madeNote = false,
+): string[] {
   const type = `trail.${action}`;
   const [subject, verb] = action.split(".", 2);
   if (subject === "product") return [type, `trail.project.${verb}`];
-  if (subject === "issue") return [type, `trail.item.${verb}`];
+  if (subject === "issue") {
+    const renamed = `trail.item.${verb}`;
+    return itemType === "note" && !madeNote ? [renamed] : [type, renamed];
+  }
   return [type];
 }
 

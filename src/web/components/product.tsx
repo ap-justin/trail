@@ -10,9 +10,10 @@ import {
   ItemTable,
   matchesFilters,
   NO_FILTERS,
-  statusFilterOf,
+  showAllFilters,
   statusTabValue,
 } from "@/components/item-list";
+import { type NotesRead, NotesSection } from "@/components/notes";
 import { Pane, PaneTabs } from "@/components/pane-tabs";
 import {
   ItemListEmpty,
@@ -28,6 +29,7 @@ import {
 import { KeyPill } from "@/components/text";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import type {
+  WebItemCountsView,
   WebItemListView,
   WebProductDetailView,
   WebProductRefView,
@@ -35,6 +37,7 @@ import type {
   WebProjectView,
   WebStatusUpdatePageView,
 } from "@/lib/api-types";
+import { statusFilterOf } from "@/lib/item-status";
 import type { Loadable } from "@/lib/loadable";
 import { paths } from "@/lib/paths";
 import { useMinuteClock } from "@/lib/use-minute-clock";
@@ -47,14 +50,21 @@ export type ProductViewProps = {
   detail: WebProductDetailView | null;
   /** The rows under `filters`; `counts` are per type and status whatever the filters. */
   items: Loadable<WebItemListView>;
+  /** The last list's counts, held while the next filter's list loads; null before any. */
+  counts: WebItemCountsView | null;
+  /** The current notes, for the Notes section under the list. */
+  notes: Loadable<NotesRead>;
+  /** The product's last note counts, held while the next filter's list loads; null before any. */
+  noteCounts: WebItemCountsView["notes"] | null;
   /** Newest first. */
   statusUpdates: Loadable<WebStatusUpdatePageView>;
   filters: ItemFilters;
   onFiltersChange: (filters: ItemFilters) => void;
   onNewIssue: () => void;
   onRetryItems: () => void;
+  onRetryNotes: () => void;
   onRetryStatusUpdates: () => void;
-  /** Closes the Items pane, under the list; hidden with the pane below lg. */
+  /** Under the list, before its Notes section; hidden with the Items pane below lg. */
   footer?: ReactNode;
   /** The clock relative times are read against; ticks each minute when omitted. */
   now?: Date;
@@ -156,8 +166,16 @@ function ItemsBody({
         }}
       />
     );
-  if (items.data.counts.all.all === 0) {
-    return <ItemListEmpty productKey={product.key} onNewIssue={onNewIssue} />;
+  // a list of notes is a filter result even where there is no work
+  const { counts } = items.data;
+  if (counts.all.all === 0 && filters.type !== "note") {
+    return (
+      <ItemListEmpty
+        productKey={product.key}
+        onlyNotes={counts.notes.current + counts.notes.archived > 0}
+        onNewIssue={onNewIssue}
+      />
+    );
   }
   const rows = items.data.items.filter((item) => matchesFilters(item, filters));
   if (rows.length === 0) {
@@ -166,7 +184,7 @@ function ItemsBody({
         filters={filters}
         onShowAll={() => {
           focusList();
-          onFiltersChange(NO_FILTERS);
+          onFiltersChange(showAllFilters(filters, NO_FILTERS));
         }}
       />
     );
@@ -174,8 +192,8 @@ function ItemsBody({
   const groups = [{ product: null, count: rows.length, items: rows }];
   return (
     <>
-      <ItemTable groups={groups} labels now={now} />
-      <ItemRows groups={groups} now={now} />
+      <ItemTable groups={groups} type={filters.type} labels now={now} />
+      <ItemRows groups={groups} type={filters.type} now={now} />
     </>
   );
 }
@@ -208,9 +226,9 @@ function ProjectItem({ project, now }: { project: WebProjectView; now: Date }) {
 type PaneName = "items" | "projects" | "updates";
 
 /**
- * A product's items, filtered by type and status, beside an aside of its repository,
- * projects and status updates. Below 1024px the repo sits under the heading and Items,
- * Projects and Status updates switch.
+ * A product's items, filtered by type and status, and its current notes under them,
+ * beside an aside of its repository, projects and status updates. Below 1024px the repo
+ * sits under the heading and Items, Projects and Status updates switch.
  */
 export function ProductView(props: ProductViewProps) {
   const now = useMinuteClock(props.now);
@@ -223,7 +241,7 @@ export function ProductView(props: ProductViewProps) {
   const { detail, filters, onFiltersChange } = props;
   const projects = detail?.projects ?? [];
   const counts =
-    props.items.status === "ready" ? props.items.data.counts : null;
+    props.items.status === "ready" ? props.items.data.counts : props.counts;
   const panes: [PaneName, string][] = [
     ["items", "Items"],
     ...(projects.length > 0
@@ -280,6 +298,20 @@ export function ProductView(props: ProductViewProps) {
           </TabsContent>
         </Tabs>
         {props.footer}
+        {filters.type !== "note" && (
+          <NotesSection
+            notes={props.notes}
+            counts={props.noteCounts}
+            order="newest"
+            onShowArchived={() => {
+              listRef.current?.focus();
+              onFiltersChange({ type: "note", status: "archived" });
+            }}
+            onRetry={props.onRetryNotes}
+            now={now}
+            className="mt-6"
+          />
+        )}
       </Pane>
       <aside className="flex flex-col gap-5 lg:w-70 lg:shrink-0">
         {detail?.repoUrl && (

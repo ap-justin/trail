@@ -25,6 +25,7 @@ import {
   changedStatusLabel,
   PriorityLabel,
   priorityLabel,
+  StatusIcon,
   StatusLabel,
   TypeIcon,
   typeLabel,
@@ -133,7 +134,7 @@ function createdAs(issue: WebItemView): WebItemType {
   return created?.kind === "item_created" ? created.createdAs : issue.type;
 }
 
-/** Issue or Todo as its grey glyph and word: a fact about the item, never a chip. */
+/** Issue, Todo or Note as its grey glyph and word: a fact about the item, never a chip. */
 function ItemType({ type }: { type: WebItemType }) {
   return (
     <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
@@ -142,6 +143,12 @@ function ItemType({ type }: { type: WebItemType }) {
     </span>
   );
 }
+
+const createdBy: Record<WebItemType, string> = {
+  issue: "filed by",
+  todo: "planned by",
+  note: "written by",
+};
 
 /**
  * At lg the title, then one byline: type, key, who filed it and when. Below lg the
@@ -161,9 +168,7 @@ function Header({ issue }: { issue: WebItemView }) {
           <ItemType type={issue.type} />
         </span>
         <KeyText className={lead}>{issue.key}</KeyText>
-        <span className={rest}>
-          {createdAs(issue) === "todo" ? "planned by" : "filed by"}
-        </span>
+        <span className={rest}>{createdBy[createdAs(issue)]}</span>
         <span className={cn("flex items-center gap-1.5", rest)}>
           <Actor actor={issue.creator} withTitle={false} />
         </span>
@@ -221,16 +226,17 @@ function Property({
 const none = <span className="text-muted-foreground">None</span>;
 
 // an issue waits in triage for an owner; a todo always has its planning bot
-const noAssignee: Record<WebItemType, ReactNode> = {
+const noAssignee: Record<Exclude<WebItemType, "note">, ReactNode> = {
   issue: <span className="text-muted-foreground">Unassigned</span>,
   todo: none,
 };
 
 /**
  * Read-only on purpose: people never change status, priority, labels, assignee or
- * estimate, so nothing here is a control, has a hover state or carries a chevron.
+ * estimate, so nothing here is a control, has a hover state or carries a chevron. A note
+ * is never assigned, prioritised or estimated, so it has no Assignee, Priority or Estimate row.
  * Below lg every property is a full 44px row; Type and Status sit in the header there
- * and Created drops, so Priority leads.
+ * and Created drops, so Priority leads (Labels on a note).
  */
 function Properties({ issue }: { issue: WebItemView }) {
   const headingId = useId();
@@ -246,35 +252,41 @@ function Properties({ issue }: { issue: WebItemView }) {
         <Property label="Status" className="max-lg:hidden">
           <StatusLabel status={issue.status} className="text-sm" />
         </Property>
-        <Property label="Priority">
-          <PriorityLabel priority={issue.priority} className="text-sm" />
-        </Property>
-        <Property label="Estimate">
-          {issue.estimate === null ? none : `${issue.estimate} h`}
-        </Property>
+        {issue.type !== "note" && (
+          <>
+            <Property label="Priority">
+              <PriorityLabel priority={issue.priority} className="text-sm" />
+            </Property>
+            <Property label="Estimate">
+              {issue.estimate === null ? none : `${issue.estimate} h`}
+            </Property>
+          </>
+        )}
         {/* at lg the label stays on the name's row, above the title's */}
-        <Property label="Assignee" itemClassName="lg:self-start">
-          {issue.assignee ? (
-            // at lg a grid with the title on a second row, indented past the avatar;
-            // below, one line that wraps the title under a long name
-            <span className="flex min-w-0 items-center gap-2 lg:grid lg:grid-cols-[auto_minmax(0,1fr)] lg:justify-items-start lg:gap-x-2 lg:gap-y-1">
-              <ActorAvatar
-                actor={issue.assignee}
-                size="xs"
-                className="lg:size-5"
-              />
-              <ActorName
-                actor={issue.assignee}
-                className="lg:contents"
-                // start-aligned, a nowrap name is as wide as its text: capped to its track
-                nameClassName="max-w-full"
-                titleClassName="lg:col-start-2 lg:row-start-2"
-              />
-            </span>
-          ) : (
-            noAssignee[issue.type]
-          )}
-        </Property>
+        {issue.type !== "note" && (
+          <Property label="Assignee" itemClassName="lg:self-start">
+            {issue.assignee ? (
+              // at lg a grid with the title on a second row, indented past the avatar;
+              // below, one line that wraps the title under a long name
+              <span className="flex min-w-0 items-center gap-2 lg:grid lg:grid-cols-[auto_minmax(0,1fr)] lg:justify-items-start lg:gap-x-2 lg:gap-y-1">
+                <ActorAvatar
+                  actor={issue.assignee}
+                  size="xs"
+                  className="lg:size-5"
+                />
+                <ActorName
+                  actor={issue.assignee}
+                  className="lg:contents"
+                  // start-aligned, a nowrap name is as wide as its text: capped to its track
+                  nameClassName="max-w-full"
+                  titleClassName="lg:col-start-2 lg:row-start-2"
+                />
+              </span>
+            ) : (
+              noAssignee[issue.type]
+            )}
+          </Property>
+        )}
         <Property label="Labels">
           {issue.labels.length === 0
             ? none
@@ -332,6 +344,94 @@ function Properties({ issue }: { issue: WebItemView }) {
       </dl>
     </section>
   );
+}
+
+/**
+ * Items as links, each its status and type glyphs, key and title: the items a note is about, or the
+ * notes about this item, with `children` under them. Nothing when there are no items and no `children`.
+ * With `currentNotes` every row is a current note under its heading, so the status glyph goes and the
+ * note glyph stays unnamed: each link is its key and title.
+ */
+function ItemRefs({
+  heading,
+  items,
+  currentNotes = false,
+  children,
+}: {
+  heading: string;
+  items: WebItemView["about"];
+  currentNotes?: boolean;
+  children?: ReactNode;
+}) {
+  const headingId = useId();
+  if (items.length === 0 && children === undefined) return null;
+  return (
+    <section
+      aria-labelledby={headingId}
+      className="max-lg:px-4 max-lg:py-3.5 lg:mt-7"
+    >
+      <h2 id={headingId} className="mb-1.5 font-medium lg:mb-2">
+        {heading}
+      </h2>
+      {items.length > 0 && (
+        <ul>
+          {items.map((item) => (
+            <li key={item.key}>
+              <AppLink
+                href={paths.issue(item.key)}
+                className="group flex min-h-11 items-center gap-2 rounded-md py-1.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring lg:min-h-0"
+              >
+                {/* named by its glyphs and words: "In progress Issue TRL-14 Team access" */}
+                {!currentNotes && (
+                  <>
+                    <StatusIcon status={item.status} label />{" "}
+                  </>
+                )}
+                <TypeIcon type={item.type} decorative={currentNotes} />{" "}
+                <KeyText className="shrink-0">{item.key}</KeyText>{" "}
+                <span className="min-w-0 truncate group-hover:underline">
+                  {item.title}
+                </span>
+              </AppLink>
+            </li>
+          ))}
+        </ul>
+      )}
+      {children}
+    </section>
+  );
+}
+
+/**
+ * The notes about an item: the current ones the read carries (newest first, capped), then
+ * what the list leaves out as one plain sentence. The web list has no about filter, so the
+ * counts link nowhere, and a sentence keeps them from reading as the product page's button.
+ */
+function NotesAbout({ item }: { item: WebItemView }) {
+  const { current, archived } = item.notesCount;
+  if (current + archived === 0) return null;
+  const left = notesLeftOut(current, current - item.notes.length, archived);
+  return (
+    <ItemRefs heading="Notes" items={item.notes} currentNotes>
+      {left && <p className="py-1.5 text-muted-foreground">{left}</p>}
+    </ItemRefs>
+  );
+}
+
+const notesWord = (n: number) => (n === 1 ? "note" : "notes");
+
+/** "No current notes, 2 archived." · "3 more current notes, 1 archived." · "1 archived note." */
+function notesLeftOut(current: number, unlisted: number, archived: number) {
+  const lead =
+    current === 0
+      ? "No current notes"
+      : unlisted > 0
+        ? `${unlisted} more current ${notesWord(unlisted)}`
+        : null;
+  if (archived === 0) return lead && `${lead}.`;
+  return lead
+    ? `${lead}, ${archived} archived.`
+    : `${archived} archived ${notesWord(archived)}.`;
 }
 
 const webScheme = /^https?:\/\//i;
@@ -473,18 +573,63 @@ function Links({ links }: { links: WebItemView["links"] }) {
   );
 }
 
-const typeLabels: Record<WebItemType, string> = {
-  issue: "Issue",
-  todo: "Todo",
+const createdPhrase: Record<WebItemType, string> = {
+  issue: "filed this issue",
+  todo: "planned this todo",
+  note: "wrote this note",
 };
+
+const countOfItems = (n: number) => `${n} ${n === 1 ? "item" : "items"}`;
+
+/** The entry counts other products' items and never names them. */
+function othersClause({ from, to }: { from: number; to: number }) {
+  if (from === to) return null;
+  if (from === 0) return `added ${countOfItems(to)} in other products`;
+  if (to === 0) return `removed ${countOfItems(from)} in other products`;
+  return `went from ${from} to ${countOfItems(to)} in other products`;
+}
+
+/**
+ * "changed what this note is about: added ATL-3, ATL-5; removed ATL-1". The line is a flex
+ * row, so each word run and key carries its own comma or semicolon, and the gap never
+ * parts them.
+ */
+function aboutPhrase(entry: Extract<EntryView, { kind: "about_changed" }>) {
+  const others = othersClause(entry.others);
+  const clauses = [
+    ...(entry.added.length > 0 ? [{ words: "added", keys: entry.added }] : []),
+    ...(entry.removed.length > 0
+      ? [{ words: "removed", keys: entry.removed }]
+      : []),
+    ...(others === null ? [] : [{ words: others, keys: [] }]),
+  ];
+  return (
+    <>
+      changed what this note is about{clauses.length > 0 && ":"}{" "}
+      {clauses.map(({ words, keys }, c) => {
+        const end = c < clauses.length - 1 && ";";
+        return [
+          <span key={words}>
+            {words}
+            {keys.length === 0 && end}{" "}
+          </span>,
+          ...keys.map((key, k) => (
+            <span key={key}>
+              <KeyText className="text-foreground">{key}</KeyText>
+              {k < keys.length - 1 ? "," : end}{" "}
+            </span>
+          )),
+        ];
+      })}
+    </>
+  );
+}
 
 /** The words after the actor in a one-line timeline entry. */
 function changePhrase(entry: EntryView): ReactNode {
   switch (entry.kind) {
     case "item_created":
-      return entry.createdAs === "todo"
-        ? "planned this todo"
-        : "filed this issue";
+      return createdPhrase[entry.createdAs];
     case "status_changed":
       return (
         <>
@@ -499,8 +644,8 @@ function changePhrase(entry: EntryView): ReactNode {
     case "type_changed":
       return (
         <>
-          changed type from {strong(typeLabels[entry.from])} to{" "}
-          {strong(typeLabels[entry.to])}
+          changed type from {strong(typeLabel(entry.from))} to{" "}
+          {strong(typeLabel(entry.to))}
         </>
       );
     case "added_to_project":
@@ -524,6 +669,8 @@ function changePhrase(entry: EntryView): ReactNode {
       );
     case "link_added":
       return <>added a link {strong(entry.link.title)}</>;
+    case "about_changed":
+      return aboutPhrase(entry);
     case "assignee_changed":
       return entry.to ? (
         <>
@@ -826,9 +973,10 @@ function CommentBox({
 }
 
 /**
- * An item (issue or todo) as people see it: everything read-only except the comment box
- * at the end of the timeline. At 1440 a main column beside a 280px Properties and Links rail; below,
- * one column in the order title, description, properties, links, activity, comment box.
+ * An item (issue, todo or note) as people see it: everything read-only except the comment box
+ * at the end of the timeline. At 1440 a main column beside a 280px rail of Properties, Links, About
+ * and Notes; below, one column in the order title, description, properties, links, about, notes,
+ * activity, comment box.
  */
 export function IssueView(props: IssueViewProps) {
   const { issue } = props;
@@ -851,6 +999,8 @@ export function IssueView(props: IssueViewProps) {
       <aside className="lg:col-start-2 lg:row-span-4 lg:row-start-1">
         <Properties issue={data} />
         <Links links={data.links} />
+        <ItemRefs heading="About" items={data.about} />
+        <NotesAbout item={data} />
       </aside>
       <section
         aria-labelledby={activityId}

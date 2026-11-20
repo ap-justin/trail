@@ -126,6 +126,116 @@ test("a human cannot create a project", () => {
   );
 });
 
+test("a person cannot add a note, and no note exists after the refusal", () => {
+  const target = service.createProduct(bot, { key: projectKey(), name: "p" });
+  published = [];
+  rejectsCleanly(
+    () => service.addNote(human, { product: target.key, title: "record" }),
+    ForbiddenError,
+  );
+  expect(() =>
+    service.addNote(human, { product: target.key, title: "record" }),
+  ).toThrow("only a bot may add a note");
+  expect(published).toEqual([]);
+  expect(
+    service.listItems(bot, { product: target.key, type: "note" }).items,
+  ).toEqual([]);
+  expect(
+    service.addNote(bot, { product: target.key, title: "record" }),
+  ).toMatchObject({ type: "note", status: "current" });
+  expect(published.map((e) => e.action)).toEqual(["issue.created"]);
+});
+
+test.each([
+  ["todo", "current"],
+  ["todo", "archived"],
+  ["issue", "current"],
+  ["issue", "archived"],
+] as const)(
+  "listing %ss by note status %s is refused, and the message sends the caller to type note",
+  (type, status) => {
+    const target = service.createProduct(bot, { key: projectKey(), name: "p" });
+    const listing = () =>
+      service.listItems(bot, { product: target.key, type, status });
+    expect(listing).toThrow(ValidationError);
+    expect(listing).toThrow(`never ${status}`);
+    expect(listing).toThrow(/send type note/);
+  },
+);
+
+/** The query plan of every statement on the issue table that `run` executes, as SQLite would run it with the same parameters. */
+function issuePlansOf(run: () => void): string[] {
+  const client = db.$client;
+  const prepare = client.prepare.bind(client);
+  const plans: string[] = [];
+  const spy = vi.spyOn(client, "prepare").mockImplementation((source) => {
+    const statement = prepare(source);
+    if (!/ from "issue"/.test(source)) return statement;
+    const all = statement.all.bind(statement);
+    statement.all = (...params: unknown[]) => {
+      plans.push(
+        (
+          prepare(`explain query plan ${source}`).all(...params) as {
+            detail: string;
+          }[]
+        )
+          .map((r) => r.detail)
+          .join("\n"),
+      );
+      return all(...params);
+    };
+    return statement;
+  });
+  try {
+    run();
+  } finally {
+    spy.mockRestore();
+  }
+  return plans;
+}
+
+test("listing a product's notes with no status lists current and archived ones, newest first, and reads them off the status index", () => {
+  const target = service.createProduct(bot, { key: projectKey(), name: "p" });
+  service.addNote(bot, { product: target.key, title: "first" });
+  for (let i = 0; i < 20; i++) {
+    service.addTodo(bot, { product: target.key, title: `work ${i}` });
+    service.fileIssue(bot, { product: target.key, title: `request ${i}` });
+  }
+  const archived = service.addNote(bot, { product: target.key, title: "old" });
+  service.updateItem(bot, archived.id, { status: "archived" });
+  service.addNote(bot, { product: target.key, title: "last" });
+  // the statistics `pragma optimize` gathers on a served file, which the planner weighs
+  db.$client.exec("analyze");
+
+  let listed: Issue[] = [];
+  const plans = issuePlansOf(() => {
+    listed = service.listItems(bot, {
+      product: target.key,
+      type: "note",
+    }).items;
+  });
+  expect(listed.map((n) => [n.title, n.status])).toEqual([
+    ["last", "current"],
+    ["old", "archived"],
+    ["first", "current"],
+  ]);
+  const page = plans.find((p) => /\bissue_product_\w*idx\b/.test(p));
+  expect(page).toMatch(/\bissue_product_status_created_idx\b/);
+});
+
+test("the service refuses an about of more than 50 keys before looking any up, naming the field and the count", () => {
+  const target = service.createProduct(bot, { key: projectKey(), name: "p" });
+  const keys = Array.from({ length: 51 }, (_, i) => `${target.key}-${i + 1}`);
+  expect(() =>
+    service.addNote(bot, { product: target.key, title: "wide", about: keys }),
+  ).toThrow(
+    "about names 51 items, over the limit of 50: a note is about at most 50 items",
+  );
+  expect(
+    service.listItems(bot, { product: target.key, type: "note" }).items,
+  ).toEqual([]);
+});
+
 test("a person can file an issue but not add a todo, nor create or fill a project", () => {
   const target = service.createProduct(bot, { key: projectKey(), name: "p" });
   const filed = service.fileIssue(human, { product: target.key, title: "x" });
@@ -559,7 +669,10 @@ describe("updatedAt", () => {
         }),
     ])[0] as Product;
     expect(result).toEqual(created);
-    expect(service.getProduct(bot, created.id)).toEqual(created);
+    expect(service.getProduct(bot, created.id)).toEqual({
+      ...created,
+      notes: { current: 0, archived: 0 },
+    });
     expect(published).toEqual([]);
   });
 
@@ -579,6 +692,8 @@ describe("updatedAt", () => {
     expect(result).toEqual(created);
     expect(service.getItem(bot, created.id)).toEqual({
       ...created,
+      notes: [],
+      notesCount: { current: 0, archived: 0 },
       access: "product",
     });
     expect(published).toEqual([]);

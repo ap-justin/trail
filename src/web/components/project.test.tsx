@@ -12,8 +12,11 @@ import {
 import { applyCompiledCss } from "@/test/compiled-css";
 import {
   beta,
+  countsOf,
   docsSite,
   issueRow,
+  noteRow,
+  notesRead,
   projectDetail,
   projectItems,
   statusUpdate,
@@ -43,12 +46,21 @@ const groups = [
 ];
 
 function props(overrides: Partial<ProjectViewProps> = {}): ProjectViewProps {
+  const items: ProjectViewProps["items"] = overrides.items ?? {
+    status: "ready",
+    data: projectItems(groups),
+  };
   return {
+    // the route's: its own query, held while the list reloads
+    noteCounts: (items.status === "ready" ? items.data : projectItems(groups))
+      .counts.notes,
     project: {
       status: "ready",
       data: projectDetail({ products: [docsSite, trail] }),
     },
-    items: { status: "ready", data: projectItems(groups) },
+    items,
+    counts: null,
+    notes: { status: "ready", data: notesRead([]) },
     statusUpdates: {
       status: "ready",
       data: {
@@ -60,6 +72,7 @@ function props(overrides: Partial<ProjectViewProps> = {}): ProjectViewProps {
     onFiltersChange: vi.fn(),
     onRetryProject: vi.fn(),
     onRetryItems: vi.fn(),
+    onRetryNotes: vi.fn(),
     onRetryStatusUpdates: vi.fn(),
     now,
     ...overrides,
@@ -97,6 +110,11 @@ const groupBody = (key: string) => {
 const rowsIn = (scope: HTMLElement) =>
   scope.querySelectorAll("tr[data-item-key]").length;
 const details = () => screen.getByRole("region", { name: "Details" });
+const typeToggle = () => screen.getByRole("group", { name: "Filter by type" });
+const statusTabs = () =>
+  within(screen.getByRole("tablist", { name: "Filter by status" }))
+    .getAllByRole("tab")
+    .map((t) => t.textContent);
 const HIDDEN = "Items from products you can't see are not shown.";
 
 describe("goal and details", () => {
@@ -204,14 +222,18 @@ describe("groups", () => {
     ] as const) {
       const body = groupBody(key);
       const header = within(body).getByRole("columnheader");
-      expect(header).toHaveTextContent(`${name} ${key} ${count} items`);
+      expect(header).toHaveTextContent(
+        `${name} ${key} ${count} issues and todos`,
+      );
       expect(rowsIn(body)).toBe(count);
     }
   });
 
   test("below 1024px each group is a section headed the same way", () => {
     renderProject();
-    const section = screen.getByRole("region", { name: "trail TRL 3 items" });
+    const section = screen.getByRole("region", {
+      name: "trail TRL 3 issues and todos",
+    });
     expect(within(section).getAllByRole("listitem")).toHaveLength(3);
   });
 
@@ -242,6 +264,26 @@ describe("groups", () => {
     expect(types.map((t) => t.dataset.itemType)).toEqual(["todo", "todo"]);
   });
 
+  test.each([
+    ["issue", issueRow(), "trail TRL 1 issue"],
+    ["todo", todoRow(), "trail TRL 1 todo"],
+  ] as const)(
+    "under a %s filter each group's heading names that type alone, in the table and below 1024px",
+    (type, row, name) => {
+      renderProject({
+        items: {
+          status: "ready",
+          data: projectItems([{ product: trail, items: [row] }]),
+        },
+        filters: { ...NO_PROJECT_FILTERS, type },
+      });
+      expect(
+        within(groupBody("TRL")).getByRole("columnheader").textContent,
+      ).toBe(name);
+      expect(screen.getByRole("region", { name })).toBeInTheDocument();
+    },
+  );
+
   test("an unassigned issue reads Unassigned; rows have no Labels column", () => {
     renderProject();
     expect(
@@ -257,7 +299,7 @@ describe("groups", () => {
       "Priority",
       "Assignee",
       "Updated",
-      "Docs site DOC 2 items",
+      "Docs site DOC 2 issues and todos",
     ]);
     expect(table().querySelector('[data-item-key="DOC-6"]')).toHaveTextContent(
       "Unassigned",
@@ -344,7 +386,7 @@ describe("375", () => {
     }
   });
 
-  test("the sheet holds Product and Type, applied as chosen, and says how many items show", async () => {
+  test("the sheet holds Product and Type, applied as chosen, and the button counts them in the type's own word", async () => {
     const user = userEvent.setup();
     render(<FilteredProject />);
     await user.click(filtersButton());
@@ -355,7 +397,7 @@ describe("375", () => {
     await user.click(within(sheet).getByRole("combobox", { name: "Type" }));
     await user.click(await screen.findByRole("option", { name: "Todos" }));
     await user.click(
-      within(sheet).getByRole("button", { name: "Show 2 items" }),
+      within(sheet).getByRole("button", { name: "Show 2 todos" }),
     );
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(
@@ -366,7 +408,55 @@ describe("375", () => {
     expect(filtersButton()).toHaveAccessibleName("Filters 1 in use");
   });
 
-  test("the button counts the product and type in force; while the list loads the sheet has no count", async () => {
+  test("the sheet's all-types option says All, as the lg toggle does: it lists issues and todos, not notes", async () => {
+    const user = userEvent.setup();
+    render(<FilteredProject />);
+    await user.click(filtersButton());
+    const sheet = await screen.findByRole("dialog", { name: "Filters" });
+    await user.click(within(sheet).getByRole("combobox", { name: "Type" }));
+    expect(
+      (await screen.findAllByRole("option")).map((o) => o.textContent),
+    ).toEqual(["All", "Issues", "Todos", "Notes"]);
+  });
+
+  test("under the Notes type the sheet's button counts notes, not items", async () => {
+    const user = userEvent.setup();
+    // 5 work items and 2 notes (1 current, 1 archived): All notes is 2, neither the work 5 nor the current 1
+    render(
+      <FilteredProject
+        items={{
+          status: "ready",
+          data: {
+            ...projectItems(groups),
+            counts: countsOf([
+              ...groups.flatMap((g) => g.items),
+              noteRow(),
+              noteRow({ key: "TRL-29", status: "archived" }),
+            ]),
+          },
+        }}
+      />,
+    );
+    await user.click(filtersButton());
+    const sheet = await screen.findByRole("dialog", { name: "Filters" });
+    await user.click(within(sheet).getByRole("combobox", { name: "Type" }));
+    await user.click(await screen.findByRole("option", { name: "Notes" }));
+    expect(
+      await within(sheet).findByRole("button", { name: /^Show / }),
+    ).toHaveAccessibleName("Show 2 notes");
+  });
+
+  test("under All the sheet's button counts issues and todos, not items", async () => {
+    const user = userEvent.setup();
+    render(<FilteredProject />);
+    await user.click(filtersButton());
+    const sheet = await screen.findByRole("dialog", { name: "Filters" });
+    expect(
+      within(sheet).getByRole("button", { name: /^Show / }),
+    ).toHaveAccessibleName("Show 5 issues and todos");
+  });
+
+  test("the button counts the product and type in force; while the list loads the sheet has no count, only the type", async () => {
     const user = userEvent.setup();
     renderProject({
       filters: { type: "issue", status: null, product: "TRL" },
@@ -375,9 +465,28 @@ describe("375", () => {
     expect(filtersButton()).toHaveAccessibleName("Filters 2 in use");
     await user.click(filtersButton());
     expect(
-      await screen.findByRole("button", { name: "Show items" }),
+      await screen.findByRole("button", { name: "Show issues" }),
     ).toBeInTheDocument();
   });
+
+  test.each([
+    [null, "Show issues and todos"],
+    ["note", "Show notes"],
+  ] as const)(
+    "while the list loads under type %s the sheet's button reads %s, without a count",
+    async (type, label) => {
+      const user = userEvent.setup();
+      renderProject({
+        filters: { ...NO_PROJECT_FILTERS, type },
+        items: { status: "loading" },
+      });
+      await user.click(filtersButton());
+      const sheet = await screen.findByRole("dialog", { name: "Filters" });
+      expect(
+        within(sheet).getByRole("button", { name: /^Show / }),
+      ).toHaveAccessibleName(label);
+    },
+  );
 });
 
 describe("empty and failed", () => {
@@ -426,6 +535,41 @@ describe("empty and failed", () => {
     expect(details()).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Try again" }));
     expect(p.onRetryItems).toHaveBeenCalledOnce();
+  });
+
+  test("while a tab's list loads, the tabs keep the counts the route holds; without them, they count only a ready list", () => {
+    const { counts } = projectItems(groups);
+    const { rerender } = render(
+      <ProjectView
+        {...props({
+          filters: { ...NO_PROJECT_FILTERS, status: "done" },
+          items: { status: "loading" },
+          counts,
+        })}
+      />,
+    );
+    expect(statusTabs()).toEqual([
+      "All 5",
+      "Open 4",
+      "In progress 1",
+      "Done 0",
+      "Canceled 0",
+    ]);
+    rerender(
+      <ProjectView
+        {...props({
+          filters: { ...NO_PROJECT_FILTERS, status: "done" },
+          items: { status: "loading" },
+        })}
+      />,
+    );
+    expect(statusTabs()).toEqual([
+      "All ",
+      "Open ",
+      "In progress ",
+      "Done ",
+      "Canceled ",
+    ]);
   });
 
   test("Try again and Show all leave focus on the list, not the top of the page", async () => {
@@ -519,4 +663,344 @@ test("the Projects link in the heading draws the shared focus outline", () => {
     "focus-visible:outline-offset-2",
     "focus-visible:outline-ring",
   );
+});
+
+describe("notes", () => {
+  const notes = [noteRow()];
+  const archived = noteRow({
+    key: "TRL-29",
+    title: "Old deploy steps",
+    status: "archived",
+  });
+  const withNotes = (work = groups) => ({
+    ...projectItems(work),
+    counts: countsOf([...work.flatMap((g) => g.items), ...notes, archived]),
+  });
+
+  test("current notes show in a Notes section under the work list; the tab and group counts leave them out", () => {
+    renderProject({
+      items: { status: "ready", data: withNotes() },
+      notes: { status: "ready", data: notesRead(notes) },
+    });
+    const section = screen.getByRole("region", { name: /^Notes/ });
+    expect(
+      within(section).getByRole("link", {
+        name: "TRL-31 Why the feed reads newest first",
+      }),
+    ).toHaveAttribute("href", "/products/TRL/31");
+    // the notes are counted apart: the work list's tabs and its groups hold the 5 todos and issues only
+    expect(
+      within(screen.getByRole("tablist", { name: "Filter by status" }))
+        .getAllByRole("tab")
+        .map((t) => t.textContent),
+    ).toEqual(["All 5", "Open 4", "In progress 1", "Done 0", "Canceled 0"]);
+    const body = groupBody("TRL");
+    expect(within(body).getByRole("columnheader")).toHaveTextContent(
+      "trail TRL 3 issues and todos",
+    );
+    expect(rowsIn(body)).toBe(3);
+    expect(
+      within(table()).queryByText(/Why the feed reads newest first/),
+    ).toBeNull();
+  });
+
+  test("Show archived notes keeps the product filter and lists the archived ones", async () => {
+    const user = userEvent.setup();
+    const p = renderProject({
+      filters: { ...NO_PROJECT_FILTERS, product: "TRL" },
+      items: { status: "ready", data: withNotes() },
+      notes: { status: "ready", data: notesRead(notes) },
+    });
+    await user.click(
+      screen.getByRole("button", { name: "Show 1 archived note" }),
+    );
+    expect(p.onFiltersChange).toHaveBeenCalledWith({
+      product: "TRL",
+      type: "note",
+      status: "archived",
+    });
+  });
+
+  test("every note archived and the notes list not loaded: the section says none are current and still offers the archived, whose list then shows", async () => {
+    const user = userEvent.setup();
+    const onlyArchived = {
+      ...projectItems(groups),
+      counts: countsOf([...groups.flatMap((g) => g.items), archived]),
+    };
+    const p = props({
+      items: { status: "ready", data: onlyArchived },
+      // the route's read of current notes never runs for a count of 0
+      notes: { status: "loading" },
+    });
+    const { rerender } = render(<ProjectView {...p} />);
+    const section = screen.getByRole("region", { name: /^Notes/ });
+    expect(
+      within(section).getByRole("heading", { name: "Notes 0" }),
+    ).toBeInTheDocument();
+    expect(within(section).getByText("No current notes.")).toBeInTheDocument();
+    expect(within(section).queryByRole("status")).toBeNull();
+    await user.click(
+      within(section).getByRole("button", { name: "Show 1 archived note" }),
+    );
+    expect(p.onFiltersChange).toHaveBeenCalledWith({
+      ...NO_PROJECT_FILTERS,
+      type: "note",
+      status: "archived",
+    });
+    rerender(
+      <ProjectView
+        {...p}
+        filters={{ ...NO_PROJECT_FILTERS, type: "note", status: "archived" }}
+        items={{
+          status: "ready",
+          data: {
+            ...projectItems([{ product: trail, items: [archived] }]),
+            counts: onlyArchived.counts,
+          },
+        }}
+      />,
+    );
+    expect(
+      screen.getAllByRole("link", { name: "TRL-29 Old deploy steps" }),
+    ).not.toHaveLength(0);
+  });
+
+  test("a project with notes and no work lists its notes when asked, not the empty state, and its group counts notes", () => {
+    renderProject({
+      filters: { ...NO_PROJECT_FILTERS, type: "note", status: "archived" },
+      items: {
+        status: "ready",
+        data: {
+          ...projectItems([{ product: trail, items: [archived] }]),
+          counts: countsOf([...notes, archived]),
+        },
+      },
+    });
+    expect(
+      screen.queryByRole("heading", { name: "No items in this project yet" }),
+    ).toBeNull();
+    expect(
+      screen.getAllByRole("link", { name: "TRL-29 Old deploy steps" }),
+    ).not.toHaveLength(0);
+    expect(screen.queryByRole("region", { name: /^Notes/ })).toBeNull();
+    // a group of notes counts notes, at both widths
+    expect(
+      within(groupBody("TRL")).getByRole("columnheader"),
+    ).toHaveTextContent("trail TRL 1 note");
+    expect(
+      screen.getByRole("region", { name: "trail TRL 1 note" }),
+    ).toBeInTheDocument();
+  });
+
+  test("Show all on an empty notes filter keeps the notes and the product, and clears only the status", async () => {
+    const user = userEvent.setup();
+    const p = renderProject({
+      filters: { product: "TRL", type: "note", status: "current" },
+      items: {
+        status: "ready",
+        data: {
+          ...projectItems([]),
+          counts: countsOf([archived]),
+        },
+      },
+    });
+    expect(
+      screen.getByRole("heading", { name: "No notes are current" }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Show all" }));
+    expect(p.onFiltersChange).toHaveBeenCalledWith({
+      product: "TRL",
+      type: "note",
+      status: null,
+    });
+  });
+
+  test("a project with notes and no work: Show archived notes leaves focus on the list", async () => {
+    const user = userEvent.setup();
+    const notesOnly = {
+      ...projectItems([]),
+      counts: countsOf([...notes, archived]),
+    };
+    const { rerender } = render(
+      <ProjectView
+        {...props({
+          items: { status: "ready", data: notesOnly },
+          notes: { status: "ready", data: notesRead(notes) },
+        })}
+      />,
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Show 1 archived note" }),
+    );
+    rerender(
+      <ProjectView
+        {...props({
+          filters: { ...NO_PROJECT_FILTERS, type: "note", status: "archived" },
+          items: { status: "loading" },
+          notes: { status: "ready", data: notesRead(notes) },
+        })}
+      />,
+    );
+    expect(screen.getByRole("tabpanel")).toHaveFocus();
+  });
+
+  test("a project with notes and no work keeps its filters: leaving the archived notes keeps focus on the pressed control, and the empty list doesn't say the project has no items", async () => {
+    const user = userEvent.setup();
+    render(
+      <FilteredProject
+        items={{
+          status: "ready",
+          data: {
+            ...projectItems([{ product: trail, items: [archived] }]),
+            counts: countsOf([...notes, archived]),
+          },
+        }}
+        notes={{ status: "ready", data: notesRead(notes) }}
+      />,
+    );
+    const noWork = () =>
+      screen.getByRole("heading", {
+        name: "No issues or todos in this project yet",
+      });
+    expect(noWork()).toBeInTheDocument();
+    expect(screen.queryByText(/Bots add issues and todos/)).toBeNull();
+    await user.click(
+      screen.getByRole("button", { name: "Show 1 archived note" }),
+    );
+    expect(
+      screen.getAllByRole("link", { name: "TRL-29 Old deploy steps" }),
+    ).not.toHaveLength(0);
+    const all = within(typeToggle()).getByRole("button", { name: /^All/ });
+    await user.click(all);
+    expect(all).toHaveFocus();
+    expect(noWork()).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: /^Notes/ })).toBeInTheDocument();
+    const issues = within(typeToggle()).getByRole("button", {
+      name: /^Issues/,
+    });
+    await user.click(issues);
+    expect(issues).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "Show all" }));
+    expect(screen.getByRole("tabpanel", { name: /^All/ })).toHaveFocus();
+    expect(noWork()).toBeInTheDocument();
+  });
+
+  test("the Notes section and Show archived notes stay while the work list reloads", () => {
+    renderProject({
+      filters: { ...NO_PROJECT_FILTERS, status: "open" },
+      items: { status: "loading" },
+      noteCounts: withNotes().counts.notes,
+      notes: { status: "ready", data: notesRead(notes) },
+    });
+    const section = screen.getByRole("region", { name: /^Notes/ });
+    expect(
+      within(section).getByRole("heading", { name: "Notes 1" }),
+    ).toBeInTheDocument();
+    expect(
+      within(section).getByRole("link", {
+        name: "TRL-31 Why the feed reads newest first",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(section).getByRole("button", { name: "Show 1 archived note" }),
+    ).toBeInTheDocument();
+  });
+
+  test("a notes read the page cap cut short says how many of its count show, newest first under a product filter, with no way to more", () => {
+    renderProject({
+      filters: { ...NO_PROJECT_FILTERS, product: "TRL" },
+      items: { status: "ready", data: withNotes() },
+      noteCounts: { current: 2134, archived: 1 },
+      notes: {
+        status: "ready",
+        data: { items: notes, nextCursor: "after-31", total: 2134 },
+      },
+    });
+    const section = screen.getByRole("region", { name: /^Notes/ });
+    expect(
+      within(section).getByText("Showing the newest 1 of 2,134 notes"),
+    ).toBeInTheDocument();
+    expect(within(section).getAllByRole("button")).toHaveLength(1);
+  });
+
+  test("across products the capped read runs A to Z by product, so its line says first, not newest", () => {
+    renderProject({
+      items: { status: "ready", data: withNotes() },
+      noteCounts: { current: 2134, archived: 1 },
+      notes: {
+        status: "ready",
+        data: { items: notes, nextCursor: "after-31", total: 2134 },
+      },
+    });
+    expect(
+      within(screen.getByRole("region", { name: /^Notes/ })).getByText(
+        "Showing the first 1 of 2,134 notes",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  test("Show archived notes keeps the product filter", async () => {
+    const user = userEvent.setup();
+    const p = renderProject({
+      filters: { ...NO_PROJECT_FILTERS, product: "TRL" },
+      items: { status: "ready", data: withNotes() },
+      notes: { status: "ready", data: notesRead(notes) },
+    });
+    await user.click(
+      within(screen.getByRole("region", { name: /^Notes/ })).getByRole(
+        "button",
+        { name: "Show 1 archived note" },
+      ),
+    );
+    expect(p.onFiltersChange).toHaveBeenCalledWith({
+      product: "TRL",
+      type: "note",
+      status: "archived",
+    });
+  });
+
+  test("every current note shown: no Showing line and no button but the archived one", () => {
+    renderProject({
+      items: { status: "ready", data: withNotes() },
+      notes: { status: "ready", data: notesRead(notes) },
+    });
+    const section = screen.getByRole("region", { name: /^Notes/ });
+    expect(within(section).queryByText(/^Showing/)).toBeNull();
+    expect(within(section).getAllByRole("button")).toHaveLength(1);
+  });
+
+  test("counts from a later list above the rows of an older read: no Showing line", () => {
+    // a failed refetch keeps the older read's rows while another list's counts moved on
+    renderProject({
+      items: { status: "ready", data: withNotes() },
+      noteCounts: { current: 4, archived: 1 },
+      notes: { status: "ready", data: notesRead(notes) },
+    });
+    const section = screen.getByRole("region", { name: /^Notes/ });
+    expect(
+      within(section).getByRole("heading", { name: "Notes 4" }),
+    ).toBeInTheDocument();
+    expect(within(section).queryByText(/^Showing/)).toBeNull();
+  });
+
+  test("Try again on notes leaves focus on their heading", async () => {
+    const user = userEvent.setup();
+    const items = { status: "ready", data: withNotes() } as const;
+    const { rerender } = render(
+      <ProjectView {...props({ items, notes: { status: "error" } })} />,
+    );
+    const section = screen.getByRole("region", { name: /^Notes/ });
+    await user.click(
+      within(section).getByRole("button", { name: "Try again" }),
+    );
+    rerender(
+      <ProjectView {...props({ items, notes: { status: "loading" } })} />,
+    );
+    expect(screen.getByRole("heading", { name: "Notes 1" })).toHaveFocus();
+  });
+
+  test("a project with no notes has no Notes section", () => {
+    renderProject();
+    expect(screen.queryByRole("region", { name: /^Notes/ })).toBeNull();
+  });
 });

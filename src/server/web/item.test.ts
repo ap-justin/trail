@@ -83,6 +83,9 @@ test("an issue reads with its type, product and fields, its people as actors, an
     createdAt: expect.any(String),
     updatedAt: expect.any(String),
     completedAt: null,
+    about: [],
+    notes: [],
+    notesCount: { current: 0, archived: 0 },
   });
   const workerActor = {
     id: worker.actor.id,
@@ -349,14 +352,23 @@ test("an item's key reads it in lower case and with its number zero-padded", asy
 
 test("the created entry carries the type the item was created with, on the timeline and in the feed, whatever its type now", async () => {
   const p = addProject("Created as");
+  // only a product's own bot converts an item to or from a note
+  await v1("PATCH", `/products/${p.key}`, { owner: bot.actor.id });
   const issue = await seed.item(p.key, "issue");
   await v1("PATCH", `/items/${issue}`, { type: "todo" });
   const todo = await seed.item(p.key, "todo");
+  const note = await seed.item(p.key, "note");
+  const retypedNote = await seed.item(p.key, "note");
+  expect(
+    (await v1("PATCH", `/items/${retypedNote}`, { type: "issue" })).status,
+  ).toBe(200);
 
   const feed = (await get(`/feed?product=${p.key}`)).body.items as Body[];
   for (const [key, createdAs] of [
     [issue, "issue"],
     [todo, "todo"],
+    [note, "note"],
+    [retypedNote, "note"],
   ]) {
     const { body } = await get(`/items/${key}`);
     expect(body.timeline[0], key).toMatchObject({

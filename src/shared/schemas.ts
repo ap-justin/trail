@@ -3,6 +3,7 @@ import {
   activitySubjectTypes,
   actorKinds,
   apiKeyActions,
+  type IssueStatus,
   issueStatuses,
   issueTypes,
   projectHealths,
@@ -23,6 +24,8 @@ import {
   botTitleCharacterProblem,
   ISSUE_LABELS_MAX,
   ISSUE_LINKS_MAX,
+  ITEM_NOTES_MAX,
+  NOTE_ABOUT_MAX,
   SLUG_MAX,
 } from "../server/service/validate.js";
 import {
@@ -35,6 +38,19 @@ import {
 // Schema read; .openapi({ description }) reaches only the spec.
 const issueStatusSchema = z.enum(issueStatuses).openapi("IssueStatus");
 const itemTypeSchema = z.enum(issueTypes).openapi("ItemType");
+// the statuses of an issue or a todo, which the routes from before notes take
+const workStatusSchema = z
+  .enum([
+    "triage",
+    "open",
+    "in_progress",
+    "done",
+    "canceled",
+  ] as const satisfies readonly IssueStatus[])
+  .openapi("WorkStatus");
+const WORK_TYPES =
+  "todo: planned work of the product's own bot, open from the start and always assigned. issue: a request for work to the product's bot, filed in triage until that bot accepts it (status open with an assignee) or cancels it.";
+const ITEM_TYPES = `${WORK_TYPES} note: a record nobody has to act on, current or archived and never assigned; about lists the items it is about.`;
 const healthSchema = z.enum(projectHealths).openapi("ProjectHealth");
 const priority = z.int().min(0).max(4).meta({
   description: "0 none, 1 urgent, 2 high, 3 medium, 4 low.",
@@ -86,6 +102,10 @@ export const errorSchema = z
   })
   .openapi("Error");
 
+const noteCountsSchema = z
+  .object({ current: z.int(), archived: z.int() })
+  .openapi("NoteCounts");
+
 const actorRefSchema = z
   .object({ id, name: z.string(), kind: z.enum(actorKinds) })
   .openapi("ActorRef");
@@ -118,6 +138,10 @@ export const productSchema = z
     createdBy: id,
     createdAt: timestamp,
     updatedAt: timestamp,
+    notes: noteCountsSchema.optional().meta({
+      description:
+        "On get_product (GET /products/{key}) only: its notes per status. No work count or progress includes notes: they are counted only here, in a project's `notes` and in an item's `notesCount`.",
+    }),
   })
   .openapi("Product");
 
@@ -146,6 +170,15 @@ const productRefSchema = z
   .object({ key: z.string(), name: z.string() })
   .openapi("ProductRef");
 
+const itemRefSchema = z
+  .object({
+    key: z.string().meta({ example: "TRL-12" }),
+    title: z.string(),
+    type: itemTypeSchema,
+    status: issueStatusSchema,
+  })
+  .openapi("ItemRef");
+
 export const issueSchema = z
   .object({
     id,
@@ -154,10 +187,7 @@ export const issueSchema = z
       example: "TRL-12",
     }),
     number: z.int().meta({ example: 12 }),
-    type: itemTypeSchema.meta({
-      description:
-        "todo: planned work of the product's own bot, open from the start and always assigned. issue: a report to the product's bot, filed in triage until that bot accepts it (status open with an assignee) or cancels it.",
-    }),
+    type: itemTypeSchema.meta({ description: ITEM_TYPES }),
     product: z.string().meta({
       description: "The key of the product the item belongs to.",
       example: "TRL",
@@ -178,9 +208,17 @@ export const issueSchema = z
     projectId: id.meta({ description: "Deprecated: the product's id." }),
     title: z.string(),
     description: z.string(),
-    status: issueStatusSchema,
-    priority,
-    estimate: estimate.nullable(),
+    status: issueStatusSchema.meta({
+      description:
+        "An issue: triage, open, in_progress, done or canceled. A todo: the same but triage. A note: current or archived.",
+    }),
+    priority: priority.meta({
+      description:
+        "0 none, 1 urgent, 2 high, 3 medium, 4 low; always 0 on a note.",
+    }),
+    estimate: estimate.nullable().meta({
+      description: "Hours; always null on a note.",
+    }),
     labels: z.array(z.string()).meta({ description: "Names, A to Z." }),
     links: z.array(itemLinkSchema),
     assignee: actorRefSchema.nullable(),
@@ -196,7 +234,21 @@ export const issueSchema = z
     updatedAt: timestamp,
     completedAt: timestamp.nullable().meta({
       description:
-        "When the item moved to done or canceled; null while it is in triage, open or in progress.",
+        "When the item moved to done or canceled; null while it is in triage, open or in progress, and always on a note.",
+    }),
+    about: z.array(itemRefSchema).optional().meta({
+      description:
+        "On a note only: the items it is about that this key reaches, by key.",
+    }),
+    notes: z
+      .array(itemRefSchema)
+      .optional()
+      .meta({
+        description: `On get_item (GET /items/{key}) only: the ${ITEM_NOTES_MAX} newest current notes about this item that this key reaches, newest first. notesCount counts them all; list_items (GET /items) with about set to this item's key lists every one, archived ones too.`,
+      }),
+    notesCount: noteCountsSchema.optional().meta({
+      description:
+        "On get_item (GET /items/{key}) only: every note about this item that this key reaches, per status.",
     }),
     access: z.enum(["product", "project", "via_project"]).optional().meta({
       description:
@@ -221,8 +273,14 @@ export const updatedItemSchema = issueSchema
   .extend({ skippedLabels })
   .openapi("UpdatedItem");
 
+// the routes from before notes find no note, so a note's fields never reach them
 export const legacyIssueSchema = issueSchema
+  .omit({ about: true, notes: true, notesCount: true })
   .extend({
+    type: z
+      .enum(["issue", "todo"])
+      .openapi("LegacyItemType")
+      .meta({ description: WORK_TYPES }),
     status: z
       .enum(["open", "in_progress", "done", "canceled"])
       .openapi("LegacyIssueStatus")
@@ -328,7 +386,11 @@ export const projectSchema = z
         "True when it also draws from products this key can't name: their items are left out of counts and lists, and nothing names them.",
     }),
     counts: countsSchema.meta({
-      description: "Its items per status, of the products listed only.",
+      description:
+        "Its issues and todos per status, of the products listed only; notes are in notes.",
+    }),
+    notes: noteCountsSchema.meta({
+      description: "Its notes per status, of the products listed only.",
     }),
     latestStatusUpdate: statusUpdateSchema
       .extend({ author: actorRefSchema })
@@ -363,13 +425,45 @@ export const projectItemsRemovedSchema = z
   })
   .openapi("ProjectItemsRemoved");
 
+/** How a note's events carry about: list_activity, the webhook docs and the activity payload all say it. */
+export const NOTE_EVENT_ABOUT =
+  "A note's events name the items it is about by key. On its create event, about is an array of keys, like [\"TRL-3\"], of the items in the note's own product that the reading key reaches (on a webhook, the key its deliveries are checked against), in key order, and aboutOthers counts the rest: items in other products and items the key doesn't reach. An update that changes which of its own product's items it is about, or how many others, a turn into an issue or a todo included (which empties it), carries about {from, to} and aboutOthers {from, to} in the same form; an update that changes neither, or changes only items the reading key doesn't reach (a swap among other products' items, say), carries neither, and is no event at all when it changed nothing else. So about on an event is not the note's full list, and holds keys, not the {key, title, type, status} of an item's about: get_item (GET /items/{key}) on the note lists every item it is about that the key reaches, and that list can change with no event when the change is outside the key's reach.";
+
+const eventAboutKeys = z.array(z.string());
+const activityPayload = z
+  .looseObject({
+    about: z
+      .union([
+        eventAboutKeys,
+        z.object({ from: eventAboutKeys, to: eventAboutKeys }),
+      ])
+      .optional()
+      .meta({
+        description:
+          "On a note's events: keys on a create, {from, to} on an update.",
+      }),
+    aboutOthers: z
+      .union([
+        z.int().min(0),
+        z.object({ from: z.int().min(0), to: z.int().min(0) }),
+      ])
+      .optional()
+      .meta({
+        description:
+          "Beside about: how many items it leaves out, as a number or {from, to}.",
+      }),
+  })
+  .meta({
+    description: `What the event changed or created; its fields depend on action. ${NOTE_EVENT_ABOUT}`,
+  });
+
 export const activityEventSchema = z
   .object({
     id,
     actorId: id,
     subjectType: z.enum(activitySubjectTypes).meta({
       description:
-        "product, project, issue (any item, todo or issue), comment, label or status_update; ignore one you don't know, as trail adds them over time.",
+        "product, project, issue (any item: a todo, an issue or a note), comment, label or status_update; ignore one you don't know, as trail adds them over time.",
     }),
     subjectId: id,
     product: z.string().nullable().meta({
@@ -388,7 +482,7 @@ export const activityEventSchema = z
         "Like issue.created, issue.updated, comment.created, product.created, product.updated, product.imported, project.created, project.updated, project.item_added, project.item_removed, status_update.created, label.created; ignore one you don't know.",
       example: "issue.updated",
     }),
-    payload: z.record(z.string(), z.unknown()),
+    payload: activityPayload,
     createdAt: timestamp,
   })
   .openapi("ActivityEvent");
@@ -798,8 +892,10 @@ const projectSlug = z.string().min(1).max(SLUG_MAX).meta({
     "The project's slug, like launch-q4, exactly; list_projects lists them.",
   example: "launch-q4",
 });
-const ISSUE_PROJECT =
-  "A project's slug, like launch-q4: the issue joins that project as it is filed, and product must be one the project draws from (left out, the project's one product). A key reaching a product only through projects sends `project` when it names more than one; with exactly one, that one is the default. list_projects lists them with their products.";
+const ONE_PROJECT_DEFAULT =
+  "A key reaching a product only through projects sends `project` when it names more than one; with exactly one, that one is the default.";
+const joiningProject = (joins: string) =>
+  `A project's slug, like launch-q4: ${joins}, and product must be one the project draws from (left out, the project's one product). ${ONE_PROJECT_DEFAULT} list_projects lists them with their products.`;
 const botRef = z.string().min(1).max(200);
 const LABEL_NAMES =
   "A name matches the product's label ignoring the case of A-Z. Only the product's owner creates labels: from the owner, or on a product with no owner, a new name creates the label; from anyone else, the names the product lacks come back in skippedLabels.";
@@ -1043,14 +1139,21 @@ export const todoCreateSchema = z
   )
   .openapi("TodoCreate");
 
+/** Where file_issue and add_note file, as requireFilingGrant (service/index.ts) enforces it. */
+const FILABLE_PRODUCTS =
+  "a product this key lists (an unrestricted key, any product) or one a project it lists draws from. list_products also lists the products this key reads only through a project drawing from its own products, and those take nothing: that is forbidden_scope, naming the product to file on instead and the grant to ask for";
+
 export const issueFileSchema = z
   .strictObject(
     {
       product: productRef.optional().meta({
-        description:
-          "The key (like TRL) of the product the issue is for: any product list_products lists, which for a key reaching it only through a project needs project too. Left out, the project's one product.",
+        description: `The key (like TRL) of the product the issue is for: ${FILABLE_PRODUCTS}. Left out, the project's one product.`,
       }),
-      project: projectSlug.optional().meta({ description: ISSUE_PROJECT }),
+      project: projectSlug.optional().meta({
+        description: joiningProject(
+          "the issue joins that project as it is filed",
+        ),
+      }),
       ...itemFields,
       labels: labelNames.optional(),
       assignee: assigneeRef.nullable().optional().meta({
@@ -1067,24 +1170,68 @@ export const issueFileSchema = z
   })
   .openapi("IssueFile");
 
-/** POST /items: a todo or an issue by `type`. */
+const aboutKeys = z
+  .array(z.string().min(1).max(200))
+  .max(NOTE_ABOUT_MAX)
+  .meta({ example: ["TRL-12", "ATL-3"] });
+const ABOUT = `Keys of the items the note is about, like TRL-12, in any product this key reaches, at most ${NOTE_ABOUT_MAX}; get_item on each lists the note in its notes.`;
+
+export const noteCreateSchema = z
+  .strictObject(
+    {
+      product: productRef.optional().meta({
+        description: `The key (like TRL) of the product the note belongs to: ${FILABLE_PRODUCTS}. Left out, the project's one product.`,
+      }),
+      project: projectSlug.optional().meta({
+        description: joiningProject(
+          "the note joins that project as it is added",
+        ),
+      }),
+      title,
+      description: text.optional(),
+      about: aboutKeys.optional().meta({ description: ABOUT }),
+      labels: labelNames.optional(),
+      links: links.optional(),
+      externalRef: externalRef.optional(),
+    },
+    renamedFields({ projectId: nowNamed("product") }),
+  )
+  .meta({
+    description: "Name product, project, or both.",
+    anyOf: [{ required: ["product"] }, { required: ["project"] }],
+  })
+  .openapi("NoteCreate");
+
+/** POST /items: a todo, an issue or a note by `type`. */
 export const itemCreateSchema = z
   .strictObject(
     {
       type: itemTypeSchema.meta({
         description:
-          "todo: planned work for a product you own (or one with no owner), open at once and assigned (to the product's owner by default); in another bot's product it is a 403. issue: a report to another product's bot, filed in triage until that bot accepts it (status open with an assignee) or cancels it.",
+          "todo: planned work for a product you own (or one with no owner), open at once and assigned (to the product's owner by default); in another bot's product it is a 403. issue: a request for work to a product's bot, filed in triage until that bot accepts it (status open with an assignee) or cancels it. note: a record nobody has to act on, on any product you may file an issue on, current at once and never assigned.",
       }),
       product: productRef.optional().meta({
         description:
-          "The product's key (like TRL). An issue needs it unless project draws from one product; a todo goes to the one product you own when left out.",
+          "The product's key (like TRL). An issue or a note needs it unless project draws from one product; a todo goes to the one product you own when left out.",
       }),
       project: projectSlug.optional().meta({
-        description: `Issues only (a todo with it is a 422). ${ISSUE_PROJECT}`,
+        description: `Issues and notes only (a todo with it is a 422). ${joiningProject("the issue or note joins that project as it is added")}`,
       }),
       ...itemFields,
+      estimate: estimate.nullable().optional().meta({
+        description:
+          "Hours; null or left out, none. A note takes no estimate: on a note, any value sent, null included, is a 422.",
+      }),
+      priority: priority.optional().meta({
+        description:
+          "0 none, 1 urgent, 2 high, 3 medium, 4 low. A note takes no priority: on a note, any value sent, 0 included, is a 422.",
+      }),
       labels: labelNames.optional(),
-      assignee: assigneeRef.nullable().optional(),
+      assignee: assigneeRef.nullable().optional().meta({
+        description:
+          "Who works on it: a bot's name (any case) or id, or a person's id. A note takes none.",
+      }),
+      about: aboutKeys.optional().meta({ description: `Notes only. ${ABOUT}` }),
     },
     itemCreateRenames,
   )
@@ -1119,7 +1266,7 @@ const itemPatchFields = {
   description: text.optional(),
   status: issueStatusSchema.optional().meta({
     description:
-      "triage, open, in_progress, done or canceled. A product's bot accepts an issue from triage with open and an assignee (open alone leaves it unassigned), or drops it with canceled. A todo is never in triage.",
+      "An issue or a todo: triage, open, in_progress, done or canceled. A product's bot accepts an issue from triage with open and an assignee (open alone leaves it unassigned), or drops it with canceled. A todo is never in triage. A note: current or archived.",
   }),
   estimate: estimate
     .nullable()
@@ -1153,12 +1300,31 @@ export const itemUpdateSchema = z
     {
       type: itemTypeSchema.optional().meta({
         description:
-          "todo makes it planned work of its product (an item in triage opens; it gets the product's owner as assignee when it has none); issue makes it a report.",
+          "todo makes it planned work of its product (an item in triage opens, and a note opens; it gets the product's owner as assignee when it has none); issue makes it a request for work (a note goes to triage); note makes it a record: status current, no assignee, priority 0 and estimate null. Only the product's owner changes an item's type; on a product with no owner any bot swaps todo and issue, and none turns an item into a note or a note into work.",
       }),
       ...itemPatchFields,
+      estimate: itemPatchFields.estimate.meta({
+        description:
+          "Hours; null clears. A note holds none: on a note, or with type note, null is taken and any number is a 422.",
+      }),
+      priority: priority.optional().meta({
+        description:
+          "0 none, 1 urgent, 2 high, 3 medium, 4 low. A note holds none: on a note, or with type note, 0 is taken and any other value is a 422.",
+      }),
       assignee: assigneeRef.nullable().optional().meta({
         description:
-          "A bot's name (any case) or id, or a person's id; null unassigns an issue (a todo always keeps one).",
+          "A bot's name (any case) or id, or a person's id; null unassigns an issue (a todo always keeps one, and a note never has one).",
+      }),
+      about: aboutKeys.optional().meta({
+        description: `A note's: replaces the items it is about; [] clears them. A replace keeps the items this key cannot reach. ${ABOUT}`,
+      }),
+      addAbout: aboutKeys.optional().meta({
+        description:
+          "A note's: keys of items to add to those it is about, keeping the others. Not with about.",
+      }),
+      removeAbout: aboutKeys.optional().meta({
+        description:
+          "A note's: keys of items to drop from those it is about; a key it isn't about is ignored. Not with about.",
       }),
     },
     renamedFields({ assigneeId: nowNamed("assignee") }),
@@ -1169,6 +1335,10 @@ export const issueUpdateSchema = z
   .strictObject(
     {
       ...itemPatchFields,
+      status: workStatusSchema.optional().meta({
+        description:
+          "triage, open, in_progress, done or canceled. A todo is never in triage.",
+      }),
       assigneeId: id
         .nullable()
         .optional()
@@ -1396,7 +1566,7 @@ export const threadPageSchema = pageSchema(messageSchema)
 
 export const issueListQuerySchema = pageQuerySchema.extend({
   ...legacyProductFields(false),
-  status: issueStatusSchema.optional(),
+  status: workStatusSchema.optional(),
   assigneeId: id.optional(),
 });
 
@@ -1406,9 +1576,20 @@ export const itemListQuerySchema = pageQuerySchema.extend({
     description:
       "A project's slug, like launch-q4: only its items, of the products this key reaches.",
   }),
-  type: itemTypeSchema.optional(),
-  status: issueStatusSchema.optional(),
+  type: itemTypeSchema.optional().meta({
+    description:
+      "todo, issue or note. Left out, issues and todos only: notes are listed only with type note or about.",
+  }),
+  status: issueStatusSchema.optional().meta({
+    description:
+      "triage, open, in_progress, done or canceled for issues and todos; current or archived with type note or about.",
+  }),
   assignee: assigneeRef.optional(),
+  about: z.string().min(1).max(200).optional().meta({
+    description:
+      "An item's key, like TRL-12: every note about it that this key reaches, archived ones too unless status says which. It lists notes, so type is note or left out.",
+    example: "TRL-12",
+  }),
 });
 
 export const activityListQuerySchema = pageQuerySchema.extend({
@@ -1480,6 +1661,9 @@ const webItemRefSchema = z.object({
   title: z.string(),
   type: webItemTypeSchema,
 });
+const webItemLinkSchema = webItemRefSchema.extend({
+  status: webItemStatusSchema,
+});
 
 export const viewerStates = [
   "anonymous",
@@ -1539,10 +1723,13 @@ const webItemCountsSchema = z
     all: webStatusCountsSchema,
     issue: webStatusCountsSchema,
     todo: webStatusCountsSchema,
+    notes: z
+      .object({ current: z.int(), archived: z.int() })
+      .meta({ description: "Notes per status; all leaves them out." }),
   })
   .meta({
     description:
-      "Per type (all, issue, todo) and status tab, whatever the type and status filters: the tabs follow the type toggle by reading the toggled type's counts.",
+      "Per type (all, issue, todo) and status tab, whatever the type and status filters: the tabs follow the type toggle by reading the toggled type's counts. Notes are counted apart, in notes.",
   });
 
 export const webProductSchema = z.object({
@@ -1733,6 +1920,27 @@ export const entrySchema = z
       removed: z.array(z.string()),
     }),
     z.object({ ...onItem, kind: z.literal("link_added"), link: linkSchema }),
+    z
+      .object({
+        ...onItem,
+        kind: z.literal("about_changed"),
+        added: z.array(z.string()).meta({
+          description:
+            "Keys of the items in the note's product the edit made it about, in key order.",
+        }),
+        removed: z.array(z.string()).meta({
+          description:
+            "Keys of the items in the note's product it is no longer about, in key order.",
+        }),
+        others: z.object({ from: z.int(), to: z.int() }).meta({
+          description:
+            "How many items it was and is about in products the entry doesn't name, before and after the edit; equal when only named items changed.",
+        }),
+      })
+      .meta({
+        description:
+          "On an item's timeline only, never in the feed: a note's edit changed the items it is about.",
+      }),
     z.object({
       ...onItem,
       kind: z.literal("assignee_changed"),
@@ -1814,6 +2022,16 @@ export const webItemSchema = z.object({
   createdAt: timestamp,
   updatedAt: timestamp,
   completedAt: timestamp.nullable(),
+  about: z.array(webItemLinkSchema).meta({
+    description:
+      "On a note: the items it is about that the viewer sees, by key; empty on an issue or a todo.",
+  }),
+  notes: z.array(webItemLinkSchema).meta({
+    description: `The ${ITEM_NOTES_MAX} newest current notes about the item that the viewer sees, newest first.`,
+  }),
+  notesCount: noteCountsSchema.meta({
+    description: "Every note about the item that the viewer sees, per status.",
+  }),
   timeline: z.array(entrySchema).meta({
     description:
       "Oldest first: the filing, the comments, the changes and the project adds and removes.",
@@ -1981,7 +2199,9 @@ export const webCommentCreateSchema = z.strictObject({
 });
 
 const itemFilters = {
-  type: webItemTypeSchema.optional(),
+  type: webItemTypeSchema.optional().meta({
+    description: "Left out, issues and todos: notes are listed with type note.",
+  }),
   status: webItemStatusSchema.optional().meta({
     description: "open matches triage too, as the Open tab counts it.",
   }),
@@ -2010,7 +2230,7 @@ const feedFilterQuery = {
   }),
   type: itemTypeSchema.optional().meta({
     description:
-      "issue or todo: only the entries of items of that type now (created, changed, commented on, added to or taken out of a project), and no product's or project's own entry.",
+      "issue, todo or note: only the entries of items of that type now (created, changed, commented on, added to or taken out of a project), and no product's or project's own entry.",
   }),
 };
 

@@ -8,10 +8,12 @@ import {
   webhookSubscription,
 } from "../db/schema.js";
 import type { ActivityEvent, EventBus } from "../events/bus.js";
+import { eventForReach } from "../service/visible.js";
 import {
-  deliveryKeyRefusal,
+  deliveryKey,
   isPending,
   leftFollowedProjects,
+  sendingKeyReach,
   type WebhookSettings,
 } from "../service/webhooks.js";
 import {
@@ -47,6 +49,8 @@ export const PURGE_BATCH = 500;
 /** The lastError of a delivery the worker drops instead of sending. */
 export const LEFT_PROJECT =
   "not sent: the item left the projects this webhook follows before it went out";
+export const NOTHING_IN_REACH =
+  "not sent: the note's about changed only among items this webhook's key doesn't reach";
 
 export type WebhookWorkerOptions = {
   db: Db;
@@ -213,33 +217,52 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
       .filter((d) => d.nextAttemptAt.getTime() <= now);
   }
 
-  /** The envelope a delivery carries: its message's on an inbox subscription, else its event's. */
-  function envelopeOf(delivery: Delivery): Envelope | undefined {
+  /**
+   * The envelope a delivery carries: its message's on an inbox subscription,
+   * else its event's as `keyId`, the key sending it, reads it. `perKey` marks a
+   * note event's, whose about keys depend on that key.
+   */
+  function envelopeOf(
+    delivery: Delivery,
+    keyId: string | null,
+  ): { envelope: Envelope; perKey: boolean } | undefined {
     if (delivery.messageId !== null) {
-      return buildMessageEnvelope(db, delivery.messageId);
+      const envelope = buildMessageEnvelope(db, delivery.messageId);
+      return envelope && { envelope, perKey: false };
     }
-    if (delivery.eventId === null) return undefined;
+    if (delivery.eventId === null || keyId === null) return undefined;
     const event = db
       .select()
       .from(activityEvent)
       .where(eq(activityEvent.id, delivery.eventId))
       .get();
-    return event && buildEnvelope(db, event, settings.publicUrl);
+    if (!event) return undefined;
+    const read = eventForReach(db, sendingKeyReach(db, keyId), event);
+    // clearance dropped a delivery its key reads as nothing
+    if (!read) return undefined;
+    return {
+      envelope: buildEnvelope(db, read, settings.publicUrl),
+      perKey: event.payload.about !== undefined,
+    };
   }
 
-  function bodyOf(delivery: Delivery): string | null {
+  function bodyOf(delivery: Delivery, keyId: string | null): string | null {
     if (delivery.body !== null) return delivery.body;
-    const envelope = envelopeOf(delivery);
-    if (!envelope) return null;
+    const built = envelopeOf(delivery, keyId);
+    if (!built) return null;
     const body = JSON.stringify({
-      ...envelope,
+      ...built.envelope,
       // a product event's legacy trail.project.* twin carries its own type
       type: delivery.type,
     });
-    db.update(webhookDelivery)
-      .set({ body })
-      .where(eq(webhookDelivery.id, delivery.id))
-      .run();
+    // a retry may go out on another key (the webhook moved, or its fallback key
+    // changed), so a body naming what one key reaches is built afresh each time
+    if (!built.perKey) {
+      db.update(webhookDelivery)
+        .set({ body })
+        .where(eq(webhookDelivery.id, delivery.id))
+        .run();
+    }
     return body;
   }
 
@@ -301,29 +324,39 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
   }
 
   /**
-   * Why a delivery mustn't go out now, or null: its event's item has left
-   * the project a follow alone queued it for, or the webhook's key can no
-   * longer send it (`deliveryKeyRefusal`). `tell` is set on the key's refusals,
-   * which only the bot can fix.
+   * The key a delivery goes out on (null when its event is gone), or why it
+   * mustn't go out now: its event's item has left the project a follow alone
+   * queued it for, the key reads its event as nothing (`eventForReach`), or the
+   * webhook's key can no longer send it (`deliveryKey`).
+   * `tell` is set on the key's refusals, which only the bot can fix.
    */
-  function unsendable(
+  function clearance(
     delivery: Delivery,
     sub: Subscription,
-  ): { reason: string; tell: boolean } | null {
-    const keyRefused = (event: typeof activityEvent.$inferSelect | null) => {
-      const reason = deliveryKeyRefusal(db, sub, event);
-      return reason === null ? null : { reason, tell: true };
+  ): { refused: { reason: string; tell: boolean } } | { keyId: string | null } {
+    const keyFor = (event: typeof activityEvent.$inferSelect | null) => {
+      const key = deliveryKey(db, sub, event);
+      return "refusal" in key
+        ? { refused: { reason: key.refusal, tell: true } }
+        : key;
     };
-    if (delivery.eventId === null) return keyRefused(null);
+    if (delivery.eventId === null) return keyFor(null);
     const event = db
       .select()
       .from(activityEvent)
       .where(eq(activityEvent.id, delivery.eventId))
       .get();
-    if (!event) return null;
+    if (!event) return { keyId: null };
     if (leftFollowedProjects(db, sub.id, event))
-      return { reason: LEFT_PROJECT, tell: false };
-    return keyRefused(event);
+      return { refused: { reason: LEFT_PROJECT, tell: false } };
+    const key = keyFor(event);
+    if (
+      "keyId" in key &&
+      key.keyId !== null &&
+      eventForReach(db, sendingKeyReach(db, key.keyId), event) === null
+    )
+      return { refused: { reason: NOTHING_IN_REACH, tell: false } };
+    return key;
   }
 
   /**
@@ -364,13 +397,13 @@ export function createWebhookWorker(options: WebhookWorkerOptions) {
       .where(eq(webhookSubscription.id, delivery.subscriptionId))
       .get();
     if (!sub) return;
-    const refused = unsendable(delivery, sub);
-    if (refused !== null) {
-      drop(delivery, refused);
+    const cleared = clearance(delivery, sub);
+    if ("refused" in cleared) {
+      drop(delivery, cleared.refused);
       return;
     }
     const secret = openSecret(settings.key, sub.id, sub.secretCipher);
-    const body = secret === null ? null : bodyOf(delivery);
+    const body = secret === null ? null : bodyOf(delivery, cleared.keyId);
     let result: SendResult;
     if (secret === null) {
       result = {

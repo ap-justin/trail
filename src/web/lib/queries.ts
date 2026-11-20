@@ -1,11 +1,14 @@
 import {
+  hashKey,
   infiniteQueryOptions,
   MutationCache,
   type Query,
   QueryCache,
   QueryClient,
   type QueryClientConfig,
+  type QueryKey,
   queryOptions,
+  skipToken,
 } from "@tanstack/react-query";
 import {
   ApiError,
@@ -21,18 +24,30 @@ import type {
   WebProjectView,
 } from "@/lib/api-types";
 
+/**
+ * A query nothing on screen shows: no observer, or only disabled ones, as a section's list is
+ * while its tab hides it. Not Query's `inactive` alone: a `skipToken` query's observers are
+ * always disabled, though the page still shows its data.
+ */
+export const isOffScreen = (query: Query) =>
+  query.getObserversCount() === 0 ||
+  (!query.isActive() && query.options.queryFn !== skipToken);
+
 export const keys = {
   me: ["me"] as const,
   products: ["products"] as const,
   product: (key: string) => ["product", key] as const,
   productItems: (key: string, { type, status }: ItemQuery) =>
     ["product", key, "items", type, status] as const,
+  productNoteCounts: (key: string) => ["product", key, "note-counts"] as const,
   productStatusUpdates: (key: string) =>
     ["product", key, "status-updates"] as const,
   projects: ["projects"] as const,
   project: (slug: string) => ["project", slug] as const,
   projectItems: (slug: string, { product, type, status }: ProjectItemQuery) =>
     ["project", slug, "items", product, type, status] as const,
+  projectNoteCounts: (slug: string, product: string | null) =>
+    ["project", slug, "note-counts", product] as const,
   projectStatusUpdates: (slug: string) =>
     ["project", slug, "status-updates"] as const,
   issue: (key: string) => ["issue", key] as const,
@@ -44,15 +59,22 @@ export const keys = {
   conversation: (a: string, b: string) => ["conversation", a, b] as const,
 };
 
-/** Reads pages in order until one has no `nextCursor` or `max` pages are in; never empty. */
+/**
+ * Reads pages in order until one has no `nextCursor` or `max` pages are in; never empty.
+ * `onFirstPage` sees the first page as soon as it arrives. Each read gets `signal`, so a
+ * read the query abandons stops at the page in flight.
+ */
 async function readPages<Page extends { nextCursor: string | null }>(
-  read: (cursor: string | null) => Promise<Page>,
+  read: (cursor: string | null, signal: AbortSignal) => Promise<Page>,
   max: number,
+  signal: AbortSignal,
+  onFirstPage?: (page: Page) => void,
 ): Promise<Page[]> {
   const pages: Page[] = [];
   let cursor: string | null = null;
   do {
-    const page = await read(cursor);
+    const page = await read(cursor, signal);
+    if (pages.length === 0) onFirstPage?.(page);
     pages.push(page);
     cursor = page.nextCursor;
   } while (cursor !== null && pages.length < max);
@@ -65,12 +87,64 @@ export const PROJECT_PAGES_MAX = 10;
 /** Every project the viewer can see, newest first, up to `PROJECT_PAGES_MAX` pages. */
 export const projectsQuery = queryOptions({
   queryKey: keys.projects,
-  queryFn: async (): Promise<WebProjectView[]> =>
-    (await readPages(api.projects, PROJECT_PAGES_MAX)).flatMap((p) => p.items),
+  queryFn: async ({ signal }): Promise<WebProjectView[]> =>
+    (await readPages(api.projects, PROJECT_PAGES_MAX, signal)).flatMap(
+      (p) => p.items,
+    ),
 });
 
 /** Pages of a product's or project's items the page reads before it stops: neither has Load more. */
 export const ITEM_PAGES_MAX = 10;
+
+type ItemCounts = WebItemListView["counts"];
+type NoteCounts = ItemCounts["notes"];
+
+const CURRENT_NOTES = { type: "note", status: "current" } as const;
+
+/**
+ * Writes a list's counts and, when its current or archived notes or its issues and todos
+ * moved, marks the current notes stale, so the Notes section's rows refetch: a note archived
+ * or made an issue while another is filed leaves the current count as it was. A change no
+ * count shows (a note restored as another is archived, a note retitled) waits for the next
+ * notes read. The notes list's own read skips that, as it is the fresh read.
+ */
+function writeNoteCounts(
+  client: QueryClient,
+  countsKey: QueryKey,
+  notesKey: QueryKey,
+  counts: ItemCounts,
+  isNotesList: boolean,
+) {
+  const last = client.getQueryData<ItemCounts>(countsKey);
+  client.setQueryData(countsKey, counts);
+  if (
+    !isNotesList &&
+    last !== undefined &&
+    (last.notes.current !== counts.notes.current ||
+      last.notes.archived !== counts.notes.archived ||
+      last.all.all !== counts.all.all)
+  ) {
+    // a notes read in flight began with this list's, as a focus or reconnect rereads both,
+    // so it is kept rather than thrown away for a second one
+    void client.invalidateQueries(
+      { queryKey: notesKey, exact: true },
+      { cancelRefetch: false },
+    );
+  }
+}
+
+const isCurrentNotes = ({ type, status }: ItemQuery) =>
+  type === CURRENT_NOTES.type && status === CURRENT_NOTES.status;
+
+/**
+ * Whether `previous`, the list an observer last showed, is another filter's. One under this
+ * list's own key was dropped from the cache, as an access event drops the lists off screen,
+ * and may hold a revoked product's rows.
+ */
+const isAnotherList = (
+  queryKey: QueryKey,
+  previous: Pick<Query, "queryHash"> | undefined,
+) => previous !== undefined && previous.queryHash !== hashKey(queryKey);
 
 /**
  * A product's items under `filters`, every page up to `ITEM_PAGES_MAX`, as one list. A
@@ -79,11 +153,20 @@ export const ITEM_PAGES_MAX = 10;
 export const productItemsQuery = (key: string, filters: ItemQuery) =>
   queryOptions({
     queryKey: keys.productItems(key, filters),
-    queryFn: async (): Promise<WebItemListView> =>
+    queryFn: async ({ client, signal }): Promise<WebItemListView> =>
       (
         await readPages(
-          (cursor) => api.productItems(key, filters, cursor),
+          (cursor, signal) => api.productItems(key, filters, cursor, signal),
           ITEM_PAGES_MAX,
+          signal,
+          (page) =>
+            writeNoteCounts(
+              client,
+              keys.productNoteCounts(key),
+              keys.productItems(key, CURRENT_NOTES),
+              page.counts,
+              isCurrentNotes(filters),
+            ),
         )
       ).reduce((read, page) => ({
         ...page,
@@ -93,7 +176,10 @@ export const productItemsQuery = (key: string, filters: ItemQuery) =>
     // put: the view filters rows by the active filters, and a product's counts don't follow
     // type or status
     placeholderData: (previous, previousQuery) =>
-      previousQuery?.queryKey[1] === key ? previous : undefined,
+      previousQuery?.queryKey[1] === key &&
+      isAnotherList(keys.productItems(key, filters), previousQuery)
+        ? previous
+        : undefined,
   });
 
 type ItemGroup = WebProjectItemsView["groups"][number];
@@ -119,17 +205,58 @@ function joinGroups(read: ItemGroup[], page: ItemGroup[]): ItemGroup[] {
 export const projectItemsQuery = (slug: string, filters: ProjectItemQuery) =>
   queryOptions({
     queryKey: keys.projectItems(slug, filters),
-    queryFn: async (): Promise<WebProjectItemsView> =>
+    queryFn: async ({ client, signal }): Promise<WebProjectItemsView> =>
       (
         await readPages(
-          (cursor) => api.projectItems(slug, filters, cursor),
+          (cursor, signal) => api.projectItems(slug, filters, cursor, signal),
           ITEM_PAGES_MAX,
+          signal,
+          (page) =>
+            writeNoteCounts(
+              client,
+              keys.projectNoteCounts(slug, filters.product),
+              keys.projectItems(slug, {
+                ...CURRENT_NOTES,
+                product: filters.product,
+              }),
+              page.counts,
+              isCurrentNotes(filters),
+            ),
         )
       ).reduce((read, page) => ({
         ...page,
         groups: joinGroups(read.groups, page.groups),
       })),
-    // no placeholder: a group's count follows every filter, so any other list's would miscount
+    // the same project and product's last list while the next type or status loads, for its
+    // counts, which follow only the product filter; a group's count follows every filter, so
+    // the caller shows none of its groups
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === slug &&
+      previousQuery.queryKey[3] === filters.product &&
+      isAnotherList(keys.projectItems(slug, filters), previousQuery)
+        ? previous
+        : undefined,
+  });
+
+const selectNotes = (counts: ItemCounts) => counts.notes;
+
+/**
+ * A product's note counts as the first page of any of its lists last read them, so they
+ * arrive before a long list's later pages; never fetched on their own.
+ */
+export const productNoteCountsQuery = (key: string) =>
+  queryOptions<ItemCounts, Error, NoteCounts>({
+    queryKey: keys.productNoteCounts(key),
+    queryFn: skipToken,
+    select: selectNotes,
+  });
+
+/** A project's note counts under the product filter, as `productNoteCountsQuery` reads a product's. */
+export const projectNoteCountsQuery = (slug: string, product: string | null) =>
+  queryOptions<ItemCounts, Error, NoteCounts>({
+    queryKey: keys.projectNoteCounts(slug, product),
+    queryFn: skipToken,
+    select: selectNotes,
   });
 
 /** Bots at work across the viewer's products, for the feed's Working now strip. */

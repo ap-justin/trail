@@ -5,7 +5,6 @@ import { AppLink, RowLink } from "@/components/app-link";
 import { FiltersSheet, TypeSelect } from "@/components/filter-select";
 import { EmptyState } from "@/components/states";
 import {
-  type IssueStatus,
   type ItemType,
   PriorityLabel,
   priorityLabel,
@@ -32,11 +31,13 @@ import type {
   WebItemRowView,
   WebProductRefView,
 } from "@/lib/api-types";
+import {
+  type StatusFilter,
+  statusesOf,
+  statusFilterOf,
+} from "@/lib/item-status";
 import { paths } from "@/lib/paths";
 import { cn } from "@/lib/utils";
-
-/** A status tab: triage has none of its own, Open covers it. */
-export type StatusFilter = Exclude<IssueStatus, "triage">;
 
 /** The type toggle and the status tab; null is All. The URL is the route's. */
 export type ItemFilters = {
@@ -46,43 +47,70 @@ export type ItemFilters = {
 
 export const NO_FILTERS: ItemFilters = { type: null, status: null };
 
-const filterStatuses: StatusFilter[] = [
+// the 375 chips leave Canceled out, unless it is the filter in force
+const workChipStatuses: readonly StatusFilter[] = [
   "open",
   "in_progress",
   "done",
-  "canceled",
 ];
-// the 375 chips leave Canceled out, unless it is the filter in force
-const chipStatuses: StatusFilter[] = ["open", "in_progress", "done"];
 const ALL = "all";
 
-/** A tab value back to its filter: All and anything unknown are null. */
-export function statusFilterOf(value: string): StatusFilter | null {
-  return filterStatuses.find((status) => status === value) ?? null;
+/** The filters under another type; a status that type has no tab for falls back to All. */
+function withType(filters: ItemFilters, type: ItemType | null): ItemFilters {
+  const keeps = filters.status && statusesOf(type).includes(filters.status);
+  return { ...filters, type, status: keeps ? filters.status : null };
+}
+
+/**
+ * Where FilterEmpty's Show all lands, `none` being the page's cleared filters. Notes
+ * with a status drop only the status: All lists issues and todos, so clearing the type
+ * would leave the notes altogether.
+ */
+export function showAllFilters<F extends ItemFilters>(filters: F, none: F): F {
+  return filters.type === "note" && filters.status
+    ? { ...filters, status: null }
+    : none;
+}
+
+/** A tab's count by its value, All included; a status the type has no tab for has none. */
+type StatusCounts = Partial<Record<StatusFilter | typeof ALL, number>>;
+
+/** The status tabs' counts under `type`: notes are counted apart from the work types. */
+function tabCounts(
+  counts: WebItemCountsView,
+  type: ItemType | null,
+): StatusCounts {
+  if (type !== "note") return counts[type ?? "all"];
+  const { current, archived } = counts.notes;
+  return { all: current + archived, current, archived };
 }
 
 /**
  * Whether a row belongs under the filters. The route fetches with them; this keeps rows
- * from a list still answering an earlier filter off the screen.
+ * from a list still answering an earlier filter off the screen. Without a type, the list
+ * is issues and todos: a note belongs only under Notes.
  */
 export function matchesFilters(item: WebItemRowView, filters: ItemFilters) {
-  if (filters.type && item.type !== filters.type) return false;
+  if (filters.type ? item.type !== filters.type : item.type === "note")
+    return false;
   if (!filters.status) return true;
   if (filters.status === "open")
     return item.status === "open" || item.status === "triage";
   return item.status === filters.status;
 }
 
-const typeOptions = [
-  { value: ALL, label: "All", count: "all" },
-  { value: "issue", label: "Issues", count: "issue" },
-  { value: "todo", label: "Todos", count: "todo" },
-] as const;
+const typeOptions: { value: string; label: string; type: ItemType | null }[] = [
+  { value: ALL, label: "All", type: null },
+  { value: "issue", label: "Issues", type: "issue" },
+  { value: "todo", label: "Todos", type: "todo" },
+  { value: "note", label: "Notes", type: "note" },
+];
 
 /**
- * All, Issues or Todos, each with its count, on a segmented track: 32px beside the status
- * tabs at 1024px and up; 44px below, like the product select it can share a row with, and
- * as wide as it's let. `countsBelowLg={false}` drops the counts there, on that shared row.
+ * All (issues and todos), Issues, Todos or Notes, each with its count, on a segmented
+ * track: 32px beside the status tabs at 1024px and up; 44px below, like the product select
+ * it can share a row with, and as wide as it's let. `countsBelowLg={false}` drops the
+ * counts there, on that shared row.
  */
 export function TypeToggle({
   value,
@@ -106,7 +134,7 @@ export function TypeToggle({
         // pressing the current item again empties the group; keep the filter instead
         const picked = next[0];
         if (picked === undefined) return;
-        const type = picked === "issue" || picked === "todo" ? picked : null;
+        const type = typeOptions.find((o) => o.value === picked)?.type ?? null;
         if (type !== value) onChange(type);
       }}
       variant="segmented"
@@ -116,7 +144,8 @@ export function TypeToggle({
         <ToggleGroupItem
           key={option.value}
           value={option.value}
-          className="gap-1.25 text-xs max-lg:flex-1 max-lg:text-sm"
+          // grown from its own width, not split evenly: "Issues 116" outgrows a quarter of 343px
+          className="gap-1.25 text-xs max-lg:flex-auto max-lg:text-sm"
         >
           {option.label}
           {counts && (
@@ -125,7 +154,7 @@ export function TypeToggle({
               <span
                 className={cn("text-2xs", !countsBelowLg && "max-lg:hidden")}
               >
-                {counts[option.count].all}
+                {tabCounts(counts, option.type).all}
               </span>
             </>
           )}
@@ -135,10 +164,11 @@ export function TypeToggle({
   );
 }
 
-type StatusCounts = WebItemCountsView["all"];
-
 /** All, then each status, with its count once the list has loaded. */
-function statusOptions(statuses: StatusFilter[], counts: StatusCounts | null) {
+function statusOptions(
+  statuses: readonly StatusFilter[],
+  counts: StatusCounts | null,
+) {
   return [
     { value: ALL, label: "All", count: counts?.all },
     ...statuses.map((status) => ({
@@ -155,9 +185,11 @@ function statusOptions(statuses: StatusFilter[], counts: StatusCounts | null) {
  * rule that scrolls sideways, its right edge masked so a tab cut there reads as more.
  */
 function StatusTabs({
+  type,
   counts,
   belowLg,
 }: {
+  type: ItemType | null;
   counts: StatusCounts | null;
   belowLg: boolean;
 }) {
@@ -166,15 +198,16 @@ function StatusTabs({
       variant="line"
       aria-label="Filter by status"
       className={cn(
-        // at lg the bar under the tabs and the type toggle draws the one rule
-        "rounded-none p-0 lg:h-8 lg:gap-3 lg:data-[variant=line]:border-b-0",
+        // at lg the bar draws the one rule, under the tabs' row
+        // at lg the list sizes to its tabs, not the line variant's w-full, so the toggle can share its row
+        "rounded-none p-0 lg:mt-0.5 lg:h-8 lg:gap-3 lg:data-[variant=line]:w-fit lg:data-[variant=line]:border-b-0",
         belowLg
           ? // the stock line variant's p-0 is an attribute selector, so the inset needs one too
             "max-lg:scrollbar-none max-lg:overflow-x-auto max-lg:mask-r-from-88% max-lg:data-[variant=line]:px-4"
           : "max-lg:hidden",
       )}
     >
-      {statusOptions(filterStatuses, counts).map((option) => (
+      {statusOptions(statusesOf(type), counts).map((option) => (
         <TabsTrigger
           key={option.value}
           value={option.value}
@@ -193,18 +226,21 @@ function StatusTabs({
 }
 
 /** The Filters sheet's primary button; without a count while the list loads. */
-function showItemsLabel(count: number | undefined) {
-  if (count === undefined) return "Show items";
-  return `Show ${count} ${itemNoun(count)}`;
+function showItemsLabel(count: number | undefined, type: ItemType | null) {
+  if (count === undefined) return `Show ${nouns[type ?? "all"]}`;
+  return `Show ${count} ${itemNoun(count, type)}`;
 }
 
 function StatusChips({
+  type,
   value,
   onChange,
 }: {
+  type: ItemType | null;
   value: StatusFilter | null;
   onChange: (status: StatusFilter | null) => void;
 }) {
+  const chipStatuses = type === "note" ? statusesOf("note") : workChipStatuses;
   // the row scrolls sideways; its right padding fades out, so a chip cut at the edge reads as more
   return (
     <ToggleGroup
@@ -256,10 +292,19 @@ export function ItemFilterBar({
   /** `select` as the sheet stacks it (with a `fieldLabel`), and whether it is in force. */
   sheet?: { select: ReactNode; active: boolean };
 }) {
-  const typeCounts = counts?.[filters.type ?? "all"];
+  const typeCounts = counts && tabCounts(counts, filters.type);
+  const onTypeChange = (type: ItemType | null) =>
+    onFiltersChange(withType(filters, type));
   return (
-    <div className="flex flex-col lg:flex-row lg:items-end lg:border-b">
-      <StatusTabs counts={typeCounts ?? null} belowLg={sheet !== undefined} />
+    // too narrow for both, the toggle wraps under the tabs, so it is drawn where it falls in
+    // the Tab order. The rule is drawn at the first row's foot, under the tabs whether or
+    // not the toggle shares their row: top-8.5 is the tabs' lg:mt-0.5 plus their lg:h-8.
+    <div className="flex flex-col lg:relative lg:flex-row lg:flex-wrap lg:items-end lg:gap-x-4 lg:gap-y-2 lg:pb-px lg:after:absolute lg:after:inset-x-0 lg:after:top-8.5 lg:after:border-b lg:after:border-border">
+      <StatusTabs
+        type={filters.type}
+        counts={typeCounts}
+        belowLg={sheet !== undefined}
+      />
       <div
         className={cn(
           "flex items-center gap-2 max-lg:px-4 max-lg:pt-3 lg:mb-0.5 lg:ml-auto",
@@ -270,7 +315,7 @@ export function ItemFilterBar({
         <TypeToggle
           value={filters.type}
           counts={counts}
-          onChange={(type) => onFiltersChange({ ...filters, type })}
+          onChange={onTypeChange}
           countsBelowLg={!select}
           className="max-lg:flex-1"
         />
@@ -280,18 +325,24 @@ export function ItemFilterBar({
           activeCount={
             [sheet.active, filters.type !== null].filter(Boolean).length
           }
-          doneLabel={showItemsLabel(typeCounts?.[filters.status ?? ALL])}
+          doneLabel={showItemsLabel(
+            typeCounts?.[filters.status ?? ALL],
+            filters.type,
+          )}
           className="mx-4 mt-3 self-start lg:hidden"
         >
           {sheet.select}
           <TypeSelect
             fieldLabel="Type"
+            // null here is issues and todos, as on the lg toggle; notes list in their own section
+            allLabel="All"
             value={filters.type}
-            onChange={(type) => onFiltersChange({ ...filters, type })}
+            onChange={onTypeChange}
           />
         </FiltersSheet>
       ) : (
         <StatusChips
+          type={filters.type}
           value={filters.status}
           onChange={(status) => onFiltersChange({ ...filters, status })}
         />
@@ -303,10 +354,12 @@ export function ItemFilterBar({
 /** Lists, tabs and chips all read the same filter value off this. */
 export const statusTabValue = (filters: ItemFilters) => filters.status ?? ALL;
 
+// All holds issues and todos; notes list beside it, so "items" would deny them
 const nouns: Record<ItemType | "all", string> = {
-  all: "items",
+  all: "issues and todos",
   issue: "issues",
   todo: "todos",
+  note: "notes",
 };
 
 /** Items exist, none under the filters: say which, and offer them all back. */
@@ -317,7 +370,8 @@ export function FilterEmpty({
   filters: ItemFilters;
   onShowAll: () => void;
 }) {
-  const noun = nouns[filters.type ?? "all"];
+  // "or" where it negates: none of either
+  const noun = filters.type ? nouns[filters.type] : "issues or todos";
   return (
     <EmptyState
       icon={SearchIcon}
@@ -336,7 +390,10 @@ export function FilterEmpty({
   );
 }
 
-/** An issue may be unassigned; a todo always has its bot, so it never reads Unassigned. */
+/**
+ * An issue may be unassigned; a todo always has its bot and a note never has one, so
+ * neither reads Unassigned.
+ */
 function Assignee({ item }: { item: WebItemRowView }) {
   if (!item.assignee) {
     return item.type === "issue" ? (
@@ -389,22 +446,28 @@ function Labels({
   );
 }
 
-const itemNoun = (count: number) => (count === 1 ? "item" : "items");
+function itemNoun(count: number, type: ItemType | null = null) {
+  if (count !== 1) return nouns[type ?? "all"];
+  return type ? nouns[type].slice(0, -1) : "issue or todo";
+}
 
-/** `trail TRL 8 items`: a product group's heading, its key as a pill after the name. */
+/** `trail TRL 8 issues and todos`, or `3 todos` under the type filter's Todos: a product group's heading, its key as a pill after the name. */
 export function GroupHeading({
   product,
   count,
+  type,
 }: {
   product: WebProductRefView;
   count: number;
+  /** The page's type filter; null is All. */
+  type: ItemType | null;
 }) {
   return (
     <span className="flex min-w-0 items-center gap-2">
       <span className="truncate font-medium">{product.name}</span>{" "}
       <KeyPill>{product.key}</KeyPill>{" "}
       <span className="shrink-0 text-xs font-normal whitespace-nowrap text-muted-foreground">
-        {count} {itemNoun(count)}
+        {count} {itemNoun(count, type)}
       </span>
     </span>
   );
@@ -417,22 +480,31 @@ export type ItemGroup = {
   items: WebItemRowView[];
 };
 
+/** A list holds notes only when filtered to them: without a type it holds issues and todos. */
+const holdsWork = (groups: ItemGroup[]) =>
+  groups.some((group) => group.items.some((item) => item.type !== "note"));
+
 const head = "h-7.5 px-0";
 
 /**
- * The 1024px table: status, type, key, title, priority, (labels,) assignee, updated. A
- * group with a product gets a heading row; groups after the first sit 12px apart.
+ * The 1024px table: status, type, key, title, priority, (labels,) assignee, updated; a list
+ * of notes alone drops priority and assignee, which a note never has. A group with a product
+ * gets a heading row; groups after the first sit 12px apart.
  */
 export function ItemTable({
   groups,
+  type,
   labels,
   now,
 }: {
   groups: ItemGroup[];
+  /** The page's type filter, which names the rows in a group's heading. */
+  type: ItemType | null;
   labels: boolean;
   now: Date;
 }) {
-  const columns = labels ? 8 : 7;
+  const work = holdsWork(groups);
+  const columns = 5 + (labels ? 1 : 0) + (work ? 2 : 0);
   return (
     <Table className="table-fixed max-lg:hidden">
       <TableHeader>
@@ -445,11 +517,15 @@ export function ItemTable({
           </TableHead>
           <TableHead className={cn(head, "w-18")}>Key</TableHead>
           <TableHead className={head}>Title</TableHead>
-          <TableHead className={cn(head, "w-21.5")}>Priority</TableHead>
+          {work && (
+            <TableHead className={cn(head, "w-21.5")}>Priority</TableHead>
+          )}
           {labels && (
             <TableHead className={cn(head, "w-24.5")}>Labels</TableHead>
           )}
-          <TableHead className={cn(head, "w-34.5")}>Assignee</TableHead>
+          {work && (
+            <TableHead className={cn(head, "w-34.5")}>Assignee</TableHead>
+          )}
           <TableHead className={cn(head, "w-15 pr-2 text-right")}>
             Updated
           </TableHead>
@@ -472,7 +548,11 @@ export function ItemTable({
                 )}
               >
                 <div className="flex h-8.5 items-center px-2">
-                  <GroupHeading product={group.product} count={group.count} />
+                  <GroupHeading
+                    product={group.product}
+                    count={group.count}
+                    type={type}
+                  />
                 </div>
               </TableHead>
             </TableRow>
@@ -503,17 +583,21 @@ export function ItemTable({
                   {item.title}
                 </RowLink>
               </TableCell>
-              <TableCell className="px-0 py-2">
-                <PriorityLabel priority={item.priority} />
-              </TableCell>
+              {work && (
+                <TableCell className="px-0 py-2">
+                  <PriorityLabel priority={item.priority} />
+                </TableCell>
+              )}
               {labels && (
                 <TableCell className="px-0 py-2 pr-2.5">
                   <Labels labels={item.labels} oneLine />
                 </TableCell>
               )}
-              <TableCell className="px-0 py-2 pr-2.5">
-                <Assignee item={item} />
-              </TableCell>
+              {work && (
+                <TableCell className="px-0 py-2 pr-2.5">
+                  <Assignee item={item} />
+                </TableCell>
+              )}
               <TableCell className="py-2 pr-2 pl-0 text-right text-muted-foreground">
                 <Age iso={item.updatedAt} now={now} />
               </TableCell>
@@ -531,7 +615,16 @@ export function ItemTable({
  * key and title and described by its type, status, assignee, priority and labels. A
  * group with a product gets a heading.
  */
-export function ItemRows({ groups, now }: { groups: ItemGroup[]; now: Date }) {
+export function ItemRows({
+  groups,
+  type,
+  now,
+}: {
+  groups: ItemGroup[];
+  /** The page's type filter, which names the rows in a group's heading. */
+  type: ItemType | null;
+  now: Date;
+}) {
   const id = useId();
   return (
     <div className="lg:hidden">
@@ -548,7 +641,11 @@ export function ItemRows({ groups, now }: { groups: ItemGroup[]; now: Date }) {
               id={`${id}-${group.product.key}`}
               className="flex items-center px-4 pt-5 pb-0.5 font-normal"
             >
-              <GroupHeading product={group.product} count={group.count} />
+              <GroupHeading
+                product={group.product}
+                count={group.count}
+                type={type}
+              />
             </h3>
           )}
           <ul>
@@ -587,7 +684,7 @@ export function ItemRows({ groups, now }: { groups: ItemGroup[]; now: Date }) {
                             {statusLabel(item.status)}
                           </span>{" "}
                           <RowAssignee item={item} />{" "}
-                          {item.priority !== 0 && (
+                          {item.type !== "note" && item.priority !== 0 && (
                             <span>{priorityLabel(item.priority)} </span>
                           )}
                           {item.labels.length > 0 && (

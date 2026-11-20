@@ -22,13 +22,20 @@ export const issueStatuses = [
   "in_progress",
   "done",
   "canceled",
+  "current",
+  "archived",
 ] as const;
 // the statuses that carry a completed_at
 const completedStatuses = [
   "done",
   "canceled",
 ] as const satisfies readonly IssueStatus[];
-export const issueTypes = ["issue", "todo"] as const;
+// the statuses a note takes, and only a note
+export const noteStatuses = [
+  "current",
+  "archived",
+] as const satisfies readonly IssueStatus[];
+export const issueTypes = ["issue", "todo", "note"] as const;
 export const projectHealths = ["on_track", "at_risk", "off_track"] as const;
 export const activitySubjectTypes = [
   "product",
@@ -382,7 +389,7 @@ export const productMember = sqliteTable(
   ],
 );
 
-// an item: an issue anyone filed, or a todo the product's own bot keeps
+// an item: an issue anyone filed, a todo the product's own bot keeps, or a note
 export const issue = sqliteTable(
   "issue",
   {
@@ -424,6 +431,19 @@ export const issue = sqliteTable(
     check(
       "issue_todo_status_check",
       sql`${c(t.type)} <> 'todo' or ${c(t.status)} <> 'triage'`,
+    ),
+    // a note is a record nobody acts on: it alone takes current/archived, and has no assignee, priority or estimate
+    check(
+      "issue_note_status_check",
+      sql`(${c(t.type)} = 'note') = (${oneOf(t.status, noteStatuses)})`,
+    ),
+    check(
+      "issue_note_assignee_check",
+      sql`${c(t.type)} <> 'note' or ${c(t.assigneeId)} is null`,
+    ),
+    check(
+      "issue_note_rank_check",
+      sql`${c(t.type)} <> 'note' or (${c(t.priority)} = 0 and ${c(t.estimate)} is null)`,
     ),
     check("issue_title_check", sql`length(${c(t.title)}) > 0`),
     check("issue_number_check", sql`${c(t.number)} > 0`),
@@ -517,6 +537,26 @@ export const issueLink = sqliteTable(
     check("issue_link_url_check", sql`length(${c(t.url)}) > 0`),
     check("issue_link_title_check", sql`length(${c(t.title)}) > 0`),
     unique("issue_link_issue_url_unique").on(t.issueId, t.url),
+  ],
+);
+
+// the items a note is about, in any product. Nothing here pins note_id to a note; the service
+// writes rows only for notes and clears them when an item stops being one.
+export const noteAbout = sqliteTable(
+  "note_about",
+  {
+    noteId: text("note_id")
+      .notNull()
+      .references(() => issue.id, { onDelete: "cascade" }),
+    itemId: text("item_id")
+      .notNull()
+      .references(() => issue.id, { onDelete: "cascade" }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.noteId, t.itemId] }),
+    check("note_about_self_check", sql`${c(t.noteId)} <> ${c(t.itemId)}`),
+    // the notes about an item
+    index("note_about_item_note_idx").on(t.itemId, t.noteId),
   ],
 );
 
@@ -1047,7 +1087,8 @@ export const webhookDelivery = sqliteTable(
     status: text("status", { enum: webhookDeliveryStatuses })
       .notNull()
       .default("pending"),
-    // the JSON sent, built at the first attempt so a retry sends the same bytes
+    // the JSON sent, built at the first attempt so a retry sends the same bytes;
+    // never kept for a note event, whose about keys follow the key sending it
     body: text("body"),
     attempts: integer("attempts").notNull().default(0),
     nextAttemptAt: integer("next_attempt_at", {

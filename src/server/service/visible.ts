@@ -4,6 +4,8 @@ import type { Db } from "../db/client.js";
 import {
   activityEvent,
   comment,
+  issue,
+  product,
   project,
   projectItem,
   projectProduct,
@@ -194,6 +196,100 @@ export function eventsReached(db: Db, reach: Reach): SQL | undefined {
   );
 }
 
+/** A note's about on its events: as it stands on a create, as it changed on an update. */
+type About =
+  | { about: string[]; aboutOthers: number }
+  | {
+      about: { from: string[]; to: string[] };
+      aboutOthers: { from: number; to: number };
+    };
+
+/**
+ * TRL-12 as its product key and number; none for a string no item's key could
+ * be (product_key_check keeps `-` out of a product key; 012 is not 12's key).
+ */
+function splitItemKey(key: string): { product: string; number: number }[] {
+  const dash = key.indexOf("-");
+  const number = Number(key.slice(dash + 1));
+  return dash > 0 && String(number) === key.slice(dash + 1)
+    ? [{ product: key.slice(0, dash), number }]
+    : [];
+}
+
+/**
+ * A note event as `reach` may read it. The stored `about` names the note's
+ * own product's items, which a product follower reaches whole, so it reads
+ * the event as stored; a key reaching the product only through a project gets
+ * just the keys of the items it reaches, the rest added to `aboutOthers`. An
+ * update whose about change it can't see reads without `about`, as the writer
+ * drops a swap among other products' items; null when that leaves nothing, so
+ * the key reads no event at all. Any other event as stored.
+ */
+export function eventForReach<
+  E extends {
+    subjectType: string;
+    productId: string | null;
+    payload: Record<string, unknown>;
+  },
+>(db: Db, reach: Reach, event: E): E | null {
+  if (
+    reach === null ||
+    event.subjectType !== "issue" ||
+    event.payload.about === undefined ||
+    (event.productId !== null && reach.products.includes(event.productId))
+  )
+    return event;
+  const stored = event.payload as About;
+  const created = Array.isArray(stored.about);
+  const keys = created
+    ? { from: stored.about as string[], to: stored.about as string[] }
+    : (stored.about as { from: string[]; to: string[] });
+  const others = created
+    ? { from: stored.aboutOthers as number, to: stored.aboutOthers as number }
+    : (stored.aboutOthers as { from: number; to: number });
+  const named = [...new Set([...keys.from, ...keys.to])];
+  if (named.length === 0) return event;
+  const parts = named.flatMap(splitItemKey);
+  // keys × numbers over-fetches pairs nobody named; `shown` drops them. Kept as
+  // two lists so product.key and issue_product_number_unique serve the lookup
+  const reached = new Set(
+    db
+      .select({ key: product.key, number: issue.number })
+      .from(product)
+      .innerJoin(issue, eq(issue.productId, product.id))
+      .where(
+        and(
+          inArray(product.key, [...new Set(parts.map((p) => p.product))]),
+          inArray(issue.number, [...new Set(parts.map((p) => p.number))]),
+          itemsReached(db, reach, issue.id, issue.productId),
+        ),
+      )
+      .all()
+      .map((r) => `${r.key}-${r.number}`),
+  );
+  const shown = (side: string[]) => side.filter((k) => reached.has(k));
+  const from = shown(keys.from);
+  const to = shown(keys.to);
+  const fromOthers = others.from + keys.from.length - from.length;
+  const toOthers = others.to + keys.to.length - to.length;
+  if (
+    !created &&
+    fromOthers === toOthers &&
+    from.length === to.length &&
+    from.every((key, i) => key === to[i])
+  ) {
+    const { about: _about, aboutOthers: _others, ...rest } = event.payload;
+    return Object.keys(rest).length === 0 ? null : { ...event, payload: rest };
+  }
+  const about: About = created
+    ? { about: to, aboutOthers: toOthers }
+    : {
+        about: { from, to },
+        aboutOthers: { from: fromOthers, to: toOthers },
+      };
+  return { ...event, payload: { ...event.payload, ...about } };
+}
+
 // One message for a reference that is missing and one the caller can't see, so a 404 never tells them apart.
 const notFound = (what: string, ref: string, help: string) =>
   new NotFoundError(`no ${what} ${ref}: ${help}`);
@@ -208,6 +304,11 @@ export const noProject = (ref: string) =>
     "project",
     ref,
     "pass the slug (like launch-q4) of a project this key reaches; list_projects (GET /api/v1/projects) lists them",
+  );
+/** What the routes from before notes answer for a note the key reaches. */
+export const noteOnIssueRoute = (key: string) =>
+  new NotFoundError(
+    `${key} is a note, which the deprecated issue routes don't read or edit (GET and POST /api/v1/issues/{id}/comments still serve its comments): read it with get_item (GET /api/v1/items/{key}) and edit it with update_item (PATCH /api/v1/items/{key})`,
   );
 export const noIssue = (ref: string) =>
   notFound(

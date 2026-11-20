@@ -209,24 +209,28 @@ export function ProductSelect({
 const TYPE_OPTIONS: { value: WebItemType; label: string }[] = [
   { value: "issue", label: "Issues" },
   { value: "todo", label: "Todos" },
+  { value: "note", label: "Notes" },
 ];
 
-/** "All types", Issues or Todos. */
+/** Issues, Todos or Notes, under the caller's `allLabel` for no type. */
 export function TypeSelect({
   value,
   onChange,
   fieldLabel,
+  allLabel,
 }: {
   value: WebItemType | null;
   onChange: (type: WebItemType | null) => void;
   /** Set inside the Filters sheet: the word above the trigger. */
   fieldLabel?: string;
+  /** The name for null, which differs by list: the feed's includes notes, a work list's doesn't. */
+  allLabel: string;
 }) {
   return (
     <FilterSelect
       label="Filter by type"
       fieldLabel={fieldLabel}
-      allLabel="All types"
+      allLabel={allLabel}
       icon={ShapesIcon}
       options={TYPE_OPTIONS}
       value={value}

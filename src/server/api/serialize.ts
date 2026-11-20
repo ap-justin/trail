@@ -30,21 +30,25 @@ import type {
   MarkReadResult,
   Message,
   NamedProduct,
+  NoteCounts,
   Page,
   ProductView as Product,
+  ProductDetail,
   ProjectView as Project,
   SentMessage,
   StatusUpdate,
   Webhook,
   Whoami,
 } from "../service/index.js";
+import { isNoteStatus } from "../service/index.js";
 import { type KeyScope, scopeView } from "../service/keys.js";
 import { MESSAGE_PREVIEW_CHARS } from "../service/messages.js";
 import { buildLogHint, type Surface } from "./build-log.js";
 
 // One function per resource, each listing its wire keys, so a new column reaches the wire only on purpose.
 
-export function toProduct(row: Product): ProductView {
+/** A product; with `notes` as get_product reads it. */
+export function toProduct(row: Product & { notes?: NoteCounts }): ProductView {
   return {
     id: row.id,
     key: row.key,
@@ -56,12 +60,13 @@ export function toProduct(row: Product): ProductView {
     createdBy: row.createdBy,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    ...(row.notes && { notes: row.notes }),
   };
 }
 
-/** A product as a key reads it: `toProduct`, or for one named only through a project its id, key and name. */
+/** A product as a key reads it: `toProduct`, with `notes` from get_product, or for one named only through a project its id, key and name. */
 export function toProductRead(
-  row: Product | NamedProduct,
+  row: ProductDetail | Product | NamedProduct,
 ): ProductView | NamedProductView {
   return "createdBy" in row
     ? toProduct(row)
@@ -79,6 +84,7 @@ export function toProject(row: Project): ProjectView {
     products: row.products.map((p) => ({ key: p.key, name: p.name })),
     hiddenProducts: row.hiddenProducts,
     counts: row.counts,
+    notes: row.notes,
     latestStatusUpdate:
       row.latestStatusUpdate === null
         ? null
@@ -134,16 +140,33 @@ export function toIssue(row: Issue): IssueView {
     updatedAt: row.updatedAt.toISOString(),
     completedAt: row.completedAt?.toISOString() ?? null,
     ...(row.access && { access: row.access }),
+    ...(row.about && { about: row.about }),
+    ...(row.notes && { notes: row.notes }),
+    ...(row.notesCount && { notesCount: row.notesCount }),
   };
 }
 
 /** An item as the routes from before triage serve it: triage, which their status enum lacks, reads as open. */
 export function toLegacyIssue(row: Issue) {
-  const view = toIssue(row);
   return {
-    ...view,
-    status: view.status === "triage" ? ("open" as const) : view.status,
+    ...toIssue(row),
+    type: legacyType(row.type),
+    status: legacyStatus(row.status),
   };
+}
+
+// the service keeps notes from reaching the legacy routes
+function legacyType(type: Issue["type"]) {
+  if (type === "note") throw new Error("a note reached a legacy route");
+  return type;
+}
+
+function legacyStatus(status: Issue["status"]) {
+  if (status === "triage") return "open";
+  if (isNoteStatus(status)) {
+    throw new Error(`a note, in status ${status}, reached a legacy route`);
+  }
+  return status;
 }
 
 /** A created item's view with the label names left off it, when a filer outside the product sent some the product lacks. */

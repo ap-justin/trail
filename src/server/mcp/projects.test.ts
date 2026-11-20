@@ -39,6 +39,7 @@ test("create_project defaults to the caller's one product and to the caller as l
     products: [{ key: alpha.product.key, name: "Alpha's product" }],
     hiddenProducts: false,
     counts: { triage: 0, open: 0, in_progress: 0, done: 0, canceled: 0 },
+    notes: { current: 0, archived: 0 },
     latestStatusUpdate: null,
     createdBy: alpha.actor.id,
     createdAt: expect.any(String),

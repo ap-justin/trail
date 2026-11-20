@@ -3,6 +3,7 @@ import { createFileRoute, Navigate, redirect } from "@tanstack/react-router";
 import { AppPage, useChrome } from "@/app/chrome";
 import { NotFoundPage } from "@/app/not-found-page";
 import { RowsMissing } from "@/app/rows-missing";
+import type { NotesRead } from "@/components/notes";
 import {
   ProjectHeading,
   ProjectHealth,
@@ -10,6 +11,7 @@ import {
   ProjectView,
 } from "@/components/project";
 import { api, isNotFound } from "@/lib/api";
+import type { WebProjectItemsView } from "@/lib/api-types";
 import {
   type ItemSearch,
   itemSearchOf,
@@ -17,13 +19,21 @@ import {
   validateItemSearch,
 } from "@/lib/item-search";
 import { loadableAfter, loadableOf } from "@/lib/loadable";
-import { keys, projectItemsQuery } from "@/lib/queries";
+import { keys, projectItemsQuery, projectNoteCountsQuery } from "@/lib/queries";
 
 // slugs are lowercase, so a segment with a capital and no lowercase is a product key
 // from before projects: /projects/TRL was the TRL product's page
 const productKey = /^(?=.*[A-Z])[A-Z0-9]{2,10}$/;
 
 type ProjectSearch = ItemSearch & { product?: string };
+
+// module-scoped so the query reruns the flatten only when the list changes, not every render;
+// structural sharing keeps the notes' identity either way
+const notesOfGroups = (list: WebProjectItemsView): NotesRead => ({
+  items: list.groups.flatMap((group) => group.items),
+  nextCursor: list.nextCursor,
+  total: list.counts.notes.current,
+});
 
 export const Route = createFileRoute("/_app/projects/$slug")({
   validateSearch: (search: Record<string, unknown>): ProjectSearch => ({
@@ -66,9 +76,40 @@ function ProjectPage() {
   };
   // with ?product=, only the project's own products say whether it applies
   const itemsWaitOnProject = search.product !== undefined;
+  const productSettled = !itemsWaitOnProject || project.data !== undefined;
   const items = useQuery({
     ...projectItemsQuery(slug, filters),
-    enabled: !itemsWaitOnProject || project.data !== undefined,
+    enabled: productSettled,
+  });
+  // the placeholder lends only its counts: its groups' counts follow the last tab's filters
+  const counts = items.data?.counts ?? null;
+  const shownItems = items.isPlaceholderData
+    ? { data: undefined, isError: false }
+    : items;
+  // from the first page of whichever list under this product filter read last, so a long
+  // list's later pages don't hold up the Notes section, and a tab whose read failed keeps them;
+  // while a product filter's first list loads, the last filter's keep the section in place,
+  // but a failed read leaves nothing coming to replace them
+  const noteCountsQuery = useQuery({
+    ...projectNoteCountsQuery(slug, product),
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === slug ? previous : undefined,
+  });
+  const noteCounts =
+    !productSettled || (noteCountsQuery.isPlaceholderData && items.isError)
+      ? null
+      : (noteCountsQuery.data ?? null);
+  // the Notes section's, under the product filter the counts it reads follow, once they say
+  // there are current notes; a list of notes has no section, and the last filter's counts
+  // don't say this one has any
+  const notes = useQuery({
+    ...projectItemsQuery(slug, { product, type: "note", status: "current" }),
+    enabled:
+      productSettled &&
+      filters.type !== "note" &&
+      !noteCountsQuery.isPlaceholderData &&
+      (noteCounts?.current ?? 0) > 0,
+    select: notesOfGroups,
   });
   const updates = useQuery({
     queryKey: keys.projectStatusUpdates(slug),
@@ -101,8 +142,13 @@ function ProjectPage() {
       <ProjectView
         project={loadableOf(project)}
         items={
-          itemsWaitOnProject ? loadableAfter(items, project) : loadableOf(items)
+          itemsWaitOnProject
+            ? loadableAfter(shownItems, project)
+            : loadableOf(shownItems)
         }
+        counts={counts}
+        notes={loadableOf(notes)}
+        noteCounts={noteCounts}
         statusUpdates={loadableOf(updates)}
         filters={filters}
         onFiltersChange={(next) =>
@@ -116,16 +162,25 @@ function ProjectPage() {
         onRetryProject={() => void project.refetch()}
         // a refetch ignores `enabled`, so items still waiting on the project wait on its retry
         onRetryItems={() =>
-          void (itemsWaitOnProject && project.data === undefined
-            ? project.refetch()
-            : items.refetch())
+          void (productSettled ? items.refetch() : project.refetch())
         }
+        onRetryNotes={() => void notes.refetch()}
         onRetryStatusUpdates={() => void updates.refetch()}
         footer={
           <RowsMissing
-            list={items.data}
+            list={shownItems.data}
             shown={
-              items.data?.groups.reduce((n, g) => n + g.items.length, 0) ?? 0
+              shownItems.data?.groups.reduce((n, g) => n + g.items.length, 0) ??
+              0
+            }
+            notes={
+              filters.type === "note"
+                ? {
+                    status: filters.status,
+                    // A to Z by product, newest first within one
+                    order: product === null ? "first" : "newest",
+                  }
+                : undefined
             }
           />
         }

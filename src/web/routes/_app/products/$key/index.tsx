@@ -4,15 +4,24 @@ import { AppPage, useChrome } from "@/app/chrome";
 import { NotFoundPage } from "@/app/not-found-page";
 import { RowsMissing } from "@/app/rows-missing";
 import { matchesFilters } from "@/components/item-list";
+import type { NotesRead } from "@/components/notes";
 import {
   ProductHeading,
   ProductHealth,
   ProductView,
 } from "@/components/product";
 import { api, isNotFound } from "@/lib/api";
+import type { WebItemListView } from "@/lib/api-types";
 import { itemSearchOf, validateItemSearch } from "@/lib/item-search";
 import { loadableOf } from "@/lib/loadable";
-import { keys, productItemsQuery } from "@/lib/queries";
+import { keys, productItemsQuery, productNoteCountsQuery } from "@/lib/queries";
+
+// module-scoped so the query reruns the select only when the list changes, not every render
+const notesOfList = (list: WebItemListView): NotesRead => ({
+  items: list.items,
+  nextCursor: list.nextCursor,
+  total: list.counts.notes.current,
+});
 
 export const Route = createFileRoute("/_app/products/$key/")({
   validateSearch: validateItemSearch,
@@ -49,6 +58,16 @@ function ProductPage() {
     !items.data.items.some((item) => matchesFilters(item, filters))
       ? { data: undefined, isError: false }
       : items;
+  // from the first page of whichever of this product's lists read last, so a long list's
+  // later pages don't hold up the Notes section, and a tab whose read failed keeps them
+  const noteCounts = useQuery(productNoteCountsQuery(key)).data ?? null;
+  // the Notes section's, once the counts say there are current notes; a list of notes has
+  // no section
+  const notes = useQuery({
+    ...productItemsQuery(key, { type: "note", status: "current" }),
+    enabled: type !== "note" && (noteCounts?.current ?? 0) > 0,
+    select: notesOfList,
+  });
   const updates = useQuery({
     queryKey: keys.productStatusUpdates(key),
     queryFn: () => api.productStatusUpdates(key),
@@ -72,6 +91,9 @@ function ProductPage() {
         product={ref}
         detail={product.data ?? null}
         items={loadableOf(shownItems)}
+        counts={items.data?.counts ?? null}
+        notes={loadableOf(notes)}
+        noteCounts={noteCounts}
         statusUpdates={loadableOf(updates)}
         filters={filters}
         onFiltersChange={(next) =>
@@ -79,12 +101,14 @@ function ProductPage() {
         }
         onNewIssue={() => openNewIssue(key)}
         onRetryItems={() => void items.refetch()}
+        onRetryNotes={() => void notes.refetch()}
         onRetryStatusUpdates={() => void updates.refetch()}
         footer={
           // the last filter's list stands in until this one loads, and its cap isn't this one's
           <RowsMissing
             list={items.isPlaceholderData ? undefined : items.data}
             shown={items.data?.items.length ?? 0}
+            notes={type === "note" ? { status, order: "newest" } : undefined}
           />
         }
       />

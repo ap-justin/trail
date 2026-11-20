@@ -1,30 +1,32 @@
-import type { ItemFilters, StatusFilter } from "@/components/item-list";
+import type { ItemFilters } from "@/components/item-list";
 import type { ItemType } from "@/components/status";
+import { type StatusFilter, statusesOf } from "@/lib/item-status";
 
-const statuses = {
-  open: true,
-  in_progress: true,
-  done: true,
-  canceled: true,
-  // triage is no tab of its own: the Open tab's ?status=open matches it
-} satisfies Record<StatusFilter, true>;
-
-const isStatus = (value: unknown): value is StatusFilter =>
-  typeof value === "string" && Object.hasOwn(statuses, value);
+const isStatusOf = (
+  type: ItemType | null,
+  value: unknown,
+): value is StatusFilter =>
+  (statusesOf(type) as readonly unknown[]).includes(value);
 
 const isType = (value: unknown): value is ItemType =>
-  value === "issue" || value === "todo";
+  value === "issue" || value === "todo" || value === "note";
 
 /** `?status=` and `?type=` in an item list's URL; absent is All. */
 export type ItemSearch = { status?: StatusFilter; type?: ItemType };
 
-/** The status and type filters; anything else in ?status= or ?type= is All. */
+/**
+ * The status and type filters; anything else in ?status= or ?type= is All, and so is a
+ * status the type has no tab for, as a deep link or back/forward can carry.
+ */
 export const validateItemSearch = (
   search: Record<string, unknown>,
-): ItemSearch => ({
-  status: isStatus(search.status) ? search.status : undefined,
-  type: isType(search.type) ? search.type : undefined,
-});
+): ItemSearch => {
+  const type = isType(search.type) ? search.type : undefined;
+  return {
+    status: isStatusOf(type ?? null, search.status) ? search.status : undefined,
+    type,
+  };
+};
 
 /**
  * A search value as the text typed in the URL; an empty one is absent. The router's

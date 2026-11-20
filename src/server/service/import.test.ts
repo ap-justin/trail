@@ -884,3 +884,28 @@ test("a sourceKey not shaped like an issue key is refused, naming it", () => {
     'issue JUS187 (externalRef uuid-bad): sourceKey "JUS187" is not an issue key: send Linear\'s identifier, like ABC-187',
   );
 });
+
+test("a re-run over an issue since retyped to a note leaves the note as it is and still applies the other issues", () => {
+  const payload = linearProject();
+  service.importProject(bot, payload);
+  const key = `${payload.key}-1`;
+  service.updateItem(bot, key, { type: "note" });
+  const note = service.getItem(bot, key);
+  expect(note).toMatchObject({ type: "note", status: "current" });
+  const [i1, i2, i3] = payload.issues ?? [];
+
+  const result = service.importProject(bot, {
+    ...payload,
+    issues: [
+      { ...(i1 as ImportIssue), title: "first, retitled", status: "Done" },
+      { ...(i2 as ImportIssue), title: "second, retitled" },
+      i3 as ImportIssue,
+    ],
+  });
+  expect(result.updated.issues).toBe(1);
+  expect(result.unchanged.issues).toBe(2);
+  expect(service.getItem(bot, key)).toEqual(note);
+  expect(service.getItem(bot, `${payload.key}-2`).title).toBe(
+    "second, retitled",
+  );
+});

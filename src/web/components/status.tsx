@@ -1,4 +1,6 @@
 import {
+  ArchiveIcon,
+  BookmarkIcon,
   CircleAlertIcon,
   CircleCheckIcon,
   CircleDotIcon,
@@ -11,6 +13,7 @@ import {
   SignalHighIcon,
   SignalLowIcon,
   SignalMediumIcon,
+  StickyNoteIcon,
 } from "lucide-react";
 import type {
   WebItemRowView,
@@ -25,6 +28,7 @@ export type { WebItemType as ItemType };
 const types: Record<WebItemType, { label: string; icon: LucideIcon }> = {
   issue: { label: "Issue", icon: InboxIcon },
   todo: { label: "Todo", icon: ListTodoIcon },
+  note: { label: "Note", icon: StickyNoteIcon },
 };
 
 export function typeLabel(type: WebItemType): string {
@@ -32,7 +36,7 @@ export function typeLabel(type: WebItemType): string {
 }
 
 /**
- * Issue or Todo as one grey glyph, an image named for the type; `decorative` where
+ * Issue, Todo or Note as one grey glyph, an image named for the type; `decorative` where
  * the type is said in words beside it.
  */
 export function TypeIcon({
@@ -74,6 +78,17 @@ const statuses: Record<
   canceled: {
     label: "Canceled",
     icon: CircleXIcon,
+    ink: "text-muted-foreground",
+  },
+  // a note's two states
+  current: {
+    label: "Current",
+    icon: BookmarkIcon,
+    ink: "text-muted-foreground",
+  },
+  archived: {
+    label: "Archived",
+    icon: ArchiveIcon,
     ink: "text-muted-foreground",
   },
 };

@@ -84,3 +84,133 @@ test("POST status-update routes, product and project, carry the same guidance", 
     expectStatusGuidance(spec.paths[path]?.post?.description, path);
   }
 });
+
+test("add_todo, file_issue and add_note each send what someone has to act on to its own issue", async () => {
+  const tool = await toolDescriptions();
+  for (const name of ["add_todo", "file_issue", "add_note"]) {
+    const text = tool(name).description;
+    expect(text, name).toMatch(
+      /Anything in a note that someone has to act on goes in its own issue/,
+    );
+  }
+});
+
+/** How a note's events carry about: its own product's keys the reader reaches, the rest counted, never the full list. */
+function expectNoteEventAbout(text: string | undefined, where: string) {
+  expect(text, where).toMatch(/On its create event, about is an array of keys/);
+  expect(text, where).toMatch(/aboutOthers counts the rest/);
+  expect(text, where).toMatch(
+    /changes which of its own product's items it is about, or how many others.*carries about \{from, to\} and aboutOthers \{from, to\}/,
+  );
+  expect(text, where).toMatch(
+    /can change with no event when the change is outside the key's reach/,
+  );
+}
+
+test("list_activity and create_webhook say how a note's events carry about and aboutOthers", async () => {
+  const tool = await toolDescriptions();
+  for (const name of ["list_activity", "create_webhook"]) {
+    expectNoteEventAbout(tool(name).description, name);
+  }
+});
+
+test("GET /activity's event payload and POST /webhooks say how a note's events carry about and aboutOthers", async () => {
+  const spec = (await (
+    await request("GET", "/api/v1/openapi.json", { key: null })
+  ).json()) as {
+    paths: Record<string, { post?: { description?: string } }>;
+    components: {
+      schemas: Record<
+        string,
+        { properties: Record<string, { description?: string }> }
+      >;
+    };
+  };
+  expectNoteEventAbout(
+    spec.components.schemas.ActivityEvent?.properties.payload?.description,
+    "ActivityEvent.payload",
+  );
+  expectNoteEventAbout(spec.paths["/webhooks"]?.post?.description, "/webhooks");
+});
+
+test("create_webhook and POST /webhooks say a note event naming items is rebuilt on every attempt", async () => {
+  const tool = await toolDescriptions();
+  const spec = (await (
+    await request("GET", "/api/v1/openapi.json", { key: null })
+  ).json()) as { paths: Record<string, { post?: { description?: string } }> };
+  for (const [where, text] of [
+    ["create_webhook", tool("create_webhook").description],
+    ["/webhooks", spec.paths["/webhooks"]?.post?.description],
+  ]) {
+    expect(text, where).toMatch(
+      /A note event whose payload carries about is the exception: it is built afresh on every attempt, so each retry, under the same delivery id, carries the subject, product, actor and url as they stand at that retry\./,
+    );
+  }
+});
+
+test("POST /items' project field says an issue or a note joins the project", async () => {
+  const spec = (await (
+    await request("GET", "/api/v1/openapi.json", { key: null })
+  ).json()) as {
+    components: {
+      schemas: Record<
+        string,
+        { properties: Record<string, { description?: string }> }
+      >;
+    };
+  };
+  const project =
+    spec.components.schemas.ItemCreate?.properties.project?.description;
+  expect(project).toMatch(
+    /^Issues and notes only \(a todo with it is a 422\)\. A project's slug, like launch-q4: the issue or note joins that project as it is added, and product must be one the project draws from/,
+  );
+});
+
+test("update_item says who edits a note", async () => {
+  const tool = await toolDescriptions();
+  expect(tool("update_item").description).toMatch(
+    /A note is edited only by its author and its product's own bot/,
+  );
+});
+
+test("add_note's and file_issue's project fields say a key reaching one project defaults to it, and their product fields don't ask for project", async () => {
+  const tool = await toolDescriptions();
+  const field = (name: string, key: string) =>
+    (
+      tool(name).inputSchema.properties as Record<
+        string,
+        { description?: string }
+      >
+    )[key]?.description;
+  for (const name of ["file_issue", "add_note"]) {
+    expect(field(name, "project"), name).toMatch(
+      /A key reaching a product only through projects sends `project` when it names more than one; with exactly one, that one is the default\./,
+    );
+    expect(field(name, "product"), name).not.toMatch(/needs project/);
+  }
+});
+
+test("list_items and GET /items say that without type they list issues and todos only", async () => {
+  const tool = await toolDescriptions();
+  expect(tool("list_items").description).toMatch(
+    /Without type it lists issues and todos only; notes need type "note" or about/,
+  );
+  const spec = (await (
+    await request("GET", "/api/v1/openapi.json", { key: null })
+  ).json()) as {
+    paths: Record<string, { get?: { description?: string } }>;
+  };
+  expect(spec.paths["/items"]?.get?.description).toMatch(
+    /Without type, issues and todos only: notes are listed with type note or about/,
+  );
+});
+
+test("add_note says a note is a record nobody has to act on and file_issue that it is a request for work", async () => {
+  const tool = await toolDescriptions();
+  expect(tool("add_note").description).toMatch(
+    /^Add a note: a record nobody has to act on/,
+  );
+  expect(tool("file_issue").description).toMatch(
+    /a bug report or request for work to a product's bot/,
+  );
+});

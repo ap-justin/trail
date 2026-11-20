@@ -239,6 +239,7 @@ describe("GET /products/:key/items", () => {
       all: { all: 5, open: 3, in_progress: 1, done: 1, canceled: 0 },
       issue: { all: 3, open: 2, in_progress: 0, done: 1, canceled: 0 },
       todo: { all: 2, open: 1, in_progress: 1, done: 0, canceled: 0 },
+      notes: { current: 0, archived: 0 },
     });
   });
 

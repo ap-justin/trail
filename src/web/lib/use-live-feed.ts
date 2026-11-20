@@ -13,7 +13,7 @@ import { api, type FeedFilter, isNotFound } from "@/lib/api";
 import type { EntryView, FeedView } from "@/lib/api-types";
 import { holdFeedStream } from "@/lib/feed-stream-holds";
 import { statusOf } from "@/lib/loadable";
-import { keys } from "@/lib/queries";
+import { isOffScreen, keys } from "@/lib/queries";
 
 /** How long a row that arrived over the stream keeps its highlight. */
 export const FRESH_MS = 2000;
@@ -245,7 +245,7 @@ export function useLiveFeed(
     dispatch({ type: "clear" });
     setFreshIds(new Set());
     received.current = new Set();
-    queryClient.removeQueries({ type: "inactive" });
+    queryClient.removeQueries({ predicate: isOffScreen });
     // `/me` asked first, so the cache counts the feed and Working now reads below as already
     // following the access it reports, and doesn't read them a second time
     void queryClient.invalidateQueries({ queryKey: keys.me });
