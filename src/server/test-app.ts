@@ -51,6 +51,7 @@ export const testAuthConfig: AuthConfig = {
   BETTER_AUTH_URL: TEST_ORIGIN,
   github: { clientId: "test-client-id", clientSecret: "test-client-secret" },
   email: { from: "trail <trail@mail.example.test>", resendApiKey: "re_test" },
+  preview: null,
 };
 
 /**

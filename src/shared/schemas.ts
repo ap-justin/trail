@@ -1781,6 +1781,10 @@ export const meSchema = z.object({
     description:
       "Whether this server can email a sign-in link; false until EMAIL_FROM, RESEND_API_KEY and BETTER_AUTH_URL are all set.",
   }),
+  previewSignIn: z.boolean().meta({
+    description:
+      "Whether this server runs in preview mode, where POST /api/preview/sign-in signs in the owner with the preview password; false otherwise.",
+  }),
 });
 
 const webStatusUpdateSchema = z.object({

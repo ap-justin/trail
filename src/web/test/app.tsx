@@ -40,6 +40,7 @@ export function meView(state: MeView["state"]): MeView {
         products: [],
         ownerName,
         emailSignIn: true,
+        previewSignIn: false,
       };
     case "not_invited":
       return {
@@ -50,6 +51,7 @@ export function meView(state: MeView["state"]): MeView {
         products: [],
         ownerName,
         emailSignIn: true,
+        previewSignIn: false,
       };
     default:
       return {
@@ -60,6 +62,7 @@ export function meView(state: MeView["state"]): MeView {
         products: allProducts,
         ownerName,
         emailSignIn: true,
+        previewSignIn: false,
       };
   }
 }

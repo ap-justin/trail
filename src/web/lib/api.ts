@@ -220,6 +220,12 @@ export const api = {
       "/api/auth/magic-link/confirm",
       json("POST", { token, callbackURL }),
     ),
+  /** Preview mode only: signs in as the seeded owner with the preview password; sets the session cookie. */
+  previewSignIn: (password: string) =>
+    request<{ redirectTo: string }>(
+      "/api/preview/sign-in",
+      json("POST", { password }),
+    ),
   signOut: () => request<unknown>("/api/auth/sign-out", json("POST", {})),
   eventsUrl: (filter: FeedFilter) => web(`/events${query(filter)}`),
   /** Only `actor` events and heartbeats: no feed entries, no replay, its own per-person cap. */

@@ -28,7 +28,7 @@ export function ownerName(db: Db, ownerLogin: string): string {
 function meOf(
   db: Db,
   viewer: Viewer,
-  shared: Pick<MeView, "ownerName" | "emailSignIn">,
+  shared: Pick<MeView, "ownerName" | "emailSignIn" | "previewSignIn">,
 ): MeView {
   if (viewer.kind === "anonymous") {
     return {
@@ -77,6 +77,7 @@ export function meRoutes(db: Db, auth: TrailAuth) {
       meOf(db, c.var.viewer, {
         ownerName: ownerName(db, auth.ownerLogin),
         emailSignIn: auth.emailSignIn,
+        previewSignIn: auth.previewSignIn !== null,
       }),
       200,
     ),

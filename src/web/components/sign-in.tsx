@@ -162,6 +162,99 @@ function EmailForm({
   );
 }
 
+/** Where a preview's test sign-in stands. */
+export type PreviewSignIn =
+  | { status: "idle" }
+  /** From the press until the page has left as a member. */
+  | { status: "signing_in" }
+  | { status: "wrong_password" }
+  /** `retryAfterSeconds`: the server's Retry-After; null without one. */
+  | { status: "rate_limited"; retryAfterSeconds: number | null }
+  | { status: "failed"; message: string };
+
+const WRONG_PASSWORD = "That password didn't work.";
+
+function PreviewForm({
+  state,
+  onSignIn,
+}: {
+  state: PreviewSignIn;
+  onSignIn: (password: string) => void;
+}) {
+  const [password, setPassword] = useState("");
+  const wrong = state.status === "wrong_password";
+  // shown from each wrong answer until the next edit
+  const [marked, setMarked] = useState(wrong);
+  const [wasWrong, setWasWrong] = useState(wrong);
+  if (wrong !== wasWrong) {
+    setWasWrong(wrong);
+    if (wrong) setMarked(true);
+  }
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (wrong) inputRef.current?.focus();
+  }, [wrong]);
+
+  const signingIn = state.status === "signing_in";
+  const ids = { heading: useId(), password: useId(), error: useId() };
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (signingIn) return;
+    onSignIn(password);
+  };
+
+  return (
+    <section aria-labelledby={ids.heading} className="mt-6 border-t pt-5">
+      <h2 id={ids.heading} className="mb-3 font-semibold">
+        Test sign-in (preview only)
+      </h2>
+      <form noValidate onSubmit={submit} className="flex flex-col">
+        <label htmlFor={ids.password} className="mb-1.5 font-medium">
+          Preview password
+        </label>
+        <Input
+          id={ids.password}
+          ref={inputRef}
+          type="password"
+          autoComplete="off"
+          value={password}
+          readOnly={signingIn}
+          onChange={(event) => {
+            setPassword(event.currentTarget.value);
+            setMarked(false);
+          }}
+          aria-invalid={marked || undefined}
+          aria-describedby={marked ? ids.error : undefined}
+          className={cn("h-11 lg:h-10", signingIn && "opacity-50")}
+        />
+        {marked && (
+          <p id={ids.error} className="mt-1.5 text-xs text-destructive">
+            {WRONG_PASSWORD}
+          </p>
+        )}
+        <Button
+          type="submit"
+          variant="outline"
+          aria-disabled={signingIn || undefined}
+          aria-busy={signingIn || undefined}
+          className={cn(cardButton, "mt-2", signingIn && "opacity-50")}
+        >
+          {signingIn ? "Signing in…" : "Sign in to the preview"}
+        </Button>
+        {/* mounted while empty so a failure is announced when it arrives */}
+        <p role="status" className="text-xs text-destructive not-empty:mt-2">
+          {state.status === "rate_limited"
+            ? `Too many requests, try again in ${waitOf(state.retryAfterSeconds)}.`
+            : state.status === "failed"
+              ? state.message
+              : null}
+        </p>
+      </form>
+    </section>
+  );
+}
+
 /** "Check your email", focused when it arrives: the form and the button pressed are gone. */
 function LinkSent({
   onUseDifferentAddress,
@@ -208,6 +301,7 @@ export function SignInView({
   emailLink = { status: "idle" },
   onEmailLink,
   onUseDifferentAddress,
+  preview,
 }: {
   /** Starts GitHub OAuth. */
   onSignIn: () => void;
@@ -224,6 +318,8 @@ export function SignInView({
   onEmailLink: (email: string) => void;
   /** Leaves "Check your email" for the form again. */
   onUseDifferentAddress: () => void;
+  /** Only on a server in preview mode: signs in with the preview password. */
+  preview?: { state: PreviewSignIn; onSignIn: (password: string) => void };
 }) {
   const sent = emailLink.status === "sent";
   // the form comes back after "Check your email" only through this button, which it replaced
@@ -285,6 +381,9 @@ export function SignInView({
           Email sign-in isn't available right now. Only invited accounts can
           sign in.
         </p>
+      )}
+      {preview && (
+        <PreviewForm state={preview.state} onSignIn={preview.onSignIn} />
       )}
     </SignInCard>
   );

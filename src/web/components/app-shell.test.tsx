@@ -136,6 +136,7 @@ test("the shell's viewer carries the photo URL `/me` gives the signed-in actor",
     products: [],
     ownerName: "Jordan Smith",
     emailSignIn: true,
+    previewSignIn: false,
   };
   expect(sessionOf(me)?.viewer).toEqual({
     name: "Maya Chen",
@@ -160,6 +161,7 @@ test("a person who signs in by email is let into the shell, shown by their addre
     products: [],
     ownerName: "Jordan Smith",
     emailSignIn: true,
+    previewSignIn: false,
   };
   expect(sessionOf(me)?.viewer).toEqual({
     name: "dana.okafor",
