@@ -144,7 +144,7 @@ Fixed in the CSV writer: the last row was never flushed.
 Open it in trail:
 https://trail.example/issues/ATL-7
 
-You get this email once, when an issue filed for you is done or canceled. Stop these emails:
+You get this email each time an issue filed for you is done or canceled. Stop these emails:
 https://trail.example/unsubscribe/issue-end?t=tok
 `);
   for (const part of [

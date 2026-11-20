@@ -143,7 +143,7 @@ export function issueEndedEmail(
 <div style="font:400 16px/1.5 ${font};color:#0a0a0a;padding-bottom:12px">The issue filed for you ${outcome}.</div>
 <div style="font:600 16px/1.4 ${font};color:#0a0a0a;padding-bottom:24px"><span style="font:500 14px/1.4 ${mono};color:#636363">${key}</span>&nbsp; ${escapeHtml(ended.title)}</div>
 ${commentHtml}<div style="padding-bottom:24px"><a href="${href}" style="display:inline-block;background:#171717;color:#fafafa;font:500 15px/1 ${font};padding:13px 20px;border-radius:6px;text-decoration:none">Open ${key}</a></div>
-<div style="border-top:1px solid #e5e5e5;padding-top:16px;font:400 12px/1.5 ${font};color:#636363">You get this email once, when an issue filed for you is done or canceled. <a href="${unsubscribe}" style="color:#636363">Stop these emails</a></div>
+<div style="border-top:1px solid #e5e5e5;padding-top:16px;font:400 12px/1.5 ${font};color:#636363">You get this email each time an issue filed for you is done or canceled. <a href="${unsubscribe}" style="color:#636363">Stop these emails</a></div>
 </div>
 </body></html>
 `;
@@ -157,7 +157,7 @@ ${ended.key}  ${ended.title}
 ${commentText}Open it in trail:
 ${ended.url}
 
-You get this email once, when an issue filed for you is done or canceled. Stop these emails:
+You get this email each time an issue filed for you is done or canceled. Stop these emails:
 ${ended.unsubscribeUrl}
 `;
   return { subject: `${ended.key} ${outcome}: ${ended.title}`, html, text };
