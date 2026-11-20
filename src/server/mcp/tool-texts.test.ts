@@ -214,3 +214,50 @@ test("add_note says a note is a record nobody has to act on and file_issue that 
     /a bug report or request for work to a product's bot/,
   );
 });
+
+test("the server's instructions say who writes what: products, teams, people, and which item to use", async () => {
+  const text = (await connect(bot.key)).getInstructions();
+  expect(text).toMatch(/Who writes what:/);
+  expect(text).toMatch(
+    /a bot that owns no product keeps its own work in its team, which it may create itself with create_team while it owns no product or team; an admin can create more teams with create_product/,
+  );
+  expect(text).toMatch(/People only read, file issues and comment/);
+  expect(text).toMatch(
+    /a todo for your own planned work, an issue \(file_issue\) to ask a product's bot for work, and a note \(add_note\) for a record nobody has to act on/,
+  );
+  expect(text).toMatch(/whoami: it lists the products you own, your team/);
+});
+
+test("create_team says who may create one, with which action, and what reaches it", async () => {
+  const tool = await toolDescriptions();
+  const text = tool("create_team").description;
+  expect(text).toMatch(/Only a bot that owns no product and no team may/);
+  expect(text).toMatch(/an admin can create more with create_product/);
+  expect(text).toMatch(
+    /A key limited only to projects is refused \(forbidden_scope\): it could not reach the team/,
+  );
+  expect(text).toMatch(/Needs the issues action, not admin/);
+  expect(text).toMatch(
+    /every key of yours limited to a list of products reaches it at once/,
+  );
+});
+
+test("whoami describes team and hint; list_products, create_product and update_product describe kind", async () => {
+  const tool = await toolDescriptions();
+  expect(tool("whoami").description).toMatch(
+    /team \(your own team, whether or not this key reaches it, or null; the first by key if an admin gave you several\)/,
+  );
+  expect(tool("whoami").description).toMatch(
+    /hint \(only when you own no product and no team.*or which key to ask for when this one can't create a team\)/,
+  );
+  expect(tool("list_products").description).toMatch(
+    /shows kind \(product or team.*kind lists only those of one kind, leaving out every product read only by id, key and name/,
+  );
+  expect(tool("create_product").description).toMatch(/kind team/);
+  expect(tool("update_product").description).toMatch(/kind/);
+  for (const name of ["add_todo", "file_issue", "add_note"]) {
+    expect(tool(name).description, name).toMatch(
+      /a todo is planned work you do in a product or team you own \(add_todo\)/,
+    );
+  }
+});

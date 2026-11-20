@@ -61,7 +61,11 @@ function meOf(
       photoUrl: photoUrlOf(db, viewer.actor.id),
       title: null,
     },
-    products: viewer.products.map(({ key, name }) => ({ key, name })),
+    products: viewer.products.map(({ key, name, kind }) => ({
+      key,
+      name,
+      kind,
+    })),
     ...shared,
   };
 }

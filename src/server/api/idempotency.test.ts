@@ -454,3 +454,50 @@ test("a product create stored before products were split from projects replays w
     deprecated: expect.any(String),
   });
 });
+
+test("a product create stored before products had a kind replays with kind product", async () => {
+  const made = (await (
+    await request("POST", "/api/v1/products", {
+      json: { key: projectKey(), name: "before kind" },
+    })
+  ).json()) as Body;
+  // the request and the row create_product stored between migrations 0015 and 0022
+  db.transaction((tx) =>
+    storeResult(
+      tx,
+      bot.actor.id,
+      {
+        key: "product before kind",
+        scope: "project.create",
+        request: {
+          name: "before kind",
+          key: made.key,
+          description: "",
+          externalRef: null,
+          repoUrl: null,
+          ownerId: undefined,
+        },
+      },
+      {
+        id: made.id,
+        key: made.key,
+        name: made.name,
+        description: "",
+        issueSeq: 0,
+        externalRef: null,
+        ownerId: bot.actor.id,
+        repoUrl: null,
+        createdBy: bot.actor.id,
+        createdAt: made.createdAt,
+        updatedAt: made.updatedAt,
+      },
+    ),
+  );
+  const again = await post(
+    "/products",
+    { key: made.key, name: "before kind" },
+    "product before kind",
+  );
+  expect(again.status).toBe(201);
+  expect(await again.json()).toMatchObject({ id: made.id, kind: "product" });
+});

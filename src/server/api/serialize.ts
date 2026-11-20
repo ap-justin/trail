@@ -53,6 +53,7 @@ export function toProduct(row: Product & { notes?: NoteCounts }): ProductView {
     id: row.id,
     key: row.key,
     name: row.name,
+    kind: row.kind,
     description: row.description,
     repoUrl: row.repoUrl,
     owner: row.owner,
@@ -267,6 +268,8 @@ export function toWhoami(row: Whoami, scope: KeyScope): WhoamiView {
     photoUrl: row.photoUrl,
     title: row.title,
     unreadMessages: row.unreadMessages,
+    team: row.team && ref(row.team),
+    ...(row.hint !== undefined && { hint: row.hint }),
   };
 }
 

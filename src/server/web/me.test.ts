@@ -58,7 +58,7 @@ test("a member gets its actor and exactly its products; the owner's display name
         photoUrl: null,
         title: null,
       },
-      products: [{ key: mine.key, name: "Mine" }],
+      products: [{ key: mine.key, name: "Mine", kind: "product" }],
       ownerName: "Olive Owner",
       emailSignIn: true,
     },
@@ -69,7 +69,11 @@ test("the owner is state owner and sees every project", async () => {
   const a = addProject();
   const res = await me(await signIn(owner));
   expect(res.body).toMatchObject({ state: "owner", login: owner });
-  expect(res.body.products).toContainEqual({ key: a.key, name: a.name });
+  expect(res.body.products).toContainEqual({
+    key: a.key,
+    name: a.name,
+    kind: "product",
+  });
 });
 
 test("ownerName follows the owner's account, not its login: a renamed owner keeps its name, and whoever later takes the old login is not the owner", async () => {
@@ -84,5 +88,24 @@ test("ownerName follows the owner's account, not its login: a renamed owner keep
   expect((await me(squatter)).body).toMatchObject({
     state: "not_invited",
     ownerName: "Olive Owner",
+  });
+});
+
+test("each product carries its kind: a team row is team, any other is product", async () => {
+  const product = addProject("Plain");
+  const team = addProject("Crew");
+  await request("PATCH", `/api/v1/products/${team.key}`, {
+    json: { kind: "team" },
+  });
+  const { body } = await me(await signIn(owner));
+  expect(body.products).toContainEqual({
+    key: product.key,
+    name: "Plain",
+    kind: "product",
+  });
+  expect(body.products).toContainEqual({
+    key: team.key,
+    name: "Crew",
+    kind: "team",
   });
 });

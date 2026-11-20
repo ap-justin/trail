@@ -23,6 +23,8 @@ test("GET /whoami answers the key's bot: id, kind, name, label, photoUrl and tit
     photoUrl: null,
     title: null,
     unreadMessages: 0,
+    team: null,
+    hint: expect.stringContaining("create_team"),
   });
 });
 

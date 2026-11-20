@@ -30,7 +30,10 @@ export type EmailHuman = {
 /** A person, told apart by `githubId`: null for an email person. */
 export type HumanActor = GitHubHuman | EmailHuman;
 
-export type VisibleProduct = { id: string; key: string; name: string };
+export type VisibleProduct = Pick<
+  typeof product.$inferSelect,
+  "id" | "key" | "name" | "kind"
+>;
 
 /** What a sign-in knows of a GitHub account; `login` is lowercased. */
 export type GitHubIdentity = { githubId: number; login: string; name: string };
@@ -344,7 +347,12 @@ const emailHuman = (row: ActorRow): EmailHuman => ({
 
 /** Every product for the owner; for a member, those listed under its invite. */
 export function visibleProducts(db: Db, access: Access): VisibleProduct[] {
-  const columns = { id: product.id, key: product.key, name: product.name };
+  const columns = {
+    id: product.id,
+    key: product.key,
+    name: product.name,
+    kind: product.kind,
+  };
   if (access.isOwner) {
     return db.select(columns).from(product).orderBy(asc(product.key)).all();
   }

@@ -993,6 +993,8 @@ test("whoami is the calling actor's row, label included", () => {
     ...labelled,
     photoUrl: null,
     unreadMessages: 0,
+    team: null,
+    hint: expect.stringContaining("create_team"),
     ownProducts: [],
     impliedProjects: [],
     products: service

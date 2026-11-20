@@ -6,6 +6,11 @@ import { beta, product, statusUpdate } from "@/test/fixtures";
 
 const now = new Date("2026-11-11T09:53:00.000Z");
 
+const team = (overrides: Parameters<typeof product>[0]) => ({
+  ...product(overrides),
+  kind: "team" as const,
+});
+
 function renderProducts(overrides: Partial<ProductsViewProps> = {}) {
   render(
     <ProductsView
@@ -183,6 +188,53 @@ describe("products", () => {
       expect(text).not.toHaveTextContent("**");
       expect(text).not.toHaveTextContent("`");
     }
+  });
+
+  test("teams list apart under a Teams heading, in their own table and cards, each with a Team badge", () => {
+    renderProducts({
+      products: [
+        { ...product(), kind: "product" as const },
+        team({ key: "LDG", name: "Ledger" }),
+      ],
+    });
+    const teams = within(screen.getByRole("region", { name: "Teams" }));
+    const [productTable, teamTable] = screen.getAllByRole("table");
+    if (!productTable || !teamTable) throw new Error("expected two tables");
+    expect(
+      within(productTable).getByRole("columnheader", { name: "Product" }),
+    ).toBeInTheDocument();
+    expect(within(productTable).queryByText("Ledger")).toBeNull();
+    expect(within(productTable).queryByText("Team")).toBeNull();
+    expect(teams.getByRole("heading", { name: "Teams" })).toBeInTheDocument();
+    expect(
+      within(teamTable).getByRole("columnheader", { name: "Team" }),
+    ).toBeInTheDocument();
+    expect(
+      within(teamTable).getByRole("link", { name: "Ledger LDG Team" }),
+    ).toHaveAttribute("href", "/products/LDG");
+    expect(teams.getByRole("listitem")).toHaveTextContent("Ledger LDG Team");
+    expect(teams.queryByText("trail")).toBeNull();
+  });
+
+  test("with no team there is no Teams heading and no Team badge", () => {
+    renderProducts({
+      products: [product(), product({ key: "OPB", name: "OpenBot" })],
+    });
+    expect(screen.queryByRole("region", { name: "Teams" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Teams" })).toBeNull();
+    expect(screen.queryByText("Team")).toBeNull();
+    expect(screen.getAllByRole("table")).toHaveLength(1);
+  });
+
+  test("a viewer who sees only teams gets the Teams section and no products table", () => {
+    renderProducts({
+      products: [team({ key: "LDG", name: "Ledger" })],
+    });
+    expect(screen.getAllByRole("table")).toHaveLength(1);
+    expect(
+      screen.getByRole("columnheader", { name: "Team" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Product" })).toBeNull();
   });
 
   test("a person with no products is told to ask the owner by name", () => {

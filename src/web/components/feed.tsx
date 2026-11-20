@@ -616,6 +616,11 @@ function sentenceFor(entry: EntryView): Sentence | null {
         verb: muted("created"),
         subject: productSubject(entry.product),
       };
+    case "team_created":
+      return {
+        verb: muted("created team"),
+        subject: productSubject(entry.product),
+      };
     case "product_imported": {
       // an import that only touched labels, status updates or the product row counts 0 of both
       const counts = [

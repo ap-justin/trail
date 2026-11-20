@@ -691,6 +691,7 @@ function changePhrase(entry: EntryView): ReactNode {
     case "comment":
     case "product_status_update":
     case "product_created":
+    case "team_created":
     case "product_imported":
     case "project_status_update":
     case "project_created":

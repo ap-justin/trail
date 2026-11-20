@@ -103,7 +103,7 @@ function migrationsWith(
 const migrationsWithProductRebuild = () =>
   migrationsWith("9999_rebuild", [
     "PRAGMA foreign_keys=OFF;",
-    "CREATE TABLE `__new_product` (`id` text PRIMARY KEY NOT NULL, `key` text NOT NULL UNIQUE, `name` text NOT NULL, `description` text DEFAULT '' NOT NULL, `issue_seq` integer DEFAULT 0 NOT NULL, `external_ref` text, `owner_id` text REFERENCES `actor`(`id`), `repo_url` text, `created_by` text NOT NULL REFERENCES `actor`(`id`), `created_at` integer NOT NULL, `updated_at` integer NOT NULL) STRICT;",
+    "CREATE TABLE `__new_product` (`id` text PRIMARY KEY NOT NULL, `key` text NOT NULL UNIQUE, `name` text NOT NULL, `description` text DEFAULT '' NOT NULL, `issue_seq` integer DEFAULT 0 NOT NULL, `external_ref` text, `owner_id` text REFERENCES `actor`(`id`), `repo_url` text, `created_by` text NOT NULL REFERENCES `actor`(`id`), `created_at` integer NOT NULL, `updated_at` integer NOT NULL, `kind` text DEFAULT 'product' NOT NULL) STRICT;",
     "INSERT INTO `__new_product` SELECT * FROM `product`;",
     "DROP TABLE `product`;",
     "ALTER TABLE `__new_product` RENAME TO `product`;",

@@ -254,7 +254,9 @@ test("PUT replaces a person's products, and the member sees exactly the new set 
   expect(moved.status).toBe(200);
   expect(moved.body.products).toEqual([{ key: beta.key, name: "Beta" }]);
   const me = await as(cookie)("GET", "/me");
-  expect(me.body.products).toEqual([{ key: beta.key, name: "Beta" }]);
+  expect(me.body.products).toEqual([
+    { key: beta.key, name: "Beta", kind: "product" },
+  ]);
 
   const emptied = await people("PUT", "/people/mover", { products: [] });
   expect(emptied.body.products).toEqual([]);

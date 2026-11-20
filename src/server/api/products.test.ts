@@ -14,6 +14,7 @@ test("POST /products creates a product as the calling bot and returns 201", asyn
     id: expect.any(String),
     key: "TRL",
     name: "trail",
+    kind: "product",
     description: "issue tracker",
     repoUrl: null,
     owner: { id: bot.actor.id, name: "tester", kind: "bot" },

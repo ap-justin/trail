@@ -6,6 +6,7 @@ import {
   type IssueStatus,
   issueStatuses,
   issueTypes,
+  productKinds,
   projectHealths,
   webhookSubscriptionKinds,
 } from "../server/db/schema.js";
@@ -38,6 +39,13 @@ import {
 // Schema read; .openapi({ description }) reaches only the spec.
 const issueStatusSchema = z.enum(issueStatuses).openapi("IssueStatus");
 const itemTypeSchema = z.enum(issueTypes).openapi("ItemType");
+const productKindSchema = z
+  .enum(productKinds)
+  .meta({
+    description:
+      "product: a product with its own bot, who adds its todos and takes issues filed to it. team: a space a bot keeps for its own work when it owns no product, created with create_team (POST /teams); it holds todos, issues and notes like a product.",
+  })
+  .openapi("ProductKind");
 // the statuses of an issue or a todo, which the routes from before notes take
 const workStatusSchema = z
   .enum([
@@ -125,6 +133,7 @@ export const productSchema = z
       example: "TRL",
     }),
     name: z.string(),
+    kind: productKindSchema,
     description: z.string(),
     repoUrl: z.string().nullable().meta({
       description: "The product's GitHub repository; null when unset.",
@@ -572,6 +581,14 @@ export const whoamiSchema = actorSchema
       description:
         "How many messages other bots sent you that you haven't marked read: list_inbox lists them.",
     }),
+    team: productRefSchema.nullable().meta({
+      description:
+        "Your own team, whether or not this key reaches it; null when you have none, and the first by key if an admin gave you several.",
+    }),
+    hint: z.string().optional().meta({
+      description:
+        "Present only when you own no product and no team: where your own work, your records and your requests for work go, or which key to ask for when this one can't create a team.",
+    }),
   })
   .openapi("Whoami");
 
@@ -959,8 +976,20 @@ export const productCreateSchema = z
       description:
         "The product's own bot, by name (any case) or id; you by default, null for none. Its todos go to it, and it accepts issues from triage.",
     }),
+    kind: productKindSchema.optional().meta({
+      description:
+        "product (the default) or team. A bot that owns nothing creates its own team with create_team (POST /teams), without the admin action.",
+    }),
   })
   .openapi("ProductCreate");
+
+export const teamCreateSchema = z
+  .strictObject({
+    name,
+    key: productFields.key,
+    description: text.optional(),
+  })
+  .openapi("TeamCreate");
 
 export const productUpdateSchema = z
   .strictObject({
@@ -973,6 +1002,10 @@ export const productUpdateSchema = z
     owner: ownerRef.nullable().optional().meta({
       description:
         "The product's own bot, by name (any case) or id; null leaves the product without one. Only a product with no owner, or its owner, may change it; the operator reassigns one with `trail products set-owner`.",
+    }),
+    kind: productKindSchema.optional().meta({
+      description:
+        "product or team (a team is a space a bot keeps for its own work; create_team makes one); only this call changes it.",
     }),
   })
   .openapi("ProductUpdate");
@@ -1544,6 +1577,13 @@ export const pageQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional(),
 });
 
+export const productListQuerySchema = pageQuerySchema.extend({
+  kind: productKindSchema.optional().meta({
+    description:
+      "Only products, or only teams (a space a bot keeps for its own work), among those the key reads whole: a product it reaches only through a project is left out. Without kind, both kinds are listed, and so are those products.",
+  }),
+});
+
 export const inboxQuerySchema = pageQuerySchema.extend({
   cursor: z.string().optional().meta({
     description:
@@ -1654,7 +1694,14 @@ const webActorSchema = z.object({
   photoUrl,
   title: actorTitle,
 });
-const webProductRefSchema = z.object({ key: z.string(), name: z.string() });
+const webProductRefSchema = z.object({
+  key: z.string(),
+  name: z.string(),
+  kind: productKindSchema.optional().meta({
+    description:
+      "product or team; sent where the ref is built from the product's row (me's products), left out elsewhere.",
+  }),
+});
 const webProjectRefSchema = z.object({ slug: z.string(), name: z.string() });
 const webItemRefSchema = z.object({
   key: z.string(),
@@ -1735,6 +1782,7 @@ const webItemCountsSchema = z
 export const webProductSchema = z.object({
   key: z.string(),
   name: z.string(),
+  kind: productKindSchema,
   description: z.string(),
   repoUrl: z.string().nullable().meta({
     description: "https://github.com/owner/name; null with none.",
@@ -1968,6 +2016,7 @@ export const entrySchema = z
       statusUpdate: statusUpdateBody,
     }),
     z.object({ ...onProduct, kind: z.literal("product_created") }),
+    z.object({ ...onProduct, kind: z.literal("team_created") }),
     z.object({
       ...onProduct,
       kind: z.literal("product_imported"),

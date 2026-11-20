@@ -27,6 +27,7 @@ test("GET /products lists only the member's products, with open issues (triage a
     {
       key: mine.key,
       name: "Mine",
+      kind: "product",
       description: "",
       repoUrl: null,
       health: null,
@@ -296,5 +297,26 @@ describe("GET /products/:key/items", () => {
   test("an unknown type is a 422", async () => {
     const { status } = await get(`/products/${p.key}/items?type=epic`, cookie);
     expect(status).toBe(422);
+  });
+});
+
+test("GET /products and GET /products/:key carry kind: team for a team row, product otherwise", async () => {
+  const plain = addProject("Plain kind");
+  const team = addProject("Team kind");
+  await request("PATCH", `/api/v1/products/${team.key}`, {
+    json: { kind: "team" },
+  });
+  const cookie = await addMember("kim", [plain.id, team.id]);
+  const { body } = await get("/products", cookie);
+  expect(body.items).toEqual([
+    expect.objectContaining({ key: plain.key, kind: "product" }),
+    expect.objectContaining({ key: team.key, kind: "team" }),
+  ]);
+  expect((await get(`/products/${team.key}`, cookie)).body).toMatchObject({
+    key: team.key,
+    kind: "team",
+  });
+  expect((await get(`/products/${plain.key}`, cookie)).body).toMatchObject({
+    kind: "product",
   });
 });

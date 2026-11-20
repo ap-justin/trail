@@ -29,6 +29,7 @@ const TOOLS = [
   "create_label",
   "create_product",
   "create_project",
+  "create_team",
   "create_webhook",
   "delete_webhook",
   "file_issue",

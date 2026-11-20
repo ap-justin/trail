@@ -568,6 +568,8 @@ test("whoami reports the calling key's scope, null where it is unrestricted", as
     unreadMessages: 0,
     photoUrl: null,
     title: null,
+    team: null,
+    hint: expect.stringContaining("create_team"),
   });
   const unscopedMe = await request("GET", "/api/v1/whoami", {
     key: (await unscopedKey()).key,
@@ -645,6 +647,7 @@ test("the spec documents each gated operation's 403 with the action it needs", a
     "POST /products": orScope("admin"),
     "POST /products/{key}/labels": ownerLabels,
     "POST /products/{key}/status-updates": needs("status_updates"),
+    "POST /teams": `${needs("issues")}, or reaches only projects, so it could not work in a team (code forbidden_scope)`,
     "POST /projects":
       "The key lacks the issues action, or with key the admin action (code forbidden_action), or with key reaches only some products (code forbidden_scope)",
     "POST /projects/{ref}/labels": ownerLabels,

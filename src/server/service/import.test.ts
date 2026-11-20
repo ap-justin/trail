@@ -909,3 +909,11 @@ test("a re-run over an issue since retyped to a note leaves the note as it is an
     "second, retitled",
   );
 });
+
+test("an import onto a key a team holds says the key is taken by a team", () => {
+  const owner = createBot(db, "team-importer").actor;
+  const team = service.createTeam(owner, { key: projectKey(), name: "Desk" });
+  expect(() =>
+    service.importProject(bot, { ...linearProject(), key: team.key }),
+  ).toThrow(/is taken by team /);
+});

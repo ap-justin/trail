@@ -63,6 +63,22 @@ export function LabelChip({
   );
 }
 
+/** After a team's name and key: the outline chip "Asked for no reply" wears, neutral, so the one hue stays on bots. */
+export function TeamBadge({ className }: { className?: string }) {
+  return (
+    <Badge
+      variant="outline"
+      data-team-badge
+      className={cn(
+        "h-4.5 bg-background px-1.75 text-2xs font-normal text-muted-foreground",
+        className,
+      )}
+    >
+      Team
+    </Badge>
+  );
+}
+
 /** `trail` with the bot-teal dot. */
 export function Wordmark({ className }: { className?: string }) {
   return (

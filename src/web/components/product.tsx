@@ -26,7 +26,7 @@ import {
   TargetDate,
   UpdateHealth,
 } from "@/components/status-updates";
-import { KeyPill } from "@/components/text";
+import { KeyPill, TeamBadge } from "@/components/text";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import type {
   WebItemCountsView,
@@ -40,6 +40,7 @@ import type {
 import { statusFilterOf } from "@/lib/item-status";
 import type { Loadable } from "@/lib/loadable";
 import { paths } from "@/lib/paths";
+import { isTeam, type WithKind } from "@/lib/product-kind";
 import { useMinuteClock } from "@/lib/use-minute-clock";
 import { cn } from "@/lib/utils";
 
@@ -70,8 +71,15 @@ export type ProductViewProps = {
   now?: Date;
 };
 
-/** The shell heading on a product page: `Products / trail TRL` at 1440, `trail TRL` below. */
-export function ProductHeading({ product }: { product: WebProductRefView }) {
+/**
+ * The shell heading on a product page: `Products / trail TRL` at 1440, `trail TRL` below; a team
+ * adds its Team badge.
+ */
+export function ProductHeading({
+  product,
+}: {
+  product: WebProductRefView & WithKind;
+}) {
   return (
     <span className="flex min-w-0 items-center gap-2">
       <span className="flex items-center gap-2 font-normal text-muted-foreground max-lg:hidden">
@@ -85,6 +93,12 @@ export function ProductHeading({ product }: { product: WebProductRefView }) {
       </span>
       <span className="truncate">{product.name}</span>{" "}
       <KeyPill>{product.key}</KeyPill>
+      {isTeam(product) && (
+        <>
+          {" "}
+          <TeamBadge />
+        </>
+      )}
     </span>
   );
 }

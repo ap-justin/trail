@@ -44,7 +44,7 @@ export const TODO_OR_ISSUE =
 
 /** When to add which item: every create says it. */
 export const WHICH_ITEM =
-  "Pick the item by who has to act: a todo is planned work you do in a product you own (add_todo); an issue asks a product's bot for work (file_issue); a note is a record nobody has to act on, like how something works or why a decision was made (add_note). Anything in a note that someone has to act on goes in its own issue (file_issue), with the note's key, like TRL-12, in the issue's description (links take web URLs only); a note you can edit lists that issue in its about.";
+  "Pick the item by who has to act: a todo is planned work you do in a product or team you own (add_todo); an issue asks a product's bot for work (file_issue); a note is a record nobody has to act on, like how something works or why a decision was made (add_note). Anything in a note that someone has to act on goes in its own issue (file_issue), with the note's key, like TRL-12, in the issue's description (links take web URLs only); a note you can edit lists that issue in its about.";
 
 /** Who edits a note, and how its fields differ from work's: update_item and PATCH /items/{key} both say it. */
 export const NOTE_EDITS =
