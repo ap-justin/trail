@@ -2,15 +2,15 @@
 // each sample taken right after a forced GC: rss, heap used, heap total, external and array buffers.
 // Not part of CI. Usage: node scripts/soak.mjs [--minutes 10] [--interval 60] [--bots 15] [--pause 500] [--only <load>] [--snapshots <dir>]
 // <load> is one of rest, mcp, live, notes, teams, mail, web, messages; leave --only out for all of them.
-// The people's loads (live, web) sign a person in by email through the fake Resend below; SOAK_WEB_COOKIE
-// stands in for that with a session cookie of your own.
+// The people's loads (live, web) sign a person in by email through the fake Resend below, and are skipped
+// when that fails. A bad flag exits 2; a server that dies mid-run still gets the tally, and exits 1.
 // The load: bots on REST and MCP (MCP calls often dropped mid-flight, with a mix of tools), items linking
 // pull requests of a fake GitHub, webhooks to a local receiver that is sometimes slow or down, notes
 // (with about, edits, reads and lists), teams, issues filed for a handler and then ended so the end-of-issue
 // mail goes out through a fake Resend that sometimes refuses, bot messages, and a person's live event
 // streams and project, product and item pages. Everything stays on 127.0.0.1; GitHub and Resend are never called.
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -29,13 +29,58 @@ const { values } = parseArgs({
     only: { type: "string" },
   },
 });
-const minutes = Number(values.minutes);
-const intervalS = Number(values.interval);
-const botCount = Number(values.bots);
-const pauseMs = Number(values.pause);
+const usage = (message) => {
+  console.error(`soak: ${message}`);
+  process.exit(2);
+};
+const numberFlag = (name, ok, wanted) => {
+  const n = Number(values[name]);
+  if (!ok(n)) usage(`--${name} must be ${wanted}, got ${values[name]}`);
+  return n;
+};
+const minutes = numberFlag("minutes", (n) => n > 0, "a number above 0");
+// setInterval reads a delay under 1 ms as 1 ms
+const intervalS = numberFlag(
+  "interval",
+  (n) => n >= 0.001,
+  "seconds, 0.001 or more",
+);
+const botCount = numberFlag(
+  "bots",
+  (n) => Number.isInteger(n) && n >= 1,
+  "a whole number, 1 or more",
+);
+const pauseMs = numberFlag("pause", (n) => n >= 0, "milliseconds, 0 or more");
+const LOADS = [
+  "rest",
+  "mcp",
+  "live",
+  "notes",
+  "teams",
+  "mail",
+  "web",
+  "messages",
+];
+if (values.only !== undefined && !LOADS.includes(values.only))
+  usage(`--only must be one of ${LOADS.join(", ")}, got ${values.only}`);
+// a request or CLI call that takes longer is counted as failed, so a stalled answer can't outlast --minutes
+const REQUEST_TIMEOUT_MS = 30_000;
 const root = new URL("..", import.meta.url).pathname;
 const dir = mkdtempSync(join(tmpdir(), "trail-soak-"));
 if (values.snapshots) mkdirSync(values.snapshots, { recursive: true });
+let server;
+// sync, so it also runs from 'exit' after a crash: the server is killed rather than drained
+const cleanUp = () => {
+  if (server && server.exitCode === null && server.signalCode === null)
+    server.kill("SIGKILL");
+  rmSync(dir, { recursive: true, force: true });
+};
+process.on("exit", cleanUp);
+for (const signal of ["SIGINT", "SIGTERM"])
+  process.once(signal, () => {
+    cleanUp();
+    process.kill(process.pid, signal);
+  });
 
 const listen = (server) =>
   new Promise((resolve) =>
@@ -116,7 +161,7 @@ env.PORT = String(serverPort);
 const base = `http://127.0.0.1:${serverPort}`;
 env.BETTER_AUTH_URL = base;
 
-const server = spawn(
+server = spawn(
   process.execPath,
   [
     "--expose-gc",
@@ -128,34 +173,67 @@ const server = spawn(
 );
 const heapWaiters = [];
 server.on("message", (m) => heapWaiters.shift()?.(m));
+// answers null once the server is gone, so a sample never waits on a dead process
 const ask = (message) =>
   new Promise((resolve) => {
+    if (!server.connected) return resolve(null);
     heapWaiters.push(resolve);
-    server.send(message);
+    server.send(message, (error) => {
+      if (!error) return;
+      const i = heapWaiters.indexOf(resolve);
+      if (i !== -1) heapWaiters.splice(i, 1);
+      resolve(null);
+    });
   });
+let stop = Number.POSITIVE_INFINITY;
+let stopping = false;
+let serverDied = false;
+const exited = new Promise((resolve) => server.once("exit", resolve));
+server.once("exit", (code, signal) => {
+  for (const waiter of heapWaiters.splice(0)) waiter(null);
+  if (stopping) return;
+  serverDied = true;
+  stop = 0;
+  console.error(
+    `soak: the server exited (code ${code}, signal ${signal}); stopping the load`,
+  );
+});
 
-for (let i = 0; i < 100; i++) {
-  if (
-    await fetch(`${base}/health`).then(
-      (r) => r.ok,
-      () => false,
-    )
-  )
-    break;
-  await new Promise((r) => setTimeout(r, 200));
+let healthy = false;
+for (let i = 0; i < 100 && !healthy && !serverDied; i++) {
+  healthy = await fetch(`${base}/health`, {
+    signal: AbortSignal.timeout(1000),
+  }).then(
+    (r) => r.ok,
+    () => false,
+  );
+  if (!healthy) await new Promise((r) => setTimeout(r, 200));
 }
+if (!healthy)
+  throw new Error(
+    `the server never answered ${base}/health (pnpm build first?)`,
+  );
 
 async function cli(...args) {
   return new Promise((resolve, reject) => {
     const p = spawn(process.execPath, [join(root, "dist/cli.js"), ...args], {
       env,
+      timeout: REQUEST_TIMEOUT_MS,
     });
     let out = "";
     p.stdout.on("data", (d) => (out += d));
     let err = "";
     p.stderr.on("data", (d) => (err += d));
-    p.on("close", (code) =>
-      code === 0 ? resolve(out) : reject(new Error(err || out)),
+    p.on("close", (code, signal) =>
+      code === 0
+        ? resolve(out)
+        : reject(
+            new Error(
+              err ||
+                out ||
+                `trail ${args.join(" ")} ended by ${signal ?? code}`,
+            ),
+          ),
     );
   });
 }
@@ -180,9 +258,11 @@ for (let i = 0; i < TEAM_BOTS; i++) {
 const answers = new Map();
 const samples = new Map();
 const tally = (method, path, status) => {
-  const k = `${method} ${path.replace(/[A-Z]{2,5}-\d+|\d+/g, "#").replace(/about=#|[?].*/, "")} ${status}`;
+  const k = `${method} ${path.replace(/[A-Z]{2,5}-\d+|\d+/g, "#")} ${status}`;
   answers.set(k, (answers.get(k) ?? 0) + 1);
 };
+// a fetch that never answered: TimeoutError, AbortError, or the network error's code
+const failure = (error) => error.cause?.code ?? error.name;
 const api = async (bot, method, path, body, signal) => {
   const res = await fetch(`${base}/api/v1${path}`, {
     method,
@@ -191,7 +271,10 @@ const api = async (bot, method, path, body, signal) => {
       "content-type": "application/json",
     },
     body: body && JSON.stringify(body),
-    signal,
+    signal: signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  }).catch((error) => {
+    tally(method, path, failure(error));
+    throw error;
   });
   tally(method, path, res.status);
   if (res.status >= 400 && !samples.has(`${method} ${res.status}`))
@@ -295,13 +378,37 @@ const mcpTools = (bot) => [
   },
 ];
 
+// a tool's refusal is a 200 with isError, a protocol error a 200 with error: both tallied as refused
+const mcpCall = async (bot, what, body, signal) => {
+  try {
+    const res = await fetch(`${base}/mcp`, {
+      method: "POST",
+      headers: mcpHeaders(bot),
+      body,
+      signal,
+    });
+    const text = await res.text();
+    tally(
+      "MCP",
+      what,
+      /"isError":true|"error":\{/.test(text)
+        ? `${res.status} refused`
+        : res.status,
+    );
+  } catch (error) {
+    tally("MCP", what, failure(error));
+  }
+};
+
 async function mcpRound(bot) {
   const drop = Math.random() < 0.5;
   const ctl = new AbortController();
-  const init = fetch(`${base}/mcp`, {
-    method: "POST",
-    headers: mcpHeaders(bot),
-    body: mcpBody(
+  const signal = () =>
+    AbortSignal.any([ctl.signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]);
+  const init = mcpCall(
+    bot,
+    "initialize",
+    mcpBody(
       "initialize",
       {
         protocolVersion: "2025-03-26",
@@ -310,24 +417,17 @@ async function mcpRound(bot) {
       },
       1,
     ),
-    signal: ctl.signal,
-  });
+    signal(),
+  );
   // a dropped call is abandoned with no close, as a bot that crashed leaves it
   if (drop) setTimeout(() => ctl.abort(), Math.random() * 5);
-  await init.then(
-    (r) => r.text(),
-    () => null,
-  );
+  await init;
   const tool = pick(mcpTools(bot));
-  const call = fetch(`${base}/mcp`, {
-    method: "POST",
-    headers: mcpHeaders(bot),
-    body: mcpBody("tools/call", tool, 2),
-    signal: ctl.signal,
-  });
-  await call.then(
-    (r) => r.text(),
-    () => null,
+  await mcpCall(
+    bot,
+    `tools/call ${tool.name}`,
+    mcpBody("tools/call", tool, 2),
+    signal(),
   );
 }
 
@@ -406,9 +506,16 @@ async function messagesRound(bot) {
 // what a person's browser reads: the project and product pages, the Notes section, an item
 async function webRound(cookie, bot) {
   const get = async (path) => {
-    const res = await fetch(`${base}/api/web${path}`, { headers: { cookie } });
-    tally("WEB GET", path, res.status);
-    return res.text();
+    try {
+      const res = await fetch(`${base}/api/web${path}`, {
+        headers: { cookie },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      tally("WEB GET", path, res.status);
+      await res.text();
+    } catch (error) {
+      tally("WEB GET", path, failure(error));
+    }
   };
   await get("/me");
   await get("/projects");
@@ -422,27 +529,36 @@ async function webRound(cookie, bot) {
   if (bot.lastKey) await get(`/items/${bot.lastKey}`);
 }
 
+// the session cookie, or undefined when the sign-in failed
 async function signIn() {
   const headers = { origin: base, "content-type": "application/json" };
-  await fetch(`${base}/api/auth/sign-in/magic-link`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ email: PERSON, callbackURL: "/" }),
-  });
+  const post = async (path, body) => {
+    try {
+      const res = await fetch(`${base}/api/auth${path}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      tally("AUTH POST", path, res.status);
+      await res.text();
+      return res;
+    } catch (error) {
+      tally("AUTH POST", path, failure(error));
+      return null;
+    }
+  };
+  await post("/sign-in/magic-link", { email: PERSON, callbackURL: "/" });
   for (let i = 0; i < 50 && !signInLinks.get(PERSON); i++)
     await new Promise((r) => setTimeout(r, 100));
   const link = signInLinks.get(PERSON);
   if (!link) return undefined;
   const query = new URL(link).searchParams;
-  const res = await fetch(`${base}/api/auth/magic-link/confirm`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      token: query.get("token"),
-      callbackURL: query.get("callbackURL") ?? undefined,
-    }),
+  const res = await post("/magic-link/confirm", {
+    token: query.get("token"),
+    callbackURL: query.get("callbackURL") ?? undefined,
   });
-  return res.headers
+  return res?.headers
     .getSetCookie()
     .map((c) => c.split(";")[0])
     .find((c) => c.includes("session_token="));
@@ -452,37 +568,54 @@ async function liveRound(cookie) {
   const ctl = new AbortController();
   const res = await fetch(`${base}/api/web/events`, {
     headers: { cookie },
-    signal: ctl.signal,
-  }).catch(() => null);
-  tally("WEB GET", "/events", res?.status ?? "failed");
-  if (res?.status !== 200 || !res.body) return;
+    signal: AbortSignal.any([
+      ctl.signal,
+      AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    ]),
+  }).catch((error) => {
+    tally("WEB GET", "/events", failure(error));
+    return null;
+  });
+  if (!res) return;
+  tally("WEB GET", "/events", res.status);
+  if (res.status !== 200 || !res.body) return void res.body?.cancel();
   const reader = res.body.getReader();
   await reader.read().catch(() => null);
   await new Promise((r) => setTimeout(r, 200 + Math.random() * 800));
   ctl.abort();
 }
 
-const cookie = process.env.SOAK_WEB_COOKIE ?? (await signIn());
+const cookie = await signIn();
 // a handler can be set once the person has signed in
-for (const bot of bots) {
-  if (bot.i % 2 === 0) await cli("bot", "handler", bot.name, PERSON);
+if (cookie) {
+  for (const bot of bots) {
+    if (bot.i % 2 === 0) await cli("bot", "handler", bot.name, PERSON);
+  }
+} else {
+  console.error(
+    "no person signed in: the live and web loads are skipped, and the mail load has no handler",
+  );
 }
-if (!cookie)
-  console.error("no person signed in: the live and web loads are skipped");
-const stop = Date.now() + minutes * 60_000;
+stop = Math.min(stop, Date.now() + minutes * 60_000);
 const on = (what) => !values.only || values.only === what;
 const pause = () =>
   new Promise((r) => setTimeout(r, pauseMs * (0.6 + Math.random() * 0.8)));
+// a round that threw is tallied and the next one runs: one bad answer doesn't end the run unreported
+const failedRound = (error) => tally("ROUND", "threw", failure(error));
 const workers = bots.map(async (bot) => {
   while (Date.now() < stop) {
-    // rest first: the other loads read what it filed
-    if (on("rest") || bot.lastKey === undefined) await restRound(bot);
-    if (on("mcp")) await mcpRound(bot);
-    if (on("notes")) await notesRound(bot);
-    if (on("mail") && bot.i % 2 === 0) await mailRound(bot);
-    if (on("messages")) await messagesRound(bot);
-    if (on("live") && cookie && bot.i % 3 === 0) await liveRound(cookie);
-    if (on("web") && cookie && bot.i % 3 === 1) await webRound(cookie, bot);
+    try {
+      // rest first: the other loads read what it filed
+      if (on("rest") || bot.lastKey === undefined) await restRound(bot);
+      if (on("mcp")) await mcpRound(bot);
+      if (on("notes")) await notesRound(bot);
+      if (on("mail") && bot.i % 2 === 0) await mailRound(bot);
+      if (on("messages")) await messagesRound(bot);
+      if (on("live") && cookie && bot.i % 3 === 0) await liveRound(cookie);
+      if (on("web") && cookie && bot.i % 3 === 1) await webRound(cookie, bot);
+    } catch (error) {
+      failedRound(error);
+    }
     await pause();
   }
 });
@@ -491,7 +624,7 @@ if (on("teams"))
     workers.push(
       (async () => {
         while (Date.now() < stop) {
-          await teamsRound(bot);
+          await teamsRound(bot).catch(failedRound);
           await pause();
         }
       })(),
@@ -501,8 +634,11 @@ const started = Date.now();
 const mb = (n) => `${(n / 1048576).toFixed(1).padStart(6)} MB`;
 const report = async (label) => {
   const m = await ask({ type: "heap" });
+  const at = `${String(Math.round((Date.now() - started) / 60_000)).padStart(4)} min`;
+  if (!m)
+    return console.log(`${at}  no sample: the server is gone${label ?? ""}`);
   console.log(
-    `${String(Math.round((Date.now() - started) / 60_000)).padStart(4)} min  rss ${mb(m.rss)}  heapUsed ${mb(m.heapUsed)}  heapTotal ${mb(m.heapTotal)}  external ${mb(m.external)}  arrayBuffers ${mb(m.arrayBuffers)}${label ?? ""}`,
+    `${at}  rss ${mb(m.rss)}  heapUsed ${mb(m.heapUsed)}  heapTotal ${mb(m.heapTotal)}  external ${mb(m.external)}  arrayBuffers ${mb(m.arrayBuffers)}${label ?? ""}`,
   );
 };
 await report(" (start)");
@@ -533,8 +669,12 @@ console.log(
 for (const [k, text] of samples)
   console.log(`first ${k}: ${text.slice(0, 300)}`);
 console.log(`mail: ${mailStats.ok} accepted, ${mailStats.refused} refused`);
+stopping = true;
 server.kill();
-github.close();
-receiver.close();
-resend.close();
-process.exit(0);
+// the server drains for up to 4 s (src/server/index.ts deadlineMs); the 'exit' cleanup kills what is left
+await Promise.race([exited, new Promise((r) => setTimeout(r, 6000))]);
+for (const fake of [github, receiver, resend]) {
+  fake.closeAllConnections();
+  fake.close();
+}
+process.exit(serverDied ? 1 : 0);

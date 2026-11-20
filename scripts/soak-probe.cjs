@@ -32,8 +32,14 @@ globalThis.fetch = (input, init) => {
 
 // a public-looking address for every webhook host, so the address check passes
 dnsPromises.lookup = async () => [{ address: "93.184.216.34", family: 4 }];
-dns.lookup = (_host, opts, cb) =>
-  (typeof opts === "function" ? opts : cb)(null, "93.184.216.34", 4);
+// any other connection by host name is one the soak didn't redirect: refuse it rather than reach the internet
+dns.lookup = (host, opts, cb) =>
+  process.nextTick(
+    typeof opts === "function" ? opts : cb,
+    Object.assign(new Error(`soak: no lookup of ${host}`), {
+      code: "ENOTFOUND",
+    }),
+  );
 https.request = (options, callback) =>
   http.request({ ...options, host: "127.0.0.1", port: receiverPort }, callback);
 syncBuiltinESMExports();
