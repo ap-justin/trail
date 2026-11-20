@@ -2345,7 +2345,7 @@ export function createService({
         .get();
       if (taken) {
         throw new ConflictError(
-          `product key ${input.key} is taken by product ${taken.id} ("${taken.name}", externalRef ${taken.externalRef ?? "none"}): send another key for ${input.externalRef}`,
+          `product key ${input.key} is taken by ${taken.kind} ${taken.id} ("${taken.name}", externalRef ${taken.externalRef ?? "none"}): send another key for ${input.externalRef}`,
         );
       }
       requireKeyNoSlug(tx, input.key);

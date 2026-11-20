@@ -1004,7 +1004,8 @@ export const productUpdateSchema = z
         "The product's own bot, by name (any case) or id; null leaves the product without one. Only a product with no owner, or its owner, may change it; the operator reassigns one with `trail products set-owner`.",
     }),
     kind: productKindSchema.optional().meta({
-      description: "product or team; only this call changes it.",
+      description:
+        "product or team (a team is a space a bot keeps for its own work; create_team makes one); only this call changes it.",
     }),
   })
   .openapi("ProductUpdate");
@@ -1579,7 +1580,7 @@ export const pageQuerySchema = z.object({
 export const productListQuerySchema = pageQuerySchema.extend({
   kind: productKindSchema.optional().meta({
     description:
-      "Only products, or only teams, among those the key reads whole: a product it reaches only through a project is left out. Without kind, both kinds are listed, and so are those products.",
+      "Only products, or only teams (a space a bot keeps for its own work), among those the key reads whole: a product it reaches only through a project is left out. Without kind, both kinds are listed, and so are those products.",
   }),
 });
 
