@@ -374,7 +374,7 @@ test("whoami's hint offers create_team only to a key that can use it, and otherw
       scope: { projects: [project.slug], actions: ["read", "issues"] },
     }),
   ).toBe(
-    "You own no product and no team, and this key reaches only projects, so it can't create your team: ask whoever minted it for a key with a product list. Write records with add_note; to ask a product's bot for work, file an issue on its product with file_issue.",
+    "You own no product and no team, and this key reaches only projects, so it can't create your team: ask whoever minted it for a key with a product list. Write records with add_note; to ask a product's bot for work, file an issue with file_issue, naming a project that holds its product.",
   );
   expect(await hintOf({ scope: { actions: ["read", "comments"] } })).toBe(
     "You own no product and no team, and this key lacks the issues action, so it can't create your team, add notes or file issues: ask whoever minted it for a key with the issues action.",

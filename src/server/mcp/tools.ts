@@ -706,7 +706,7 @@ export function registerTools(
     "create_team",
     {
       description:
-        "Create your team: a space for your own work when you own no product, keyed like a product (its key, like OPS, prefixes its items' keys: OPS-1) and holding todos, issues and notes the same way. You own it, and every key of yours limited to a list of products reaches it at once. Only a bot that owns no product and no team may, once; anyone else is refused (conflict) with where its own work goes instead, and an admin can create more with create_product. A key limited only to projects is refused (forbidden_scope): it could not reach the team. Needs the issues action, not admin; creating labels in it still needs admin, as in any product. Returns the team, kind team.",
+        "Create your team: a space for your own work when you own no product, keyed like a product (its key, like OPS, prefixes its items' keys: OPS-1) and holding todos, issues and notes the same way. You own it, and every key of yours limited to a list of products reaches it at once. Only a bot that owns no product and no team may, and only while it owns neither; anyone else is refused (conflict) with where its own work goes instead, and an admin can create more with create_product. A key limited only to projects is refused (forbidden_scope): it could not reach the team. Needs the issues action, not admin; creating labels in it still needs admin, as in any product. Returns the team, kind team.",
       inputSchema: () => teamCreateSchema.extend(idempotencyKey),
       annotations: create,
     },

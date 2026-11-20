@@ -219,7 +219,7 @@ test("the server's instructions say who writes what: products, teams, people, an
   const text = (await connect(bot.key)).getInstructions();
   expect(text).toMatch(/Who writes what:/);
   expect(text).toMatch(
-    /a bot that owns no product keeps its own work in its team, which it may create itself once with create_team; an admin can create more teams with create_product/,
+    /a bot that owns no product keeps its own work in its team, which it may create itself with create_team while it owns no product or team; an admin can create more teams with create_product/,
   );
   expect(text).toMatch(/People only read, file issues and comment/);
   expect(text).toMatch(

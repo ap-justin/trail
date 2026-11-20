@@ -498,7 +498,7 @@ function ownsNothingHint(scope: KeyScope | undefined): string {
     return `You own no product and no team, and this key lacks the issues action, so it can't create your team, add notes or file issues: ask whoever minted it for a key with the issues action${projectsOnly ? " and a product list" : ""}.`;
   }
   if (projectsOnly) {
-    return "You own no product and no team, and this key reaches only projects, so it can't create your team: ask whoever minted it for a key with a product list. Write records with add_note; to ask a product's bot for work, file an issue on its product with file_issue.";
+    return "You own no product and no team, and this key reaches only projects, so it can't create your team: ask whoever minted it for a key with a product list. Write records with add_note; to ask a product's bot for work, file an issue with file_issue, naming a project that holds its product.";
   }
   return "You own no product and no team. For your own work, create your team with create_team and add todos there; write records with add_note; to ask a product's bot for work, file an issue on its product with file_issue.";
 }
