@@ -1,6 +1,6 @@
 // Preloaded into the server by scripts/soak.mjs with `node --require`; never part of the build.
 // It answers the soak's IPC messages with heap numbers or a heap snapshot, and sends the server's
-// two outbound calls, GitHub's pull request API and webhook receivers, to local stand-ins.
+// outbound calls, GitHub's pull request API, webhook receivers and Resend's mail API, to local stand-ins.
 const v8 = require("node:v8");
 const http = require("node:http");
 const https = require("node:https");
@@ -10,6 +10,7 @@ const { syncBuiltinESMExports } = require("node:module");
 
 const githubPort = Number(process.env.SOAK_GITHUB_PORT);
 const receiverPort = Number(process.env.SOAK_RECEIVER_PORT);
+const resendPort = Number(process.env.SOAK_RESEND_PORT);
 
 const realFetch = globalThis.fetch;
 globalThis.fetch = (input, init) => {
@@ -17,6 +18,12 @@ globalThis.fetch = (input, init) => {
   if (url.startsWith("https://api.github.com/")) {
     return realFetch(
       `http://127.0.0.1:${githubPort}${url.slice("https://api.github.com".length)}`,
+      init,
+    );
+  }
+  if (url.startsWith("https://api.resend.com/")) {
+    return realFetch(
+      `http://127.0.0.1:${resendPort}${url.slice("https://api.resend.com".length)}`,
       init,
     );
   }
@@ -35,8 +42,16 @@ process.on("message", (message) => {
   if (message.type === "heap") {
     global.gc?.();
     global.gc?.();
-    const { heapUsed, rss } = process.memoryUsage();
-    process.send({ type: "heap", heapUsed, rss });
+    const { heapUsed, heapTotal, rss, external, arrayBuffers } =
+      process.memoryUsage();
+    process.send({
+      type: "heap",
+      heapUsed,
+      heapTotal,
+      rss,
+      external,
+      arrayBuffers,
+    });
   } else if (message.type === "snapshot") {
     global.gc?.();
     const file = v8.writeHeapSnapshot(message.file);
