@@ -47,6 +47,7 @@ import type {
   PullRequestState,
   PullRequests,
 } from "../github/pull-requests.js";
+import { enqueueIssueEndMail } from "../issue-end-mail/outbox.js";
 import { checkWebhookUrl, UnsafeUrlError } from "../webhooks/address.js";
 import { openSecret, sealSecret } from "../webhooks/secret.js";
 import { sendWebhook } from "../webhooks/send.js";
@@ -966,6 +967,7 @@ export function createService({
         const committed = events.map((e) => {
           const row = tx.insert(activityEvent).values(e).returning().get();
           enqueueDeliveries(tx, row, webhooks.now());
+          enqueueIssueEndMail(tx, row, webhooks.now());
           return row;
         });
         return { result, events: committed };

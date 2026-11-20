@@ -687,6 +687,59 @@ test("products set-owner refuses a person and an unknown product or bot with exi
   );
 });
 
+test("products set-owner --clear leaves the product with no owner, and says so when it had none", () => {
+  const ownerOf = () =>
+    withDb(
+      (db) =>
+        db.$client
+          .prepare<[], string | null>(
+            "select owner_id from product where key = 'BTA'",
+          )
+          .pluck()
+          .get() ?? null,
+    );
+  const owner = withDb((db) => {
+    const bot = createBot(db, "Beta keeper").actor;
+    db.update(product)
+      .set({ ownerId: bot.id })
+      .where(eq(product.key, "BTA"))
+      .run();
+    return bot;
+  });
+  const cleared = run("products", "set-owner", "bta", "--clear");
+  expect(cleared).toEqual({
+    code: 0,
+    stdout: `product  BTA\nfrom     Beta keeper (${owner.id})\nto       -\n`,
+    stderr: "",
+  });
+  expect(ownerOf()).toBeNull();
+  const again = run("products", "set-owner", "BTA", "--clear");
+  expect(again).toEqual({
+    code: 0,
+    stdout: "product  BTA\nBTA has no owner: nothing to clear\n",
+    stderr: "",
+  });
+  expect(ownerOf()).toBeNull();
+});
+
+test("products set-owner --clear with a bot is a usage error, changing nothing", () => {
+  const { code, stdout, stderr } = run(
+    "products",
+    "set-owner",
+    "ATL",
+    "alpha",
+    "--clear",
+  );
+  expect(code).toBe(2);
+  expect(stdout).toBe("");
+  expect(stderr.split("\n")[0]).toBe(
+    "trail: 'products set-owner --clear' takes no <bot-id-label-or-name>",
+  );
+  const missing = run("products", "set-owner", "--clear");
+  expect(missing.code).toBe(2);
+  expect(missing.stderr).toMatch(/^trail: missing <key>/);
+});
+
 test("products set-repo sets a GitHub URL, a trailing .git dropped; anything else is exit 2", () => {
   const set = run(
     "products",

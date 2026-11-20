@@ -61,6 +61,37 @@ export function setProductOwner(
   );
 }
 
+/**
+ * Leaves the product with no owner, so its triage and its todos wait for
+ * one; `from` is null when it had none and nothing changed. An operator
+ * write: no activity event, as `setProductOwner` has none.
+ */
+export function clearProductOwner(
+  db: Db,
+  key: string,
+): { key: string; from: string | null } {
+  return db.transaction(
+    (tx) => {
+      const target = productByKey(tx, key);
+      if (target.ownerId === null) return { key: target.key, from: null };
+      const before = tx
+        .select()
+        .from(actor)
+        .where(eq(actor.id, target.ownerId))
+        .get();
+      tx.update(product)
+        .set({ ownerId: null, updatedAt: new Date() })
+        .where(eq(product.id, target.id))
+        .run();
+      return {
+        key: target.key,
+        from: before ? botLabel(before) : target.ownerId,
+      };
+    },
+    { behavior: "immediate" },
+  );
+}
+
 /** Every product's key and its owner bot's name, null for none, in key order. */
 export function listProductOwners(
   db: Db,

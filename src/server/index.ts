@@ -3,10 +3,13 @@ import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
 import { createAuth } from "./auth/auth.js";
+import { resendTransport } from "./auth/mail.js";
 import { loadConfig } from "./config.js";
 import { migrate, openDatabase } from "./db/client.js";
 import { createEventBus } from "./events/bus.js";
 import { createPullRequests } from "./github/pull-requests.js";
+import { deriveUnsubscribeKey } from "./issue-end-mail/unsubscribe.js";
+import { createIssueEndMailWorker } from "./issue-end-mail/worker.js";
 import { webhookSettings } from "./service/webhooks.js";
 import { onShutdownSignal } from "./shutdown.js";
 import { LiveStreams } from "./web/events.js";
@@ -45,16 +48,40 @@ const webhooks = webhookSettings(deriveSecretKey(config.BETTER_AUTH_SECRET), {
 });
 const webhookWorker = createWebhookWorker({ db, bus, settings: webhooks });
 const pullRequests = createPullRequests({ db, token: config.GITHUB_TOKEN });
+const unsubscribeKey = deriveUnsubscribeKey(config.BETTER_AUTH_SECRET);
+const issueEndMail = createIssueEndMailWorker({
+  db,
+  bus,
+  mail:
+    "missing" in config.email
+      ? config.email
+      : {
+          from: config.email.from,
+          // set: config.email lists BETTER_AUTH_URL as missing without it
+          publicUrl: config.BETTER_AUTH_URL as string,
+          unsubscribeKey,
+          transport: resendTransport(config.email.resendApiKey),
+        },
+});
 const server = serve(
   {
-    fetch: createApp({ db, bus, auth, streams, webDir, webhooks, pullRequests })
-      .fetch,
+    fetch: createApp({
+      db,
+      bus,
+      auth,
+      streams,
+      webDir,
+      webhooks,
+      pullRequests,
+      unsubscribeKey,
+    }).fetch,
     port: config.PORT,
   },
   (info) => {
     console.log(`trail listening on :${info.port}`);
     // after the first listen: a restart sends what the outbox still holds
     webhookWorker.start();
+    issueEndMail.start();
     pullRequests.start();
   },
 );
@@ -70,7 +97,7 @@ onShutdownSignal({
   // a stream the deadline cut can still be mid-query: the database closes after its last
   onClosed: async () => {
     await streams.end();
-    await webhookWorker.stop();
+    await Promise.all([webhookWorker.stop(), issueEndMail.stop()]);
     await pullRequests.stop();
     db.$client.close();
   },

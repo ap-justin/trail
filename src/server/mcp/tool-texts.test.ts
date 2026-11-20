@@ -166,6 +166,13 @@ test("POST /items' project field says an issue or a note joins the project", asy
   );
 });
 
+test("update_item says ending an issue filed for a person emails them the owner bot's latest comment", async () => {
+  const tool = await toolDescriptions();
+  expect(tool("update_item").description).toMatch(
+    /Done or canceled on an issue with a filedFor person emails them once, quoting the product's own bot's latest comment on it: as that bot, comment the result or the reason first\./,
+  );
+});
+
 test("update_item says who edits a note", async () => {
   const tool = await toolDescriptions();
   expect(tool("update_item").description).toMatch(

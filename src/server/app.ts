@@ -6,6 +6,10 @@ import type { TrailAuth } from "./auth/auth.js";
 import type { Db } from "./db/client.js";
 import type { EventBus } from "./events/bus.js";
 import type { PullRequests } from "./github/pull-requests.js";
+import {
+  type UnsubscribeKey,
+  unsubscribeRoutes,
+} from "./issue-end-mail/unsubscribe.js";
 import { mcpRoutes } from "./mcp/index.js";
 import { photoRoutes } from "./photos.js";
 import { createService, type WebhookSettings } from "./service/index.js";
@@ -21,6 +25,7 @@ export function createApp({
   webDir,
   webhooks,
   pullRequests,
+  unsubscribeKey,
 }: {
   db: Db;
   bus: EventBus;
@@ -31,6 +36,8 @@ export function createApp({
   webhooks: WebhookSettings;
   /** the GitHub pull request states item links show */
   pullRequests: PullRequests;
+  /** signs the issue-ended email's unsubscribe links */
+  unsubscribeKey: UnsubscribeKey;
   /** the built SPA (dist/web); without it only the API answers */
   webDir?: string;
 }) {
@@ -49,6 +56,7 @@ export function createApp({
   app.route("/mcp", mcpRoutes({ db, service }));
   app.route("/api/web", createWeb({ db, service, bus, auth, streams }));
   app.route("/api/photos", photoRoutes({ db, auth }));
+  app.route("/", unsubscribeRoutes({ db, key: unsubscribeKey }));
   const spa = webDir === undefined ? undefined : spaHandlers(webDir);
   if (spa) app.get("*", ...spa);
   // a sub-app's notFound never runs, so unknown /api/v1 routes land here too

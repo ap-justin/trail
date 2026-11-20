@@ -25,6 +25,7 @@ import {
   setBotTitle,
 } from "./service/keys.js";
 import {
+  clearProductOwner,
   listProductOwners,
   type ProductChange,
   setProductOwner,
@@ -77,9 +78,10 @@ const usage = `Usage:
                                    none with the read action
   trail products owners            list each product's current owner bot, or none
   trail products set-owner <key> <bot-id-label-or-name>
+  trail products set-owner <key> --clear
                                    make a bot the product's owner: it adds
                                    todos, accepts issues from triage and
-                                   cancels any item
+                                   cancels any item; or leave it with none
   trail products set-repo <key> <url>
                                    set the product's GitHub repository,
                                    https://github.com/<owner>/<name>
@@ -91,8 +93,8 @@ const usage = `Usage:
   --actions <actions> scope: limit the key to these of read, issues, comments,
                       status_updates and admin, like read,issues,comments
   --key-only          print only the key on stdout; the rest goes to stderr
-  --clear             bot title, bot label, bot handler: remove it instead of
-                      setting one
+  --clear             bot title, bot label, bot handler, products set-owner:
+                      remove it instead of setting one
   --add-product <key>, --remove-product <key>, --add-project <slug>,
   --remove-project <slug>
                       key scope: the products and projects to add or take off;
@@ -696,11 +698,32 @@ function twoArgs(
   return [args[0] as string, args[1] as string];
 }
 
-const productsSetOwner: Command<[string, string]> = {
-  flags: [],
-  parse: (args) => twoArgs(args, "key", "bot-id-label-or-name"),
-  run(db, [key, bot], io) {
-    printChange(io, setProductOwner(db, key, bot));
+const productsSetOwner: Command<{ key: string; bot: string | null }> = {
+  flags: ["clear"],
+  parse(args, flags) {
+    if (flags.clear) {
+      if (args.length === 0) throw new UsageError("missing <key>");
+      if (args.length > 1) {
+        throw new UsageError(
+          "'products set-owner --clear' takes no <bot-id-label-or-name>",
+        );
+      }
+      return { key: args[0] as string, bot: null };
+    }
+    const [key, bot] = twoArgs(args, "key", "bot-id-label-or-name");
+    return { key, bot };
+  },
+  run(db, { key, bot }, io) {
+    if (bot !== null) {
+      printChange(io, setProductOwner(db, key, bot));
+      return;
+    }
+    const cleared = clearProductOwner(db, key);
+    io.stdout.write(
+      cleared.from === null
+        ? `product  ${cleared.key}\n${cleared.key} has no owner: nothing to clear\n`
+        : `product  ${cleared.key}\nfrom     ${cleared.from}\nto       -\n`,
+    );
   },
 };
 

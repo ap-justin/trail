@@ -12,6 +12,7 @@ import {
   createPullRequests,
   type PullRequestOptions,
 } from "./github/pull-requests.js";
+import { deriveUnsubscribeKey } from "./issue-end-mail/unsubscribe.js";
 import { createBot } from "./service/keys.js";
 import { type WebhookSettings, webhookSettings } from "./service/webhooks.js";
 import { LiveStreams } from "./web/events.js";
@@ -209,6 +210,7 @@ export function setupTestApp({
     webDir,
     webhooks,
     pullRequests,
+    unsubscribeKey: deriveUnsubscribeKey(testAuthConfig.BETTER_AUTH_SECRET),
   });
   const bot = createBot(db, "tester");
   const github = fakeGitHub();
