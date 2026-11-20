@@ -154,6 +154,10 @@ const env = {
   SOAK_RESEND_PORT: String(resendPort),
   EMAIL_FROM: "trail <trail@mail.example.test>",
   RESEND_API_KEY: "re_soak_key",
+  // blanked, not inherited from the shell: "" reads as unset (src/server/config.ts)
+  GITHUB_CLIENT_ID: "",
+  GITHUB_CLIENT_SECRET: "",
+  GITHUB_TOKEN: "",
 };
 const serverPort = await new Promise((resolve) => {
   const s = createServer();
