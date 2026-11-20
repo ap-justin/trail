@@ -129,3 +129,34 @@ test("GET /whoami carries team and, for a bot that owns nothing, hint", async ()
   expect(after.team).toEqual({ key, name: "Wyn's desk" });
   expect(after).not.toHaveProperty("hint");
 });
+
+test("POST /teams with a key limited only to projects is a 403 forbidden_scope, and no team is written", async () => {
+  const shared = (await (
+    await request("POST", "/api/v1/products", {
+      json: { key: projectKey(), name: "rest shared", owner: null },
+    })
+  ).json()) as { key: string };
+  const project = (await (
+    await request("POST", "/api/v1/projects", {
+      json: { name: "rest project", products: [shared.key] },
+    })
+  ).json()) as { slug: string };
+  const bot = createBot(db, "Sorrel", {
+    scope: { projects: [project.slug], actions: ["read", "issues"] },
+  });
+  const res = await request("POST", "/api/v1/teams", {
+    json: { key: projectKey(), name: "nowhere" },
+    key: bot.key,
+  });
+  expect(res.status).toBe(403);
+  expect(await res.json()).toEqual({
+    error: {
+      code: "forbidden_scope",
+      message: `this key may not create a team: it reaches only project ${project.slug}, so it could not work in a team. Ask whoever minted the key for one with a product list, or with no product limit, and create the team with that.`,
+    },
+  });
+  const me = (await (
+    await request("GET", "/api/v1/whoami", { key: bot.key })
+  ).json()) as { team: unknown };
+  expect(me.team).toBeNull();
+});

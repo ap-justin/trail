@@ -262,3 +262,31 @@ test("update_product's kind needs the admin action like any of its fields", asyn
     /^forbidden_action: this key may not update a product: that needs the admin action/,
   );
 });
+
+test("create_team: a key limited only to projects is refused before anything is written, since it could not reach the team", async () => {
+  const admin = createBot(db, "Pia");
+  const adminClient = await connect(admin.key);
+  const shared = await call(adminClient, "create_product", {
+    key: projectKey(),
+    name: "pia's shared",
+    owner: null,
+  });
+  const project = await call(adminClient, "create_project", {
+    name: "pia's project",
+    products: [shared.key],
+  });
+  const bot = createBot(db, "Quill", {
+    scope: { projects: [project.slug], actions: ["read", "issues"] },
+  });
+  const client = await connect(bot.key);
+  const key = projectKey();
+  expect(await callError(client, "create_team", { key, name: "nowhere" })).toBe(
+    `forbidden_scope: this key may not create a team: it reaches only project ${project.slug}, so it could not work in a team. Ask whoever minted the key for one with a product list, or with no product limit, and create the team with that.`,
+  );
+  expect((await call(client, "whoami")).team).toBeNull();
+  const unlimited = createKey(db, bot.actor.id);
+  const listed = await call(await connect(unlimited.key), "list_products", {
+    limit: 200,
+  });
+  expect(listed.items.map((p: { key: string }) => p.key)).not.toContain(key);
+});

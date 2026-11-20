@@ -647,7 +647,7 @@ test("the spec documents each gated operation's 403 with the action it needs", a
     "POST /products": orScope("admin"),
     "POST /products/{key}/labels": ownerLabels,
     "POST /products/{key}/status-updates": needs("status_updates"),
-    "POST /teams": needs("issues"),
+    "POST /teams": `${needs("issues")}, or reaches only projects, so it could not work in a team (code forbidden_scope)`,
     "POST /projects":
       "The key lacks the issues action, or with key the admin action (code forbidden_action), or with key reaches only some products (code forbidden_scope)",
     "POST /projects/{ref}/labels": ownerLabels,

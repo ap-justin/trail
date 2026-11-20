@@ -583,7 +583,7 @@ export const whoamiSchema = actorSchema
     }),
     team: productRefSchema.nullable().meta({
       description:
-        "Your own team, whether or not this key reaches it; null when you have none.",
+        "Your own team, whether or not this key reaches it; null when you have none, and the first by key if an admin gave you several.",
     }),
     hint: z.string().optional().meta({
       description:

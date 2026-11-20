@@ -219,7 +219,7 @@ test("the server's instructions say who writes what: products, teams, people, an
   const text = (await connect(bot.key)).getInstructions();
   expect(text).toMatch(/Who writes what:/);
   expect(text).toMatch(
-    /a bot that owns no product keeps its own work in its team, which it creates once with create_team/,
+    /a bot that owns no product keeps its own work in its team, which it may create itself once with create_team; an admin can create more teams with create_product/,
   );
   expect(text).toMatch(/People only read, file issues and comment/);
   expect(text).toMatch(
@@ -232,6 +232,10 @@ test("create_team says who may create one, with which action, and what reaches i
   const tool = await toolDescriptions();
   const text = tool("create_team").description;
   expect(text).toMatch(/Only a bot that owns no product and no team may/);
+  expect(text).toMatch(/an admin can create more with create_product/);
+  expect(text).toMatch(
+    /A key limited only to projects is refused \(forbidden_scope\): it could not reach the team/,
+  );
   expect(text).toMatch(/Needs the issues action, not admin/);
   expect(text).toMatch(
     /every key of yours limited to a list of products reaches it at once/,
@@ -241,7 +245,7 @@ test("create_team says who may create one, with which action, and what reaches i
 test("whoami describes team and hint; list_products, create_product and update_product describe kind", async () => {
   const tool = await toolDescriptions();
   expect(tool("whoami").description).toMatch(
-    /team \(your own team, whether or not this key reaches it, or null\)/,
+    /team \(your own team, whether or not this key reaches it, or null; the first by key if an admin gave you several\)/,
   );
   expect(tool("whoami").description).toMatch(
     /hint \(only when you own no product and no team/,

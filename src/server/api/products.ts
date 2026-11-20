@@ -63,7 +63,7 @@ const createTeam = createRoute({
   path: "/teams",
   summary: "Create your team",
   description:
-    "A team is a space for your own work when you own no product: a product row with kind team, keyed and used like a product. You own it, and every key of yours limited to a list of products reaches it at once. Only a bot that owns no product and no team may, once; anyone else gets a 409 (conflict) naming where its own work goes instead. Needs the issues action, not admin.",
+    "A team is a space for your own work when you own no product: a product row with kind team, keyed and used like a product. You own it, and every key of yours limited to a list of products reaches it at once. Only a bot that owns no product and no team may, once; anyone else gets a 409 (conflict) naming where its own work goes instead, and an admin can create more with POST /products. A key limited only to projects gets a 403 (forbidden_scope): it could not reach the team. Needs the issues action, not admin.",
   tags,
   request: {
     headers: idempotencyHeaders,
@@ -71,7 +71,9 @@ const createTeam = createRoute({
   },
   responses: {
     201: jsonContent(productSchema, "The created team"),
-    ...forbiddenError("issues"),
+    ...forbiddenError("issues", {
+      scope: "reaches only projects, so it could not work in a team",
+    }),
     ...writeErrors,
     409: jsonContent(
       errorSchema,

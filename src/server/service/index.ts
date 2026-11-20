@@ -3382,7 +3382,8 @@ export function createService({
 
     /**
      * A bot that owns no product and no team creates its one team, owned by
-     * itself, with the issues action and a key of any reach.
+     * itself, with the issues action and a key with a product list or no
+     * product limit.
      */
     createTeam(
       actor: ActingActor,
@@ -3391,6 +3392,13 @@ export function createService({
     ): ProductView {
       requireBot(actor, "create a team");
       requireAction(actor, "issues", "create a team");
+      // only keys with a product list are widened to the new team; one limited to projects would 404 on it
+      const scope = actor.scope;
+      if (scope?.products?.length === 0) {
+        throw new ForbiddenScopeError(
+          `this key may not create a team: it reaches only ${reachOf(scope)}, so it could not work in a team. Ask whoever minted the key for one with a product list, or with no product limit, and create the team with that.`,
+        );
+      }
       const fields = {
         name: nonBlank(input.name, "name"),
         key: validProductKey(input.key),
