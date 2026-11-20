@@ -237,7 +237,7 @@ export const issueSchema = z
       .nullable()
       .meta({
         description:
-          "On an issue: the person it was filed for, by name. A bot's issue filed with filed_for \"handler\" is filed for its handler, and a person's own issue for that person. Null when filed for nobody, and on a todo or a note.",
+          "The person it was filed for as an issue, by name: a bot's issue filed with filed_for \"handler\" is filed for its handler, and a person's own issue for that person. Kept when the issue becomes a todo or a note. Null when filed for nobody, as an item added as a todo or a note always is.",
       }),
     externalRef: z.string().nullable(),
     sourceAuthor,
@@ -1180,7 +1180,7 @@ const itemCreateRenames = renamedFields({
 
 const filedFor = z.literal("handler").optional().meta({
   description:
-    'Issues only. "handler" files the issue for the person you work for, your handler (whoami shows it), when you file on their behalf; they get one email when the issue ends. Leave it out for your own work. With no handler set it is a 422 naming the `trail bot handler` command the operator runs; on a todo or a note it is a 422.',
+    'Issues only. "handler" files the issue for the person you work for, your handler (whoami shows it), when you file on their behalf; they get an email each time the issue ends. Leave it out for your own work. With no handler set it is a 422 naming the `trail bot handler` command the operator runs; on a todo or a note it is a 422.',
 });
 
 const assigneeRef = botRef.meta({
@@ -1891,7 +1891,7 @@ export const webProductDetailSchema = webProductSchema.extend({
 
 const webFiledForSchema = z.object({ name: z.string() }).nullable().meta({
   description:
-    "The person an issue was filed for, by name: a bot's handler, or the person who filed it in the web app. Null when filed for nobody, and on a todo or a note.",
+    "The person an item was filed for as an issue, by name: a bot's handler, or the person who filed it in the web app. Kept when the issue becomes a todo or a note. Null when filed for nobody, as an item added as a todo or a note always is.",
 });
 
 export const webItemRowSchema = z.object({
