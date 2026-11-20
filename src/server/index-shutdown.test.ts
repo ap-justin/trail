@@ -257,3 +257,57 @@ globalThis.fetch = (input, init) => {
     await new Promise((resolve) => resend.close(resolve));
   }
 }, 40_000);
+
+test("SIGTERM cuts an issue-ended email send in flight and leaves the row pending for the next start", async () => {
+  const { databasePath, stateOf } = await pendingCopy("stopmail");
+  // a Resend that never answers: the request ends only when the worker's signal aborts it
+  const preload = join(dir, "hung-resend.mjs");
+  writeFileSync(
+    preload,
+    `const real = globalThis.fetch;
+globalThis.fetch = (input, init) => {
+  const url = new URL(typeof input === "string" ? input : (input.url ?? String(input)));
+  if (url.origin !== "https://api.resend.com") return real(input, init);
+  console.log("resend request started");
+  return new Promise((_, reject) =>
+    init.signal.addEventListener("abort", () => {
+      console.log("resend request aborted");
+      reject(init.signal.reason);
+    }),
+  );
+};
+`,
+  );
+  const child = spawnEntry(databasePath, {
+    imports: [pathToFileURL(preload).href],
+    env: {
+      EMAIL_FROM: "trail <trail@mail.example.test>",
+      RESEND_API_KEY: "re_entry_key",
+    },
+  });
+  let output = "";
+  for (const stream of [child.stdout, child.stderr]) {
+    stream?.on("data", (chunk: Buffer) => {
+      output += chunk.toString();
+    });
+  }
+  const done = exited(child);
+  try {
+    await listening(child);
+    const deadline = Date.now() + 15_000;
+    while (
+      !output.includes("resend request started") &&
+      Date.now() < deadline
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    expect(output).toContain("resend request started");
+    child.kill("SIGTERM");
+    expect(await done).toEqual({ code: null, signal: "SIGTERM" });
+    // only the worker's stop() aborts that request, and the drain waits for it
+    expect(output).toContain("resend request aborted");
+    expect(stateOf()).toMatchObject({ state: "pending" });
+  } finally {
+    child.kill("SIGKILL");
+  }
+}, 40_000);

@@ -294,6 +294,16 @@ test("the legacy item schemas leave out a note's type and fields, which the lega
   );
 });
 
+test("PATCH /items/{key} says what update_item says about the email an ending sends, so a REST bot comments first too", async () => {
+  const res = await request("GET", "/api/v1/openapi.json", { key: null });
+  const spec = (await res.json()) as {
+    paths: Record<string, Record<string, { description?: string }>>;
+  };
+  expect(spec.paths["/items/{key}"]?.patch?.description).toContain(
+    "The email quotes the product's own bot's latest comment on the item: as that bot, comment the result or the reason first.",
+  );
+});
+
 test("the deprecated label list says what its replacement says about implicitly named products", async () => {
   const res = await request("GET", "/api/v1/openapi.json", { key: null });
   const spec = (await res.json()) as {

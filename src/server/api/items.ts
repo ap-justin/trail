@@ -50,6 +50,10 @@ export const WHICH_ITEM =
 export const NOTE_EDITS =
   "A note is edited only by its author and its product's own bot, and on a product with no owner only by its author; anyone else is refused (forbidden) and comments with add_comment. Its status is current or archived, it has no assignee, priority or estimate (priority reads 0 and estimate null, and an update takes those two values and refuses any other), and about, addAbout and removeAbout set the items it is about. Only the product's owner turns an item into a note (type note: status current, assignee dropped, priority and estimate cleared) or a note back into work (an issue goes to triage, a todo opens assigned to the owner), so on a product with no owner no bot does either.";
 
+/** What ending an issue filed for a person sends: update_item and PATCH /items/{key} both say it. */
+export const ENDING_EMAIL =
+  "Done or canceled on an item with a filedFor person emails them, again on each later ending after a reopen, unless they have unsubscribed from these emails. The email quotes the product's own bot's latest comment on the item: as that bot, comment the result or the reason first.";
+
 export const COMMENT_HOLDS =
   "A comment holds what changed for the work and why, a decision or scope change, a blocker and who clears it, or that it is done. It leaves out commit SHAs, CI runs and logs, review findings and agent run ids: those stay on the pull request, and the pull request goes in the item's links.";
 
@@ -112,7 +116,7 @@ const updateItem = createRoute({
   path: "/items/{key}",
   summary:
     "Change an item's type, status, assignee, title, description, estimate, priority, labels or links, or the items a note is about",
-  description: `Needs the issues action. ${TODO_OR_ISSUE} ${NOTE_EDITS} Accept an issue from triage with status open and assignee, the bot that will work on it (status open alone leaves it unassigned), or drop it with canceled. On a product with an owner, only the owner or the item's filer cancels it, at any status, and only the owner reopens a canceled issue another bot filed. type todo on an item in triage opens it and assigns the product's owner when it has no assignee; a todo never goes back to triage and never loses its assignee. Fields left out stay as they are; addLabels, removeLabels, addLinks and removeLinks change part of a set in the same transaction. On a product another bot owns, labels and addLabels attach only the product's existing labels and create none; the answer lists the names left off in skippedLabels. Moving to done or canceled stamps completedAt; reopening clears it.`,
+  description: `Needs the issues action. ${TODO_OR_ISSUE} ${NOTE_EDITS} Accept an issue from triage with status open and assignee, the bot that will work on it (status open alone leaves it unassigned), or drop it with canceled. On a product with an owner, only the owner or the item's filer cancels it, at any status, and only the owner reopens a canceled issue another bot filed. type todo on an item in triage opens it and assigns the product's owner when it has no assignee; a todo never goes back to triage and never loses its assignee. Fields left out stay as they are; addLabels, removeLabels, addLinks and removeLinks change part of a set in the same transaction. On a product another bot owns, labels and addLabels attach only the product's existing labels and create none; the answer lists the names left off in skippedLabels. Moving to done or canceled stamps completedAt; reopening clears it. ${ENDING_EMAIL}`,
   tags,
   request: { params: itemParam, body: jsonBody(itemUpdateSchema) },
   responses: {

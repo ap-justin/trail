@@ -9,7 +9,6 @@ import { deriveUnsubscribeKey, unsubscribeUrl } from "./unsubscribe.js";
 import {
   createIssueEndMailWorker,
   type IssueEndMailWorkerOptions,
-  MAX_ATTEMPTS,
 } from "./worker.js";
 
 const {
@@ -157,6 +156,47 @@ test("an ended issue's email goes to the person's address once, with the issue, 
     lastError: null,
     sentAt: expect.any(Date),
   });
+});
+
+test("the email carries the issue's title as it reads when sent, not when it ended", async () => {
+  const key = await ended("done", "Old title");
+  await api("PATCH", `/items/${key}`, bot.key, {
+    title: "Renamed after ending",
+  });
+  const sent: MailMessage[] = [];
+  await worker(async (m) => {
+    sent.push(m);
+  }).tick();
+  const [message] = sent as [MailMessage];
+  expect(message.subject).toBe(`${key} is done: Renamed after ending`);
+  expect(message.text).toContain(`${key}  Renamed after ending\n`);
+  expect(message.text).not.toContain("Old title");
+});
+
+test("a publicUrl with a trailing slash still gives single-slash issue and unsubscribe links", async () => {
+  const key = await ended();
+  const sent: MailMessage[] = [];
+  await worker(
+    async (m) => {
+      sent.push(m);
+    },
+    {
+      mail: {
+        from: FROM,
+        publicUrl: `${TEST_ORIGIN}//`,
+        unsubscribeKey,
+        transport: async (m) => {
+          sent.push(m);
+        },
+      },
+    },
+  ).tick();
+  const [message] = sent as [MailMessage];
+  expect(message.text).toContain(`\n${TEST_ORIGIN}/issues/${key}\n`);
+  expect(message.headers?.["List-Unsubscribe"]).toMatch(
+    new RegExp(`^<${TEST_ORIGIN}/unsubscribe/`),
+  );
+  expect(message.text).not.toMatch(/[^:]\/\//);
 });
 
 test("an email still pending when the person unsubscribes is skipped, not sent", async () => {
@@ -538,7 +578,6 @@ test("a network error that never clears fails the email after the default attemp
     await w.tick();
     now += 6 * 60 * 60_000;
   }
-  expect(MAX_ATTEMPTS).toBe(6);
   expect(calls).toBe(6);
   expect(rowOf(key)).toMatchObject({ state: "failed", attempts: 6 });
 });

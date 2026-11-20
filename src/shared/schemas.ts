@@ -1180,7 +1180,7 @@ const itemCreateRenames = renamedFields({
 
 const filedFor = z.literal("handler").optional().meta({
   description:
-    'Issues only. "handler" files the issue for the person you work for, your handler (whoami shows it), when you file on their behalf; they get an email each time the issue ends. Leave it out for your own work. With no handler set it is a 422 naming the `trail bot handler` command the operator runs; on a todo or a note it is a 422.',
+    'Issues only. "handler" files the issue for the person you work for, your handler (whoami shows it), when you file on their behalf; they get an email each time the issue ends unless they have unsubscribed from these emails. Leave it out for your own work. With no handler set it is a 422 naming the `trail bot handler` command the operator runs; on a todo or a note it is a 422.',
 });
 
 const assigneeRef = botRef.meta({

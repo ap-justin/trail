@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { ENDING_EMAIL } from "../api/items.js";
 import { setupTestApp } from "../test-app.js";
 import { mcpClients } from "./test-client.js";
 
@@ -166,10 +167,11 @@ test("POST /items' project field says an issue or a note joins the project", asy
   );
 });
 
-test("update_item says ending an issue filed for a person emails them the owner bot's latest comment", async () => {
+test("update_item says ending an issue filed for a person emails them the owner bot's latest comment, unless they unsubscribed", async () => {
   const tool = await toolDescriptions();
-  expect(tool("update_item").description).toMatch(
-    /Done or canceled on an item with a filedFor person emails them, again on each later ending after a reopen, quoting the product's own bot's latest comment on it: as that bot, comment the result or the reason first\./,
+  expect(tool("update_item").description).toContain(ENDING_EMAIL);
+  expect(ENDING_EMAIL).toMatch(
+    /^Done or canceled on an item with a filedFor person emails them, again on each later ending after a reopen, unless they have unsubscribed from these emails\. The email quotes the product's own bot's latest comment on the item: as that bot, comment the result or the reason first\.$/,
   );
 });
 
@@ -244,6 +246,19 @@ test("filed_for and the handler: the instructions, file_issue, whoami and list_b
   expect(tool("file_issue").description).toMatch(
     /filed_for "handler" when you file it on behalf of the person you work for, your handler/,
   );
+  // one click in the mail client unsubscribes for good, so none of these promises every ending
+  const promise =
+    /each time (it|the issue) ends(?! unless they have unsubscribed from these emails)/;
+  const fieldText = (
+    tool("file_issue").inputSchema.properties as Record<
+      string,
+      { description?: string }
+    >
+  ).filed_for?.description;
+  for (const said of [text, tool("file_issue").description, fieldText]) {
+    expect(said).toMatch(/each time (it|the issue) ends/);
+    expect(said).not.toMatch(promise);
+  }
   expect(tool("whoami").description).toMatch(
     /handler \(the person you work for, with name and email, the one place a bot reads that address; null until the operator sets one/,
   );

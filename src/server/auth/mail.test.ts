@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import {
   issueEndedEmail,
   type MailMessage,
@@ -116,6 +116,46 @@ test("a refusal carries Resend's status, and a dropped connection none", async (
     throw new TypeError("fetch failed");
   });
   await expect(dropped(message)).rejects.not.toBeInstanceOf(MailRefused);
+});
+
+test("the request is cut by the transport's own timeout even when the caller passes a signal", async () => {
+  const timeout = new AbortController();
+  const timeoutSpy = vi
+    .spyOn(AbortSignal, "timeout")
+    .mockReturnValue(timeout.signal);
+  try {
+    let sentWith: AbortSignal | null | undefined;
+    const send = resendTransport("re_key", async (_input, init) => {
+      sentWith = init?.signal;
+      return new Promise<Response>((_, reject) =>
+        init?.signal?.addEventListener("abort", () =>
+          reject(init.signal?.reason),
+        ),
+      );
+    });
+    const caller = new AbortController();
+    const sending = send(message, caller.signal);
+    timeout.abort(new DOMException("timed out", "TimeoutError"));
+    await expect(sending).rejects.toMatchObject({ name: "TimeoutError" });
+    expect(caller.signal.aborted).toBe(false);
+    expect(sentWith?.aborted).toBe(true);
+  } finally {
+    timeoutSpy.mockRestore();
+  }
+});
+
+test("the caller's signal also cuts the request", async () => {
+  const send = resendTransport("re_key", async (_input, init) => {
+    return new Promise<Response>((_, reject) =>
+      init?.signal?.addEventListener("abort", () =>
+        reject(init.signal?.reason),
+      ),
+    );
+  });
+  const caller = new AbortController();
+  const sending = send(message, caller.signal);
+  caller.abort(new Error("shutdown"));
+  await expect(sending).rejects.toThrow("shutdown");
 });
 
 const ended = {
