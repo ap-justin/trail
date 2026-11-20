@@ -4,6 +4,7 @@ import { AppPage, useChrome } from "@/app/chrome";
 import { NotFoundPage } from "@/app/not-found-page";
 import { RowsMissing } from "@/app/rows-missing";
 import { matchesFilters } from "@/components/item-list";
+import type { NotesRead } from "@/components/notes";
 import {
   ProductHeading,
   ProductHealth,
@@ -16,7 +17,11 @@ import { loadableOf } from "@/lib/loadable";
 import { keys, productItemsQuery, productNoteCountsQuery } from "@/lib/queries";
 
 // module-scoped so the query reruns the select only when the list changes, not every render
-const itemsOfList = (list: WebItemListView) => list.items;
+const notesOfList = (list: WebItemListView): NotesRead => ({
+  items: list.items,
+  nextCursor: list.nextCursor,
+  total: list.counts.notes.current,
+});
 
 export const Route = createFileRoute("/_app/products/$key/")({
   validateSearch: validateItemSearch,
@@ -61,7 +66,7 @@ function ProductPage() {
   const notes = useQuery({
     ...productItemsQuery(key, { type: "note", status: "current" }),
     enabled: type !== "note" && (noteCounts?.current ?? 0) > 0,
-    select: itemsOfList,
+    select: notesOfList,
   });
   const updates = useQuery({
     queryKey: keys.productStatusUpdates(key),
@@ -103,6 +108,7 @@ function ProductPage() {
           <RowsMissing
             list={items.isPlaceholderData ? undefined : items.data}
             shown={items.data?.items.length ?? 0}
+            notes={type === "note" ? { status, order: "newest" } : undefined}
           />
         }
       />

@@ -19,6 +19,7 @@ import {
   issueRow,
   itemList,
   noteRow,
+  notesRead,
   productDetail,
   projectRow,
   statusUpdate,
@@ -59,7 +60,7 @@ function props(overrides: Partial<ProductViewProps> = {}): ProductViewProps {
     detail: productDetail(),
     items,
     counts: null,
-    notes: { status: "ready", data: [] },
+    notes: { status: "ready", data: notesRead([]) },
     statusUpdates: {
       status: "ready",
       data: { items: [statusUpdate()], nextCursor: null },
@@ -443,7 +444,7 @@ describe("type toggle and status tabs", () => {
         status: "ready",
         data: { items: [], nextCursor: null, counts: countsOf([noteRow()]) },
       },
-      notes: { status: "ready", data: [noteRow()] },
+      notes: { status: "ready", data: notesRead([noteRow()]) },
     });
     expect(
       screen.getByRole("heading", { name: "No issues or todos in TRL yet" }),
@@ -485,7 +486,7 @@ describe("notes", () => {
   test("current notes show in a Notes section under the work list, each a link, and work counts leave them out", () => {
     renderProduct({
       items: { status: "ready", data: workWithNotes },
-      notes: { status: "ready", data: current },
+      notes: { status: "ready", data: notesRead(current) },
     });
     expect(
       within(notesSection()).getByRole("heading", { name: "Notes 2" }),
@@ -509,7 +510,7 @@ describe("notes", () => {
     const user = userEvent.setup();
     const p = renderProduct({
       items: { status: "ready", data: workWithNotes },
-      notes: { status: "ready", data: current },
+      notes: { status: "ready", data: notesRead(current) },
     });
     await user.click(
       within(notesSection()).getByRole("button", {
@@ -688,7 +689,7 @@ describe("notes", () => {
     render(
       <FilteredProduct
         items={{ status: "ready", data: notesList }}
-        notes={{ status: "ready", data: current }}
+        notes={{ status: "ready", data: notesRead(current) }}
       />,
     );
     await user.click(
@@ -763,7 +764,7 @@ describe("notes", () => {
       filters: { type: "todo", status: null },
       items: { status: "loading" },
       noteCounts: workWithNotes.counts.notes,
-      notes: { status: "ready", data: current },
+      notes: { status: "ready", data: notesRead(current) },
     });
     expect(
       within(notesSection()).getByRole("heading", { name: "Notes 2" }),
@@ -776,35 +777,73 @@ describe("notes", () => {
     ).toBeInTheDocument();
   });
 
-  test("a notes list cut short of the count says how many show, and Show all notes lists the current ones with focus on the list", async () => {
-    const user = userEvent.setup();
-    const p = renderProduct({
-      items: { status: "ready", data: workWithNotes },
-      noteCounts: { current: 2134, archived: 1 },
-      notes: { status: "ready", data: current },
-    });
-    expect(
-      within(notesSection()).getByText("Showing 2 of 2,134 notes"),
-    ).toBeInTheDocument();
-    await user.click(
-      within(notesSection()).getByRole("button", { name: "Show all notes" }),
-    );
-    expect(p.onFiltersChange).toHaveBeenCalledWith({
-      type: "note",
-      status: "current",
-    });
-    expect(screen.getByRole("tabpanel", { name: /^All/ })).toHaveFocus();
-  });
-
-  test("every current note shown: no Showing line and no Show all notes", () => {
+  test("a notes read the page cap cut short says how many of its count show, with no way to more", () => {
     renderProduct({
       items: { status: "ready", data: workWithNotes },
-      notes: { status: "ready", data: current },
+      noteCounts: { current: 2134, archived: 1 },
+      notes: {
+        status: "ready",
+        data: { items: current, nextCursor: "after-33", total: 2134 },
+      },
+    });
+    expect(
+      within(notesSection()).getByText("Showing the newest 2 of 2,134 notes"),
+    ).toBeInTheDocument();
+    // the list filtered to current notes is the same read under the same cap
+    expect(
+      within(notesSection()).queryByRole("button", { name: /notes$/ }),
+    ).toBeNull();
+    expect(
+      within(notesSection()).getByRole("button", {
+        name: "Show 1 archived note",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  test("every current note shown: no Showing line and no button but the archived one", () => {
+    renderProduct({
+      items: { status: "ready", data: workWithNotes },
+      notes: { status: "ready", data: notesRead(current) },
     });
     expect(within(notesSection()).queryByText(/^Showing/)).toBeNull();
+    expect(within(notesSection()).getAllByRole("button")).toHaveLength(1);
+  });
+
+  test("counts from a later list above the rows of an older read that wasn't capped: no Showing line", () => {
+    // a failed refetch keeps the older read's rows while another list's counts moved on
+    renderProduct({
+      items: { status: "ready", data: workWithNotes },
+      noteCounts: { current: 5, archived: 1 },
+      notes: { status: "ready", data: notesRead(current) },
+    });
     expect(
-      within(notesSection()).queryByRole("button", { name: "Show all notes" }),
-    ).toBeNull();
+      within(notesSection()).getByRole("heading", { name: "Notes 5" }),
+    ).toBeInTheDocument();
+    expect(within(notesSection()).queryByText(/^Showing/)).toBeNull();
+  });
+
+  test("an older capped read under later counts says its own count", () => {
+    renderProduct({
+      items: { status: "ready", data: workWithNotes },
+      noteCounts: { current: 2500, archived: 1 },
+      notes: {
+        status: "ready",
+        data: { items: current, nextCursor: "after-33", total: 2134 },
+      },
+    });
+    expect(
+      within(notesSection()).getByText("Showing the newest 2 of 2,134 notes"),
+    ).toBeInTheDocument();
+  });
+
+  test("a failed notes read with counts known: no Showing line", () => {
+    renderProduct({
+      items: { status: "ready", data: workWithNotes },
+      noteCounts: { current: 2134, archived: 1 },
+      notes: { status: "error" },
+    });
+    expect(within(notesSection()).getByRole("alert")).toBeInTheDocument();
+    expect(within(notesSection()).queryByText(/^Showing/)).toBeNull();
   });
 });
 

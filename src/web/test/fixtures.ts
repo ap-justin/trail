@@ -1,3 +1,4 @@
+import type { NotesRead } from "@/components/notes";
 import type {
   EntryView,
   PersonView,
@@ -593,6 +594,11 @@ export function countsOf(items: WebItemRowView[]) {
 /** A product's item list whose counts are these rows' own. */
 export function itemList(items: WebItemRowView[]): WebItemListView {
   return { items, nextCursor: null, counts: countsOf(items) };
+}
+
+/** A read of these current notes that got every one: its count is theirs. */
+export function notesRead(items: WebItemRowView[]): NotesRead {
+  return { items, nextCursor: null, total: items.length };
 }
 
 /** The Human UI launch project as a row on the projects list. */

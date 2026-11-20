@@ -9,13 +9,35 @@ import type { Loadable } from "@/lib/loadable";
 import { paths } from "@/lib/paths";
 import { cn } from "@/lib/utils";
 
+/** A read of the current notes: its rows and what the same read counted. */
+export type NotesRead = {
+  items: WebItemRowView[];
+  /** Set when the page cap (`ITEM_PAGES_MAX` in lib/queries.ts) cut the read short. */
+  nextCursor: string | null;
+  /** The current notes, as the same read counted them. */
+  total: number;
+};
+
+/** How a notes list is ordered: newest first, or by product and then newest first. */
+export type NotesOrder = "newest" | "first";
+
+/** `Showing the newest 2,000 of 2,345 notes`: a notes list the page cap cut short. */
+export const notesShownText = (
+  shown: number,
+  total: number,
+  order: NotesOrder,
+) =>
+  `Showing the ${order} ${shown.toLocaleString("en-US")} of ${total.toLocaleString("en-US")} ${total === 1 ? "note" : "notes"}`;
+
 export type NotesSectionProps = {
   /** The current notes, in the list's order. */
-  notes: Loadable<WebItemRowView[]>;
+  notes: Loadable<NotesRead>;
   /** Null until the page first counts its items; nothing renders until then. */
   counts: WebItemCountsView["notes"] | null;
-  /** Lists the page's current or archived notes in its own item list. */
-  onShowNotes: (status: "current" | "archived") => void;
+  /** The notes read's order, which the cap line names. */
+  order: NotesOrder;
+  /** Lists the page's archived notes in its own item list. */
+  onShowArchived: () => void;
   onRetry: () => void;
   now: Date;
   className?: string;
@@ -23,13 +45,15 @@ export type NotesSectionProps = {
 
 /**
  * A product's or project's current notes under the work list: key, title and age a row,
- * a line saying so when the list stopped short of the count, then the way to the archived
- * ones. Nothing at all when it has no notes.
+ * a line saying so when the page cap cut the read short, then the way to the archived
+ * ones. Nothing at all when it has no notes. The cap line has no link to the rest: the
+ * list filtered to current notes is this same read, under the same cap.
  */
 export function NotesSection({
   notes,
   counts,
-  onShowNotes,
+  order,
+  onShowArchived,
   onRetry,
   now,
   className,
@@ -38,9 +62,12 @@ export function NotesSection({
   const headingRef = useRef<HTMLHeadingElement>(null);
   const current = counts?.current ?? 0;
   if (current + (counts?.archived ?? 0) === 0) return null;
-  // the notes read stops at its page cap (`ITEM_PAGES_MAX` in lib/queries.ts) while the
-  // count is the true total
-  const shown = notes.status === "ready" ? notes.data.length : current;
+  // the read's own count, not `counts`: those come from whichever list read last, and a
+  // failed refetch leaves the rows of an older read
+  const capped =
+    notes.status === "ready" && notes.data.nextCursor !== null
+      ? notes.data
+      : null;
   return (
     <section aria-labelledby={headingId} className={className}>
       <AsideHeading
@@ -61,27 +88,16 @@ export function NotesSection({
         }}
         now={now}
       />
-      {shown < current && (
-        <>
-          <p className="pt-2 text-muted-foreground max-lg:px-4 lg:px-2">
-            Showing {shown.toLocaleString("en-US")} of{" "}
-            {current.toLocaleString("en-US")} {current === 1 ? "note" : "notes"}
-          </p>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => onShowNotes("current")}
-            className={SHOW_NOTES_BUTTON}
-          >
-            Show all notes
-          </Button>
-        </>
+      {capped && (
+        <p className="pt-2 text-muted-foreground max-lg:px-4 lg:px-2">
+          {notesShownText(capped.items.length, capped.total, order)}
+        </p>
       )}
       {counts && counts.archived > 0 && (
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => onShowNotes("archived")}
+          onClick={onShowArchived}
           className={cn("mt-1", SHOW_NOTES_BUTTON)}
         >
           Show {counts.archived} archived{" "}
@@ -124,7 +140,7 @@ function NotesBody({
   onRetry,
   now,
 }: {
-  notes: Loadable<WebItemRowView[]>;
+  notes: Loadable<NotesRead>;
   current: number;
   onRetry: () => void;
   now: Date;
@@ -148,7 +164,7 @@ function NotesBody({
   }
   return (
     <ul>
-      {notes.data.map((note) => (
+      {notes.data.items.map((note) => (
         <li
           key={note.key}
           data-item-key={note.key}

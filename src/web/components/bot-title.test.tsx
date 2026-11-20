@@ -15,6 +15,7 @@ import {
   issueList,
   issueRow,
   maya,
+  notesRead,
   product,
   statusUpdate,
   trail,
@@ -290,7 +291,7 @@ describe("product", () => {
         }}
         filters={{ type: null, status: null }}
         onFiltersChange={vi.fn()}
-        notes={{ status: "ready", data: [] }}
+        notes={{ status: "ready", data: notesRead([]) }}
         noteCounts={null}
         onRetryItems={vi.fn()}
         onRetryNotes={vi.fn()}

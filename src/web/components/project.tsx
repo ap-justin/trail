@@ -14,7 +14,7 @@ import {
   showAllFilters,
   statusTabValue,
 } from "@/components/item-list";
-import { NotesSection } from "@/components/notes";
+import { type NotesRead, NotesSection } from "@/components/notes";
 import {
   EmptyState,
   ErrorState,
@@ -31,7 +31,6 @@ import { KeyPill } from "@/components/text";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import type {
   WebItemCountsView,
-  WebItemRowView,
   WebProjectDetailView,
   WebProjectItemsView,
   WebProjectView,
@@ -62,7 +61,7 @@ export type ProjectViewProps = {
    */
   counts: WebItemCountsView | null;
   /** The current notes under the product filter, for the Notes section under the list. */
-  notes: Loadable<WebItemRowView[]>;
+  notes: Loadable<NotesRead>;
   /** The last note counts under the product filter, held while the next list loads; null before any. */
   noteCounts: WebItemCountsView["notes"] | null;
   /** Newest first. */
@@ -367,9 +366,11 @@ function ProjectBody(
           <NotesSection
             notes={props.notes}
             counts={props.noteCounts}
-            onShowNotes={(status) => {
+            // a project's notes run A to Z by product, newest first within one
+            order={filters.product === null ? "first" : "newest"}
+            onShowArchived={() => {
               listRef.current?.focus();
-              onFiltersChange({ ...filters, type: "note", status });
+              onFiltersChange({ ...filters, type: "note", status: "archived" });
             }}
             onRetry={props.onRetryNotes}
             now={now}

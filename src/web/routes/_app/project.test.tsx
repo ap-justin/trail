@@ -891,61 +891,70 @@ describe("notes filters in the URL", () => {
     expect(screen.queryByText(noteRow().title)).not.toBeInTheDocument();
   });
 
-  test("past the page cap the Notes section counts what it shows, and Show all notes lists them", async () => {
-    signedInAs("member");
+  /** Human UI's notes, one a page and never the last, so the cap stops their read; returns the note pages read. */
+  function serveCappedNotes(notes: { current: number; archived: number }) {
     serveProject();
-    const total = 25;
-    let notePages = 0;
+    const read = { pages: 0 };
     server.use(
       http.get("/api/web/projects/human-ui/items", ({ request }) => {
-        const isNotes =
-          new URL(request.url).searchParams.get("type") === "note";
-        if (!isNotes) {
+        if (new URL(request.url).searchParams.get("type") !== "note") {
           const list = projectItems([{ product: trail, items: [todoRow()] }]);
           return HttpResponse.json({
             ...list,
-            counts: { ...list.counts, notes: { current: total, archived: 0 } },
+            counts: { ...list.counts, notes },
           });
         }
-        notePages++;
+        read.pages++;
+        const n = read.pages;
         const list = projectItems([
           {
             product: trail,
-            items: [
-              noteRow({ key: `TRL-${notePages}`, title: `Note ${notePages}` }),
-            ],
+            items: [noteRow({ key: `TRL-${n}`, title: `Note ${n}` })],
           },
         ]);
         return HttpResponse.json({
           ...list,
-          counts: { ...list.counts, notes: { current: total, archived: 0 } },
-          nextCursor: `after-${notePages}`,
+          counts: { ...list.counts, notes },
+          nextCursor: `after-${n}`,
         });
       }),
     );
-    const { router } = renderApp("/projects/human-ui");
+    return read;
+  }
+
+  test("past the page cap the Notes section says how many of the count show, with no way to more", async () => {
+    signedInAs("member");
+    const read = serveCappedNotes({ current: 2345, archived: 0 });
+    renderApp("/projects/human-ui");
     const section = await screen.findByRole("region", { name: /^Notes/ });
+    // across products the read runs A to Z by product
     expect(
       await within(section).findByText(
-        `Showing ${ITEM_PAGES_MAX} of ${total} notes`,
+        `Showing the first ${ITEM_PAGES_MAX} of 2,345 notes`,
       ),
     ).toBeVisible();
-    expect(notePages).toBe(ITEM_PAGES_MAX);
-    await userEvent.click(
-      within(section).getByRole("button", { name: "Show all notes" }),
-    );
-    await waitFor(() =>
-      expect(router.state.location.search).toEqual({
-        type: "note",
-        status: "current",
-      }),
-    );
-    // the notes are now the list, so the section's cap line is gone and the rows remain
-    expect(screen.queryByText(/^Showing \d+ of/)).not.toBeInTheDocument();
-    expect(
-      await screen.findAllByText(`Note ${ITEM_PAGES_MAX}`),
-    ).not.toHaveLength(0);
+    expect(read.pages).toBe(ITEM_PAGES_MAX);
+    expect(within(section).queryByRole("button")).toBeNull();
   });
+
+  test.each([
+    ["", "first", { current: 2000, archived: 345 }],
+    ["&status=current", "first", { current: 2345, archived: 7 }],
+    ["&status=archived&product=TRL", "newest", { current: 3, archived: 2345 }],
+  ] as const)(
+    "a notes list under ?type=note%s past the page cap says how many of the filter's count show",
+    async (search, order, notes) => {
+      signedInAs("member");
+      serveCappedNotes(notes);
+      renderApp(`/projects/human-ui?type=note${search}`);
+      expect(
+        await screen.findAllByText(
+          `Showing the ${order} ${ITEM_PAGES_MAX} of 2,345 notes`,
+        ),
+      ).not.toHaveLength(0);
+      expect(screen.queryByText(/items are shown/)).toBeNull();
+    },
+  );
 });
 
 describe("pages", () => {

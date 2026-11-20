@@ -3,6 +3,7 @@ import { createFileRoute, Navigate, redirect } from "@tanstack/react-router";
 import { AppPage, useChrome } from "@/app/chrome";
 import { NotFoundPage } from "@/app/not-found-page";
 import { RowsMissing } from "@/app/rows-missing";
+import type { NotesRead } from "@/components/notes";
 import {
   ProjectHeading,
   ProjectHealth,
@@ -28,8 +29,11 @@ type ProjectSearch = ItemSearch & { product?: string };
 
 // module-scoped so the query reruns the flatten only when the list changes, not every render;
 // structural sharing keeps the notes' identity either way
-const itemsOfGroups = (list: WebProjectItemsView) =>
-  list.groups.flatMap((group) => group.items);
+const notesOfGroups = (list: WebProjectItemsView): NotesRead => ({
+  items: list.groups.flatMap((group) => group.items),
+  nextCursor: list.nextCursor,
+  total: list.counts.notes.current,
+});
 
 export const Route = createFileRoute("/_app/projects/$slug")({
   validateSearch: (search: Record<string, unknown>): ProjectSearch => ({
@@ -105,7 +109,7 @@ function ProjectPage() {
       filters.type !== "note" &&
       !noteCountsQuery.isPlaceholderData &&
       (noteCounts?.current ?? 0) > 0,
-    select: itemsOfGroups,
+    select: notesOfGroups,
   });
   const updates = useQuery({
     queryKey: keys.projectStatusUpdates(slug),
@@ -168,6 +172,15 @@ function ProjectPage() {
             shown={
               shownItems.data?.groups.reduce((n, g) => n + g.items.length, 0) ??
               0
+            }
+            notes={
+              filters.type === "note"
+                ? {
+                    status: filters.status,
+                    // A to Z by product, newest first within one
+                    order: product === null ? "first" : "newest",
+                  }
+                : undefined
             }
           />
         }

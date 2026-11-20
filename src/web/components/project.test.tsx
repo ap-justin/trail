@@ -16,6 +16,7 @@ import {
   docsSite,
   issueRow,
   noteRow,
+  notesRead,
   projectDetail,
   projectItems,
   statusUpdate,
@@ -59,7 +60,7 @@ function props(overrides: Partial<ProjectViewProps> = {}): ProjectViewProps {
     },
     items,
     counts: null,
-    notes: { status: "ready", data: [] },
+    notes: { status: "ready", data: notesRead([]) },
     statusUpdates: {
       status: "ready",
       data: {
@@ -659,7 +660,7 @@ describe("notes", () => {
   test("current notes show in a Notes section under the work list; the tab and group counts leave them out", () => {
     renderProject({
       items: { status: "ready", data: withNotes() },
-      notes: { status: "ready", data: notes },
+      notes: { status: "ready", data: notesRead(notes) },
     });
     const section = screen.getByRole("region", { name: /^Notes/ });
     expect(
@@ -688,7 +689,7 @@ describe("notes", () => {
     const p = renderProject({
       filters: { ...NO_PROJECT_FILTERS, product: "TRL" },
       items: { status: "ready", data: withNotes() },
-      notes: { status: "ready", data: notes },
+      notes: { status: "ready", data: notesRead(notes) },
     });
     await user.click(
       screen.getByRole("button", { name: "Show 1 archived note" }),
@@ -804,7 +805,7 @@ describe("notes", () => {
       <ProjectView
         {...props({
           items: { status: "ready", data: notesOnly },
-          notes: { status: "ready", data: notes },
+          notes: { status: "ready", data: notesRead(notes) },
         })}
       />,
     );
@@ -816,7 +817,7 @@ describe("notes", () => {
         {...props({
           filters: { ...NO_PROJECT_FILTERS, type: "note", status: "archived" },
           items: { status: "loading" },
-          notes: { status: "ready", data: notes },
+          notes: { status: "ready", data: notesRead(notes) },
         })}
       />,
     );
@@ -834,7 +835,7 @@ describe("notes", () => {
             counts: countsOf([...notes, archived]),
           },
         }}
-        notes={{ status: "ready", data: notes }}
+        notes={{ status: "ready", data: notesRead(notes) }}
       />,
     );
     const noWork = () =>
@@ -869,7 +870,7 @@ describe("notes", () => {
       filters: { ...NO_PROJECT_FILTERS, status: "open" },
       items: { status: "loading" },
       noteCounts: withNotes().counts.notes,
-      notes: { status: "ready", data: notes },
+      notes: { status: "ready", data: notesRead(notes) },
     });
     const section = screen.getByRole("region", { name: /^Notes/ });
     expect(
@@ -885,38 +886,81 @@ describe("notes", () => {
     ).toBeInTheDocument();
   });
 
-  test("a notes list cut short of the count says how many show, and Show all notes keeps the product filter", async () => {
+  test("a notes read the page cap cut short says how many of its count show, newest first under a product filter, with no way to more", () => {
+    renderProject({
+      filters: { ...NO_PROJECT_FILTERS, product: "TRL" },
+      items: { status: "ready", data: withNotes() },
+      noteCounts: { current: 2134, archived: 1 },
+      notes: {
+        status: "ready",
+        data: { items: notes, nextCursor: "after-31", total: 2134 },
+      },
+    });
+    const section = screen.getByRole("region", { name: /^Notes/ });
+    expect(
+      within(section).getByText("Showing the newest 1 of 2,134 notes"),
+    ).toBeInTheDocument();
+    expect(within(section).getAllByRole("button")).toHaveLength(1);
+  });
+
+  test("across products the capped read runs A to Z by product, so its line says first, not newest", () => {
+    renderProject({
+      items: { status: "ready", data: withNotes() },
+      noteCounts: { current: 2134, archived: 1 },
+      notes: {
+        status: "ready",
+        data: { items: notes, nextCursor: "after-31", total: 2134 },
+      },
+    });
+    expect(
+      within(screen.getByRole("region", { name: /^Notes/ })).getByText(
+        "Showing the first 1 of 2,134 notes",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  test("Show archived notes keeps the product filter", async () => {
     const user = userEvent.setup();
     const p = renderProject({
       filters: { ...NO_PROJECT_FILTERS, product: "TRL" },
       items: { status: "ready", data: withNotes() },
-      noteCounts: { current: 2134, archived: 1 },
-      notes: { status: "ready", data: notes },
+      notes: { status: "ready", data: notesRead(notes) },
     });
-    const section = screen.getByRole("region", { name: /^Notes/ });
-    expect(
-      within(section).getByText("Showing 1 of 2,134 notes"),
-    ).toBeInTheDocument();
     await user.click(
-      within(section).getByRole("button", { name: "Show all notes" }),
+      within(screen.getByRole("region", { name: /^Notes/ })).getByRole(
+        "button",
+        { name: "Show 1 archived note" },
+      ),
     );
     expect(p.onFiltersChange).toHaveBeenCalledWith({
       product: "TRL",
       type: "note",
-      status: "current",
+      status: "archived",
     });
   });
 
-  test("every current note shown: no Showing line and no Show all notes", () => {
+  test("every current note shown: no Showing line and no button but the archived one", () => {
     renderProject({
       items: { status: "ready", data: withNotes() },
-      notes: { status: "ready", data: notes },
+      notes: { status: "ready", data: notesRead(notes) },
     });
     const section = screen.getByRole("region", { name: /^Notes/ });
     expect(within(section).queryByText(/^Showing/)).toBeNull();
+    expect(within(section).getAllByRole("button")).toHaveLength(1);
+  });
+
+  test("counts from a later list above the rows of an older read: no Showing line", () => {
+    // a failed refetch keeps the older read's rows while another list's counts moved on
+    renderProject({
+      items: { status: "ready", data: withNotes() },
+      noteCounts: { current: 4, archived: 1 },
+      notes: { status: "ready", data: notesRead(notes) },
+    });
+    const section = screen.getByRole("region", { name: /^Notes/ });
     expect(
-      within(section).queryByRole("button", { name: "Show all notes" }),
-    ).toBeNull();
+      within(section).getByRole("heading", { name: "Notes 4" }),
+    ).toBeInTheDocument();
+    expect(within(section).queryByText(/^Showing/)).toBeNull();
   });
 
   test("Try again on notes leaves focus on their heading", async () => {

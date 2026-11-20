@@ -834,57 +834,105 @@ describe("notes filters in the URL", () => {
     expect(screen.queryByText(noteRow().title)).not.toBeInTheDocument();
   });
 
-  test("past the page cap the Notes section counts what it shows, and Show all notes lists them", async () => {
-    signedInAs("member");
+  /** TRL's notes, one a page and never the last, so the cap stops their read; returns the note pages read. */
+  function serveCappedNotes(notes: { current: number; archived: number }) {
     serveProduct();
-    const total = 25;
-    let notePages = 0;
+    const read = { pages: 0 };
     server.use(
       http.get("/api/web/products/TRL/items", ({ request }) => {
-        const isNotes =
-          new URL(request.url).searchParams.get("type") === "note";
-        if (!isNotes) {
-          return HttpResponse.json({
-            ...issueList([issueRow()]),
-            counts: {
-              ...issueList([]).counts,
-              notes: { current: total, archived: 0 },
-            },
-          });
+        const counts = { ...issueList([]).counts, notes };
+        if (new URL(request.url).searchParams.get("type") !== "note") {
+          return HttpResponse.json({ ...issueList([issueRow()]), counts });
         }
-        notePages++;
-        const list = issueList([
-          noteRow({ key: `TRL-${notePages}`, title: `Note ${notePages}` }),
-        ]);
+        read.pages++;
+        const n = read.pages;
         return HttpResponse.json({
-          ...list,
-          counts: { ...list.counts, notes: { current: total, archived: 0 } },
-          nextCursor: `after-${notePages}`,
+          ...issueList([noteRow({ key: `TRL-${n}`, title: `Note ${n}` })]),
+          counts,
+          nextCursor: `after-${n}`,
         });
       }),
     );
-    const { router } = renderApp("/products/TRL");
+    return read;
+  }
+
+  test("past the page cap the Notes section says how many of the count show, with no way to more", async () => {
+    signedInAs("member");
+    const read = serveCappedNotes({ current: 2345, archived: 0 });
+    renderApp("/products/TRL");
     const section = await screen.findByRole("region", { name: /^Notes/ });
     expect(
       await within(section).findByText(
-        `Showing ${ITEM_PAGES_MAX} of ${total} notes`,
+        `Showing the newest ${ITEM_PAGES_MAX} of 2,345 notes`,
       ),
     ).toBeVisible();
-    expect(notePages).toBe(ITEM_PAGES_MAX);
-    await userEvent.click(
-      within(section).getByRole("button", { name: "Show all notes" }),
-    );
-    await waitFor(() =>
-      expect(router.state.location.search).toEqual({
-        type: "note",
-        status: "current",
+    expect(read.pages).toBe(ITEM_PAGES_MAX);
+    expect(within(section).queryByRole("button")).toBeNull();
+  });
+
+  test.each([
+    ["current", { current: 2345, archived: 7 }, "2,345"],
+    ["archived", { current: 3, archived: 2345 }, "2,345"],
+    [undefined, { current: 2000, archived: 345 }, "2,345"],
+  ] as const)(
+    "a notes list under ?status=%s past the page cap says how many of the filter's count show",
+    async (status, notes, total) => {
+      signedInAs("member");
+      serveCappedNotes(notes);
+      renderApp(`/products/TRL?type=note${status ? `&status=${status}` : ""}`);
+      expect(
+        await screen.findAllByText(
+          `Showing the newest ${ITEM_PAGES_MAX} of ${total} notes`,
+        ),
+      ).not.toHaveLength(0);
+      expect(screen.queryByText(/items are shown/)).toBeNull();
+    },
+  );
+
+  test("a notes refetch that fails under counts that moved on: no Showing line", async () => {
+    signedInAs("member");
+    serveProduct();
+    let current = 1;
+    let notesFail = false;
+    server.use(
+      http.get("/api/web/products/TRL/items", ({ request }) => {
+        const counts = {
+          ...issueList([]).counts,
+          notes: { current, archived: 0 },
+        };
+        if (new URL(request.url).searchParams.get("type") !== "note") {
+          return HttpResponse.json({ ...issueList([issueRow()]), counts });
+        }
+        if (notesFail) return new HttpResponse(null, { status: 500 });
+        return HttpResponse.json({ ...issueList([noteRow()]), counts });
       }),
     );
-    // the notes are now the list, so the section's cap line is gone and the rows remain
-    expect(screen.queryByText(/^Showing \d+ of/)).not.toBeInTheDocument();
+    const { queryClient } = renderApp("/products/TRL");
+    const section = await screen.findByRole("region", { name: /^Notes/ });
     expect(
-      await screen.findAllByText(`Note ${ITEM_PAGES_MAX}`),
-    ).not.toHaveLength(0);
+      await within(section).findByText(noteRow().title),
+    ).toBeInTheDocument();
+    current = 3;
+    notesFail = true;
+    // the work list rereads, its counts move on, and the notes read they start fails
+    await act(() =>
+      queryClient.refetchQueries({ queryKey: ["product", "TRL", "items"] }),
+    );
+    await waitFor(() =>
+      expect(
+        within(section).getByRole("heading", { name: "Notes 3" }),
+      ).toBeInTheDocument(),
+    );
+    await waitFor(() =>
+      expect(
+        queryClient
+          .getQueryCache()
+          .findAll({ queryKey: ["product", "TRL", "items"] })
+          .some((q) => q.state.status === "error"),
+      ).toBe(true),
+    );
+    expect(within(section).getByText(noteRow().title)).toBeInTheDocument();
+    expect(within(section).queryByText(/^Showing/)).toBeNull();
   });
 });
 
