@@ -114,7 +114,8 @@ const receiver = createServer((req, res) => {
 });
 // a fake Resend: it keeps the last sign-in link per address, and refuses some issue-ended emails
 const signInLinks = new Map();
-const mailStats = { ok: 0, refused: 0 };
+// each mail's latest answer, by its idempotency key, so a retried mail counts once
+const mailOutcome = new Map();
 let mailCalls = 0;
 const resend = createServer((req, res) => {
   let body = "";
@@ -126,10 +127,14 @@ const resend = createServer((req, res) => {
       return res.writeHead(200).end("{}");
     }
     const n = mailCalls++;
+    const id = req.headers["idempotency-key"] ?? `call ${n}`;
     // a refusal that is retried (5xx, 429), one that is final (422), and a stalled answer
     const status = [200, 200, 500, 200, 429, 200, 422][n % 7];
-    if (n % 11 === 10) return void setTimeout(() => res.destroy(), 11_000);
-    mailStats[status === 200 ? "ok" : "refused"]++;
+    if (n % 11 === 10) {
+      mailOutcome.set(id, "stalled");
+      return void setTimeout(() => res.destroy(), 11_000);
+    }
+    mailOutcome.set(id, status === 200 ? "accepted" : "refused");
     res.writeHead(status).end("{}");
   });
 });
@@ -173,16 +178,28 @@ server = spawn(
 );
 const heapWaiters = [];
 server.on("message", (m) => heapWaiters.shift()?.(m));
+// a heap snapshot of a large heap takes seconds; a server that answers none in this time is stuck
+const ASK_TIMEOUT_MS = 60_000;
 // answers null once the server is gone, so a sample never waits on a dead process
 const ask = (message) =>
   new Promise((resolve) => {
     if (!server.connected) return resolve(null);
-    heapWaiters.push(resolve);
+    const timer = setTimeout(() => {
+      // the slot stays, so a late answer is dropped rather than handed to the next asker
+      const i = heapWaiters.indexOf(answer);
+      if (i !== -1) heapWaiters[i] = () => {};
+      resolve(null);
+    }, ASK_TIMEOUT_MS);
+    const answer = (m) => {
+      clearTimeout(timer);
+      resolve(m);
+    };
+    heapWaiters.push(answer);
     server.send(message, (error) => {
       if (!error) return;
-      const i = heapWaiters.indexOf(resolve);
+      const i = heapWaiters.indexOf(answer);
       if (i !== -1) heapWaiters.splice(i, 1);
-      resolve(null);
+      answer(null);
     });
   });
 let stop = Number.POSITIVE_INFINITY;
@@ -203,10 +220,12 @@ let healthy = false;
 for (let i = 0; i < 100 && !healthy && !serverDied; i++) {
   healthy = await fetch(`${base}/health`, {
     signal: AbortSignal.timeout(1000),
-  }).then(
-    (r) => r.ok,
-    () => false,
-  );
+  })
+    .then(async (r) => {
+      await r.text();
+      return r.ok;
+    })
+    .catch(() => false);
   if (!healthy) await new Promise((r) => setTimeout(r, 200));
 }
 if (!healthy)
@@ -258,28 +277,35 @@ for (let i = 0; i < TEAM_BOTS; i++) {
 const answers = new Map();
 const samples = new Map();
 const tally = (method, path, status) => {
-  const k = `${method} ${path.replace(/[A-Z]{2,5}-\d+|\d+/g, "#")} ${status}`;
+  const k = `${method} ${path.replace(/[A-Z]{2,5}-\d+|(?<=product=)[A-Z]{2,5}|\d+/g, "#")} ${status}`;
   answers.set(k, (answers.get(k) ?? 0) + 1);
 };
 // a fetch that never answered: TimeoutError, AbortError, or the network error's code
 const failure = (error) => error.cause?.code ?? error.name;
+// every body is read: an unread one keeps its connection open, and the server's rss and buffers with it
 const api = async (bot, method, path, body, signal) => {
-  const res = await fetch(`${base}/api/v1${path}`, {
-    method,
-    headers: {
-      authorization: `Bearer ${bot.key}`,
-      "content-type": "application/json",
-    },
-    body: body && JSON.stringify(body),
-    signal: signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-  }).catch((error) => {
+  let status;
+  let text;
+  try {
+    const res = await fetch(`${base}/api/v1${path}`, {
+      method,
+      headers: {
+        authorization: `Bearer ${bot.key}`,
+        "content-type": "application/json",
+      },
+      body: body && JSON.stringify(body),
+      signal: signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    status = res.status;
+    text = await res.text();
+  } catch (error) {
     tally(method, path, failure(error));
     throw error;
-  });
-  tally(method, path, res.status);
-  if (res.status >= 400 && !samples.has(`${method} ${res.status}`))
-    samples.set(`${method} ${res.status}`, await res.clone().text());
-  return res;
+  }
+  tally(method, path, status);
+  if (status >= 400 && !samples.has(`${method} ${status}`))
+    samples.set(`${method} ${status}`, text);
+  return { status, json: async () => JSON.parse(text) };
 };
 const PRODUCT = "SOK";
 const product = await api(bots[0], "POST", "/products", {
@@ -511,8 +537,8 @@ async function webRound(cookie, bot) {
         headers: { cookie },
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
-      tally("WEB GET", path, res.status);
       await res.text();
+      tally("WEB GET", path, res.status);
     } catch (error) {
       tally("WEB GET", path, failure(error));
     }
@@ -540,8 +566,8 @@ async function signIn() {
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
-      tally("AUTH POST", path, res.status);
       await res.text();
+      tally("AUTH POST", path, res.status);
       return res;
     } catch (error) {
       tally("AUTH POST", path, failure(error));
@@ -634,9 +660,16 @@ const started = Date.now();
 const mb = (n) => `${(n / 1048576).toFixed(1).padStart(6)} MB`;
 const report = async (label) => {
   const m = await ask({ type: "heap" });
-  const at = `${String(Math.round((Date.now() - started) / 60_000)).padStart(4)} min`;
+  const elapsed = Date.now() - started;
+  // whole minutes would print the same time for every sample under a minute apart
+  const at =
+    intervalS < 60
+      ? `${(elapsed / 1000).toFixed(1).padStart(7)} s`
+      : `${String(Math.round(elapsed / 60_000)).padStart(4)} min`;
   if (!m)
-    return console.log(`${at}  no sample: the server is gone${label ?? ""}`);
+    return console.log(
+      `${at}  no sample: the server is gone or didn't answer${label ?? ""}`,
+    );
   console.log(
     `${at}  rss ${mb(m.rss)}  heapUsed ${mb(m.heapUsed)}  heapTotal ${mb(m.heapTotal)}  external ${mb(m.external)}  arrayBuffers ${mb(m.arrayBuffers)}${label ?? ""}`,
   );
@@ -668,7 +701,11 @@ console.log(
 );
 for (const [k, text] of samples)
   console.log(`first ${k}: ${text.slice(0, 300)}`);
-console.log(`mail: ${mailStats.ok} accepted, ${mailStats.refused} refused`);
+const mailCount = (outcome) =>
+  [...mailOutcome.values()].filter((o) => o === outcome).length;
+console.log(
+  `mail: ${mailOutcome.size} mails in ${mailCalls} calls; by latest answer ${mailCount("accepted")} accepted, ${mailCount("refused")} refused, ${mailCount("stalled")} stalled`,
+);
 stopping = true;
 server.kill();
 // the server drains for up to 4 s (src/server/index.ts deadlineMs); the 'exit' cleanup kills what is left
