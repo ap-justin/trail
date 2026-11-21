@@ -180,8 +180,8 @@ export function createAuth({
 
   const photos = githubPhotos({ db, avatarFetch, bus, now });
 
-  // per sign-in request: GitHub's access token, held in memory only. It is in view in the account
-  // hooks, and the address is read with it later in the session's, in the same request
+  // per sign-in request: GitHub's access token, held in memory only. The account hooks see it
+  // first; the session hook, later in the same request, reads the address with it
   const signInTokens = new WeakMap<object, string>();
   const keepToken = (
     context: object | null | undefined,
