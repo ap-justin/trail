@@ -471,7 +471,7 @@ function memberByEmail(tx: Tx, email: string): HandlerView {
     );
   }
   throw new NotFoundError(
-    `no trail member has the email ${address} on file. Someone who signs in with GitHub has an address on file only once a sign-in reads it as their verified primary GitHub email, and trail stores it only if they have none on file yet, it isn't a GitHub noreply address and no other person on trail has it or is invited by email with it. If all of that holds for ${address}, have them sign in to trail again, then set the handler; otherwise this address can't name them. For someone without GitHub, invite that address on trail's People page, then set the handler once they have signed in with it`,
+    `no trail member has the email ${address} on file. Someone who signs in with GitHub has an address on file once a sign-in reads their verified primary GitHub email; trail stores it only if they have none yet, it isn't a GitHub noreply address, and no other person or email invite has it. If all of that holds for ${address}, have them sign in to trail again, then set the handler; otherwise this address can't name them. For someone without GitHub, invite that address on trail's People page, then set the handler once they have signed in with it`,
   );
 }
 
