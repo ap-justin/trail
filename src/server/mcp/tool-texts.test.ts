@@ -171,7 +171,7 @@ test("update_item says ending an issue filed for a person with an address and ac
   const tool = await toolDescriptions();
   expect(tool("update_item").description).toContain(ENDING_EMAIL);
   expect(ENDING_EMAIL).toMatch(
-    /^Done or canceled on an item with a filedFor person let in by email, not GitHub, who can see its product emails them, again on each later ending after a reopen, unless they have unsubscribed from these emails\. The email quotes your latest comment on the item, else the product's own bot's: comment the result or the reason first\.$/,
+    /^Done or canceled on an item with a filedFor person emails them if trail has their address \(let in by email, or the verified GitHub primary address trail first read at sign-in\) and they can see its product, again on each later ending after a reopen, unless they have unsubscribed from these emails\. The email quotes your latest comment on the item, else the product's own bot's: comment the result or the reason first\.$/,
   );
 });
 
@@ -241,6 +241,9 @@ test("filed_for and the handler: the instructions, file_issue, whoami and list_b
   const text = (await connect(bot.key)).getInstructions();
   expect(text).toMatch(
     /An issue you file on your person's behalf takes filed_for "handler"/,
+  );
+  expect(text).toMatch(
+    /A person's own issue is filed for that person, emailed the same way when trail has their address: let in by email, or the verified GitHub primary address trail first read at sign-in\./,
   );
   const tool = await toolDescriptions();
   expect(tool("file_issue").description).toMatch(

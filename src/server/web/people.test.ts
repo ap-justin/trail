@@ -397,14 +397,13 @@ test.each(["@@double", "@dana@example.com", "@"])(
 
 test("removing a GitHub-invited person through DELETE clears them as the handler of their bots", async () => {
   await addMember("gh-handled", [alpha.id], { githubId: 9101 });
-  // a GitHub account has no address, so setBotHandler can't name it: write the handler column as the data would hold it
-  const person = db.select().from(actor).where(eq(actor.githubId, 9101)).get();
+  db.update(actor)
+    .set({ githubEmail: "gh-handled@example.com" })
+    .where(eq(actor.githubId, 9101))
+    .run();
   const handled = createBot(db, "github removal");
   const other = createBot(db, "github removal bystander");
-  db.update(actor)
-    .set({ handlerId: person?.id })
-    .where(eq(actor.id, handled.actor.id))
-    .run();
+  setBotHandler(db, handled.actor.id, "gh-handled@example.com");
   const handlerOf = async (key: string) =>
     ((await (await request("GET", "/api/v1/whoami", { key })).json()) as Body)
       .handler;
@@ -444,4 +443,30 @@ test("removing a person clears them as every bot's handler, and inviting them ag
 
   await people("POST", "/people", { username: email, products: [alpha.key] });
   for (const b of bots) expect(await whoami(b.key)).toBeNull();
+});
+
+test("inviting an address someone who signs in with GitHub has on file is a 409 naming them, and invites no one", async () => {
+  await addMember("gh-holder", [], { githubId: 9500, name: "Gwen Holder" });
+  db.update(actor)
+    .set({ githubEmail: "gwen@example.com" })
+    .where(eq(actor.githubId, 9500))
+    .run();
+  const res = await people("POST", "/people", {
+    username: "Gwen@Example.com",
+    products: [],
+  });
+  expect(res).toEqual({
+    status: 409,
+    body: {
+      error: {
+        code: "conflict",
+        message:
+          "gwen@example.com is already on file for Gwen Holder, a member who signs in with GitHub: invite their GitHub username instead.",
+      },
+    },
+  });
+  const listed = await people("GET", "/people");
+  expect(
+    listed.body.items.map((i: Body) => i.email).includes("gwen@example.com"),
+  ).toBe(false);
 });

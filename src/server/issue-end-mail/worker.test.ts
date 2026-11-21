@@ -3,6 +3,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { type MailMessage, MailRefused } from "../auth/mail.js";
 import {
   actor,
+  invite,
   issue,
   issueEndMail,
   product,
@@ -25,7 +26,6 @@ const {
   request,
   inviteEmail,
   signInWithEmail,
-  addMember,
   signIn,
   owner,
 } = setupTestApp();
@@ -231,7 +231,15 @@ test("an email still pending when the person unsubscribes is skipped, not sent",
 
 test("a person with no email address, signed in with GitHub, is skipped with the reason", async () => {
   const wrk = db.select().from(product).where(eq(product.key, "WRK")).get();
-  const cookie = await addMember("gil-github", [wrk?.id ?? ""]);
+  const { id: inviteId } = db
+    .insert(invite)
+    .values({ username: "gil-github", invitedBy: bot.actor.id })
+    .returning()
+    .get();
+  db.insert(productMember)
+    .values({ inviteId, productId: wrk?.id ?? "" })
+    .run();
+  const cookie = await signIn("gil-github", { emails: [] });
   const res = await request("POST", "/api/web/issues", {
     key: null,
     cookie,
@@ -247,8 +255,48 @@ test("a person with no email address, signed in with GitHub, is skipped with the
   expect(rowOf(key)).toMatchObject({
     state: "skipped",
     lastError:
-      "not sent: the person has no email address; only a person let in by email has one",
+      "not sent: the person has no email address on file, from an email invite or the verified GitHub primary address trail first read at sign-in",
   });
+});
+
+test("a GitHub person with a verified primary address stored gets the mail there", async () => {
+  const wrk = db.select().from(product).where(eq(product.key, "WRK")).get();
+  const { id: inviteId } = db
+    .insert(invite)
+    .values({ username: "greta-github", invitedBy: bot.actor.id })
+    .returning()
+    .get();
+  db.insert(productMember)
+    .values({ inviteId, productId: wrk?.id ?? "" })
+    .run();
+  const cookie = await signIn("greta-github", {
+    emails: [{ email: "greta@example.com", primary: true, verified: true }],
+  });
+  // the address is read and stored after sign-in returns
+  await expect
+    .poll(
+      () =>
+        db
+          .select({ githubEmail: actor.githubEmail })
+          .from(actor)
+          .where(eq(actor.githubLogin, "greta-github"))
+          .get()?.githubEmail,
+      { timeout: 5_000 },
+    )
+    .toBe("greta@example.com");
+  const res = await request("POST", "/api/web/issues", {
+    key: null,
+    cookie,
+    json: { product: "WRK", title: "from greta" },
+  });
+  const { key } = (await res.json()) as { key: string };
+  await api("PATCH", `/items/${key}`, bot.key, { status: "done" });
+  const sent: MailMessage[] = [];
+  await worker(async (m) => {
+    sent.push(m);
+  }).tick();
+  expect(sent.map((m) => m.to)).toEqual(["greta@example.com"]);
+  expect(rowOf(key)).toMatchObject({ state: "sent", lastError: null });
 });
 
 test("with no mail provider every email is skipped, naming what is missing, with one warning per worker", async () => {

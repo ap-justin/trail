@@ -75,7 +75,7 @@ beforeAll(() => {
   for (const table of ["actor", "issue", "comment", "activity_event"]) {
     before[table] = rows(db, `select * from ${table} order by id`);
   }
-  migrate(db);
+  migrate(db, through(23));
   return () => db.$client.close();
 });
 

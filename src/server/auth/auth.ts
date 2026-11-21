@@ -11,11 +11,13 @@ import { account, session, user, verification } from "../db/schema.js";
 import type { EventBus } from "../events/bus.js";
 import { githubPhotos } from "./avatar.js";
 import { errorJson } from "./error-json.js";
+import { verifiedPrimaryEmail } from "./github-email.js";
 import {
   type Access,
   accessOf,
   accessOfEmail,
   isEmailInvited,
+  storeGitHubEmail,
   syncActor,
   syncEmailActor,
   visibleProducts,
@@ -125,6 +127,7 @@ export function createAuth({
   db,
   config,
   avatarFetch = fetch,
+  emailFetch = (input, init) => globalThis.fetch(input, init),
   bus,
   now = Date.now,
   mailTransport,
@@ -133,6 +136,8 @@ export function createAuth({
   config: AuthConfig;
   /** fetches a person's GitHub photo at sign-in and when a day-old one is refreshed */
   avatarFetch?: typeof fetch;
+  /** reads a signing-in person's GitHub emails; the global fetch by default */
+  emailFetch?: typeof fetch;
   /** where a changed GitHub photo is published to open pages */
   bus?: EventBus;
   /** the clock that spaces photo refreshes */
@@ -174,6 +179,29 @@ export function createAuth({
   ];
 
   const photos = githubPhotos({ db, avatarFetch, bus, now });
+
+  // per sign-in request: GitHub's access token, held in memory only. The account hooks see it
+  // first; the session hook, later in the same request, reads the address with it
+  const signInTokens = new WeakMap<object, string>();
+  const keepToken = (
+    context: object | null | undefined,
+    providerId: string | undefined,
+    accessToken: string | null | undefined,
+  ) => {
+    if (context && providerId === "github" && accessToken) {
+      signInTokens.set(context, accessToken);
+    }
+  };
+
+  /** Reads and stores the person's verified primary address, after sign-in and never failing it. */
+  function storeEmailLater(actorId: string, accessToken: string) {
+    verifiedPrimaryEmail(accessToken, emailFetch)
+      .then((address) => storeGitHubEmail(db, actorId, address))
+      .catch((e: unknown) => {
+        const reason = e instanceof Error ? e.message : String(e);
+        console.warn(`GitHub email of actor ${actorId} not stored: ${reason}`);
+      });
+  }
 
   const userRow = (userId: string) =>
     db.select().from(user).where(eq(user.id, userId)).get();
@@ -284,16 +312,26 @@ export function createAuth({
       }),
     },
     databaseHooks: {
-      // trail never calls GitHub as a person, so their tokens are never kept
+      // a person's tokens are only used within their sign-in request (the email read) and never kept
       account: {
-        create: { before: async (row) => ({ data: { ...row, ...noTokens } }) },
-        update: { before: async (row) => ({ data: { ...row, ...noTokens } }) },
+        create: {
+          before: async (row, context) => {
+            keepToken(context, row.providerId, row.accessToken);
+            return { data: { ...row, ...noTokens } };
+          },
+        },
+        update: {
+          before: async (row, context) => {
+            keepToken(context, row.providerId, row.accessToken);
+            return { data: { ...row, ...noTokens } };
+          },
+        },
       },
       session: {
         create: {
           // every sign-in creates a session, and only a sign-in claims: the GitHub callback
           // rewrites the user row from the profile it just fetched before it gets here
-          after: async ({ userId }) => {
+          after: async ({ userId }, context) => {
             const row = userRow(userId);
             if (!row) return;
             // a magic-link sign-in: better-auth made the user from the address the link proved
@@ -307,8 +345,11 @@ export function createAuth({
               name: row.name,
             };
             const access = syncActor(db, identity, owner);
+            if (!access) return;
             // in the background: sign-in never waits on GitHub
-            if (access) photos.signedIn(access.actor);
+            const token = context && signInTokens.get(context);
+            if (token) storeEmailLater(access.actor.id, token);
+            photos.signedIn(access.actor);
           },
         },
       },

@@ -31,7 +31,7 @@ const DUE_BATCH = 20;
 const TURNED_OFF = "not sent: the person turned these emails off";
 const NO_ACCESS = "not sent: the person can't see the issue's product";
 const NO_ADDRESS =
-  "not sent: the person has no email address; only a person let in by email has one";
+  "not sent: the person has no email address on file, from an email invite or the verified GitHub primary address trail first read at sign-in";
 
 /** How the emails go out, or the variables they still need. */
 export type IssueEndMailSettings =
@@ -197,7 +197,12 @@ export function createIssueEndMailWorker(options: IssueEndMailWorkerOptions) {
       return finish(row, "skipped", NO_ACCESS);
     }
     const recipient = db
-      .select({ email: actor.email, off: actor.issueEndMailOff })
+      .select({
+        email: sql<
+          string | null
+        >`coalesce(${actor.email}, ${actor.githubEmail})`,
+        off: actor.issueEndMailOff,
+      })
       .from(actor)
       .where(eq(actor.id, row.recipientId))
       .get();

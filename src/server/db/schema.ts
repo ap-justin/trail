@@ -142,6 +142,9 @@ export const actor = sqliteTable(
     title: text("title"),
     // the address a person let in by email signs in with; such a person has no GitHub account here
     email: text("email"),
+    // the verified primary address of a person's GitHub account, from the first sign-in that found one
+    // and never refreshed; a person's address is coalesce(email, github_email), so no two people share one
+    githubEmail: text("github_email"),
     // the human who signed in first as TRAIL_OWNER_GITHUB
     isOwner: integer("is_owner", { mode: "boolean" }).notNull().default(false),
     // the person a bot works for; that it names a human is the service's check
@@ -180,6 +183,13 @@ export const actor = sqliteTable(
     uniqueIndex("actor_email_unique")
       .on(t.email)
       .where(sql`${c(t.email)} is not null`),
+    check(
+      "actor_github_email_check",
+      sql`${c(t.githubEmail)} is null or (${c(t.kind)} = 'human' and ${c(t.githubId)} is not null and ${emailShape(t.githubEmail)})`,
+    ),
+    uniqueIndex("actor_github_email_unique")
+      .on(t.githubEmail)
+      .where(sql`${c(t.githubEmail)} is not null`),
     check(
       "actor_title_check",
       sql`${c(t.title)} is null or (${c(t.kind)} = 'bot' and length(${c(t.title)}) between 1 and 40 and ${c(t.title)} = trim(${c(t.title)}))`,

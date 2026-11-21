@@ -411,17 +411,22 @@ export const handlerOf = (
 ): HandlerView | null => {
   if (id === null) return null;
   const row = tx
-    .select({ id: actor.id, name: actor.displayName, email: actor.email })
+    .select({
+      id: actor.id,
+      name: actor.displayName,
+      email: sql<string>`coalesce(${actor.email}, ${actor.githubEmail})`,
+    })
     .from(actor)
     .where(eq(actor.id, id))
     .get();
-  // a handler is always an email member: setBotHandler finds it by address
-  return row ? { ...row, email: row.email as string } : null;
+  // a handler always has an address: setBotHandler finds it by one
+  return row ?? null;
 };
 
 /**
- * The member whose address is `email`, in any case. Only a person let in by an
- * email invite has an address trail knows: a GitHub sign-in stores none.
+ * The member whose address is `email`, in any case: a person let in by an email
+ * invite, or one who signed in with GitHub and has a verified primary address
+ * on file.
  */
 function memberByEmail(tx: Tx, email: string): HandlerView {
   const address = email.trim().toLowerCase();
@@ -432,6 +437,29 @@ function memberByEmail(tx: Tx, email: string): HandlerView {
     .where(and(eq(actor.email, address), eq(actor.kind, "human")))
     .get();
   if (found) return { ...found, email: address };
+  const github = tx
+    .select({
+      id: actor.id,
+      name: actor.displayName,
+      login: actor.githubLogin,
+      isOwner: actor.isOwner,
+      inviteId: invite.id,
+    })
+    .from(actor)
+    .leftJoin(invite, eq(invite.githubId, actor.githubId))
+    .where(and(eq(actor.githubEmail, address), eq(actor.kind, "human")))
+    .get();
+  if (github && (github.isOwner || github.inviteId !== null)) {
+    return { id: github.id, name: github.name, email: address };
+  }
+  if (github) {
+    const username = github.login
+      ? `@${github.login}`
+      : "their GitHub username";
+    throw new NotFoundError(
+      `${address} is on file for ${github.name}, who signed in with GitHub but isn't a member now: if they aren't invited yet, invite ${username} on trail's People page; set the handler once they have signed in after the invite`,
+    );
+  }
   const invited = tx
     .select({ id: invite.id })
     .from(invite)
@@ -443,7 +471,7 @@ function memberByEmail(tx: Tx, email: string): HandlerView {
     );
   }
   throw new NotFoundError(
-    `no trail member has the email ${address}: invite that address on trail's People page first, then set the handler once they have signed in with it. A person who signs in with GitHub has no email on file in trail, so invite their email to make them a handler`,
+    `no trail member has the email ${address} on file. Someone who signs in with GitHub has an address on file once a sign-in reads their verified primary GitHub email; trail stores it only if they have none yet, it isn't a GitHub noreply address, and no other person or email invite has it. If all of that holds for ${address}, have them sign in to trail again, then set the handler; otherwise this address can't name them. For someone without GitHub, invite that address on trail's People page, then set the handler once they have signed in with it`,
   );
 }
 

@@ -59,8 +59,8 @@ const usage = `Usage:
                                    it; its keys stay
   trail bot handler <bot-id-label-or-name> <email>
   trail bot handler <bot-id-label-or-name> --clear
-                                   set the person a bot works for, a member
-                                   let in by that email (any case), whom
+                                   set the person a bot works for, the member
+                                   with that address on file (any case), whom
                                    file_issue files for with filed_for
                                    "handler"; or remove it
   trail key create <bot-id-or-label> [<scope>] [--key-only]
