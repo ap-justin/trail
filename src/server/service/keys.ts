@@ -425,8 +425,8 @@ export const handlerOf = (
 
 /**
  * The member whose address is `email`, in any case: a person let in by an email
- * invite, or one who signed in with GitHub, is let in and has a verified
- * primary address on file from a sign-in.
+ * invite, or one who signed in with GitHub and has a verified primary address
+ * on file.
  */
 function memberByEmail(tx: Tx, email: string): HandlerView {
   const address = email.trim().toLowerCase();

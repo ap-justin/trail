@@ -1,4 +1,4 @@
-// bounds the sign-in's wait on GitHub, as the photo fetch is bounded
+// sign-in doesn't wait on the read; this bounds how long the background read can run
 const EMAIL_TIMEOUT_MS = 3_000;
 
 const noreply = /@users\.noreply\.github\.com$/i;

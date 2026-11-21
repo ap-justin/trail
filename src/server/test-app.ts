@@ -164,6 +164,7 @@ export const sessionCookie = (res: Response) =>
 export function setupTestApp({
   auth: authOverrides = {},
   avatarFetch = noAvatar,
+  emailFetch,
   authNow,
   webDir,
   webhooks: webhookOverrides = {},
@@ -176,6 +177,8 @@ export function setupTestApp({
   >;
   /** answers sign-in's GitHub photo fetch; by default never, so no photo and no warning */
   avatarFetch?: typeof fetch;
+  /** reads a signing-in person's GitHub emails; by default the faked GitHub answers at once */
+  emailFetch?: typeof fetch;
   /** the clock auth reads to space GitHub photo refreshes; Date.now by default */
   authNow?: () => number;
   /** the built SPA directory `createApp` serves; none by default */
@@ -200,6 +203,7 @@ export function setupTestApp({
     db,
     config: { ...testAuthConfig, ...authOverrides },
     avatarFetch,
+    emailFetch,
     bus,
     now: authNow,
     mailTransport: async (message) => {

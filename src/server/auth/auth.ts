@@ -180,20 +180,28 @@ export function createAuth({
 
   const photos = githubPhotos({ db, avatarFetch, bus, now });
 
-  // per sign-in request: the verified primary address read from GitHub. The token is only
-  // in view in the account hooks, and the claim comes later in the session's, in the same request
-  const signInEmails = new WeakMap<object, string | null>();
-  const readEmail = async (
+  // per sign-in request: GitHub's access token, held in memory only. It is in view in the account
+  // hooks, and the address is read with it later in the session's, in the same request
+  const signInTokens = new WeakMap<object, string>();
+  const keepToken = (
     context: object | null | undefined,
     providerId: string | undefined,
     accessToken: string | null | undefined,
   ) => {
-    if (!context || providerId !== "github" || !accessToken) return;
-    signInEmails.set(
-      context,
-      await verifiedPrimaryEmail(accessToken, emailFetch),
-    );
+    if (context && providerId === "github" && accessToken) {
+      signInTokens.set(context, accessToken);
+    }
   };
+
+  /** Reads and stores the person's verified primary address, after sign-in and never failing it. */
+  function storeEmailLater(actorId: string, accessToken: string) {
+    verifiedPrimaryEmail(accessToken, emailFetch)
+      .then((address) => storeGitHubEmail(db, actorId, address))
+      .catch((e: unknown) => {
+        const reason = e instanceof Error ? e.message : String(e);
+        console.warn(`GitHub email of actor ${actorId} not stored: ${reason}`);
+      });
+  }
 
   const userRow = (userId: string) =>
     db.select().from(user).where(eq(user.id, userId)).get();
@@ -308,13 +316,13 @@ export function createAuth({
       account: {
         create: {
           before: async (row, context) => {
-            await readEmail(context, row.providerId, row.accessToken);
+            keepToken(context, row.providerId, row.accessToken);
             return { data: { ...row, ...noTokens } };
           },
         },
         update: {
           before: async (row, context) => {
-            await readEmail(context, row.providerId, row.accessToken);
+            keepToken(context, row.providerId, row.accessToken);
             return { data: { ...row, ...noTokens } };
           },
         },
@@ -337,10 +345,11 @@ export function createAuth({
               name: row.name,
             };
             const access = syncActor(db, identity, owner);
-            const githubEmail = (context && signInEmails.get(context)) ?? null;
-            if (access) storeGitHubEmail(db, access.actor.id, githubEmail);
+            if (!access) return;
             // in the background: sign-in never waits on GitHub
-            if (access) photos.signedIn(access.actor);
+            const token = context && signInTokens.get(context);
+            if (token) storeEmailLater(access.actor.id, token);
+            photos.signedIn(access.actor);
           },
         },
       },

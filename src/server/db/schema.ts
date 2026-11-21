@@ -142,8 +142,8 @@ export const actor = sqliteTable(
     title: text("title"),
     // the address a person let in by email signs in with; such a person has no GitHub account here
     email: text("email"),
-    // the verified primary address of a person's GitHub account, as of a sign-in that found one;
-    // kept apart from `email` so an email invite's person and a GitHub person never read alike
+    // the verified primary address of a person's GitHub account, from the first sign-in that found one
+    // and never refreshed; a person's address is coalesce(email, github_email), so no two people share one
     githubEmail: text("github_email"),
     // the human who signed in first as TRAIL_OWNER_GITHUB
     isOwner: integer("is_owner", { mode: "boolean" }).notNull().default(false),

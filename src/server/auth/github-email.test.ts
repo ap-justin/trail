@@ -4,8 +4,35 @@ import { actor, invite, productMember } from "../db/schema.js";
 import { createBot, setBotHandler } from "../service/keys.js";
 import { setupTestApp, TEST_OWNER } from "../test-app.js";
 
-const { db, bot, request, signIn, inviteEmail, signInWithEmail } =
-  setupTestApp();
+/** Holds GitHub's /user/emails answer until it resolves; each test that sets it clears it. */
+let held: Promise<void> | null = null;
+// email reads not yet stored; a read's store is done by the event-loop turn after its answer
+let reading = 0;
+const {
+  db,
+  bot,
+  request,
+  signIn: signInNow,
+  inviteEmail,
+  signInWithEmail,
+} = setupTestApp({
+  emailFetch: async (input, init) => {
+    reading++;
+    try {
+      await held;
+      return await globalThis.fetch(input, init);
+    } finally {
+      setImmediate(() => reading--);
+    }
+  },
+});
+
+/** Signs in, then waits for the background read and store of the person's GitHub email. */
+async function signIn(...args: Parameters<typeof signInNow>) {
+  const cookie = await signInNow(...args);
+  await vi.waitFor(() => expect(reading).toBe(0), { timeout: 5_000 });
+  return cookie;
+}
 
 const verified = (email: string) => [{ email, primary: true, verified: true }];
 
@@ -33,6 +60,25 @@ test("a verified primary address is stored, lowercased, for a person let in", as
     githubEmail: "ada.store@example.com",
     email: null,
   });
+});
+
+test("sign-in returns while GitHub's emails are still on their way, and the address lands after", async () => {
+  invitePerson("waiting-wes");
+  let release = () => {};
+  held = new Promise((resolve) => {
+    release = resolve;
+  });
+  // were sign-in to await the read, this would hang until the test times out
+  await signInNow("waiting-wes", {
+    githubId: 7016,
+    emails: verified("wes@example.com"),
+  });
+  held = null;
+  expect(stored(7016)?.githubEmail).toBeNull();
+  release();
+  await expect
+    .poll(() => stored(7016)?.githubEmail, { timeout: 5_000 })
+    .toBe("wes@example.com");
 });
 
 test("an unverified primary address is never stored, nor is a verified one that isn't primary", async () => {
@@ -230,7 +276,7 @@ test("a GitHub handler's address reaches a bot only in its own whoami", async ()
     await body("GET", "/whoami", watcher.key),
     await body("GET", "/whoami", bot.key),
   );
-  expect(dana).toBeTruthy();
+  expect(dana?.githubEmail).toBe(ADDRESS);
   expect(read.filter((t) => t.toLowerCase().includes(ADDRESS))).toEqual([]);
   expect((await body("GET", "/whoami", handled.key)).toLowerCase()).toContain(
     ADDRESS,

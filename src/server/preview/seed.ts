@@ -186,7 +186,7 @@ function seed(db: Db, ownerLogin: string): void {
     body: "Drafting the sync design this week.",
   });
 
-  // a handler is a member let in by email: setBotHandler finds them by address
+  // a handler is a member with an address on file: setBotHandler finds them by address
   const handlerEmail = "rowan@example.test";
   const { id: inviteId } = db
     .insert(invite)

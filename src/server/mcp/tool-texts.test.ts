@@ -171,7 +171,7 @@ test("update_item says ending an issue filed for a person with an address and ac
   const tool = await toolDescriptions();
   expect(tool("update_item").description).toContain(ENDING_EMAIL);
   expect(ENDING_EMAIL).toMatch(
-    /^Done or canceled on an item with a filedFor person let in by email, not GitHub, who can see its product emails them, again on each later ending after a reopen, unless they have unsubscribed from these emails\. The email quotes your latest comment on the item, else the product's own bot's: comment the result or the reason first\.$/,
+    /^Done or canceled on an item with a filedFor person whose address trail has, let in by email or from a verified GitHub primary, who can see its product emails them, again on each later ending after a reopen, unless they have unsubscribed from these emails\. The email quotes your latest comment on the item, else the product's own bot's: comment the result or the reason first\.$/,
   );
 });
 
