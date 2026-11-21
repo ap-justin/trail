@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { and, asc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { Db } from "../db/client.js";
 import {
   type ApiKeyAction,
@@ -438,18 +438,28 @@ function memberByEmail(tx: Tx, email: string): HandlerView {
     .get();
   if (found) return { ...found, email: address };
   const github = tx
-    .select({ id: actor.id, name: actor.displayName, isOwner: actor.isOwner })
+    .select({
+      id: actor.id,
+      name: actor.displayName,
+      login: actor.githubLogin,
+      isOwner: actor.isOwner,
+      inviteId: invite.id,
+    })
     .from(actor)
     .leftJoin(invite, eq(invite.githubId, actor.githubId))
-    .where(
-      and(
-        eq(actor.githubEmail, address),
-        eq(actor.kind, "human"),
-        or(eq(actor.isOwner, true), isNotNull(invite.id)),
-      ),
-    )
+    .where(and(eq(actor.githubEmail, address), eq(actor.kind, "human")))
     .get();
-  if (github) return { id: github.id, name: github.name, email: address };
+  if (github && (github.isOwner || github.inviteId !== null)) {
+    return { id: github.id, name: github.name, email: address };
+  }
+  if (github) {
+    const username = github.login
+      ? `@${github.login}`
+      : "their GitHub username";
+    throw new NotFoundError(
+      `${address} is on file for ${github.name}, who signed in with GitHub but is no longer a member: invite ${username} on trail's People page, then set the handler once they have signed in again`,
+    );
+  }
   const invited = tx
     .select({ id: invite.id })
     .from(invite)
@@ -461,7 +471,7 @@ function memberByEmail(tx: Tx, email: string): HandlerView {
     );
   }
   throw new NotFoundError(
-    `no trail member has the email ${address}: a handler must have an email on file (invited by email, or signed in with GitHub with a verified primary email). Invite that address on trail's People page first, then set the handler once they have signed in with it`,
+    `no trail member has the email ${address} on file. For someone who signs in with GitHub, have them sign in to trail again with it as their verified primary GitHub email, then set the handler; trail keeps the first one it reads, so one already on file is the address to use. For someone without GitHub, invite that address on trail's People page, then set the handler once they have signed in with it`,
   );
 }
 

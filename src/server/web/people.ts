@@ -53,7 +53,7 @@ const invitePerson = createRoute({
     201: jsonContent(personSchema, "The invite"),
     409: jsonContent(
       errorSchema,
-      "Already invited, or the person who runs this trail",
+      "Already invited, the person who runs this trail, or an address someone who signs in with GitHub has on file",
     ),
     422: jsonContent(
       errorSchema,

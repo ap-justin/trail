@@ -1,13 +1,24 @@
 import { eq } from "drizzle-orm";
-import { expect, test, vi } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { actor, invite, productMember } from "../db/schema.js";
 import { createBot, setBotHandler } from "../service/keys.js";
 import { setupTestApp, TEST_OWNER } from "../test-app.js";
+import { verifiedPrimaryEmail } from "./github-email.js";
 
 /** Holds GitHub's /user/emails answer until it resolves; each test that sets it clears it. */
 let held: Promise<void> | null = null;
 // email reads not yet stored; a read's store is done by the event-loop turn after its answer
 let reading = 0;
+/** Stands in for GitHub's /user/emails answer while set; afterEach clears it. */
+let failing: (() => Promise<Response>) | null = null;
+// the authorization header each read sent, so a test can look for its token in the logs
+const sentAuth: string[] = [];
+afterEach(() => {
+  held = null;
+  failing = null;
+  sentAuth.length = 0;
+  vi.restoreAllMocks();
+});
 const {
   db,
   bot,
@@ -20,6 +31,8 @@ const {
     reading++;
     try {
       await held;
+      sentAuth.push(new Headers(init?.headers).get("authorization") ?? "");
+      if (failing) return await failing();
       return await globalThis.fetch(input, init);
     } finally {
       setImmediate(() => reading--);
@@ -81,31 +94,60 @@ test("sign-in returns while GitHub's emails are still on their way, and the addr
     .toBe("wes@example.com");
 });
 
-test("an unverified primary address is never stored, nor is a verified one that isn't primary", async () => {
+test("an unverified primary address is never stored", async () => {
   invitePerson("unverified-pat");
   await signIn("unverified-pat", {
     githubId: 7002,
-    emails: [
-      { email: "pat@example.com", primary: true, verified: false },
-      { email: "pat-second@example.com", primary: false, verified: true },
-    ],
+    emails: [{ email: "pat@example.com", primary: true, verified: false }],
   });
   expect(stored(7002)?.githubEmail).toBeNull();
 });
 
-test("nothing is stored when GitHub lists none, refuses the token, or gives its private-address stand-in", async () => {
-  invitePerson("empty-eli");
-  invitePerson("scopeless-sam");
-  invitePerson("private-pip");
-  await signIn("empty-eli", { githubId: 7003, emails: [] });
-  await signIn("scopeless-sam", { githubId: 7004, emails: null });
-  await signIn("private-pip", {
-    githubId: 7005,
-    emails: verified("7005+private-pip@users.noreply.github.com"),
+test("a verified address that isn't primary is never stored", async () => {
+  invitePerson("second-sid");
+  await signIn("second-sid", {
+    githubId: 7019,
+    emails: [{ email: "sid@example.com", primary: false, verified: true }],
   });
-  for (const id of [7003, 7004, 7005]) {
-    expect(stored(id), `${id}`).toEqual({ githubEmail: null, email: null });
-  }
+  expect(stored(7019)?.githubEmail).toBeNull();
+});
+
+test("nothing is stored when GitHub lists no emails", async () => {
+  invitePerson("empty-eli");
+  await signIn("empty-eli", { githubId: 7003, emails: [] });
+  expect(stored(7003)).toEqual({ githubEmail: null, email: null });
+});
+
+test("nothing is stored when GitHub refuses the token", async () => {
+  invitePerson("scopeless-sam");
+  await signIn("scopeless-sam", { githubId: 7004, emails: null });
+  expect(stored(7004)).toEqual({ githubEmail: null, email: null });
+});
+
+test.each([
+  [7005, "private-pip", "7005+private-pip@users.noreply.github.com"],
+  [7020, "private-uma", "7020+Private-Uma@Users.NoReply.GitHub.com"],
+])(
+  "GitHub's private-address stand-in %s is never stored, in any case",
+  async (githubId, login, address) => {
+    invitePerson(login);
+    await signIn(login, { githubId, emails: verified(address) });
+    expect(stored(githubId)).toEqual({ githubEmail: null, email: null });
+  },
+);
+
+test("an address GitHub accepts but trail's shape check refuses is not stored, with one warning, and sign-in goes on", async () => {
+  invitePerson("odd-ott");
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  await signIn("odd-ott", {
+    githubId: 7021,
+    emails: verified("a b@example.com"),
+  });
+  expect(stored(7021)?.githubEmail).toBeNull();
+  expect(warn).toHaveBeenCalledTimes(1);
+  expect(String(warn.mock.calls[0]?.[0])).toMatch(
+    /not an address trail accepts/,
+  );
 });
 
 test("a person's stored address stays when their GitHub primary address changes", async () => {
@@ -140,18 +182,16 @@ test("an address another person holds is refused once, and sign-in goes on", asy
     githubId: 7008,
     emails: verified("shared@example.com"),
   });
-  const cookie = await signIn("second-gus", {
+  await signIn("second-gus", {
     githubId: 7009,
     emails: verified("Shared@Example.com"),
   });
   const refusals = warn.mock.calls.filter(([m]) =>
     String(m).includes("not stored"),
   );
-  warn.mockRestore();
   expect(refusals).toHaveLength(1);
   expect(stored(7008)?.githubEmail).toBe("shared@example.com");
   expect(stored(7009)?.githubEmail).toBeNull();
-  expect(cookie).toBeTruthy();
 });
 
 test("an address an email invite's person holds is refused for a GitHub person", async () => {
@@ -163,7 +203,7 @@ test("an address an email invite's person holds is refused for a GitHub person",
     githubId: 7010,
     emails: verified("held@example.com"),
   });
-  warn.mockRestore();
+  expect(warn).toHaveBeenCalledTimes(1);
   expect(stored(7010)?.githubEmail).toBeNull();
 });
 
@@ -174,9 +214,8 @@ test("an invited address a GitHub person holds lets no second person in under it
     emails: verified("taken@example.com"),
   });
   inviteEmail("taken@example.com");
-  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  vi.spyOn(console, "warn").mockImplementation(() => {});
   await signInWithEmail("taken@example.com");
-  warn.mockRestore();
   expect(
     db.select().from(actor).where(eq(actor.email, "taken@example.com")).all(),
   ).toEqual([]);
@@ -194,14 +233,14 @@ test("a member who signed in with GitHub becomes a bot's handler by that address
   const set = setBotHandler(db, handled.actor.id, "IVY@example.com");
   expect(set.to).toMatchObject({ email: "ivy@example.com" });
   expect(set.to?.name).toBeTruthy();
-  const refusal =
-    /a handler must have an email on file \(invited by email, or signed in with GitHub with a verified primary email\)/;
+  const refusal = (address: string) =>
+    `no trail member has the email ${address} on file. For someone who signs in with GitHub, have them sign in to trail again with it as their verified primary GitHub email, then set the handler; trail keeps the first one it reads, so one already on file is the address to use. For someone without GitHub, invite that address on trail's People page, then set the handler once they have signed in with it`;
   expect(() =>
     setBotHandler(db, handled.actor.id, "nobody@example.com"),
-  ).toThrow(refusal);
+  ).toThrow(refusal("nobody@example.com"));
   expect(() =>
     setBotHandler(db, handled.actor.id, "silent-jo@example.com"),
-  ).toThrow(refusal);
+  ).toThrow(refusal("silent-jo@example.com"));
 });
 
 test("the owner who signed in with GitHub can be a handler", async () => {
@@ -214,7 +253,7 @@ test("the owner who signed in with GitHub can be a handler", async () => {
   });
 });
 
-test("a person whose invite was removed is no longer found by their address", async () => {
+test("a person whose invite was removed is refused by their address, naming the GitHub username to invite again", async () => {
   invitePerson("gone-kit");
   await signIn("gone-kit", {
     githubId: 7014,
@@ -222,8 +261,13 @@ test("a person whose invite was removed is no longer found by their address", as
   });
   db.delete(invite).where(eq(invite.username, "gone-kit")).run();
   const handled = createBot(db, "kit handled");
+  const name = db
+    .select({ name: actor.displayName })
+    .from(actor)
+    .where(eq(actor.githubId, 7014))
+    .get()?.name;
   expect(() => setBotHandler(db, handled.actor.id, "kit@example.com")).toThrow(
-    /no trail member/,
+    `kit@example.com is on file for ${name}, who signed in with GitHub but is no longer a member: invite @gone-kit on trail's People page, then set the handler once they have signed in again`,
   );
 });
 
@@ -281,4 +325,108 @@ test("a GitHub handler's address reaches a bot only in its own whoami", async ()
   expect((await body("GET", "/whoami", handled.key)).toLowerCase()).toContain(
     ADDRESS,
   );
+});
+
+const TOKEN = "gho_secret-token";
+const answering =
+  (answer: () => Promise<Response>): typeof fetch =>
+  () =>
+    answer();
+
+test("a status other than ok or GitHub's 404 refusal is a failure naming the status, not the token", async () => {
+  const read = verifiedPrimaryEmail(
+    TOKEN,
+    answering(async () => new Response(null, { status: 429 })),
+  );
+  await expect(read).rejects.toThrow(/answered 429/);
+  await expect(read).rejects.not.toThrow(TOKEN);
+});
+
+test("an unreachable GitHub is a failure naming why, not the token", async () => {
+  const read = verifiedPrimaryEmail(
+    TOKEN,
+    answering(() => Promise.reject(new TypeError("fetch failed"))),
+  );
+  await expect(read).rejects.toThrow(/unreachable: fetch failed/);
+  await expect(read).rejects.not.toThrow(TOKEN);
+});
+
+test("a timeout before the answer or during its body is a failure saying it timed out", async () => {
+  const timedOut = () =>
+    new DOMException(
+      "The operation was aborted due to timeout",
+      "TimeoutError",
+    );
+  await expect(
+    verifiedPrimaryEmail(
+      TOKEN,
+      answering(() => Promise.reject(timedOut())),
+    ),
+  ).rejects.toThrow(/timed out after 3000ms/);
+  const slowBody = new Response("[]");
+  vi.spyOn(slowBody, "json").mockRejectedValue(timedOut());
+  await expect(
+    verifiedPrimaryEmail(
+      TOKEN,
+      answering(async () => slowBody),
+    ),
+  ).rejects.toThrow(/timed out after 3000ms/);
+});
+
+test("an answer that isn't a JSON list is a failure saying so", async () => {
+  await expect(
+    verifiedPrimaryEmail(
+      TOKEN,
+      answering(async () => new Response("<html>unicorn</html>")),
+    ),
+  ).rejects.toThrow(/body that isn't JSON/);
+  await expect(
+    verifiedPrimaryEmail(
+      TOKEN,
+      answering(async () => Response.json({ message: "Bad credentials" })),
+    ),
+  ).rejects.toThrow(/something other than a list/);
+});
+
+test("GitHub's 404 and a list with no verified primary are no address, not a failure", async () => {
+  await expect(
+    verifiedPrimaryEmail(
+      TOKEN,
+      answering(async () => Response.json({}, { status: 404 })),
+    ),
+  ).resolves.toBeNull();
+  await expect(
+    verifiedPrimaryEmail(
+      TOKEN,
+      answering(async () => Response.json([])),
+    ),
+  ).resolves.toBeNull();
+});
+
+test("a failed read after sign-in logs one warning naming the cause and the actor, never the token, and sign-in goes on", async () => {
+  invitePerson("limited-lee");
+  failing = async () => new Response(null, { status: 403 });
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  await signInNow("limited-lee", {
+    githubId: 7017,
+    emails: verified("lee@example.com"),
+  });
+  await expect.poll(() => warn.mock.calls.length).toBe(1);
+  const [message] = warn.mock.calls[0] ?? [];
+  const id = db.select().from(actor).where(eq(actor.githubId, 7017)).get()?.id;
+  expect(String(message)).toBe(
+    `GitHub email of actor ${id} not stored: GitHub /user/emails answered 403`,
+  );
+  const token = sentAuth[0]?.replace(/^Bearer /, "");
+  expect(token).toBeTruthy();
+  expect(String(message)).not.toContain(token);
+  expect(stored(7017)?.githubEmail).toBeNull();
+});
+
+test("a person GitHub refuses the emails of signs in with no warning", async () => {
+  invitePerson("quiet-quinn");
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  await signIn("quiet-quinn", { githubId: 7018, emails: null });
+  expect(stored(7018)?.githubEmail).toBeNull();
+  expect(warn).not.toHaveBeenCalled();
 });

@@ -76,6 +76,9 @@ test("an address sits only on a person with a GitHub account, and in the same sh
 
 test("a GitHub address is held by one person", () => {
   db.$client.exec(
+    "update actor set github_email = 'hana@example.com' where id = 'hana'",
+  );
+  db.$client.exec(
     `insert into actor (id, kind, display_name, github_id, github_login, created_at)
       values ('kay', 'human', 'Kay', 102, 'kay-example', 3)`,
   );

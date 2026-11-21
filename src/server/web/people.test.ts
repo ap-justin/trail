@@ -446,7 +446,7 @@ test("removing a person clears them as every bot's handler, and inviting them ag
   for (const b of bots) expect(await whoami(b.key)).toBeNull();
 });
 
-test("inviting an address a member who signs in with GitHub has on file is a 409 naming them, and invites no one", async () => {
+test("inviting an address someone who signs in with GitHub has on file is a 409 naming them, and invites no one", async () => {
   await addMember("gh-holder", [], { githubId: 9500, name: "Gwen Holder" });
   db.update(actor)
     .set({ githubEmail: "gwen@example.com" })
