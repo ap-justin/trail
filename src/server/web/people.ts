@@ -239,6 +239,19 @@ export function peopleRoutes(db: Db, bus: EventBus) {
               `${handleOf(invitee)} is already invited: change their products in the list below.`,
             );
           }
+          if ("email" in invitee) {
+            // the owner is the only inviter, so naming the person tells no one new
+            const holder = tx
+              .select({ name: actor.displayName })
+              .from(actor)
+              .where(eq(actor.githubEmail, invitee.email))
+              .get();
+            if (holder) {
+              throw new ConflictError(
+                `${invitee.email} is already on file for ${holder.name}, a member who signs in with GitHub: invite their GitHub username instead.`,
+              );
+            }
+          }
           const { id } = tx
             .insert(invite)
             .values({ ...invitee, invitedBy: owner.actor.id })
