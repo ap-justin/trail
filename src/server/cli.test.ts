@@ -1605,7 +1605,7 @@ test("bot handler refuses an address no member has, one not signed in yet and a 
   );
   expect(unknown.code).toBe(1);
   expect(unknown.stderr).toBe(
-    "trail: no trail member has the email nobody@example.com on file. For someone who signs in with GitHub, have them sign in to trail again with it as their verified primary GitHub email, then set the handler; trail keeps the first one it reads, so one already on file is the address to use. For someone without GitHub, invite that address on trail's People page, then set the handler once they have signed in with it\n",
+    "trail: no trail member has the email nobody@example.com on file. Someone who signs in with GitHub has an address on file only once a sign-in reads it as their verified primary GitHub email, and trail stores it only if they have none on file yet, it isn't a GitHub noreply address and no other person on trail has it or is invited by email with it. If all of that holds for nobody@example.com, have them sign in to trail again, then set the handler; otherwise this address can't name them. For someone without GitHub, invite that address on trail's People page, then set the handler once they have signed in with it\n",
   );
   const pending = run(
     "bot",

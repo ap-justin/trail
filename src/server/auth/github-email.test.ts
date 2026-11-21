@@ -207,18 +207,41 @@ test("an address an email invite's person holds is refused for a GitHub person",
   expect(stored(7010)?.githubEmail).toBeNull();
 });
 
-test("an invited address a GitHub person holds lets no second person in under it", async () => {
+test("an address a pending email invite names is refused for a GitHub person, and the invitee still gets in", async () => {
+  inviteEmail("pending@example.com");
+  invitePerson("early-eve");
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  await signIn("early-eve", {
+    githubId: 7022,
+    emails: verified("Pending@Example.com"),
+  });
+  expect(warn).toHaveBeenCalledTimes(1);
+  expect(stored(7022)?.githubEmail).toBeNull();
+  await signInWithEmail("pending@example.com");
+  expect(
+    db
+      .select({ email: actor.email })
+      .from(actor)
+      .where(eq(actor.email, "pending@example.com"))
+      .all(),
+  ).toEqual([{ email: "pending@example.com" }]);
+});
+
+test("an invited address a GitHub person holds lets no second person in under it, and the warning names no address", async () => {
   invitePerson("holder-hal");
   await signIn("holder-hal", {
     githubId: 7011,
     emails: verified("taken@example.com"),
   });
-  inviteEmail("taken@example.com");
-  vi.spyOn(console, "warn").mockImplementation(() => {});
+  const inviteId = inviteEmail("taken@example.com");
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
   await signInWithEmail("taken@example.com");
   expect(
     db.select().from(actor).where(eq(actor.email, "taken@example.com")).all(),
   ).toEqual([]);
+  const messages = warn.mock.calls.map(([m]) => String(m));
+  expect(messages.some((m) => m.includes(`invite ${inviteId}`))).toBe(true);
+  expect(messages.filter((m) => m.includes("taken@example.com"))).toEqual([]);
 });
 
 test("a member who signed in with GitHub becomes a bot's handler by that address; a stranger or an unstored address is refused", async () => {
@@ -234,7 +257,7 @@ test("a member who signed in with GitHub becomes a bot's handler by that address
   expect(set.to).toMatchObject({ email: "ivy@example.com" });
   expect(set.to?.name).toBeTruthy();
   const refusal = (address: string) =>
-    `no trail member has the email ${address} on file. For someone who signs in with GitHub, have them sign in to trail again with it as their verified primary GitHub email, then set the handler; trail keeps the first one it reads, so one already on file is the address to use. For someone without GitHub, invite that address on trail's People page, then set the handler once they have signed in with it`;
+    `no trail member has the email ${address} on file. Someone who signs in with GitHub has an address on file only once a sign-in reads it as their verified primary GitHub email, and trail stores it only if they have none on file yet, it isn't a GitHub noreply address and no other person on trail has it or is invited by email with it. If all of that holds for ${address}, have them sign in to trail again, then set the handler; otherwise this address can't name them. For someone without GitHub, invite that address on trail's People page, then set the handler once they have signed in with it`;
   expect(() =>
     setBotHandler(db, handled.actor.id, "nobody@example.com"),
   ).toThrow(refusal("nobody@example.com"));
@@ -267,7 +290,7 @@ test("a person whose invite was removed is refused by their address, naming the 
     .where(eq(actor.githubId, 7014))
     .get()?.name;
   expect(() => setBotHandler(db, handled.actor.id, "kit@example.com")).toThrow(
-    `kit@example.com is on file for ${name}, who signed in with GitHub but is no longer a member: invite @gone-kit on trail's People page, then set the handler once they have signed in again`,
+    `kit@example.com is on file for ${name}, who signed in with GitHub but isn't a member now: if they aren't invited yet, invite @gone-kit on trail's People page; set the handler once they have signed in after the invite`,
   );
 });
 

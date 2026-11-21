@@ -159,10 +159,10 @@ export function accessOf(
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
 /**
- * Whether a person other than `except` holds `address`, as an email invite's
+ * Whether a person other than `except` has `address`, as an email person's
  * address or a GitHub account's verified one: no two people share an address.
  */
-const addressHeld = (tx: Tx, address: string, except?: string): boolean =>
+const actorHasAddress = (tx: Tx, address: string, except?: string): boolean =>
   tx
     .select({ id: actor.id })
     .from(actor)
@@ -175,10 +175,23 @@ const addressHeld = (tx: Tx, address: string, except?: string): boolean =>
     .get() !== undefined;
 
 /**
+ * Whether `address` is spoken for to anyone but `except`: a person has it, or
+ * an email invite names it, so a pending invite's address waits for its invitee.
+ */
+const addressHeld = (tx: Tx, address: string, except: string): boolean =>
+  actorHasAddress(tx, address, except) ||
+  tx
+    .select({ id: invite.id })
+    .from(invite)
+    .where(eq(invite.email, address))
+    .get() !== undefined;
+
+/**
  * Keeps a GitHub person's verified primary address, which only a sign-in that
  * has just read it from GitHub may pass. A person's address once stored stays
- * as it is, and an address another person holds is refused with one warning;
- * null (no verified primary address, or none readable) stores nothing.
+ * as it is, and an address another person or an email invite holds is refused
+ * with one warning; null (no verified primary address, or none readable)
+ * stores nothing.
  */
 export function storeGitHubEmail(
   db: Db,
@@ -199,7 +212,7 @@ export function storeGitHubEmail(
       }
       if (addressHeld(tx, address, actorId)) {
         console.warn(
-          `GitHub email of actor ${actorId} not stored: another person already has that address`,
+          `GitHub email of actor ${actorId} not stored: another person or an email invite already has that address`,
         );
         return;
       }
@@ -257,9 +270,10 @@ export function syncEmailActor(
         .from(actor)
         .where(eq(actor.email, email))
         .get();
-      if (!existing && addressHeld(tx, email)) {
+      // the person check alone: the invite naming this address is `bound` itself
+      if (!existing && actorHasAddress(tx, email)) {
         console.warn(
-          `${email} is invited but a GitHub person already has that address: no actor made`,
+          `email invite ${bound.id} not signed into: a GitHub person already has its address, no actor made`,
         );
         return null;
       }
