@@ -453,3 +453,17 @@ test("a person GitHub refuses the emails of signs in with no warning", async () 
   expect(stored(7018)?.githubEmail).toBeNull();
   expect(warn).not.toHaveBeenCalled();
 });
+
+test("the read refuses redirects and is bounded, so the bearer token goes nowhere else", async () => {
+  const seen: RequestInit[] = [];
+  const answered = await verifiedPrimaryEmail(
+    "gho_probe",
+    async (_url, init) => {
+      seen.push(init ?? {});
+      return Response.json([]);
+    },
+  );
+  expect(answered).toBeNull();
+  expect(seen[0]?.redirect).toBe("error");
+  expect(seen[0]?.signal).toBeInstanceOf(AbortSignal);
+});

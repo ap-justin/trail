@@ -312,7 +312,7 @@ export function createAuth({
       }),
     },
     databaseHooks: {
-      // trail never calls GitHub as a person, so their tokens are never kept
+      // a person's tokens are only used within their sign-in request (the email read) and never kept
       account: {
         create: {
           before: async (row, context) => {
