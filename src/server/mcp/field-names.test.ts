@@ -155,11 +155,18 @@ const surface = async () => {
     let body = op.requestBody?.content["application/json"].schema;
     const ref = (body as { $ref?: string } | undefined)?.$ref;
     if (ref) body = spec.components.schemas[ref.split("/").pop() as string];
+    const bodyFields = Object.keys(body?.properties ?? {});
+    // a oneOf/allOf/union body has no `properties` to read: an empty list would pass any tool silently
+    if (op.requestBody && bodyFields.length === 0) {
+      throw new Error(
+        `${route} has a request body but routeFields read no fields from it`,
+      );
+    }
     return [
       ...(op.parameters ?? [])
         .filter((p) => p.in === "query")
         .map((p) => p.name),
-      ...Object.keys(body?.properties ?? {}),
+      ...bodyFields,
     ];
   };
   const toolFields = (tool: string) => {

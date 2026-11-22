@@ -497,12 +497,33 @@ test("create_issue refuses an idempotency key reused with a changed body and cre
   expect(listed.items).toHaveLength(1);
 });
 
+test("create_issue refuses an idempotency key reused with another projectId and creates nothing in either product", async () => {
+  const owner = await connect(bot.key);
+  await call(owner, "create_product", { key: "RKA", name: "reused key a" });
+  await call(owner, "create_product", { key: "RKB", name: "reused key b" });
+  const input = { projectId: "RKA", title: "once", idempotency_key: "reuse-2" };
+  await call(owner, "create_issue", input);
+  expect(
+    await callError(owner, "create_issue", { ...input, projectId: "RKB" }),
+  ).toMatch(
+    /^idempotency_key_reused: idempotency key "reuse-2" was already used for a different request body or target/,
+  );
+  expect(
+    (await call(owner, "list_items", { product: "RKA" })).items,
+  ).toHaveLength(1);
+  expect(
+    (await call(owner, "list_items", { product: "RKB" })).items,
+  ).toHaveLength(0);
+});
+
 test("a retry of create_issue with no idempotency key and an externalRef is a conflict naming the item", async () => {
   const owner = await connect(bot.key);
   await call(owner, "create_product", { key: "RTZ", name: "retried too" });
   const input = { projectId: "RTZ", title: "once", externalRef: "ext-1" };
   const first = await call(owner, "create_issue", input);
   expect(await callError(owner, "create_issue", input)).toBe(
-    `conflict: externalRef ext-1 is already on item ${first.key}: update that item with update_item (PATCH /items/{key}), or send a different externalRef`,
+    `conflict: externalRef ext-1 is already on item ${first.key}: update that item with update_item (PATCH /items/{key}) if you may edit it, or send a different externalRef`,
   );
+  const listed = await call(owner, "list_items", { product: "RTZ" });
+  expect(listed.items).toHaveLength(1);
 });

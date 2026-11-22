@@ -313,7 +313,7 @@ test("an externalRef already used in its scope is a 409 saying which row has it"
   });
   expect(dupIssue.status).toBe(409);
   expect(dupIssue.body.error.message).toBe(
-    `externalRef ABC-1 is already on item ${issue.key}: update that item with update_item (PATCH /items/{key}), or send a different externalRef`,
+    `externalRef ABC-1 is already on item ${issue.key}: update that item with update_item (PATCH /items/{key}) if you may edit it, or send a different externalRef`,
   );
   // unique within the project only
   await created("/issues", {

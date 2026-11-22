@@ -398,7 +398,7 @@ test("add_note keeps externalRef, and a second note with it in the product is re
       externalRef: "DOC-7",
     }),
   ).toBe(
-    `conflict: externalRef DOC-7 is already on item ${note.key}: update that item with update_item (PATCH /items/{key}), or send a different externalRef`,
+    `conflict: externalRef DOC-7 is already on item ${note.key}: update that item with update_item (PATCH /items/{key}) if you may edit it, or send a different externalRef`,
   );
 });
 
@@ -424,7 +424,7 @@ test("REST POST /items with type note and add_note share one externalRef per pro
       externalRef: "DOC-R",
     }),
   ).toBe(
-    `conflict: externalRef DOC-R is already on item ${restNote.key}: update that item with update_item (PATCH /items/{key}), or send a different externalRef`,
+    `conflict: externalRef DOC-R is already on item ${restNote.key}: update that item with update_item (PATCH /items/{key}) if you may edit it, or send a different externalRef`,
   );
 
   const mcpNote = await call(writer.client, "add_note", {
@@ -443,7 +443,7 @@ test("REST POST /items with type note and add_note share one externalRef per pro
   });
   expect(again.status).toBe(409);
   expect(((await again.json()) as Body).error.message).toBe(
-    `externalRef DOC-M is already on item ${mcpNote.key}: update that item with update_item (PATCH /items/{key}), or send a different externalRef`,
+    `externalRef DOC-M is already on item ${mcpNote.key}: update that item with update_item (PATCH /items/{key}) if you may edit it, or send a different externalRef`,
   );
 });
 
