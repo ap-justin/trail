@@ -95,8 +95,9 @@ const loopbackHost = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?$/i;
 
 /**
  * Whether the request's Host is loopback, as Sky's preview proxy always sends
- * it. Without a Host header, as from `app.request`, the URL's host stands in:
- * `@hono/node-server` builds the URL from Host.
+ * it. Without a Host header, as from `app.request`, the URL's host stands in.
+ * `@hono/node-server` builds the URL from Host, except for an absolute-form
+ * request target, so the two can differ; the check is no boundary either way.
  */
 export function isLoopbackHost(request: Request): boolean {
   const host = request.headers.get("host") ?? new URL(request.url).host;

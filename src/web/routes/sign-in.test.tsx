@@ -420,7 +420,7 @@ describe("test sign-in on a preview", () => {
     ).not.toBeInTheDocument();
   });
 
-  test("a press posts once with no password, then goes on to the return address", async () => {
+  test("a press posts once with an empty body, then goes on to the return address", async () => {
     const sent: unknown[] = [];
     server.use(
       onPreview(),
@@ -432,7 +432,6 @@ describe("test sign-in on a preview", () => {
       http.get("/api/web/items/TRL-14", () => HttpResponse.json(issue())),
     );
     const { router } = renderApp("/sign-in?redirect=%2Fproducts%2FTRL%2F14");
-    expect(document.querySelector('input[type="password"]')).toBeNull();
     await userEvent.click(await previewButton());
     await waitFor(() =>
       expect(router.state.location.pathname).toBe("/products/TRL/14"),

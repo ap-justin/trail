@@ -1,7 +1,8 @@
 import { eq } from "drizzle-orm";
 import { afterEach, expect, test, vi } from "vitest";
 import { user } from "../db/schema.js";
-import { sessionCookie, setupTestApp } from "../test-app.js";
+import { sessionCookie, setupTestApp, testAuthConfig } from "../test-app.js";
+import { createAuth } from "./auth.js";
 import { PREVIEW_PERSON } from "./preview.js";
 
 // Every group builds its own app: the sign-in limiter (10 a minute, one window
@@ -65,6 +66,26 @@ test("me tells an anonymous visitor that preview sign-in is on", async () => {
     previewSignIn: true,
   });
 });
+
+const meWithHost = async (host: string) =>
+  (
+    await main.app.request(`http://${host}/api/web/me`, { headers: { host } })
+  ).json();
+
+test.each(["localhost:4123", "[::1]"])(
+  "me offers preview sign-in under the loopback Host %j",
+  async (host) => {
+    expect(await meWithHost(host)).toMatchObject({ previewSignIn: true });
+  },
+);
+
+// the route 404s under any other Host, so a button there could only fail
+test.each(["x.example.test", "127.0.0.2"])(
+  "me offers no preview sign-in under the Host %j",
+  async (host) => {
+    expect(await meWithHost(host)).toMatchObject({ previewSignIn: false });
+  },
+);
 
 test("another site's Origin is refused", async () => {
   const res = await main.signIn("https://elsewhere.example.test");
@@ -210,6 +231,30 @@ test("two sign-ins at once on a fresh preview both sign in as one user row, via 
   }
 });
 
+test("signing in under a new TRAIL_OWNER_GITHUB moves the preview person's login to it and makes no second user", async () => {
+  const t = previewApp();
+  expect((await t.signIn()).status).toBe(200);
+  expect(t.previewUsers().map((u) => u.githubLogin)).toEqual([t.owner]);
+  // a redeploy on the same database, naming another owner
+  const redeployed = createAuth({
+    db: t.db,
+    config: {
+      ...testAuthConfig,
+      TRAIL_OWNER_GITHUB: "new-owner",
+      BETTER_AUTH_URL: undefined,
+      preview: true,
+    },
+  });
+  const res = await redeployed.previewSignIn?.(
+    new Request("http://localhost/api/preview/sign-in", {
+      method: "POST",
+      headers: { host: "localhost", origin: "http://localhost" },
+    }),
+  );
+  expect(res?.status).toBe(200);
+  expect(t.previewUsers().map((u) => u.githubLogin)).toEqual(["new-owner"]);
+});
+
 test("a sign-in whose user row can't be made, with none there to fall back on, fails with the app's 500", async () => {
   const t = previewApp();
   const insert = t.db.insert.bind(t.db);
@@ -255,4 +300,31 @@ test("sign-ins sent all at once still meet the limit of 10 a minute", async () =
   const limited = responses.find((r) => r.status === 429);
   expect(Number(limited?.headers.get("retry-after"))).toBeGreaterThan(0);
   expect(limited?.headers.getSetCookie()).toEqual([]);
+});
+
+test("the limit is one window for every caller: a differently-headed 11th is refused too", async () => {
+  const t = previewApp();
+  const from = (headers: Record<string, string>) =>
+    t.app.request("http://localhost:4123/api/preview/sign-in", {
+      method: "POST",
+      headers: {
+        host: "localhost:4123",
+        origin: "http://localhost:4123",
+        ...headers,
+      },
+    });
+  for (let i = 0; i < 10; i++) {
+    const res = await from({ "x-forwarded-for": `203.0.113.${i}` });
+    expect(res.status).toBe(200);
+  }
+  const others: Record<string, string>[] = [
+    { "x-forwarded-for": "198.51.100.99" },
+    { "fly-client-ip": "192.0.2.7", "user-agent": "another-browser" },
+    {},
+  ];
+  for (const headers of others) {
+    const res = await from(headers);
+    expect(res.status).toBe(429);
+    expect(res.headers.getSetCookie()).toEqual([]);
+  }
 });

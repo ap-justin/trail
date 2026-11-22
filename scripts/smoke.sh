@@ -3,7 +3,7 @@
 # /health, the SPA's index.html and an asset of it from dist/web, a deep link falling back to index.html (JSON 404
 # for an unknown /api path), a security header on a page, unauthenticated 401s on /api/v1, /api/web and /mcp, a bearer
 # key minted by the built CLI on /api/v1 and /mcp, and better-auth's mount answering sign-in with no GitHub app
-# and a sign-in link request with no mail provider, and no preview sign-in route or button with preview mode unset.
+# and a sign-in link request with no mail provider, and no preview sign-in route, with /api/web/me reporting it off, with preview mode unset.
 # Run after `pnpm build`; `pnpm smoke` does both. Deliberately no --env-file:
 # a developer's .env must not leak into the check.
 set -eu

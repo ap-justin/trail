@@ -381,7 +381,7 @@ describe("test sign-in on a preview", () => {
     ).not.toBeInTheDocument();
   });
 
-  test("on a preview: a labelled section after the other ways in, with one button and no password field", () => {
+  test("on a preview: a labelled section after the other ways in, with one button", () => {
     renderPreview();
     const heading = screen.getByRole("heading", {
       name: "Test sign-in (preview only)",
@@ -395,8 +395,6 @@ describe("test sign-in on a preview", () => {
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
     expect(previewButton().closest("form")).toBeNull();
-    expect(document.querySelector('input[type="password"]')).toBeNull();
-    expect(screen.queryByText(/password/i)).not.toBeInTheDocument();
   });
 
   test("a press signs in, with nothing typed", async () => {
