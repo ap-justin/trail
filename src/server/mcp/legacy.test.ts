@@ -474,6 +474,10 @@ test("a retry of create_issue returns the first item whoever owns the product, n
     };
     const first = await call(client, "create_issue", input);
     expect(await call(client, "create_issue", input)).toEqual(first);
+    const listed = await call(client, "list_items", { product: "RTY" });
+    expect(
+      listed.items.filter((i: { title: string }) => i.title === key),
+    ).toHaveLength(1);
   }
 });
 
@@ -483,6 +487,6 @@ test("a retry of create_issue with no idempotency key and an externalRef is a co
   const input = { projectId: "RTZ", title: "once", externalRef: "ext-1" };
   const first = await call(owner, "create_issue", input);
   expect(await callError(owner, "create_issue", input)).toMatch(
-    new RegExp(`conflict: externalRef ext-1 is already on item ${first.key}`),
+    new RegExp(`conflict: externalRef ext-1 is already on item ${first.key}:`),
   );
 });

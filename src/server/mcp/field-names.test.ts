@@ -12,6 +12,30 @@ type Operation = {
 };
 
 /** What each REST operation takes in its body and query, which the MCP tool beside it must take under the same names. */
+/** Tools with no request field beyond how they name their one target or the page, or no route that shares their shape. */
+const noRoute = [
+  "get_item",
+  "get_project",
+  "get_product",
+  "get_issue",
+  "get_thread",
+  "list_activity",
+  "list_labels",
+  "create_label",
+  "list_status_updates",
+  "post_status_update",
+  "remove_from_project",
+  "list_webhooks",
+  "delete_webhook",
+  "test_webhook",
+  "whoami",
+  "set_my_photo",
+  "clear_my_photo",
+  "set_my_title",
+  "clear_my_title",
+  "import_project",
+];
+
 const pairs: {
   tool: string;
   rest: string;
@@ -138,4 +162,12 @@ test("a field the REST route and its MCP tool share has one name", async () => {
       `${tool} against ${rest}`,
     ).toEqual(routeFields.filter((f) => !restOnly.includes(f)).sort());
   }
+  // a tool added without a line in pairs would go unchecked
+  const covered = new Set(pairs.map((p) => p.tool));
+  const unpaired = tools
+    .map((t) => t.name)
+    .filter((name) => !covered.has(name) && !noRoute.includes(name));
+  expect(unpaired, "tools with no pair above and no entry in noRoute").toEqual(
+    [],
+  );
 });

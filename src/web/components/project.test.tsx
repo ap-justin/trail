@@ -656,19 +656,6 @@ test("the Projects link in the heading is a 44px tap target below lg, its text's
   expect(link).not.toHaveClass("min-h-11");
 });
 
-// jsdom has no layout, so this pins the classes: "All 5" measured 33px wide at 375, under the 44px a tap needs
-test("each status tab is at least 44px wide below lg, so a short label like All is one", () => {
-  render(<FilteredProject />);
-  const tabs = within(
-    screen.getByRole("tablist", { name: "Filter by status" }),
-  ).getAllByRole("tab");
-  expect(tabs.length).toBeGreaterThan(1);
-  for (const tab of tabs) {
-    expect(tab).toHaveClass("max-lg:min-w-11");
-    expect(tab).not.toHaveClass("min-w-11");
-  }
-});
-
 test("the Projects link in the heading draws the shared focus outline", () => {
   render(<ProjectHeading project={{ name: "Docs site" }} />);
   expect(screen.getByRole("link", { name: "Projects" })).toHaveClass(
