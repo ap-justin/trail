@@ -405,16 +405,8 @@ describe("test sign-in on a preview", () => {
     http.get("/api/web/me", () =>
       HttpResponse.json({ ...meView("anonymous"), previewSignIn: true }),
     );
-
-  async function signInWith(password: string) {
-    await userEvent.type(
-      await screen.findByLabelText("Preview password"),
-      password,
-    );
-    await userEvent.click(
-      screen.getByRole("button", { name: "Sign in to the preview" }),
-    );
-  }
+  const previewButton = () =>
+    screen.findByRole("button", { name: "Sign in as the preview owner" });
 
   test("off a preview there is no test sign-in", async () => {
     signedInAs("anonymous");
@@ -423,40 +415,77 @@ describe("test sign-in on a preview", () => {
     expect(
       screen.queryByRole("heading", { name: "Test sign-in (preview only)" }),
     ).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Preview password")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Sign in as the preview owner" }),
+    ).not.toBeInTheDocument();
   });
 
-  test("the right password posts it as JSON, then goes on to the return address", async () => {
-    const sent: { type: string | null; body: unknown }[] = [];
+  test("a press posts once with no password, then goes on to the return address", async () => {
+    const sent: unknown[] = [];
     server.use(
       onPreview(),
       http.post("/api/preview/sign-in", async ({ request }) => {
-        sent.push({
-          type: request.headers.get("content-type"),
-          body: await request.json(),
-        });
+        sent.push(await request.json());
         signedInAs("member");
         return HttpResponse.json({ redirectTo: "/" });
       }),
       http.get("/api/web/items/TRL-14", () => HttpResponse.json(issue())),
     );
     const { router } = renderApp("/sign-in?redirect=%2Fproducts%2FTRL%2F14");
-    await signInWith("plum-otter-lantern-quartz");
+    expect(document.querySelector('input[type="password"]')).toBeNull();
+    await userEvent.click(await previewButton());
     await waitFor(() =>
       expect(router.state.location.pathname).toBe("/products/TRL/14"),
     );
-    expect(sent).toEqual([
-      {
-        type: "application/json",
-        body: { password: "plum-otter-lantern-quartz" },
-      },
-    ]);
+    expect(sent).toEqual([{}]);
     // the issue read is still in flight at the pathname change: wait for it to land so it
     // cannot reach a later test's handlers
     await screen.findByRole("heading", { name: issue().title });
   });
 
-  test("a sign-in /me doesn't confirm says so and frees the form", async () => {
+  test("with no return address it lands on the feed", async () => {
+    server.use(
+      onPreview(),
+      http.post("/api/preview/sign-in", () => {
+        signedInAs("member");
+        return HttpResponse.json({ redirectTo: "/" });
+      }),
+    );
+    serveFeed();
+    const { router } = renderApp("/sign-in");
+    await userEvent.click(await previewButton());
+    await waitFor(() => expect(router.state.location.pathname).toBe("/"));
+    await screen.findByRole("heading", { name: "No activity yet" });
+  });
+
+  test("a second press while signing in sends nothing", async () => {
+    let posts = 0;
+    let answer: () => void = () => {};
+    server.use(
+      onPreview(),
+      http.post("/api/preview/sign-in", async () => {
+        posts++;
+        await new Promise<void>((resolve) => {
+          answer = resolve;
+        });
+        return HttpResponse.json({ redirectTo: "/" });
+      }),
+    );
+    renderApp("/sign-in");
+    await userEvent.click(await previewButton());
+    const held = await screen.findByRole("button", { name: "Signing in…" });
+    await userEvent.click(held);
+    await waitFor(() => expect(posts).toBe(1));
+    answer();
+    expect(
+      await screen.findByText(
+        "Signed in, but the page couldn't tell. Reload to continue.",
+      ),
+    ).toBeInTheDocument();
+    expect(posts).toBe(1);
+  });
+
+  test("a sign-in /me doesn't confirm says so and frees the button", async () => {
     let meReads = 0;
     server.use(
       http.get("/api/web/me", () => {
@@ -471,44 +500,14 @@ describe("test sign-in on a preview", () => {
       ),
     );
     const { router } = renderApp("/sign-in");
-    await signInWith("plum-otter-lantern-quartz");
+    await userEvent.click(await previewButton());
     expect(
       await screen.findByText(
         "Signed in, but the page couldn't tell. Reload to continue.",
       ),
     ).toBeInTheDocument();
     expect(meReads).toBe(2);
-    expect(screen.getByLabelText("Preview password")).not.toHaveAttribute(
-      "readonly",
-    );
-    expect(
-      screen.getByRole("button", { name: "Sign in to the preview" }),
-    ).not.toHaveAttribute("aria-disabled");
-    expect(router.state.location.pathname).toBe("/sign-in");
-  });
-
-  test("a wrong password says so at the field and stays on sign-in", async () => {
-    server.use(
-      onPreview(),
-      http.post("/api/preview/sign-in", () =>
-        HttpResponse.json(
-          {
-            error: {
-              code: "invalid_password",
-              message: "that is not this preview's password",
-            },
-          },
-          { status: 401 },
-        ),
-      ),
-    );
-    const { router } = renderApp("/sign-in");
-    await signInWith("not-it");
-    expect(
-      await screen.findByText("That password didn't work."),
-    ).toBeInTheDocument();
-    expect(screen.getByLabelText("Preview password")).toHaveFocus();
-    expect(screen.queryByText(/not this preview's/)).not.toBeInTheDocument();
+    expect(await previewButton()).not.toHaveAttribute("aria-disabled");
     expect(router.state.location.pathname).toBe("/sign-in");
   });
 
@@ -523,7 +522,7 @@ describe("test sign-in on a preview", () => {
       ),
     );
     renderApp("/sign-in");
-    await signInWith("not-it");
+    await userEvent.click(await previewButton());
     expect(
       await screen.findByText("Too many requests, try again in 1 minute."),
     ).toBeInTheDocument();
@@ -540,7 +539,7 @@ describe("test sign-in on a preview", () => {
       ),
     );
     renderApp("/sign-in");
-    await signInWith("plum-otter-lantern-quartz");
+    await userEvent.click(await previewButton());
     expect(
       await screen.findByText("Something went wrong on our side. Try again."),
     ).toBeInTheDocument();

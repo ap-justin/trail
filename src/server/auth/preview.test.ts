@@ -1,36 +1,34 @@
 import { expect, test } from "vitest";
 import { sessionCookie, setupTestApp } from "../test-app.js";
 
-const password = "made-up-preview-password-0123";
-
 // as on Sky: the preview's public host isn't known ahead, so no BETTER_AUTH_URL
 const { app, request, owner } = setupTestApp({
-  auth: { preview: { password }, BETTER_AUTH_URL: undefined },
+  auth: { preview: true, BETTER_AUTH_URL: undefined },
 });
 
-const signIn = (body: unknown, origin?: string | null) =>
-  request("POST", "/api/preview/sign-in", { key: null, json: body, origin });
+const signIn = (origin?: string | null) =>
+  request("POST", "/api/preview/sign-in", { key: null, origin });
 
-test.each([
-  ["a wrong password", { password: "not-the-made-up-password-0123" }],
-  ["no password", {}],
-  ["a non-string password", { password: 123 }],
-])("%s is refused with 401 and no session", async (_, body) => {
-  const res = await signIn(body);
-  expect(res.status).toBe(401);
-  expect(await res.json()).toMatchObject({
-    error: { code: "invalid_password" },
-  });
-  expect(res.headers.getSetCookie()).toEqual([]);
-});
+const meAs = async (cookie: string) =>
+  (await request("GET", "/api/web/me", { key: null, cookie })).json();
 
-test("the preview password signs in the owner", async () => {
-  const res = await signIn({ password });
+test("sign-in takes no body and signs in the owner", async () => {
+  const res = await signIn();
   expect(res.status).toBe(200);
+  expect(await res.json()).toEqual({ redirectTo: "/" });
   const cookie = sessionCookie(res);
   expect(cookie).not.toBe("");
-  const me = await request("GET", "/api/web/me", { key: null, cookie });
-  expect(await me.json()).toMatchObject({ state: "owner", login: owner });
+  expect(await meAs(cookie)).toMatchObject({ state: "owner", login: owner });
+});
+
+test("a second sign-in works too, with a session of its own", async () => {
+  const first = sessionCookie(await signIn());
+  const res = await signIn();
+  expect(res.status).toBe(200);
+  const second = sessionCookie(res);
+  expect(second).not.toBe(first);
+  expect(await meAs(first)).toMatchObject({ state: "owner" });
+  expect(await meAs(second)).toMatchObject({ state: "owner", login: owner });
 });
 
 test("me tells an anonymous visitor that preview sign-in is on", async () => {
@@ -41,19 +39,55 @@ test("me tells an anonymous visitor that preview sign-in is on", async () => {
   });
 });
 
-test("a body that isn't JSON is refused with 400", async () => {
-  const res = await app.request("/api/preview/sign-in", {
-    method: "POST",
-    headers: { origin: "http://localhost", "content-type": "application/json" },
-    body: "{password",
+test("another site's Origin is refused", async () => {
+  const res = await signIn("https://elsewhere.example.test");
+  expect(res.status).toBe(403);
+  expect(await res.json()).toMatchObject({
+    error: { code: "INVALID_ORIGIN" },
   });
-  expect(res.status).toBe(400);
   expect(res.headers.getSetCookie()).toEqual([]);
 });
 
-test("another site's Origin is refused", async () => {
-  const res = await signIn({ password }, "https://elsewhere.example.test");
-  expect(res.status).toBe(403);
+// its own app, so these sign-ins leave the limit above alone
+const hosts = setupTestApp({
+  auth: { preview: true, BETTER_AUTH_URL: undefined },
+});
+// a browser sends Origin lowercased, whatever case Host has
+const withHost = (host: string, origin = `http://${host.toLowerCase()}`) =>
+  hosts.app.request(`http://${host}/api/preview/sign-in`, {
+    method: "POST",
+    headers: { host, origin },
+  });
+
+test.each([
+  "localhost",
+  "localhost:4123",
+  "127.0.0.1",
+  "127.0.0.1:3000",
+  "[::1]",
+  "[::1]:3000",
+  "LOCALHOST:4123",
+  "LocalHost",
+])("a loopback Host %j signs in", async (host) => {
+  const res = await withHost(host);
+  expect(res.status).toBe(200);
+  expect(sessionCookie(res)).not.toBe("");
+});
+
+test.each([
+  "x.example.test",
+  "localhost.example.test",
+  "x.localhost",
+  "127.0.0.2",
+  "[::2]",
+  "0.0.0.0:3000",
+])("any other Host %j gets the 404 an unknown route gets", async (host) => {
+  // a wrong Origin too: the Host check comes first, so it can't tell the route exists
+  const res = await withHost(host, "https://elsewhere.example.test");
+  expect(res.status).toBe(404);
+  expect(await res.json()).toEqual({
+    error: { code: "not_found", message: "no route POST /api/preview/sign-in" },
+  });
   expect(res.headers.getSetCookie()).toEqual([]);
 });
 
@@ -63,7 +97,6 @@ const upstream = "http://localhost:4123";
 const proxied = (
   path: string,
   { origin, cookie }: { origin: string; cookie?: string },
-  body?: unknown,
 ) =>
   app.request(`${upstream}${path}`, {
     method: "POST",
@@ -72,41 +105,39 @@ const proxied = (
       origin,
       "x-forwarded-host": "x.example.test",
       "x-forwarded-proto": "https",
+      // as the SPA sends every POST; better-auth checks the origin of a JSON one
       "content-type": "application/json",
       ...(cookie ? { cookie } : {}),
     },
-    body: JSON.stringify(body ?? {}),
+    body: "{}",
   });
 
 test("behind the preview proxy, sign-in sets a Secure session cookie that reads as the owner", async () => {
-  const res = await proxied(
-    "/api/preview/sign-in",
-    { origin: "https://x.example.test" },
-    { password },
-  );
+  const res = await proxied("/api/preview/sign-in", {
+    origin: "https://x.example.test",
+  });
   expect(res.status).toBe(200);
   const set = res.headers
     .getSetCookie()
     .find((c) => c.includes("session_token="));
   expect(set).toMatch(/; Secure/i);
   expect(set).toMatch(/; HttpOnly/i);
-  const cookie = sessionCookie(res);
-  const me = await request("GET", "/api/web/me", { key: null, cookie });
-  expect(await me.json()).toMatchObject({ state: "owner", login: owner });
+  expect(await meAs(sessionCookie(res))).toMatchObject({
+    state: "owner",
+    login: owner,
+  });
 });
 
 test("behind the preview proxy, another site's Origin is still refused", async () => {
-  const res = await proxied(
-    "/api/preview/sign-in",
-    { origin: "https://elsewhere.example.test" },
-    { password },
-  );
+  const res = await proxied("/api/preview/sign-in", {
+    origin: "https://elsewhere.example.test",
+  });
   expect(res.status).toBe(403);
   expect(res.headers.getSetCookie()).toEqual([]);
 });
 
 test("behind the preview proxy, better-auth's own routes take the forwarded origin", async () => {
-  const cookie = sessionCookie(await signIn({ password }));
+  const cookie = sessionCookie(await signIn());
   const refused = await proxied("/api/auth/sign-out", {
     origin: "https://elsewhere.example.test",
     cookie,
@@ -117,43 +148,43 @@ test("behind the preview proxy, better-auth's own routes take the forwarded orig
     cookie,
   });
   expect(signedOut.status).toBe(200);
-  const me = await request("GET", "/api/web/me", { key: null, cookie });
-  expect(await me.json()).toMatchObject({ state: "anonymous" });
+  expect(await meAs(cookie)).toMatchObject({ state: "anonymous" });
 });
 
 test("the session-making endpoint is not served over HTTP", async () => {
   const res = await request("POST", "/api/auth/preview-session-for-owner", {
     key: null,
-    json: { password },
   });
   expect(res.status).toBe(404);
   expect(res.headers.getSetCookie()).toEqual([]);
 });
 
-// its own app, so its limit starts empty and leaves the shared one alone
+test("two sign-ins at once on a fresh preview both sign in", async () => {
+  const fresh = setupTestApp({
+    auth: { preview: true, BETTER_AUTH_URL: undefined },
+  });
+  const both = await Promise.all([
+    fresh.request("POST", "/api/preview/sign-in", { key: null }),
+    fresh.request("POST", "/api/preview/sign-in", { key: null }),
+  ]);
+  expect(both.map((r) => r.status)).toEqual([200, 200]);
+});
+
+// its own app, so its limit starts empty and leaves the one above alone
 const burst = setupTestApp({
-  auth: { preview: { password }, BETTER_AUTH_URL: undefined },
+  auth: { preview: true, BETTER_AUTH_URL: undefined },
 });
 
-test("wrong passwords sent all at once still meet the limit", async () => {
-  const statuses = await Promise.all(
-    Array.from({ length: 15 }, async () => {
-      const res = await burst.request("POST", "/api/preview/sign-in", {
-        key: null,
-        json: { password: "a-wrong-guess" },
-      });
-      return res.status;
-    }),
+test("sign-ins sent all at once still meet the limit of 10 a minute", async () => {
+  const responses = await Promise.all(
+    Array.from({ length: 15 }, () =>
+      burst.request("POST", "/api/preview/sign-in", { key: null }),
+    ),
   );
-  expect(statuses.filter((s) => s === 401)).toHaveLength(10);
+  const statuses = responses.map((r) => r.status);
+  expect(statuses.filter((s) => s === 200)).toHaveLength(10);
   expect(statuses.filter((s) => s === 429)).toHaveLength(5);
-});
-
-// last in the file: it fills the one limit every caller shares
-test("after 10 wrong passwords in a minute, even the right one waits", async () => {
-  for (let i = 0; i < 10; i++) await signIn({ password: "a-wrong-guess" });
-  const res = await signIn({ password });
-  expect(res.status).toBe(429);
-  expect(Number(res.headers.get("retry-after"))).toBeGreaterThan(0);
-  expect(res.headers.getSetCookie()).toEqual([]);
+  const limited = responses.find((r) => r.status === 429);
+  expect(Number(limited?.headers.get("retry-after"))).toBeGreaterThan(0);
+  expect(limited?.headers.getSetCookie()).toEqual([]);
 });

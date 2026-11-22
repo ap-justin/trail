@@ -44,7 +44,9 @@ const serverSchema = databaseSchema
     RESEND_API_KEY: optional,
     // a Sky preview's test sign-in; never set on a real deploy. Only "1" turns it on
     TRAIL_PREVIEW_MODE: optional,
-    TRAIL_PREVIEW_PASSWORD: optional,
+    // set on every Fly Machine, so preview mode can tell it is on a real deploy
+    FLY_APP_NAME: optional,
+    FLY_MACHINE_ID: optional,
   })
   .transform(
     (
@@ -54,13 +56,18 @@ const serverSchema = databaseSchema
         EMAIL_FROM,
         RESEND_API_KEY,
         TRAIL_PREVIEW_MODE,
-        TRAIL_PREVIEW_PASSWORD,
+        FLY_APP_NAME,
+        FLY_MACHINE_ID,
         ...rest
       },
       ctx,
     ) => ({
       ...rest,
-      preview: previewMode(TRAIL_PREVIEW_MODE, TRAIL_PREVIEW_PASSWORD, ctx),
+      preview: previewMode(
+        TRAIL_PREVIEW_MODE,
+        Boolean(FLY_APP_NAME || FLY_MACHINE_ID),
+        ctx,
+      ),
       github: githubOAuth({
         GITHUB_CLIENT_ID,
         GITHUB_CLIENT_SECRET,
@@ -118,26 +125,25 @@ function emailSignIn(
   return { from, resendApiKey };
 }
 
-/** A Sky preview's test sign-in, or null when preview mode is off. */
-export type Preview = { password: string } | null;
-
-const PREVIEW_PASSWORD_MIN = 24;
+/** True when a Sky preview's test sign-in is on, null when preview mode is off. */
+export type Preview = true | null;
 
 function previewMode(
   mode: string | undefined,
-  password: string | undefined,
+  onFly: boolean,
   ctx: z.RefinementCtx,
 ): Preview {
   if (mode !== "1") return null;
-  if (!password || password.length < PREVIEW_PASSWORD_MIN) {
+  if (onFly) {
     ctx.addIssue({
       code: "custom",
-      path: ["TRAIL_PREVIEW_PASSWORD"],
-      message: `TRAIL_PREVIEW_PASSWORD must be set to at least ${PREVIEW_PASSWORD_MIN} characters when TRAIL_PREVIEW_MODE=1`,
+      path: ["TRAIL_PREVIEW_MODE"],
+      message:
+        "TRAIL_PREVIEW_MODE=1 opens a sign-in as the owner with no password, and this runs on Fly (FLY_APP_NAME or FLY_MACHINE_ID is set): unset TRAIL_PREVIEW_MODE",
     });
     return z.NEVER;
   }
-  return { password };
+  return true;
 }
 
 export type DatabaseConfig = z.infer<typeof databaseSchema>;

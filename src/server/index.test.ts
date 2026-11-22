@@ -101,12 +101,64 @@ test("a boot in preview mode seeds its empty database", async () => {
     {
       ...valid,
       TRAIL_PREVIEW_MODE: "1",
-      TRAIL_PREVIEW_PASSWORD: "boot-preview-password-of-24+",
     },
     "preview",
   );
   expect(run.listening).toBe(true);
   expect(productKeys(run.databasePath)).toEqual(["HBR", "LTN", "NGT"]);
+}, 30_000);
+
+test("a boot logs one line that a leftover TRAIL_PREVIEW_PASSWORD is ignored, and still starts", async () => {
+  const run = await boot(
+    {
+      ...valid,
+      TRAIL_PREVIEW_MODE: "1",
+      TRAIL_PREVIEW_PASSWORD: "made-up-leftover-password",
+    },
+    "leftover-password",
+  );
+  expect(run.listening).toBe(true);
+  const lines = run.output
+    .split("\n")
+    .filter((line) => line.includes("TRAIL_PREVIEW_PASSWORD"));
+  expect(lines).toEqual([expect.stringMatching(/ignored/)]);
+  expect(run.output).not.toContain("made-up-leftover-password");
+}, 30_000);
+
+test("a boot without a leftover TRAIL_PREVIEW_PASSWORD doesn't mention it", async () => {
+  const run = await boot(
+    { ...valid, TRAIL_PREVIEW_PASSWORD: "" },
+    "no-leftover",
+  );
+  expect(run.listening).toBe(true);
+  expect(run.output).not.toContain("TRAIL_PREVIEW_PASSWORD");
+}, 30_000);
+
+test.each(["FLY_APP_NAME", "FLY_MACHINE_ID"])(
+  "a boot in preview mode on Fly (%s set) exits non-zero, saying to unset TRAIL_PREVIEW_MODE, before touching the database",
+  async (variable) => {
+    const run = await boot(
+      { ...valid, TRAIL_PREVIEW_MODE: "1", [variable]: "made-up-fly-value" },
+      `preview-on-fly-${variable}`,
+    );
+    expect(run.listening).toBe(false);
+    expect(run.status).not.toBe(0);
+    expect(run.output).toContain("unset TRAIL_PREVIEW_MODE");
+    expect(existsSync(run.databasePath)).toBe(false);
+  },
+  30_000,
+);
+
+test("a boot on Fly without preview mode starts", async () => {
+  const run = await boot(
+    {
+      ...valid,
+      FLY_APP_NAME: "made-up-app",
+      FLY_MACHINE_ID: "made-up-machine",
+    },
+    "fly-not-preview",
+  );
+  expect(run.listening).toBe(true);
 }, 30_000);
 
 test("a boot outside preview mode seeds nothing", async () => {
