@@ -411,13 +411,15 @@ test("a bot that may not edit the item holding an externalRef gets the same conf
     title: "held record",
     externalRef: "DOC-N",
   });
-  // the precondition: the bystander can neither edit the note nor have it as its own
+  // the precondition: the bystander cannot edit the note, and is told so in full
   expect(
     await callError(bystander.client, "update_item", {
       item: note.key,
       title: "hijacked",
     }),
-  ).toMatch(/^(forbidden|not_found)/);
+  ).toBe(
+    `forbidden: ${note.key} is a note by Dup author, and only Dup author and Dup holder, the bot of ${owner.product}, edit it: add what you know with add_comment on ${note.key}`,
+  );
   const refused = await callError(bystander.client, "add_note", {
     product: owner.product,
     title: "imported again",
