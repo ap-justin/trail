@@ -2956,7 +2956,7 @@ export function createService({
                 .get();
               if (twin) {
                 throw new ConflictError(
-                  `externalRef ${externalRef} is already on item ${product.key}-${twin.number}: update that item with update_item, or send a different externalRef`,
+                  `externalRef ${externalRef} is already on item ${product.key}-${twin.number}: update that item with update_item (PATCH /items/{key}), or send a different externalRef`,
                 );
               }
             }

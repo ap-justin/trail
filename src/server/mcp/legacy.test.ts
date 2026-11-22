@@ -461,18 +461,20 @@ test("a retry of create_issue returns the first item whoever owns the product, n
   const owner = await connect(bot.key);
   await call(owner, "create_product", { key: "RTY", name: "retried" });
   const other = await connect(createBot(db, "retrying filer").key);
-  for (const [client, key] of [
-    [owner, "retry-owner"],
-    [other, "retry-other"],
+  for (const [client, key, skippedLabels] of [
+    [owner, "retry-owner", undefined],
+    [other, "retry-other", ["missing retry-other"]],
   ] as const) {
     const input = {
       projectId: "RTY",
       title: key,
-      labels: ["no such label"],
+      // a label of its own per caller: the owner creates its label, which would stop the other caller skipping a shared one
+      labels: [`missing ${key}`],
       externalRef: key,
       idempotency_key: key,
     };
     const first = await call(client, "create_issue", input);
+    expect(first.skippedLabels).toEqual(skippedLabels);
     expect(await call(client, "create_issue", input)).toEqual(first);
     const listed = await call(client, "list_items", { product: "RTY" });
     expect(
@@ -481,12 +483,26 @@ test("a retry of create_issue returns the first item whoever owns the product, n
   }
 });
 
+test("create_issue refuses an idempotency key reused with a changed body and creates nothing", async () => {
+  const owner = await connect(bot.key);
+  await call(owner, "create_product", { key: "RKR", name: "reused key" });
+  const input = { projectId: "RKR", title: "once", idempotency_key: "reuse-1" };
+  await call(owner, "create_issue", input);
+  expect(
+    await callError(owner, "create_issue", { ...input, title: "changed" }),
+  ).toMatch(
+    /^idempotency_key_reused: idempotency key "reuse-1" was already used for a different request body or target/,
+  );
+  const listed = await call(owner, "list_items", { product: "RKR" });
+  expect(listed.items).toHaveLength(1);
+});
+
 test("a retry of create_issue with no idempotency key and an externalRef is a conflict naming the item", async () => {
   const owner = await connect(bot.key);
   await call(owner, "create_product", { key: "RTZ", name: "retried too" });
   const input = { projectId: "RTZ", title: "once", externalRef: "ext-1" };
   const first = await call(owner, "create_issue", input);
-  expect(await callError(owner, "create_issue", input)).toMatch(
-    new RegExp(`conflict: externalRef ext-1 is already on item ${first.key}:`),
+  expect(await callError(owner, "create_issue", input)).toBe(
+    `conflict: externalRef ext-1 is already on item ${first.key}: update that item with update_item (PATCH /items/{key}), or send a different externalRef`,
   );
 });
