@@ -528,21 +528,40 @@ describe("test sign-in on a preview", () => {
     ).toBeInTheDocument();
   });
 
-  test("any other refusal shows the generic failure, not the server's words", async () => {
+  const GENERIC = "Something went wrong on our side. Try again.";
+  const OFFLINE =
+    "Couldn't reach trail. Check your connection, then try again.";
+
+  // the server's words never reach the page: each status maps to the generic line
+  test.each([
+    [403, "INVALID_ORIGIN", "send the request from trail's own pages"],
+    [404, "not_found", "no route POST /api/preview/sign-in"],
+    [500, "sign_in_failed", "the preview sign-in failed: try again"],
+  ])(
+    "a %i %s answer shows the generic failure, not the server's words",
+    async (status, code, message) => {
+      server.use(
+        onPreview(),
+        http.post("/api/preview/sign-in", () =>
+          HttpResponse.json({ error: { code, message } }, { status }),
+        ),
+      );
+      renderApp("/sign-in");
+      await userEvent.click(await previewButton());
+      expect(await screen.findByText(GENERIC)).toBeInTheDocument();
+      expect(screen.queryByText(message)).not.toBeInTheDocument();
+      expect(screen.queryByText(OFFLINE)).not.toBeInTheDocument();
+    },
+  );
+
+  test("a network failure says trail couldn't be reached, not the generic failure", async () => {
     server.use(
       onPreview(),
-      http.post("/api/preview/sign-in", () =>
-        HttpResponse.json(
-          { error: { code: "INVALID_ORIGIN", message: "send the request" } },
-          { status: 403 },
-        ),
-      ),
+      http.post("/api/preview/sign-in", () => HttpResponse.error()),
     );
     renderApp("/sign-in");
     await userEvent.click(await previewButton());
-    expect(
-      await screen.findByText("Something went wrong on our side. Try again."),
-    ).toBeInTheDocument();
-    expect(screen.queryByText(/send the request/)).not.toBeInTheDocument();
+    expect(await screen.findByText(OFFLINE)).toBeInTheDocument();
+    expect(screen.queryByText(GENERIC)).not.toBeInTheDocument();
   });
 });

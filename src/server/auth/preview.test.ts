@@ -1,38 +1,65 @@
-import { expect, test } from "vitest";
+import { eq } from "drizzle-orm";
+import { afterEach, expect, test, vi } from "vitest";
+import { user } from "../db/schema.js";
 import { sessionCookie, setupTestApp } from "../test-app.js";
+import { PREVIEW_PERSON } from "./preview.js";
 
+// Every group builds its own app: the sign-in limiter (10 a minute, one window
+// for every caller) is per app, so no test's outcome depends on how many
+// sign-ins another test, or another row, has spent.
 // as on Sky: the preview's public host isn't known ahead, so no BETTER_AUTH_URL
-const { app, request, owner } = setupTestApp({
-  auth: { preview: true, BETTER_AUTH_URL: undefined },
+function previewApp() {
+  const t = setupTestApp({
+    auth: { preview: true, BETTER_AUTH_URL: undefined },
+  });
+  return {
+    ...t,
+    signIn: (origin?: string | null) =>
+      t.request("POST", "/api/preview/sign-in", { key: null, origin }),
+    meAs: async (cookie: string) =>
+      (await t.request("GET", "/api/web/me", { key: null, cookie })).json(),
+    previewUsers: () =>
+      t.db
+        .select()
+        .from(user)
+        .where(eq(user.email, PREVIEW_PERSON.email))
+        .all(),
+  };
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
-const signIn = (origin?: string | null) =>
-  request("POST", "/api/preview/sign-in", { key: null, origin });
-
-const meAs = async (cookie: string) =>
-  (await request("GET", "/api/web/me", { key: null, cookie })).json();
+const main = previewApp();
 
 test("sign-in takes no body and signs in the owner", async () => {
-  const res = await signIn();
+  const res = await main.signIn();
   expect(res.status).toBe(200);
   expect(await res.json()).toEqual({ redirectTo: "/" });
   const cookie = sessionCookie(res);
   expect(cookie).not.toBe("");
-  expect(await meAs(cookie)).toMatchObject({ state: "owner", login: owner });
+  expect(await main.meAs(cookie)).toMatchObject({
+    state: "owner",
+    login: main.owner,
+  });
 });
 
 test("a second sign-in works too, with a session of its own", async () => {
-  const first = sessionCookie(await signIn());
-  const res = await signIn();
+  const first = sessionCookie(await main.signIn());
+  const res = await main.signIn();
   expect(res.status).toBe(200);
   const second = sessionCookie(res);
   expect(second).not.toBe(first);
-  expect(await meAs(first)).toMatchObject({ state: "owner" });
-  expect(await meAs(second)).toMatchObject({ state: "owner", login: owner });
+  expect(await main.meAs(first)).toMatchObject({ state: "owner" });
+  expect(await main.meAs(second)).toMatchObject({
+    state: "owner",
+    login: main.owner,
+  });
 });
 
 test("me tells an anonymous visitor that preview sign-in is on", async () => {
-  const me = await request("GET", "/api/web/me", { key: null });
+  const me = await main.request("GET", "/api/web/me", { key: null });
   expect(await me.json()).toMatchObject({
     state: "anonymous",
     previewSignIn: true,
@@ -40,7 +67,7 @@ test("me tells an anonymous visitor that preview sign-in is on", async () => {
 });
 
 test("another site's Origin is refused", async () => {
-  const res = await signIn("https://elsewhere.example.test");
+  const res = await main.signIn("https://elsewhere.example.test");
   expect(res.status).toBe(403);
   expect(await res.json()).toMatchObject({
     error: { code: "INVALID_ORIGIN" },
@@ -48,17 +75,30 @@ test("another site's Origin is refused", async () => {
   expect(res.headers.getSetCookie()).toEqual([]);
 });
 
-// its own app, so these sign-ins leave the limit above alone
-const hosts = setupTestApp({
-  auth: { preview: true, BETTER_AUTH_URL: undefined },
+test("the session-making endpoint is not served over HTTP", async () => {
+  const res = await main.request(
+    "POST",
+    "/api/auth/preview-session-for-owner",
+    {
+      key: null,
+    },
+  );
+  expect(res.status).toBe(404);
+  expect(res.headers.getSetCookie()).toEqual([]);
 });
+
 // a browser sends Origin lowercased, whatever case Host has
-const withHost = (host: string, origin = `http://${host.toLowerCase()}`) =>
-  hosts.app.request(`http://${host}/api/preview/sign-in`, {
+const withHost = (
+  t: ReturnType<typeof previewApp>,
+  host: string,
+  origin = `http://${host.toLowerCase()}`,
+) =>
+  t.app.request(`http://${host}/api/preview/sign-in`, {
     method: "POST",
     headers: { host, origin },
   });
 
+// an app per row: a row's sign-in spends nothing another row needs
 test.each([
   "localhost",
   "localhost:4123",
@@ -69,11 +109,12 @@ test.each([
   "LOCALHOST:4123",
   "LocalHost",
 ])("a loopback Host %j signs in", async (host) => {
-  const res = await withHost(host);
+  const res = await withHost(previewApp(), host);
   expect(res.status).toBe(200);
   expect(sessionCookie(res)).not.toBe("");
 });
 
+const refused = previewApp();
 test.each([
   "x.example.test",
   "localhost.example.test",
@@ -83,7 +124,7 @@ test.each([
   "0.0.0.0:3000",
 ])("any other Host %j gets the 404 an unknown route gets", async (host) => {
   // a wrong Origin too: the Host check comes first, so it can't tell the route exists
-  const res = await withHost(host, "https://elsewhere.example.test");
+  const res = await withHost(refused, host, "https://elsewhere.example.test");
   expect(res.status).toBe(404);
   expect(await res.json()).toEqual({
     error: { code: "not_found", message: "no route POST /api/preview/sign-in" },
@@ -93,12 +134,12 @@ test.each([
 
 // Sky's preview proxy: Host rewritten to the loopback upstream, the browser's
 // Origin passed through, the public host and https in X-Forwarded-*
-const upstream = "http://localhost:4123";
+const behindProxy = previewApp();
 const proxied = (
   path: string,
   { origin, cookie }: { origin: string; cookie?: string },
 ) =>
-  app.request(`${upstream}${path}`, {
+  behindProxy.app.request(`http://localhost:4123${path}`, {
     method: "POST",
     headers: {
       host: "localhost:4123",
@@ -122,9 +163,9 @@ test("behind the preview proxy, sign-in sets a Secure session cookie that reads 
     .find((c) => c.includes("session_token="));
   expect(set).toMatch(/; Secure/i);
   expect(set).toMatch(/; HttpOnly/i);
-  expect(await meAs(sessionCookie(res))).toMatchObject({
+  expect(await behindProxy.meAs(sessionCookie(res))).toMatchObject({
     state: "owner",
-    login: owner,
+    login: behindProxy.owner,
   });
 });
 
@@ -137,49 +178,76 @@ test("behind the preview proxy, another site's Origin is still refused", async (
 });
 
 test("behind the preview proxy, better-auth's own routes take the forwarded origin", async () => {
-  const cookie = sessionCookie(await signIn());
-  const refused = await proxied("/api/auth/sign-out", {
+  const cookie = sessionCookie(await behindProxy.signIn());
+  const wrongSite = await proxied("/api/auth/sign-out", {
     origin: "https://elsewhere.example.test",
     cookie,
   });
-  expect(refused.status).toBe(403);
+  expect(wrongSite.status).toBe(403);
   const signedOut = await proxied("/api/auth/sign-out", {
     origin: "https://x.example.test",
     cookie,
   });
   expect(signedOut.status).toBe(200);
-  expect(await meAs(cookie)).toMatchObject({ state: "anonymous" });
+  expect(await behindProxy.meAs(cookie)).toMatchObject({ state: "anonymous" });
 });
 
-test("the session-making endpoint is not served over HTTP", async () => {
-  const res = await request("POST", "/api/auth/preview-session-for-owner", {
-    key: null,
-  });
-  expect(res.status).toBe(404);
-  expect(res.headers.getSetCookie()).toEqual([]);
-});
-
-test("two sign-ins at once on a fresh preview both sign in", async () => {
-  const fresh = setupTestApp({
-    auth: { preview: true, BETTER_AUTH_URL: undefined },
-  });
-  const both = await Promise.all([
-    fresh.request("POST", "/api/preview/sign-in", { key: null }),
-    fresh.request("POST", "/api/preview/sign-in", { key: null }),
-  ]);
+test("two sign-ins at once on a fresh preview both sign in as one user row, via the create-user fallback", async () => {
+  const t = previewApp();
+  // the adapter inserts through this db: count the attempts to insert the preview person
+  const insert = vi.spyOn(t.db, "insert");
+  const both = await Promise.all([t.signIn(), t.signIn()]);
   expect(both.map((r) => r.status)).toEqual([200, 200]);
+  // both found no row, both tried to create it: the second hit the unique email and fell back
+  const userInserts = insert.mock.calls.filter(([table]) => table === user);
+  expect(userInserts).toHaveLength(2);
+  expect(t.previewUsers()).toHaveLength(1);
+  for (const res of both) {
+    expect(await t.meAs(sessionCookie(res))).toMatchObject({
+      state: "owner",
+      login: t.owner,
+    });
+  }
 });
 
-// its own app, so its limit starts empty and leaves the one above alone
-const burst = setupTestApp({
-  auth: { preview: true, BETTER_AUTH_URL: undefined },
+test("a sign-in whose user row can't be made, with none there to fall back on, fails with the app's 500", async () => {
+  const t = previewApp();
+  const insert = t.db.insert.bind(t.db);
+  vi.spyOn(t.db, "insert").mockImplementation(((table: unknown) => {
+    if (table === user) throw new Error("disk full");
+    return insert(table as never);
+  }) as never);
+  const res = await t.signIn();
+  expect(res.status).toBe(500);
+  expect(await res.json()).toMatchObject({ error: { code: "internal" } });
+  expect(res.headers.getSetCookie()).toEqual([]);
+  expect(t.previewUsers()).toEqual([]);
 });
 
+const noOrigin = previewApp();
+test.each([
+  ["no Origin", null],
+  ["another site's Origin", "https://elsewhere.example.test"],
+])(
+  "%s is refused 403 and takes no slot from the limit",
+  async (_name, origin) => {
+    // more refusals than the limit of 10: if each took a slot, the sign-in below would be 429
+    for (let i = 0; i < 12; i++) {
+      const res = await noOrigin.signIn(origin);
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({
+        error: { code: "INVALID_ORIGIN" },
+      });
+      expect(res.headers.getSetCookie()).toEqual([]);
+    }
+    expect((await noOrigin.signIn()).status).toBe(200);
+  },
+);
+
+const burst = previewApp();
 test("sign-ins sent all at once still meet the limit of 10 a minute", async () => {
   const responses = await Promise.all(
-    Array.from({ length: 15 }, () =>
-      burst.request("POST", "/api/preview/sign-in", { key: null }),
-    ),
+    Array.from({ length: 15 }, () => burst.signIn()),
   );
   const statuses = responses.map((r) => r.status);
   expect(statuses.filter((s) => s === 200)).toHaveLength(10);
