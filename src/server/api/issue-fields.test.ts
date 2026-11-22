@@ -1,7 +1,8 @@
 import { beforeAll, expect, test } from "vitest";
+import { createBot } from "../service/keys.js";
 import { projectKey, setupTestApp } from "../test-app.js";
 
-const { request, published } = setupTestApp();
+const { request, published, db } = setupTestApp();
 
 // biome-ignore lint/suspicious/noExplicitAny: loose response bodies for field reads
 type Body = Record<string, any>;
@@ -313,7 +314,7 @@ test("an externalRef already used in its scope is a 409 saying which row has it"
   });
   expect(dupIssue.status).toBe(409);
   expect(dupIssue.body.error.message).toBe(
-    `externalRef ABC-1 is already on item ${issue.key}: update that item with update_item, or send a different externalRef`,
+    `externalRef ABC-1 is already on item ${issue.key}: update that item with update_item (PATCH /items/{key}) if you may edit it, or send a different externalRef`,
   );
   // unique within the project only
   await created("/issues", {
@@ -335,6 +336,44 @@ test("an externalRef already used in its scope is a 409 saying which row has it"
   expect(dupComment.body.error.message).toMatch(
     /^externalRef c-1 is already on comment \S+ of this item/,
   );
+});
+
+test("POST /items with an externalRef held by an item a project-scoped key cannot read is a 409 that does not name the item", async () => {
+  const product = await created("/projects", {
+    key: projectKey(),
+    name: "hidden refs",
+  });
+  const held = await created("/issues", {
+    projectId: product.id,
+    title: "held outside the project",
+    externalRef: "HIDDEN-9",
+  });
+  const slug = `hidden-${product.key.toLowerCase()}`;
+  await created("/projects", {
+    name: "Hidden refs",
+    slug,
+    products: [product.key],
+  });
+  const scoped = createBot(db, "rest ref filer", {
+    scope: { projects: [slug] },
+  });
+
+  const res = await request("POST", "/api/v1/items", {
+    json: {
+      type: "issue",
+      product: product.key,
+      project: slug,
+      title: "same ref",
+      externalRef: "HIDDEN-9",
+    },
+    key: scoped.key,
+  });
+  expect(res.status).toBe(409);
+  const { message } = ((await res.json()) as Body).error;
+  expect(message).toBe(
+    "externalRef HIDDEN-9 is already used in this product by an item this key cannot read: send a different externalRef",
+  );
+  expect(message).not.toContain(held.key);
 });
 
 test("POST /products/:key/labels creates a label; a name taken in any case is a 409", async () => {

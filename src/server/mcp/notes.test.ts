@@ -398,7 +398,35 @@ test("add_note keeps externalRef, and a second note with it in the product is re
       externalRef: "DOC-7",
     }),
   ).toBe(
-    `conflict: externalRef DOC-7 is already on item ${note.key}: update that item with update_item, or send a different externalRef`,
+    `conflict: externalRef DOC-7 is already on item ${note.key}: update that item with update_item (PATCH /items/{key}) if you may edit it, or send a different externalRef`,
+  );
+});
+
+test("a bot that may not edit the item holding an externalRef gets the same conflict message", async () => {
+  const owner = await productBot("Dup holder");
+  const writer = await productBot("Dup author");
+  const bystander = await productBot("Dup bystander");
+  const note = await call(writer.client, "add_note", {
+    product: owner.product,
+    title: "held record",
+    externalRef: "DOC-N",
+  });
+  // the precondition: the bystander cannot edit the note, and is told so in full
+  expect(
+    await callError(bystander.client, "update_item", {
+      item: note.key,
+      title: "hijacked",
+    }),
+  ).toBe(
+    `forbidden: ${note.key} is a note by Dup author, and only Dup author and Dup holder, the bot of ${owner.product}, edit it: add what you know with add_comment on ${note.key}`,
+  );
+  const refused = await callError(bystander.client, "add_note", {
+    product: owner.product,
+    title: "imported again",
+    externalRef: "DOC-N",
+  });
+  expect(refused).toBe(
+    `conflict: externalRef DOC-N is already on item ${note.key}: update that item with update_item (PATCH /items/{key}) if you may edit it, or send a different externalRef`,
   );
 });
 
@@ -424,7 +452,7 @@ test("REST POST /items with type note and add_note share one externalRef per pro
       externalRef: "DOC-R",
     }),
   ).toBe(
-    `conflict: externalRef DOC-R is already on item ${restNote.key}: update that item with update_item, or send a different externalRef`,
+    `conflict: externalRef DOC-R is already on item ${restNote.key}: update that item with update_item (PATCH /items/{key}) if you may edit it, or send a different externalRef`,
   );
 
   const mcpNote = await call(writer.client, "add_note", {
@@ -443,7 +471,7 @@ test("REST POST /items with type note and add_note share one externalRef per pro
   });
   expect(again.status).toBe(409);
   expect(((await again.json()) as Body).error.message).toBe(
-    `externalRef DOC-M is already on item ${mcpNote.key}: update that item with update_item, or send a different externalRef`,
+    `externalRef DOC-M is already on item ${mcpNote.key}: update that item with update_item (PATCH /items/{key}) if you may edit it, or send a different externalRef`,
   );
 });
 

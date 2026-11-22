@@ -456,3 +456,97 @@ test("create_issue and list_issues take project or product as aliases of project
     "validation_failed: projectId is required: send the product's key, like TRL (project or product are its aliases); list_products lists them",
   );
 });
+
+test("a retry of create_issue returns the first item whoever owns the product, never a 500", async () => {
+  const owner = await connect(bot.key);
+  await call(owner, "create_product", { key: "RTY", name: "retried" });
+  const other = await connect(createBot(db, "retrying filer").key);
+  for (const [client, key, skippedLabels] of [
+    [owner, "retry-owner", undefined],
+    [other, "retry-other", ["missing retry-other"]],
+  ] as const) {
+    const input = {
+      projectId: "RTY",
+      title: key,
+      // a label of its own per caller: the owner creates its label, which would stop the other caller skipping a shared one
+      labels: [`missing ${key}`],
+      externalRef: key,
+      idempotency_key: key,
+    };
+    const first = await call(client, "create_issue", input);
+    expect(first.skippedLabels).toEqual(skippedLabels);
+    expect(await call(client, "create_issue", input)).toEqual(first);
+    const listed = await call(client, "list_items", { product: "RTY" });
+    expect(
+      listed.items.filter((i: { title: string }) => i.title === key),
+    ).toHaveLength(1);
+  }
+});
+
+test("two bots sending the same idempotency key to create_issue each get their own issue, not a replay", async () => {
+  const owner = await connect(bot.key);
+  await call(owner, "create_product", { key: "RSK", name: "shared key" });
+  const other = await connect(createBot(db, "same key filer").key);
+  const ownerFirst = await call(owner, "create_issue", {
+    projectId: "RSK",
+    title: "from owner",
+    idempotency_key: "shared-key",
+  });
+  const otherFirst = await call(other, "create_issue", {
+    projectId: "RSK",
+    title: "from other",
+    idempotency_key: "shared-key",
+  });
+  expect(otherFirst.key).not.toBe(ownerFirst.key);
+  expect(otherFirst.title).toBe("from other");
+  const listed = await call(owner, "list_items", { product: "RSK" });
+  expect(listed.items.map((i: Body) => i.title).sort()).toEqual([
+    "from other",
+    "from owner",
+  ]);
+});
+
+test("create_issue refuses an idempotency key reused with a changed body and creates nothing", async () => {
+  const owner = await connect(bot.key);
+  await call(owner, "create_product", { key: "RKR", name: "reused key" });
+  const input = { projectId: "RKR", title: "once", idempotency_key: "reuse-1" };
+  await call(owner, "create_issue", input);
+  expect(
+    await callError(owner, "create_issue", { ...input, title: "changed" }),
+  ).toMatch(
+    /^idempotency_key_reused: idempotency key "reuse-1" was already used for a different request body or target/,
+  );
+  const listed = await call(owner, "list_items", { product: "RKR" });
+  expect(listed.items).toHaveLength(1);
+});
+
+test("create_issue refuses an idempotency key reused with another projectId and creates nothing in either product", async () => {
+  const owner = await connect(bot.key);
+  await call(owner, "create_product", { key: "RKA", name: "reused key a" });
+  await call(owner, "create_product", { key: "RKB", name: "reused key b" });
+  const input = { projectId: "RKA", title: "once", idempotency_key: "reuse-2" };
+  await call(owner, "create_issue", input);
+  expect(
+    await callError(owner, "create_issue", { ...input, projectId: "RKB" }),
+  ).toMatch(
+    /^idempotency_key_reused: idempotency key "reuse-2" was already used for a different request body or target/,
+  );
+  expect(
+    (await call(owner, "list_items", { product: "RKA" })).items,
+  ).toHaveLength(1);
+  expect(
+    (await call(owner, "list_items", { product: "RKB" })).items,
+  ).toHaveLength(0);
+});
+
+test("a retry of create_issue with no idempotency key and an externalRef is a conflict naming the item", async () => {
+  const owner = await connect(bot.key);
+  await call(owner, "create_product", { key: "RTZ", name: "retried too" });
+  const input = { projectId: "RTZ", title: "once", externalRef: "ext-1" };
+  const first = await call(owner, "create_issue", input);
+  expect(await callError(owner, "create_issue", input)).toBe(
+    `conflict: externalRef ext-1 is already on item ${first.key}: update that item with update_item (PATCH /items/{key}) if you may edit it, or send a different externalRef`,
+  );
+  const listed = await call(owner, "list_items", { product: "RTZ" });
+  expect(listed.items).toHaveLength(1);
+});

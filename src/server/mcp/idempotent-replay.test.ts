@@ -98,6 +98,45 @@ describe("a replayed create over MCP", () => {
     expect(replay).not.toContain("to comment on");
   });
 
+  test("file_issue with an externalRef held by an item the key cannot read is a conflict that does not name the item", async () => {
+    const { client } = await keyed("ref-filer", { projects: ["recon"] });
+    const held = await call(wide, "file_issue", {
+      product: "ATL",
+      title: "held outside the project",
+      externalRef: "HIDDEN-1",
+    });
+    const refused = await callError(client, "file_issue", {
+      product: "ATL",
+      project: "recon",
+      title: "same ref",
+      externalRef: "HIDDEN-1",
+    });
+    expect(refused).toBe(
+      "conflict: externalRef HIDDEN-1 is already used in this product by an item this key cannot read: send a different externalRef",
+    );
+    expect(refused).not.toContain(held.key);
+    expect(refused).not.toContain("update_item");
+  });
+
+  test("file_issue with an externalRef held by an item inside the key's project is a conflict that names the item", async () => {
+    const { client } = await keyed("ref-insider", { projects: ["recon"] });
+    const held = await call(wide, "file_issue", {
+      product: "ATL",
+      project: "recon",
+      title: "held inside the project",
+      externalRef: "VISIBLE-1",
+    });
+    const refused = await callError(client, "file_issue", {
+      product: "ATL",
+      project: "recon",
+      title: "same ref",
+      externalRef: "VISIBLE-1",
+    });
+    expect(refused).toBe(
+      `conflict: externalRef VISIBLE-1 is already on item ${held.key}: update that item with update_item (PATCH /items/{key}) if you may edit it, or send a different externalRef`,
+    );
+  });
+
   test("post_status_update on a project the key lost is the error a new post gets", async () => {
     const { client, prefix } = await keyed("project-poster", {
       projects: ["recon", "solo"],
