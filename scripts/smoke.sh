@@ -3,7 +3,7 @@
 # /health, the SPA's index.html and an asset of it from dist/web, a deep link falling back to index.html (JSON 404
 # for an unknown /api path), a security header on a page, unauthenticated 401s on /api/v1, /api/web and /mcp, a bearer
 # key minted by the built CLI on /api/v1 and /mcp, and better-auth's mount answering sign-in with no GitHub app
-# and a sign-in link request with no mail provider, and no preview sign-in route or form with preview mode unset.
+# and a sign-in link request with no mail provider, and no preview sign-in route, with /api/web/me reporting it off, with preview mode unset.
 # Run after `pnpm build`; `pnpm smoke` does both. Deliberately no --env-file:
 # a developer's .env must not leak into the check.
 set -eu
@@ -16,7 +16,7 @@ export TRAIL_OWNER_GITHUB=smoke-owner
 export NODE_ENV=production
 export BETTER_AUTH_SECRET=smoke-secret-that-is-at-least-32-characters
 # the preview-off assertions must not inherit a caller's preview mode
-unset TRAIL_PREVIEW_MODE TRAIL_PREVIEW_PASSWORD
+unset TRAIL_PREVIEW_MODE
 PORT=$(node -e 'const s=require("node:net").createServer().listen(0,()=>{console.log(s.address().port);s.close()})')
 export PORT
 base="http://127.0.0.1:$PORT"
@@ -119,9 +119,9 @@ code=$(curl -s -o "$dir/link.json" -w '%{http_code}' -X POST "$base/api/auth/sig
   echo "/api/auth/sign-in/magic-link gave $code: $(cat "$dir/link.json")" >&2; exit 1;
 }
 curl -fsS "$base/api/web/me" | grep -q '"emailSignIn":false' || { echo "/api/web/me did not say email sign-in is off" >&2; exit 1; }
-# no TRAIL_PREVIEW_MODE: the preview sign-in has no route, and /me tells the sign-in page to draw no preview form
-code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$base/api/preview/sign-in" \
-  -H 'Content-Type: application/json' -H "Origin: $base" -d '{"password":"x"}')
+# no TRAIL_PREVIEW_MODE: the preview sign-in has no route, even from a loopback Host, and /me tells the sign-in page
+# to draw no preview button
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$base/api/preview/sign-in" -H "Origin: $base")
 [ "$code" = 404 ] || { echo "POST /api/preview/sign-in gave $code, want 404 with preview mode off" >&2; exit 1; }
 curl -fsS "$base/api/web/me" | grep -q '"previewSignIn":false' || { echo "/api/web/me did not say preview sign-in is off" >&2; exit 1; }
 echo "smoke ok: dist boots, migrates, serves the SPA, mints a key, serves /api/v1, /api/web and /mcp, and mounts /api/auth on :$PORT"

@@ -35,8 +35,12 @@ if ("missing" in config.email) {
 }
 if (config.preview) {
   console.warn(
-    "TRAIL_PREVIEW_MODE is on: test sign-in is open to anyone with the preview password; never set this on a real deploy",
+    "TRAIL_PREVIEW_MODE is on: a request with a loopback Host can sign in as the owner with no password; never set this on a real deploy",
   );
+}
+// config ignores it, but an older preview's environment may still set it
+if (process.env.TRAIL_PREVIEW_PASSWORD) {
+  console.warn("TRAIL_PREVIEW_PASSWORD is set but ignored: unset it");
 }
 // vite builds the SPA to dist/web, beside this module once bundled to dist/index.js;
 // under tsx this is src/server/index.ts, and `./web` there is the API's source

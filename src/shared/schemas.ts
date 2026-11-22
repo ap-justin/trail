@@ -1783,7 +1783,7 @@ export const meSchema = z.object({
   }),
   previewSignIn: z.boolean().meta({
     description:
-      "Whether this server runs in preview mode, where POST /api/preview/sign-in signs in the owner with the preview password; false otherwise.",
+      "Whether POST /api/preview/sign-in will sign in the owner: true only in preview mode and only for a loopback Host, false otherwise. The route ignores any body and also needs a trusted Origin.",
   }),
 });
 

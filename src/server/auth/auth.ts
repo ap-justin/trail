@@ -531,7 +531,6 @@ export function createAuth({
     isTrustedOrigin,
     previewSignIn: preview
       ? previewSignIn({
-          password: preview.password,
           isTrustedOrigin,
           sessionForOwner: (headers) =>
             auth.api.previewSessionForOwner({ headers, asResponse: true }),

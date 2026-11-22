@@ -99,44 +99,56 @@ test("GITHUB_TOKEN is optional, and empty reads as unset", () => {
   expect(loadConfig(required).GITHUB_TOKEN).toBe(undefined);
 });
 
-const previewPassword = "made-up-preview-password-24";
-
 test.each([undefined, "", "0", "true", "yes", " 1"])(
-  "preview mode is off with TRAIL_PREVIEW_MODE=%j, even with a password",
+  "preview mode is off with TRAIL_PREVIEW_MODE=%j",
   (mode) => {
-    const env = { ...required, TRAIL_PREVIEW_PASSWORD: previewPassword };
-    expect(loadConfig({ ...env, TRAIL_PREVIEW_MODE: mode }).preview).toBe(null);
-  },
-);
-
-test.each([undefined, "", "p".repeat(23)])(
-  "preview mode refuses to start with TRAIL_PREVIEW_PASSWORD=%j, naming the variable and never the value",
-  (password) => {
-    const env = {
-      ...required,
-      TRAIL_PREVIEW_MODE: "1",
-      TRAIL_PREVIEW_PASSWORD: password,
-    };
-    expect(() => loadConfig(env)).toThrow(
-      /TRAIL_PREVIEW_PASSWORD.*24 characters/,
+    expect(loadConfig({ ...required, TRAIL_PREVIEW_MODE: mode }).preview).toBe(
+      null,
     );
-    let message = "";
-    try {
-      loadConfig(env);
-    } catch (e) {
-      message = String(e);
-    }
-    if (password) expect(message).not.toContain(password);
   },
 );
 
-test("preview mode starts with a 24-character password", () => {
-  const password = "p".repeat(24);
+test("preview mode starts with no password, and a leftover one is ignored", () => {
+  const on = { ...required, TRAIL_PREVIEW_MODE: "1" };
+  expect(loadConfig(on).preview).toBe(true);
+  const leftover = loadConfig({
+    ...on,
+    TRAIL_PREVIEW_PASSWORD: "made-up-leftover",
+  });
+  expect(leftover.preview).toBe(true);
+  expect(JSON.stringify(leftover)).not.toContain("made-up-leftover");
+});
+
+test.each(["FLY_APP_NAME", "FLY_MACHINE_ID"])(
+  "preview mode refuses to start on Fly, where %s is set",
+  (variable) => {
+    expect(() =>
+      loadConfig({
+        ...required,
+        TRAIL_PREVIEW_MODE: "1",
+        [variable]: "made-up-fly-value",
+      }),
+    ).toThrow(/unset TRAIL_PREVIEW_MODE/);
+  },
+);
+
+test("on Fly with preview mode off, the server starts", () => {
+  expect(
+    loadConfig({
+      ...required,
+      FLY_APP_NAME: "made-up-app",
+      FLY_MACHINE_ID: "made-up-machine",
+    }).preview,
+  ).toBe(null);
+});
+
+test("an empty FLY_APP_NAME or FLY_MACHINE_ID doesn't count as Fly", () => {
   expect(
     loadConfig({
       ...required,
       TRAIL_PREVIEW_MODE: "1",
-      TRAIL_PREVIEW_PASSWORD: password,
+      FLY_APP_NAME: "",
+      FLY_MACHINE_ID: "",
     }).preview,
-  ).toEqual({ password });
+  ).toBe(true);
 });

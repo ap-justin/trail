@@ -3,6 +3,7 @@ import { getPath } from "hono/utils/url";
 import { handleError, handleNotFound } from "./api/errors.js";
 import { createApi } from "./api/index.js";
 import type { TrailAuth } from "./auth/auth.js";
+import { isLoopbackHost } from "./auth/preview.js";
 import type { Db } from "./db/client.js";
 import type { EventBus } from "./events/bus.js";
 import type { PullRequests } from "./github/pull-requests.js";
@@ -54,7 +55,10 @@ export function createApp({
   app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
   const { previewSignIn } = auth;
   if (previewSignIn) {
-    app.post("/api/preview/sign-in", (c) => previewSignIn(c.req.raw));
+    // any other Host gets the 404 an unknown route gets, before the origin check can tell it exists
+    app.post("/api/preview/sign-in", (c) =>
+      isLoopbackHost(c.req.raw) ? previewSignIn(c.req.raw) : c.notFound(),
+    );
   }
   app.route("/api/v1", createApi({ db, service }));
   app.route("/mcp", mcpRoutes({ db, service }));

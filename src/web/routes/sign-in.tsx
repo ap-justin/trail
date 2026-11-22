@@ -68,7 +68,7 @@ function SignIn() {
   // the session cookie is set: a fresh /me lets this viewer in, and the member branch below
   // goes on to the return address; returned, so the mutation stays pending until /me settles
   const preview = useMutation({
-    mutationFn: api.previewSignIn,
+    mutationFn: () => api.previewSignIn(),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.me }),
   });
 
@@ -106,7 +106,7 @@ function SignIn() {
         me.previewSignIn
           ? {
               state: previewStateOf(preview),
-              onSignIn: (password) => preview.mutate(password),
+              onSignIn: () => preview.mutate(),
             }
           : undefined
       }
@@ -151,8 +151,6 @@ function previewStateOf(mutation: {
   if (!mutation.error) return { status: "idle" };
   const { error } = mutation;
   switch (codeOf(error)) {
-    case "invalid_password":
-      return { status: "wrong_password" };
     case "rate_limited":
       return {
         status: "rate_limited",

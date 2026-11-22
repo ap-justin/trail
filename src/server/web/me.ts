@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { type MeView, meSchema } from "../../shared/schemas.js";
 import { jsonContent } from "../api/routes.js";
 import type { TrailAuth } from "../auth/auth.js";
+import { isLoopbackHost } from "../auth/preview.js";
 import type { Viewer } from "../auth/viewer.js";
 import type { Db } from "../db/client.js";
 import { actor } from "../db/schema.js";
@@ -77,7 +78,7 @@ export function meRoutes(db: Db, auth: TrailAuth) {
       meOf(db, c.var.viewer, {
         ownerName: ownerName(db, auth.ownerLogin),
         emailSignIn: auth.emailSignIn,
-        previewSignIn: auth.previewSignIn !== null,
+        previewSignIn: auth.previewSignIn !== null && isLoopbackHost(c.req.raw),
       }),
       200,
     ),
