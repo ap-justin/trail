@@ -211,7 +211,7 @@ function StatusTabs({
         <TabsTrigger
           key={option.value}
           value={option.value}
-          className="flex-none px-1 font-normal text-muted-foreground data-active:text-foreground max-lg:px-0 max-lg:data-active:font-medium lg:h-8"
+          className="flex-none px-1 font-normal text-muted-foreground data-active:text-foreground max-lg:min-w-11 max-lg:px-0 max-lg:data-active:font-medium lg:h-8"
         >
           {option.label}{" "}
           {option.count !== undefined && (

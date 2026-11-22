@@ -456,3 +456,33 @@ test("create_issue and list_issues take project or product as aliases of project
     "validation_failed: projectId is required: send the product's key, like TRL (project or product are its aliases); list_products lists them",
   );
 });
+
+test("a retry of create_issue returns the first item whoever owns the product, never a 500", async () => {
+  const owner = await connect(bot.key);
+  await call(owner, "create_product", { key: "RTY", name: "retried" });
+  const other = await connect(createBot(db, "retrying filer").key);
+  for (const [client, key] of [
+    [owner, "retry-owner"],
+    [other, "retry-other"],
+  ] as const) {
+    const input = {
+      projectId: "RTY",
+      title: key,
+      labels: ["no such label"],
+      externalRef: key,
+      idempotency_key: key,
+    };
+    const first = await call(client, "create_issue", input);
+    expect(await call(client, "create_issue", input)).toEqual(first);
+  }
+});
+
+test("a retry of create_issue with no idempotency key and an externalRef is a conflict naming the item", async () => {
+  const owner = await connect(bot.key);
+  await call(owner, "create_product", { key: "RTZ", name: "retried too" });
+  const input = { projectId: "RTZ", title: "once", externalRef: "ext-1" };
+  const first = await call(owner, "create_issue", input);
+  expect(await callError(owner, "create_issue", input)).toMatch(
+    new RegExp(`conflict: externalRef ext-1 is already on item ${first.key}`),
+  );
+});
