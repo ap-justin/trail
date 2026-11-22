@@ -2955,8 +2955,26 @@ export function createService({
                 )
                 .get();
               if (twin) {
+                // a key reaching the product through a project must not learn the number of an item outside it
+                const readable = tx
+                  .select({ id: issue.id })
+                  .from(issue)
+                  .where(
+                    and(
+                      eq(issue.id, twin.id),
+                      itemsReached(
+                        db,
+                        reachFor(actor),
+                        issue.id,
+                        issue.productId,
+                      ),
+                    ),
+                  )
+                  .get();
                 throw new ConflictError(
-                  `externalRef ${externalRef} is already on item ${product.key}-${twin.number}: update that item with update_item (PATCH /items/{key}) if you may edit it, or send a different externalRef`,
+                  readable
+                    ? `externalRef ${externalRef} is already on item ${product.key}-${twin.number}: update that item with update_item (PATCH /items/{key}) if you may edit it, or send a different externalRef`
+                    : `externalRef ${externalRef} is already used in this product by an item this key cannot read: send a different externalRef`,
                 );
               }
             }

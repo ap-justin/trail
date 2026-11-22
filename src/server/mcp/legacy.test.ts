@@ -483,6 +483,29 @@ test("a retry of create_issue returns the first item whoever owns the product, n
   }
 });
 
+test("two bots sending the same idempotency key to create_issue each get their own issue, not a replay", async () => {
+  const owner = await connect(bot.key);
+  await call(owner, "create_product", { key: "RSK", name: "shared key" });
+  const other = await connect(createBot(db, "same key filer").key);
+  const ownerFirst = await call(owner, "create_issue", {
+    projectId: "RSK",
+    title: "from owner",
+    idempotency_key: "shared-key",
+  });
+  const otherFirst = await call(other, "create_issue", {
+    projectId: "RSK",
+    title: "from other",
+    idempotency_key: "shared-key",
+  });
+  expect(otherFirst.key).not.toBe(ownerFirst.key);
+  expect(otherFirst.title).toBe("from other");
+  const listed = await call(owner, "list_items", { product: "RSK" });
+  expect(listed.items.map((i: Body) => i.title).sort()).toEqual([
+    "from other",
+    "from owner",
+  ]);
+});
+
 test("create_issue refuses an idempotency key reused with a changed body and creates nothing", async () => {
   const owner = await connect(bot.key);
   await call(owner, "create_product", { key: "RKR", name: "reused key" });

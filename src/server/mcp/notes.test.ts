@@ -402,6 +402,32 @@ test("add_note keeps externalRef, and a second note with it in the product is re
   );
 });
 
+test("a bot that may not edit the item holding an externalRef gets the same conflict message", async () => {
+  const owner = await productBot("Dup holder");
+  const writer = await productBot("Dup author");
+  const bystander = await productBot("Dup bystander");
+  const note = await call(writer.client, "add_note", {
+    product: owner.product,
+    title: "held record",
+    externalRef: "DOC-N",
+  });
+  // the precondition: the bystander can neither edit the note nor have it as its own
+  expect(
+    await callError(bystander.client, "update_item", {
+      item: note.key,
+      title: "hijacked",
+    }),
+  ).toMatch(/^(forbidden|not_found)/);
+  const refused = await callError(bystander.client, "add_note", {
+    product: owner.product,
+    title: "imported again",
+    externalRef: "DOC-N",
+  });
+  expect(refused).toBe(
+    `conflict: externalRef DOC-N is already on item ${note.key}: update that item with update_item (PATCH /items/{key}) if you may edit it, or send a different externalRef`,
+  );
+});
+
 test("REST POST /items with type note and add_note share one externalRef per product: each refuses the other's", async () => {
   const owner = await productBot("Parity");
   const writer = await productBot("Twin");

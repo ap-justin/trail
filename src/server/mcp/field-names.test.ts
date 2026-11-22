@@ -62,6 +62,19 @@ const readRouteFields = (spec: Spec, route: string) => {
   ];
 };
 
+/**
+ * The fields of a tool's input schema. Like `readRouteFields` it throws rather than return a partial list: a schema that
+ * lost its `properties` (an anyOf, a $ref) would read as `[]` and pass against a route that reads as `[]` too.
+ */
+const readToolFields = (tool: string, schema: Schema) => {
+  if (!schema.properties) {
+    throw new Error(
+      `tool ${tool} has an input schema toolFields cannot read in full: it has no properties`,
+    );
+  }
+  return Object.keys(schema.properties);
+};
+
 /** Tools with no request field beyond how they name their one target or the page, or no route that shares their shape. */
 const noRoute = [
   "get_item",
@@ -197,7 +210,7 @@ const surface = async () => {
   const toolFields = (tool: string) => {
     const found = tools.find((t) => t.name === tool);
     if (!found) throw new Error(`no tool ${tool}`);
-    return Object.keys((found.inputSchema as Schema).properties ?? {});
+    return readToolFields(tool, found.inputSchema as Schema);
   };
   const takesIdempotencyHeader = (route: string) =>
     (operation(route).parameters ?? []).some(
@@ -302,6 +315,29 @@ describe("routeFields", () => {
     ["no properties", {}],
   ] as [string, Schema][])("throws on a body with %s", (_name, schema) => {
     expect(() => fields(schema)).toThrow(/cannot read in full/);
+  });
+});
+
+describe("toolFields", () => {
+  test("reads the properties of a tool schema", () => {
+    expect(readToolFields("t", { properties: { a: {}, b: {} } })).toEqual([
+      "a",
+      "b",
+    ]);
+  });
+
+  test("an empty properties object is a tool with no fields", () => {
+    expect(readToolFields("t", { properties: {} })).toEqual([]);
+  });
+
+  test.each([
+    ["no properties", {}],
+    ["an anyOf in place of properties", { anyOf: [{ properties: { a: {} } }] }],
+    ["a $ref in place of properties", { $ref: "#/$defs/Input" }],
+  ] as [string, Schema][])("throws on a schema with %s", (_name, schema) => {
+    expect(() => readToolFields("t", schema)).toThrow(
+      "tool t has an input schema toolFields cannot read in full: it has no properties",
+    );
   });
 });
 
