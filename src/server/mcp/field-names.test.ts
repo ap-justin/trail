@@ -5,10 +5,61 @@ import { mcpClients } from "./test-client.js";
 const { app, bot, request } = setupTestApp();
 const { connect } = mcpClients(app);
 
-type Schema = { properties?: Record<string, unknown> };
+type Schema = {
+  properties?: Record<string, unknown>;
+  $ref?: string;
+  allOf?: unknown[];
+  oneOf?: unknown[];
+  anyOf?: unknown[];
+};
 type Operation = {
   parameters?: { in: string; name: string }[];
   requestBody?: { content: { "application/json": { schema: Schema } } };
+};
+type Spec = {
+  paths: Record<string, Record<string, Operation>>;
+  components: { schemas: Record<string, Schema> };
+};
+
+const operationOf = (spec: Spec, route: string) => {
+  const [method, path] = route.split(" ") as [string, string];
+  const op = spec.paths[path]?.[method];
+  if (!op) throw new Error(`no route ${route}`);
+  return op;
+};
+
+/**
+ * The query parameters and body fields of a route. It reads a body that is plain `properties`, directly or through one
+ * `$ref`, and throws on any other shape: a partial list would let the REST/MCP comparison pass on the fields it read.
+ */
+const readRouteFields = (spec: Spec, route: string) => {
+  const op = operationOf(spec, route);
+  const unreadable = (why: string) =>
+    new Error(
+      `${route} has a request body routeFields cannot read in full: ${why}`,
+    );
+  let bodyFields: string[] = [];
+  if (op.requestBody) {
+    let body: Schema | undefined =
+      op.requestBody.content["application/json"]?.schema;
+    if (body?.$ref) {
+      body = spec.components.schemas[body.$ref.split("/").pop() as string];
+      if (body?.$ref) throw unreadable("a $ref to a $ref");
+    }
+    for (const key of ["allOf", "oneOf", "anyOf"] as const) {
+      // an `anyOf` of `{ required }` branches (IssueCreate's alias rule) adds no fields, so `properties` is still whole
+      const addsFields = (body?.[key] ?? []).some(
+        (branch) => Object.keys(branch as object).join() !== "required",
+      );
+      if (addsFields) throw unreadable(`its ${key} may add fields`);
+    }
+    if (!body?.properties) throw unreadable("it has no properties");
+    bodyFields = Object.keys(body.properties);
+  }
+  return [
+    ...(op.parameters ?? []).filter((p) => p.in === "query").map((p) => p.name),
+    ...bodyFields,
+  ];
 };
 
 /** Tools with no request field beyond how they name their one target or the page, or no route that shares their shape. */
@@ -140,35 +191,9 @@ const surface = async () => {
   const { tools } = await (await connect(bot.key)).listTools();
   const spec = (await (
     await request("GET", "/api/v1/openapi.json", {})
-  ).json()) as {
-    paths: Record<string, Record<string, Operation>>;
-    components: { schemas: Record<string, Schema> };
-  };
-  const operation = (route: string) => {
-    const [method, path] = route.split(" ") as [string, string];
-    const op = spec.paths[path]?.[method];
-    if (!op) throw new Error(`no route ${route}`);
-    return op;
-  };
-  const routeFields = (route: string) => {
-    const op = operation(route);
-    let body = op.requestBody?.content["application/json"].schema;
-    const ref = (body as { $ref?: string } | undefined)?.$ref;
-    if (ref) body = spec.components.schemas[ref.split("/").pop() as string];
-    const bodyFields = Object.keys(body?.properties ?? {});
-    // a oneOf/allOf/union body has no `properties` to read: an empty list would pass any tool silently
-    if (op.requestBody && bodyFields.length === 0) {
-      throw new Error(
-        `${route} has a request body but routeFields read no fields from it`,
-      );
-    }
-    return [
-      ...(op.parameters ?? [])
-        .filter((p) => p.in === "query")
-        .map((p) => p.name),
-      ...bodyFields,
-    ];
-  };
+  ).json()) as Spec;
+  const operation = (route: string) => operationOf(spec, route);
+  const routeFields = (route: string) => readRouteFields(spec, route);
   const toolFields = (tool: string) => {
     const found = tools.find((t) => t.name === tool);
     if (!found) throw new Error(`no tool ${tool}`);
@@ -225,6 +250,58 @@ describe.each(pairs)("$tool against $rest", (pair) => {
     expect(toolFields(tool).includes("idempotency_key")).toBe(
       takesIdempotencyHeader(rest),
     );
+  });
+});
+
+describe("routeFields", () => {
+  const specWith = (schema: Schema): Spec => ({
+    paths: {
+      "/x": {
+        post: {
+          parameters: [{ in: "query", name: "page" }],
+          requestBody: { content: { "application/json": { schema } } },
+        },
+      },
+    },
+    components: {
+      schemas: {
+        Plain: { properties: { title: {}, body: {} } },
+        Hop: { $ref: "#/components/schemas/Plain" },
+      },
+    },
+  });
+  const fields = (schema: Schema) =>
+    readRouteFields(specWith(schema), "post /x");
+
+  test("reads query parameters and the properties behind one $ref", () => {
+    expect(fields({ $ref: "#/components/schemas/Plain" })).toEqual([
+      "page",
+      "title",
+      "body",
+    ]);
+  });
+
+  test("reads properties beside an anyOf of required-only branches", () => {
+    expect(
+      fields({
+        properties: { title: {} },
+        anyOf: [{ required: ["title"] }, { required: ["body"] }],
+      }),
+    ).toEqual(["page", "title"]);
+  });
+
+  test("reads inline properties", () => {
+    expect(fields({ properties: { title: {} } })).toEqual(["page", "title"]);
+  });
+
+  test.each([
+    ["allOf beside properties", { properties: { title: {} }, allOf: [{}] }],
+    ["oneOf beside properties", { properties: { title: {} }, oneOf: [{}] }],
+    ["anyOf with no properties", { anyOf: [{}] }],
+    ["a $ref to a $ref", { $ref: "#/components/schemas/Hop" }],
+    ["no properties", {}],
+  ] as [string, Schema][])("throws on a body with %s", (_name, schema) => {
+    expect(() => fields(schema)).toThrow(/cannot read in full/);
   });
 });
 
