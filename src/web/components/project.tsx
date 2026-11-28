@@ -278,7 +278,7 @@ function NoWork() {
   );
 }
 
-/** Progress over time beside By product on a wide column (520px and the rest); stacked on a narrow one. */
+/** Progress over time beside By product on a wide column (a 520px chart, By product in the rest); stacked on a narrow one. */
 function ProgressCharts({
   project,
   now,
