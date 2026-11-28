@@ -5,12 +5,14 @@ import {
   labelSchema,
   legacyNamedProductSchema,
   legacyProductSchema,
+  PROGRESS_READS,
   pageQuerySchema,
   pageSchema,
   projectCreateSchema,
   projectItemsAddedSchema,
   projectItemsRemovedSchema,
   projectItemsSchema,
+  projectReadSchema,
   projectSchema,
   projectUpdateSchema,
   statusUpdateCreateSchema,
@@ -56,7 +58,7 @@ const tags = ["projects"];
 
 const projectOrProduct = z.union([projectSchema, legacyProductSchema]);
 const projectOrProductRead = z.union([
-  projectSchema,
+  projectReadSchema,
   legacyProductSchema,
   legacyNamedProductSchema,
 ]);
@@ -70,11 +72,16 @@ const viewOf = (
     ? toProject(found.project)
     : deprecated(toProduct(found.product), note);
 
-/** `viewOf` for a read, where a product the key reaches only through a project is named only. */
-const readOf = (found: ProjectOrProduct<ProductView | NamedProduct>) =>
-  found.kind === "project"
-    ? viewOf(found)
-    : deprecated(toProductRead(found.product), deprecations.product);
+/** `viewOf` for a read, with the project's progress, and where a product the key reaches only through a project is named only. */
+const readOf = (found: ProjectOrProduct<ProductView | NamedProduct>) => {
+  if (found.kind === "product") {
+    return deprecated(toProductRead(found.product), deprecations.product);
+  }
+  // the service types progress optional on every ProjectView; a read always sets it
+  const { progress } = found.project;
+  if (progress === undefined) throw new Error("project read without progress");
+  return { ...toProject(found.project), progress };
+};
 
 const WHO_CHANGES =
   "Needs the issues action on a key that reaches at least one of the project's products.";
@@ -126,8 +133,7 @@ const getProject = createRoute({
   method: "get",
   path: "/projects/{ref}",
   summary: "Get a project by slug",
-  description:
-    "Deprecated: a product key that matches no slug returns the product, carrying deprecated; use GET /products/{key}. The project's items are listed by GET /items?project={slug}.",
+  description: `The project: its goal, lead, target date, the products it draws from that this key reaches or can name, counts and notes over those products, its latest status update and its progress. ${PROGRESS_READS} The project's items are listed by GET /items?project={slug}. Deprecated: a product key that matches no slug returns the product, carrying deprecated; use GET /products/{key}.`,
   tags,
   request: { params: projectParam },
   responses: {

@@ -294,6 +294,64 @@ test("the legacy item schemas leave out a note's type and fields, which the lega
   );
 });
 
+test("GET /projects/{ref} types progress as always there, and no other project response carries it", async () => {
+  type Schema = {
+    $ref?: string;
+    description?: string;
+    allOf?: Schema[];
+    anyOf?: Schema[];
+    oneOf?: Schema[];
+    properties?: Record<string, Schema>;
+    required?: string[];
+  };
+  const spec = (await (
+    await request("GET", "/api/v1/openapi.json", { key: null })
+  ).json()) as {
+    paths: Record<
+      string,
+      Record<
+        string,
+        {
+          description?: string;
+          responses: Record<
+            string,
+            { content?: Record<string, { schema: Schema }> }
+          >;
+        }
+      >
+    >;
+    components: { schemas: Record<string, Schema> };
+  };
+  const { schemas } = spec.components;
+  const ok = (path: string, method: string) =>
+    spec.paths[path]?.[method]?.responses["200"]?.content?.["application/json"]
+      ?.schema;
+
+  const read = ok("/projects/{ref}", "get");
+  const refs = (read?.anyOf ?? read?.oneOf ?? []).map((s) => s.$ref);
+  expect(refs).toContain("#/components/schemas/ProjectRead");
+  expect(refs).not.toContain("#/components/schemas/Project");
+  // ProjectRead may be inlined or Project plus its own part
+  const parts = schemas.ProjectRead?.allOf ?? [schemas.ProjectRead ?? {}];
+  const own = parts.find((p) => p.properties?.progress);
+  expect(own?.properties?.progress?.$ref).toBe(
+    "#/components/schemas/ProjectProgress",
+  );
+  expect(own?.required).toContain("progress");
+
+  expect(schemas.Project?.properties).not.toHaveProperty("progress");
+  // the component's own wording, not a field's .meta from the REST or web schema
+  expect(schemas.ProjectProgress?.description).toMatch(
+    /^How far the project is, by items and by estimated hours/,
+  );
+  expect(schemas.ProjectProgress?.description).not.toMatch(
+    /get_project|viewer/,
+  );
+  expect(spec.paths["/projects/{ref}"]?.get?.description).toMatch(
+    /^The project: .* its progress\. Its progress says /,
+  );
+});
+
 test("PATCH /items/{key} says what update_item says about the email an ending sends, so a REST bot comments first too", async () => {
   const res = await request("GET", "/api/v1/openapi.json", { key: null });
   const spec = (await res.json()) as {

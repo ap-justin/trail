@@ -6,6 +6,7 @@ export type {
   MeView,
   PeopleView,
   PersonView,
+  ProjectProgress,
   SearchView,
   WebActorView,
   WebConversationPageView,

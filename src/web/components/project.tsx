@@ -2,6 +2,7 @@ import { PackageIcon } from "lucide-react";
 import { type ReactNode, useId, useRef } from "react";
 import { ActorAvatar, BotTitle } from "@/components/actor";
 import { AppLink, textLinkFocus, textLinkTap } from "@/components/app-link";
+import { BurnUp } from "@/components/burn-up";
 import { ProductSelect } from "@/components/filter-select";
 import {
   FilterEmpty,
@@ -15,6 +16,7 @@ import {
   statusTabValue,
 } from "@/components/item-list";
 import { type NotesRead, NotesSection } from "@/components/notes";
+import { ByProduct, ProgressSummary } from "@/components/progress";
 import {
   EmptyState,
   ErrorState,
@@ -113,13 +115,18 @@ export function ProjectHealth({ project }: { project: WebProjectView }) {
   );
 }
 
-const HIDDEN_PRODUCTS = "Items from products you can't see are not shown.";
+/** With nothing in scope no numbers or graphs are drawn, so the line speaks of items. */
+const hiddenProductsLine = (inScope: number) =>
+  inScope > 0
+    ? "The numbers and graphs here cover only the products you can see."
+    : "Items from products you can't see are not shown.";
 
 /**
  * Lead, Target, Health and Products as a ledger. `aside` (1024px and up): a 72px label
- * column, the lead's title under the name, each product's name and key. `inline`
- * (below): Lead and Target alone in 36px rows on an 80px column, the title in line;
- * Health rides the heading there and the groups name the products.
+ * column, the lead's title under the name, each product's name and key. `inline` (below):
+ * Lead and Target alone in 36px rows on an 80px column, the title in line; Health rides
+ * the heading there and the groups name the products. With items in scope the target is
+ * the progress summary's, not a row here.
  */
 function ProjectDetails({
   project,
@@ -132,6 +139,8 @@ function ProjectDetails({
 }) {
   const aside = layout === "aside";
   const label = "text-muted-foreground";
+  const target =
+    project.progress.itemsInScope === 0 ? project.targetDate : null;
   return (
     <dl
       className={cn(
@@ -149,11 +158,11 @@ function ProjectDetails({
           <BotTitle actor={project.lead} />
         </span>
       </dd>
-      {project.targetDate && (
+      {target && (
         <>
           <dt className={label}>Target</dt>
           <dd>
-            <TargetDate date={project.targetDate} now={now} />
+            <TargetDate date={target} now={now} />
           </dd>
         </>
       )}
@@ -269,6 +278,24 @@ function NoWork() {
   );
 }
 
+/** Progress over time beside By product on a wide column (a 520px chart, By product in the rest); stacked on a narrow one. */
+function ProgressCharts({
+  project,
+  now,
+}: {
+  project: WebProjectDetailView;
+  now: Date;
+}) {
+  return (
+    <div className="@container mt-2 lg:mt-4">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-5 @3xl:grid-cols-[--spacing(130)_minmax(0,1fr)]">
+        <BurnUp history={project.history} now={now} />
+        <ByProduct products={project.progress.byProduct} />
+      </div>
+    </div>
+  );
+}
+
 function ProjectBody(
   props: Omit<ProjectViewProps, "project" | "onRetryProject"> & {
     project: WebProjectDetailView;
@@ -312,12 +339,24 @@ function ProjectBody(
               {project.goal}
             </p>
           </div>
+          {project.progress.itemsInScope > 0 && (
+            <ProgressSummary
+              progress={project.progress}
+              now={now}
+              className="mt-1 lg:mt-3"
+            />
+          )}
+          {project.hiddenProducts && (
+            <p className="text-xs text-muted-foreground">
+              {hiddenProductsLine(project.progress.itemsInScope)}
+            </p>
+          )}
+          {project.progress.itemsInScope > 0 && (
+            <ProgressCharts project={project} now={now} />
+          )}
           <div className="lg:hidden">
             <ProjectDetails project={project} layout="inline" now={now} />
           </div>
-          {project.hiddenProducts && (
-            <p className="text-xs text-muted-foreground">{HIDDEN_PRODUCTS}</p>
-          )}
         </div>
         {empty ? (
           <NoItems />
@@ -405,9 +444,10 @@ function ProjectBody(
 }
 
 /**
- * A project: its goal, then its items grouped by product and filtered by product, type
- * and status, beside Details and status updates. Only the viewer's products ever show;
- * when the project has others, one line says items are missing, never which.
+ * A project: its goal and progress, then its items grouped by product and filtered by
+ * product, type and status, beside Details and status updates. Only the viewer's products
+ * ever show; when the project has others, one line says the figures cover only those,
+ * never which are missing.
  */
 export function ProjectView({
   project,

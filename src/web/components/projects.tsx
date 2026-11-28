@@ -2,6 +2,7 @@ import { FolderIcon } from "lucide-react";
 import { Fragment } from "react";
 import { ActorAvatar } from "@/components/actor";
 import { RowLink } from "@/components/app-link";
+import { StackedBar } from "@/components/progress";
 import { EmptyState, ListSkeleton, ProjectsError } from "@/components/states";
 import {
   Age,
@@ -57,6 +58,55 @@ function ProjectName({ project }: { project: WebProjectView }) {
   );
 }
 
+/**
+ * Nothing in scope: how many wait in triage, or No items yet. With scope empty the open
+ * count is all triage; a project of only canceled items still reads No items yet.
+ */
+function EmptyScope({ project }: { project: WebProjectView }) {
+  return (
+    <span className="text-muted-foreground">
+      {project.openCount > 0
+        ? `${project.openCount} in triage`
+        : "No items yet"}
+    </span>
+  );
+}
+
+const projectBar = (project: WebProjectView) => ({
+  done: project.itemsDone,
+  inProgress: project.itemsInProgress,
+  open: project.itemsInScope - project.itemsDone - project.itemsInProgress,
+});
+
+/** The table's Progress cell: done of scope over a 96px bar. */
+function ProgressCell({ project }: { project: WebProjectView }) {
+  if (project.itemsInScope === 0) return <EmptyScope project={project} />;
+  return (
+    <>
+      <p>{`${project.itemsDone} of ${project.itemsInScope}`}</p>
+      <StackedBar {...projectBar(project)} className="mt-1.5 h-1.5 w-24" />
+    </>
+  );
+}
+
+/** The card's: a full-width bar over done of scope. */
+function ProgressLine({ project }: { project: WebProjectView }) {
+  if (project.itemsInScope === 0)
+    return (
+      <p className="text-xs">
+        <EmptyScope project={project} />
+      </p>
+    );
+  return (
+    <div className="flex flex-col gap-1.5">
+      <StackedBar {...projectBar(project)} className="h-1.5" />
+      <p className="text-xs text-muted-foreground">
+        {`${project.itemsDone} of ${project.itemsInScope} items done`}
+      </p>
+    </div>
+  );
+}
+
 // 16px between columns, 12px at the row's ends
 const head = "h-10 px-2 first:pl-3 last:pr-3";
 const cell = "px-2 first:pl-3 last:pr-3";
@@ -78,7 +128,7 @@ function ProjectsTable({
           <TableHead className={cn(head, "w-37")}>Lead</TableHead>
           <TableHead className={cn(head, "w-22")}>Target</TableHead>
           <TableHead className={head}>Latest status update</TableHead>
-          <TableHead className={cn(head, "w-15 text-right")}>Open</TableHead>
+          <TableHead className={cn(head, "w-34")}>Progress</TableHead>
           <TableHead className={cn(head, "w-18 text-right")}>Updated</TableHead>
         </TableRow>
       </TableHeader>
@@ -120,8 +170,8 @@ function ProjectsTable({
                 layout="table"
               />
             </TableCell>
-            <TableCell className={cn(cell, "text-right")}>
-              {project.openCount}
+            <TableCell className={cell}>
+              <ProgressCell project={project} />
             </TableCell>
             <TableCell className={cn(cell, "text-right text-muted-foreground")}>
               <Age iso={project.updatedAt} now={now} />
@@ -149,9 +199,11 @@ function ProjectCards({
           className="relative flex flex-col gap-2 border-b border-rule px-4 py-3.5"
         >
           <div className="flex flex-col gap-0.5">
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex items-start justify-between gap-2">
               <ProjectName project={project} />
-              <UpdateHealth of={project} />
+              <span className="flex h-lh shrink-0 items-center">
+                <UpdateHealth of={project} />
+              </span>
             </div>
             <p className="text-muted-foreground">{project.goal}</p>
           </div>
@@ -160,6 +212,7 @@ function ProjectCards({
             now={now}
             layout="card"
           />
+          <ProgressLine project={project} />
           <p className="flex flex-wrap items-center gap-x-2 text-muted-foreground">
             <ProductKeys project={project} />
             {project.targetDate && (
@@ -167,7 +220,6 @@ function ProjectCards({
                 · Target <TargetDate date={project.targetDate} now={now} />
               </span>
             )}
-            <span>· {project.openCount} open</span>
           </p>
         </li>
       ))}
@@ -177,7 +229,7 @@ function ProjectCards({
 
 /**
  * The projects the viewer can see a product of: a table at 1024px and up, a card each
- * below. Open counts triage and open items of the viewer's products only.
+ * below. Progress counts the viewer's products only.
  */
 export function ProjectsView(props: ProjectsViewProps) {
   const now = useMinuteClock(props.now);

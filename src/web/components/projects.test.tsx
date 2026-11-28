@@ -34,7 +34,7 @@ const cardFor = (slug: string) => {
 const cellsOf = (row: HTMLElement) => within(row).getAllByRole("cell");
 
 describe("projects", () => {
-  test("the columns read Project, Health, Products, Lead, Target, Latest status update, Open, Updated", () => {
+  test("the columns read Project, Health, Products, Lead, Target, Latest status update, Progress, Updated", () => {
     renderProjects();
     expect(
       within(table())
@@ -47,12 +47,12 @@ describe("projects", () => {
       "Lead",
       "Target",
       "Latest status update",
-      "Open",
+      "Progress",
       "Updated",
     ]);
   });
 
-  test("a row reads name and goal, health, product keys, the lead with their avatar, target, update, open count and age", () => {
+  test("a row reads name and goal, health, product keys, the lead with their avatar, target, update, progress and age", () => {
     renderProjects();
     const cells = cellsOf(rowFor("human-ui"));
     expect(
@@ -71,7 +71,19 @@ describe("projects", () => {
     ).toBeVisible();
     expect(cells[4]).toHaveTextContent(/^Dec 4$/);
     expect(cells[5]).toHaveTextContent(/Feed and product pages are drawn/);
-    expect(cells[6]).toHaveTextContent(/^14$/);
+    expect(cells[6]).toHaveTextContent(/^18 of 31$/);
+    expect(
+      [...(cells[6] as HTMLElement).querySelectorAll("[data-segment]")].map(
+        (s) => [
+          s.getAttribute("data-segment"),
+          (s as HTMLElement).style.flexGrow,
+        ],
+      ),
+    ).toEqual([
+      ["done", "18"],
+      ["in_progress", "3"],
+      ["open", "10"],
+    ]);
     expect(cells[7]).toHaveTextContent(/^41m$/);
   });
 
@@ -79,7 +91,6 @@ describe("projects", () => {
     renderProjects({ projects: [projectRow({ targetDate: null })] });
     expect(cellsOf(rowFor("human-ui"))[4]).toHaveTextContent(/^None$/);
     expect(cardFor("human-ui")).not.toHaveTextContent("Target");
-    expect(cardFor("human-ui")).toHaveTextContent("· 14 open");
   });
 
   test("a target in another year keeps its year and may wrap, so it never runs into the next column", () => {
@@ -89,11 +100,55 @@ describe("projects", () => {
     expect(target).toHaveClass("whitespace-normal");
   });
 
-  test("a card ends on the keys, the target and the open count", () => {
+  test("a card shows its progress after the latest update, and ends on the keys and the target", () => {
     renderProjects({ projects: [teamAccessRow()] });
-    expect(cardFor("team-access")).toHaveTextContent(
-      /TRL\s*· Target Nov 30· 5 open$/,
+    const card = cardFor("team-access");
+    expect(card).toHaveTextContent(
+      /6 of 10 items done\s*TRL\s*· Target Nov 30$/,
     );
+    expect(card).not.toHaveTextContent("open");
+    expect(card.querySelector("[data-bar]")).not.toBeNull();
+  });
+
+  test("no items yet: the words and no bar, in the table and on the card", () => {
+    renderProjects({
+      projects: [
+        projectRow({
+          openCount: 0,
+          itemsInScope: 0,
+          itemsDone: 0,
+          itemsInProgress: 0,
+        }),
+      ],
+    });
+    expect(cellsOf(rowFor("human-ui"))[6]).toHaveTextContent(/^No items yet$/);
+    expect(cardFor("human-ui")).toHaveTextContent("No items yet");
+    expect(document.querySelector("[data-bar]")).toBeNull();
+  });
+
+  test("only triage items: how many are in triage, not No items yet", () => {
+    renderProjects({
+      projects: [
+        projectRow({
+          openCount: 4,
+          itemsInScope: 0,
+          itemsDone: 0,
+          itemsInProgress: 0,
+        }),
+      ],
+    });
+    expect(cellsOf(rowFor("human-ui"))[6]).toHaveTextContent(/^4 in triage$/);
+    expect(cardFor("human-ui")).toHaveTextContent("4 in triage");
+    expect(screen.queryByText("No items yet")).toBeNull();
+    expect(document.querySelector("[data-bar]")).toBeNull();
+  });
+
+  test("a wrapped title keeps its health on the first line", () => {
+    renderProjects();
+    const title = within(cardFor("human-ui")).getByRole("link", {
+      name: "Human UI launch",
+    });
+    expect(title.parentElement).toHaveClass("items-start");
   });
 
   test("health shows only beside a status update", () => {

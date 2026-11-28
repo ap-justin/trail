@@ -115,10 +115,15 @@ const statusTabs = () =>
   within(screen.getByRole("tablist", { name: "Filter by status" }))
     .getAllByRole("tab")
     .map((t) => t.textContent);
-const HIDDEN = "Items from products you can't see are not shown.";
+const HIDDEN =
+  "The numbers and graphs here cover only the products you can see.";
+const follows = (first: Node, second: Node) =>
+  Boolean(
+    first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING,
+  );
 
 describe("goal and details", () => {
-  test("the goal, then Details: lead with avatar and title, target, health, the visible products", () => {
+  test("the goal, then Details: lead with avatar and title, health, the visible products", () => {
     renderProject();
     expect(screen.getByText("Goal")).toBeInTheDocument();
     expect(
@@ -128,27 +133,22 @@ describe("goal and details", () => {
     ).toBeInTheDocument();
     const dl = within(details());
     const terms = dl.getAllByRole("term").map((dt) => dt.textContent);
-    expect(terms).toEqual(["Lead", "Target", "Health", "Products"]);
-    const [lead, target, health, products] = dl.getAllByRole("definition");
+    expect(terms).toEqual(["Lead", "Health", "Products"]);
+    const [lead, health, products] = dl.getAllByRole("definition");
     expect(lead).toHaveTextContent(/Gamma.*Release engineer/);
     expect(
       within(lead as HTMLElement).getByRole("img", { name: "Gamma, bot" }),
     ).toBeVisible();
     expect(lead).not.toHaveTextContent("Bot");
-    expect(target).toHaveTextContent(/^Dec 4$/);
     expect(health).toHaveTextContent(/^At risk$/);
     expect(products).toHaveTextContent(/Docs site DOC\s*trail TRL/);
   });
 
-  test("no target drops the Target row; no status update drops Health", () => {
+  test("no status update drops Health", () => {
     renderProject({
       project: {
         status: "ready",
-        data: projectDetail({
-          targetDate: null,
-          latestStatusUpdate: null,
-          health: "at_risk",
-        }),
+        data: projectDetail({ latestStatusUpdate: null, health: "at_risk" }),
       },
     });
     expect(
@@ -159,7 +159,7 @@ describe("goal and details", () => {
     expect(within(details()).queryByText("At risk")).toBeNull();
   });
 
-  test("the 375 ledger has Lead and Target alone; the groups name the products", () => {
+  test("the 375 ledger has Lead alone, after the charts; the groups name the products", () => {
     renderProject();
     const inline = [...document.querySelectorAll("dl")].find(
       (dl) => !details().contains(dl),
@@ -169,8 +169,14 @@ describe("goal and details", () => {
       within(inline)
         .getAllByRole("term")
         .map((dt) => dt.textContent),
-    ).toEqual(["Lead", "Target"]);
+    ).toEqual(["Lead"]);
     expect(within(inline).queryByText("Products")).toBeNull();
+    expect(
+      follows(
+        screen.getByRole("region", { name: "Progress over time" }),
+        inline,
+      ),
+    ).toBe(true);
     const phoneGroups = [
       ...document.querySelectorAll<HTMLElement>(
         ".lg\\:hidden section[data-group]",
@@ -188,27 +194,169 @@ describe("goal and details", () => {
   });
 });
 
+describe("progress", () => {
+  test("the summary sits under the goal, then the chart and By product", () => {
+    renderProject();
+    const summary = screen.getByRole("region", { name: "Progress" });
+    expect(summary).toHaveTextContent("58% 18 of 31 items done");
+    expect(summary).toHaveTextContent("Target dateDec 4");
+    const goal = screen.getByText(
+      "People read the team's work in trail without asking a bot",
+    );
+    expect(follows(goal, summary)).toBe(true);
+    const chart = screen.getByRole("region", { name: "Progress over time" });
+    expect(follows(summary, chart)).toBe(true);
+    expect(chart.querySelector("svg")).not.toBeNull();
+    expect(
+      screen.getByRole("region", { name: "By product" }),
+    ).toBeInTheDocument();
+    // a bare `grid` column grows to the chart's 520px and pushes the page sideways at 375
+    expect(chart.parentElement).toHaveClass("grid-cols-[minmax(0,1fr)]");
+  });
+
+  test("no items in scope: no summary and no charts", () => {
+    const progress = projectDetail().progress;
+    renderProject({
+      project: {
+        status: "ready",
+        data: projectDetail({
+          progress: {
+            ...progress,
+            itemsInScope: 0,
+            itemsDone: 0,
+            itemsInProgress: 0,
+            itemsOpen: 0,
+            byProduct: [],
+          },
+          history: [],
+        }),
+      },
+    });
+    expect(screen.queryByRole("region", { name: "Progress" })).toBeNull();
+    expect(
+      screen.queryByRole("region", { name: "Progress over time" }),
+    ).toBeNull();
+  });
+
+  test("nothing in scope keeps the target date in Details and the 375 ledger", () => {
+    const progress = projectDetail().progress;
+    renderProject({
+      project: {
+        status: "ready",
+        data: projectDetail({
+          targetDate: "2026-12-04",
+          progress: {
+            ...progress,
+            itemsInScope: 0,
+            itemsDone: 0,
+            itemsInProgress: 0,
+            itemsOpen: 0,
+            itemsTriage: 4,
+            byProduct: [],
+            target: { date: "2026-12-04", status: "upcoming", daysAway: 6 },
+          },
+          history: [],
+        }),
+      },
+    });
+    const dls = [...document.querySelectorAll("dl")];
+    expect(dls).toHaveLength(2);
+    for (const dl of dls) {
+      const terms = within(dl)
+        .getAllByRole("term")
+        .map((dt) => dt.textContent);
+      expect(terms).toContain("Target");
+      expect(within(dl).getByText("Dec 4")).toHaveAttribute(
+        "dateTime",
+        "2026-12-04",
+      );
+    }
+  });
+
+  test("with items in scope the target is the summary's, not a Details row", () => {
+    renderProject();
+    for (const dl of document.querySelectorAll("dl")) {
+      expect(within(dl as HTMLElement).queryByText("Target")).toBeNull();
+    }
+  });
+
+  test("one visible product draws no By product list", () => {
+    const progress = projectDetail().progress;
+    renderProject({
+      project: {
+        status: "ready",
+        data: projectDetail({
+          products: [trail],
+          progress: {
+            ...progress,
+            byProduct: progress.byProduct.filter((p) => p.key === trail.key),
+          },
+        }),
+      },
+    });
+    expect(screen.queryByRole("region", { name: "By product" })).toBeNull();
+  });
+});
+
 describe("hidden products", () => {
   test("no line when the viewer sees every product", () => {
     renderProject();
     expect(screen.queryByText(HIDDEN)).toBeNull();
   });
 
-  test("one line when some are hidden, and nothing of a hidden product anywhere", () => {
+  test("one line under the summary when some are hidden, and nothing of a hidden product anywhere", () => {
+    const progress = projectDetail().progress;
     renderProject({
       project: {
         status: "ready",
         data: projectDetail({
           products: [docsSite, trail],
           hiddenProducts: true,
+          // the server's: never a product the viewer can't see
+          progress: {
+            ...progress,
+            byProduct: progress.byProduct.filter((p) => p.key !== "OPB"),
+          },
         }),
       },
     });
     expect(screen.getAllByText(HIDDEN)).toHaveLength(1);
+    expect(
+      follows(
+        screen.getByRole("region", { name: "Progress" }),
+        screen.getByText(HIDDEN),
+      ),
+    ).toBe(true);
     const markup = document.body.innerHTML;
     for (const leak of ["OPB", "OpenBot"]) {
       expect(markup).not.toContain(leak);
     }
+  });
+
+  test("with nothing in scope the line speaks of items, not numbers and graphs", () => {
+    const progress = projectDetail().progress;
+    renderProject({
+      project: {
+        status: "ready",
+        data: projectDetail({
+          products: [docsSite, trail],
+          hiddenProducts: true,
+          progress: {
+            ...progress,
+            itemsInScope: 0,
+            itemsDone: 0,
+            itemsInProgress: 0,
+            itemsOpen: 0,
+            byProduct: [],
+          },
+          history: [],
+        }),
+      },
+    });
+    expect(screen.queryByText(HIDDEN)).toBeNull();
+    expect(
+      screen.getByText("Items from products you can't see are not shown."),
+    ).toBeInTheDocument();
   });
 });
 

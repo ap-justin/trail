@@ -34,6 +34,11 @@ import {
 } from "../db/schema.js";
 import { NotFoundError, ValidationError } from "../service/errors.js";
 import { page, pageLimit } from "../service/paging.js";
+import {
+  progressItems,
+  projectHistory,
+  projectProgress,
+} from "../service/progress.js";
 import { createWebRouter } from "./env.js";
 import { itemCounts, itemFilters, itemRows } from "./items.js";
 import { projectSummaries, toStatusUpdates } from "./summaries.js";
@@ -198,9 +203,18 @@ export function projectRoutes(db: Db) {
         .from(projectProduct)
         .where(eq(projectProduct.projectId, found.id))
         .get() ?? { n: 0 };
+      const visible = summary as WebProjectView;
+      const items =
+        progressItems(
+          db,
+          [found.id],
+          inArray(projectItem.productId, visibleIds(member)),
+        ).get(found.id) ?? [];
       const view: WebProjectDetailView = {
-        ...(summary as WebProjectView),
-        hiddenProducts: (summary as WebProjectView).products.length < n,
+        ...visible,
+        hiddenProducts: visible.products.length < n,
+        progress: projectProgress(items, visible.products, found.targetDate),
+        history: projectHistory(items),
       };
       return c.json(view, 200);
     })

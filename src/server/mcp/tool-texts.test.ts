@@ -303,3 +303,52 @@ test("whoami describes team and hint; list_products, create_product and update_p
     );
   }
 });
+
+/** What a bot must know to act on a project's progress. */
+function expectProgressGuidance(text: string | undefined, where: string) {
+  expect(text, where).toMatch(/progress/);
+  expect(text, where).toMatch(/triage and canceled items are outside/);
+  expect(text, where).toMatch(
+    /work estimates.*not time to finish and not calendar time/,
+  );
+  expect(text, where).toMatch(
+    /unfinishedWithoutEstimate.*hoursLeft understates/,
+  );
+  expect(text, where).toMatch(/daysAway.*negative when overdue/);
+  expect(text, where).toMatch(/overdue past it even when every item is done/);
+  expect(text, where).toMatch(/covers the products listed in products/);
+  expect(text, where).toMatch(
+    /the key reaches only through this project included/,
+  );
+  expect(text, where).not.toMatch(/only the products this key reaches/);
+}
+
+test("get_project and GET /projects/{ref} say what progress counts and what its hours are not", async () => {
+  const tool = await toolDescriptions();
+  expectProgressGuidance(tool("get_project").description, "get_project");
+  const spec = (await (
+    await request("GET", "/api/v1/openapi.json", { key: null })
+  ).json()) as {
+    paths: Record<string, { get?: { description?: string } }>;
+    components: {
+      schemas: Record<
+        string,
+        { properties: Record<string, { description?: string }> }
+      >;
+    };
+  };
+  expectProgressGuidance(
+    spec.paths["/projects/{ref}"]?.get?.description,
+    "GET /projects/{ref}",
+  );
+  const fields = spec.components.schemas.ProjectProgress?.properties ?? {};
+  expect(fields.hoursLeft?.description).toMatch(
+    /not time to finish.*understates the work when unfinishedWithoutEstimate/,
+  );
+  expect(fields.itemsInScope?.description).toMatch(
+    /triage and canceled are outside scope/,
+  );
+  expect(
+    spec.components.schemas.ProgressTarget?.properties.daysAway?.description,
+  ).toMatch(/negative when overdue/);
+});

@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, test } from "vitest";
+import { beforeAll, describe, expect, test, vi } from "vitest";
 import { createBot } from "../service/keys.js";
 import { atFakeTimeAsync, setupTestApp } from "../test-app.js";
 import { type Body, webSeed } from "./test-seed.js";
@@ -81,6 +81,10 @@ describe("GET /projects", () => {
       ],
       // alpha's triage issue and beta's open issue and open todo; gamma's never
       openCount: 3,
+      // alpha's done todo and beta's two open items; triage is outside scope
+      itemsDone: 1,
+      itemsInProgress: 0,
+      itemsInScope: 3,
       updatedAt: expect.any(String),
     });
     expect(body.nextCursor).toBeNull();
@@ -362,5 +366,151 @@ describe("a person beside project-scoped keys", () => {
     expect(await get("/projects/launch/items", member)).toEqual(launchBefore);
     expect(before.body.items[1].openCount).toBe(3);
     expect((await get("/projects/gamma-only", member)).status).toBe(404);
+  });
+});
+
+describe("project progress", () => {
+  const scopeOf = (p: Body) => [p.itemsInScope, p.itemsDone, p.itemsOpen];
+
+  /** `fn` with the clock stopped at noon UTC on 2026-11-20, a date before the file's sessions were made, so none has expired. */
+  async function onNov20<T>(fn: () => Promise<T>): Promise<T> {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.parse("2026-11-20T12:00:00Z"));
+    try {
+      return await fn();
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+
+  test("the detail's progress covers the viewer's products alone, triage outside scope", async () => {
+    const { body } = await onNov20(() => get("/projects/launch", member));
+    expect(body.progress).toMatchObject({
+      itemsInScope: 3,
+      itemsDone: 1,
+      itemsInProgress: 0,
+      itemsOpen: 2,
+      itemsTriage: 1,
+      itemsCanceled: 0,
+      donePercent: 33,
+      target: { date: "2026-12-24", status: "upcoming", daysAway: 34 },
+    });
+    expect(
+      body.progress.byProduct.map((p: Body) => [p.key, p.inScope, p.done]),
+    ).toEqual([
+      [alpha.key, 1, 1],
+      [beta.key, 2, 0],
+    ]);
+    // the same read is live for a viewer of every product
+    const asOwner = await get("/projects/launch", ownerCookie);
+    expect(scopeOf(asOwner.body.progress)).toEqual([4, 1, 3]);
+    expect(asOwner.body.progress.byProduct).toHaveLength(3);
+  });
+
+  test("a target date in the past reads overdue by days even with every item done, and today reads today", async () => {
+    const delta = addProject("Delta");
+    const done = await item(delta.key, "todo", { status: "done" });
+    await project("Past due", [delta.key], [done], {
+      targetDate: "2026-11-15",
+    });
+    await project("Due today", [delta.key], [done], {
+      targetDate: "2026-11-20",
+    });
+    const read = (slug: string) =>
+      onNov20(() => get(`/projects/${slug}`, ownerCookie));
+    const overdue = (await read("past-due")).body.progress;
+    expect(overdue).toMatchObject({
+      itemsInScope: 1,
+      itemsDone: 1,
+      donePercent: 100,
+      target: { date: "2026-11-15", status: "overdue", daysAway: -5 },
+    });
+    expect((await read("due-today")).body.progress.target).toEqual({
+      date: "2026-11-20",
+      status: "today",
+      daysAway: 0,
+    });
+  });
+
+  test("the list's itemsInScope counts every product for a viewer of all", async () => {
+    const { body } = await get("/projects", ownerCookie);
+    const launch = body.items.find((p: Body) => p.slug === "launch");
+    expect([
+      launch.itemsDone,
+      launch.itemsInProgress,
+      launch.itemsInScope,
+    ]).toEqual([1, 0, 4]);
+  });
+
+  test("history: end-of-day scope and done per UTC day through today, done on the later of completing and joining", async () => {
+    const DAY = 86_400_000;
+    const today = Math.floor(Date.now() / DAY) * DAY;
+    const first = today - 10 * DAY;
+    const iso = (day: number) =>
+      new Date(first + day * DAY).toISOString().slice(0, 10);
+    const on = (day: number, at = 36e5 * 9) =>
+      vi.setSystemTime(first + day * DAY + at);
+    const patch = (key: string, status: string) =>
+      request("PATCH", `/api/v1/items/${key}`, { json: { status } });
+    const add = (items: string[]) =>
+      request("POST", "/api/v1/projects/history/items", { json: { items } });
+    // a zone west of UTC: a local-day reading puts 23:59Z and 00:00Z on one day
+    vi.stubEnv("TZ", "America/Los_Angeles");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    let body: Body;
+    try {
+      on(0);
+      const open = await item(alpha.key, "todo");
+      const doneLater = await item(alpha.key, "todo");
+      const doneBefore = await item(alpha.key, "todo");
+      const canceled = await item(alpha.key, "todo");
+      const triage = await item(alpha.key, "issue");
+      const removed = await item(alpha.key, "todo");
+      await project(
+        "History",
+        [alpha.key],
+        [open, doneLater, canceled, triage],
+      );
+      on(1);
+      await patch(doneBefore, "done");
+      on(2);
+      await patch(doneLater, "done");
+      await patch(canceled, "canceled");
+      await add([doneBefore]);
+      on(3);
+      await add([removed]);
+      // joins in the last minute of day 3 and completes in the first of day 4
+      on(3, 36e5 * 24 - 30_000);
+      const late = await item(alpha.key, "todo");
+      await add([late]);
+      on(4, 30_000);
+      await patch(late, "done");
+      on(4);
+      await request("DELETE", `/api/v1/projects/history/items/${removed}`, {});
+      // the read runs on the same clock, so "today" is day 10 whenever the test runs
+      on(10);
+      body = (await get("/projects/history", member)).body;
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllEnvs();
+    }
+    expect(body.history).toEqual([
+      { date: iso(0), scope: 2, done: 0 },
+      { date: iso(1), scope: 2, done: 0 },
+      { date: iso(2), scope: 3, done: 2 },
+      { date: iso(3), scope: 4, done: 2 },
+      ...[4, 5, 6, 7, 8, 9, 10].map((d) => ({
+        date: iso(d),
+        scope: 4,
+        done: 3,
+      })),
+    ]);
+    expect(scopeOf(body.progress)).toEqual([4, 3, 1]);
+  });
+
+  test("a project with nothing in scope has no history", async () => {
+    const { body } = await get("/projects/seen-only", member);
+    expect(body.history).toEqual([]);
+    expect(body.progress.itemsInScope).toBe(0);
   });
 });

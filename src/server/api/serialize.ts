@@ -96,6 +96,7 @@ export function toProject(row: Project): ProjectView {
     createdBy: row.createdBy,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    ...(row.progress && { progress: row.progress }),
   };
 }
 

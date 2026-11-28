@@ -622,6 +622,9 @@ export function projectRow(
     targetDate: "2026-12-04",
     products: [docsSite, openBot, trail],
     openCount: 14,
+    itemsDone: 18,
+    itemsInProgress: 3,
+    itemsInScope: 31,
     updatedAt: "2026-11-11T09:12:00.000Z",
     ...overrides,
   };
@@ -630,7 +633,62 @@ export function projectRow(
 export function projectDetail(
   overrides: Partial<WebProjectDetailView> = {},
 ): WebProjectDetailView {
-  return { ...projectRow(), hiddenProducts: false, ...overrides };
+  return {
+    ...projectRow(),
+    hiddenProducts: false,
+    progress: {
+      itemsInScope: 31,
+      itemsDone: 18,
+      itemsInProgress: 3,
+      itemsOpen: 10,
+      itemsTriage: 4,
+      itemsCanceled: 2,
+      donePercent: 58,
+      hoursEstimated: 64.5,
+      hoursDone: 40,
+      hoursLeft: 24.5,
+      hoursDonePercent: 62,
+      unfinishedWithoutEstimate: 2,
+      target: { date: "2026-12-04", status: "upcoming", daysAway: 6 },
+      byProduct: [
+        {
+          ...docsSite,
+          inScope: 8,
+          done: 3,
+          inProgress: 1,
+          open: 4,
+          hoursLeft: 9,
+          unfinishedWithoutEstimate: 2,
+        },
+        {
+          ...openBot,
+          inScope: 5,
+          done: 4,
+          inProgress: 0,
+          open: 1,
+          hoursLeft: 1.5,
+          unfinishedWithoutEstimate: 0,
+        },
+        {
+          ...trail,
+          inScope: 18,
+          done: 11,
+          inProgress: 2,
+          open: 5,
+          hoursLeft: 14,
+          unfinishedWithoutEstimate: 0,
+        },
+      ],
+    },
+    history: [
+      { date: "2026-11-24", scope: 27, done: 12 },
+      { date: "2026-11-25", scope: 29, done: 14 },
+      { date: "2026-11-26", scope: 30, done: 15 },
+      { date: "2026-11-27", scope: 31, done: 17 },
+      { date: "2026-11-28", scope: 31, done: 18 },
+    ],
+    ...overrides,
+  };
 }
 
 /** Team access: one product, Alpha leads, on track. */
@@ -644,6 +702,9 @@ export const teamAccessRow = (): WebProjectView =>
     targetDate: "2026-11-30",
     products: [trail],
     openCount: 5,
+    itemsDone: 6,
+    itemsInProgress: 1,
+    itemsInScope: 10,
   });
 
 /** TRL on its own page: a repo, an owner and two projects. */

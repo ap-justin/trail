@@ -162,7 +162,7 @@ describe("project page", () => {
     renderApp("/projects/human-ui");
     expect(
       await screen.findAllByText(
-        "Items from products you can't see are not shown.",
+        "The numbers and graphs here cover only the products you can see.",
       ),
     ).not.toHaveLength(0);
   });
