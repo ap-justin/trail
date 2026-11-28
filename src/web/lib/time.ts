@@ -62,6 +62,13 @@ export function dayKey(iso: string): string {
   return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
 }
 
+/** Whole calendar days from the viewer's today to a `YYYY-MM-DD`: 0 on the day, negative once past. */
+export function daysUntil(ymd: string, now: Date): number {
+  const [year = 0, month = 1, day = 1] = ymd.split("-").map(Number);
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((Date.UTC(year, month - 1, day) - today) / 86_400_000);
+}
+
 /** A calendar date with no time (a project's target, `2026-12-04`) as `Dec 4`, by `formatDay`'s rule. */
 export function formatDate(ymd: string, now: Date): string {
   const [year = 0, month = 1, day = 1] = ymd.split("-").map(Number);

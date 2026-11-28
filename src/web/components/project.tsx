@@ -2,6 +2,7 @@ import { PackageIcon } from "lucide-react";
 import { type ReactNode, useId, useRef } from "react";
 import { ActorAvatar, BotTitle } from "@/components/actor";
 import { AppLink, textLinkFocus, textLinkTap } from "@/components/app-link";
+import { BurnUp } from "@/components/burn-up";
 import { ProductSelect } from "@/components/filter-select";
 import {
   FilterEmpty,
@@ -15,6 +16,7 @@ import {
   statusTabValue,
 } from "@/components/item-list";
 import { type NotesRead, NotesSection } from "@/components/notes";
+import { ByProduct, ProgressSummary } from "@/components/progress";
 import {
   EmptyState,
   ErrorState,
@@ -24,7 +26,6 @@ import {
 import {
   AsideHeading,
   StatusUpdateList,
-  TargetDate,
   UpdateHealth,
 } from "@/components/status-updates";
 import { KeyPill } from "@/components/text";
@@ -113,22 +114,21 @@ export function ProjectHealth({ project }: { project: WebProjectView }) {
   );
 }
 
-const HIDDEN_PRODUCTS = "Items from products you can't see are not shown.";
+const HIDDEN_PRODUCTS =
+  "The numbers and graphs here cover only the products you can see.";
 
 /**
- * Lead, Target, Health and Products as a ledger. `aside` (1024px and up): a 72px label
- * column, the lead's title under the name, each product's name and key. `inline`
- * (below): Lead and Target alone in 36px rows on an 80px column, the title in line;
- * Health rides the heading there and the groups name the products.
+ * Lead, Health and Products as a ledger. `aside` (1024px and up): a 72px label column,
+ * the lead's title under the name, each product's name and key. `inline` (below): Lead
+ * alone in a 36px row on an 80px column, the title in line; Health rides the heading
+ * there and the groups name the products. The target is the progress summary's.
  */
 function ProjectDetails({
   project,
   layout,
-  now,
 }: {
   project: WebProjectDetailView;
   layout: "aside" | "inline";
-  now: Date;
 }) {
   const aside = layout === "aside";
   const label = "text-muted-foreground";
@@ -149,14 +149,6 @@ function ProjectDetails({
           <BotTitle actor={project.lead} />
         </span>
       </dd>
-      {project.targetDate && (
-        <>
-          <dt className={label}>Target</dt>
-          <dd>
-            <TargetDate date={project.targetDate} now={now} />
-          </dd>
-        </>
-      )}
       {aside && project.latestStatusUpdate && project.health && (
         <>
           <dt className={label}>Health</dt>
@@ -269,6 +261,24 @@ function NoWork() {
   );
 }
 
+/** Progress over time beside By product on a wide column (520px and the rest); stacked on a narrow one. */
+function ProgressCharts({
+  project,
+  now,
+}: {
+  project: WebProjectDetailView;
+  now: Date;
+}) {
+  return (
+    <div className="@container mt-2 lg:mt-4">
+      <div className="grid gap-5 @3xl:grid-cols-[--spacing(130)_minmax(0,1fr)]">
+        <BurnUp history={project.history} now={now} />
+        <ByProduct products={project.progress.byProduct} />
+      </div>
+    </div>
+  );
+}
+
 function ProjectBody(
   props: Omit<ProjectViewProps, "project" | "onRetryProject"> & {
     project: WebProjectDetailView;
@@ -312,12 +322,22 @@ function ProjectBody(
               {project.goal}
             </p>
           </div>
-          <div className="lg:hidden">
-            <ProjectDetails project={project} layout="inline" now={now} />
-          </div>
+          {project.progress.itemsInScope > 0 && (
+            <ProgressSummary
+              progress={project.progress}
+              now={now}
+              className="mt-1 lg:mt-3"
+            />
+          )}
           {project.hiddenProducts && (
             <p className="text-xs text-muted-foreground">{HIDDEN_PRODUCTS}</p>
           )}
+          {project.progress.itemsInScope > 0 && (
+            <ProgressCharts project={project} now={now} />
+          )}
+          <div className="lg:hidden">
+            <ProjectDetails project={project} layout="inline" />
+          </div>
         </div>
         {empty ? (
           <NoItems />
@@ -381,7 +401,7 @@ function ProjectBody(
       <aside className="flex flex-col gap-5 max-lg:pt-5 max-lg:pb-6 lg:w-75 lg:shrink-0">
         <section aria-labelledby={detailsHeading} className="max-lg:hidden">
           <AsideHeading id={detailsHeading}>Details</AsideHeading>
-          <ProjectDetails project={project} layout="aside" now={now} />
+          <ProjectDetails project={project} layout="aside" />
         </section>
         <section aria-labelledby={updatesHeading}>
           <AsideHeading
@@ -405,9 +425,10 @@ function ProjectBody(
 }
 
 /**
- * A project: its goal, then its items grouped by product and filtered by product, type
- * and status, beside Details and status updates. Only the viewer's products ever show;
- * when the project has others, one line says items are missing, never which.
+ * A project: its goal and progress, then its items grouped by product and filtered by
+ * product, type and status, beside Details and status updates. Only the viewer's products
+ * ever show; when the project has others, one line says the figures cover only those,
+ * never which are missing.
  */
 export function ProjectView({
   project,
