@@ -58,7 +58,19 @@ function ProjectName({ project }: { project: WebProjectView }) {
   );
 }
 
-const NO_ITEMS = <span className="text-muted-foreground">No items yet</span>;
+/**
+ * Nothing in scope: how many wait in triage, or No items yet. With scope empty the open
+ * count is all triage; a project of only canceled items still reads No items yet.
+ */
+function EmptyScope({ project }: { project: WebProjectView }) {
+  return (
+    <span className="text-muted-foreground">
+      {project.openCount > 0
+        ? `${project.openCount} in triage`
+        : "No items yet"}
+    </span>
+  );
+}
 
 const projectBar = (project: WebProjectView) => ({
   done: project.itemsDone,
@@ -68,7 +80,7 @@ const projectBar = (project: WebProjectView) => ({
 
 /** The table's Progress cell: done of scope over a 96px bar. */
 function ProgressCell({ project }: { project: WebProjectView }) {
-  if (project.itemsInScope === 0) return NO_ITEMS;
+  if (project.itemsInScope === 0) return <EmptyScope project={project} />;
   return (
     <>
       <p>{`${project.itemsDone} of ${project.itemsInScope}`}</p>
@@ -79,7 +91,12 @@ function ProgressCell({ project }: { project: WebProjectView }) {
 
 /** The card's: a full-width bar over done of scope. */
 function ProgressLine({ project }: { project: WebProjectView }) {
-  if (project.itemsInScope === 0) return <p className="text-xs">{NO_ITEMS}</p>;
+  if (project.itemsInScope === 0)
+    return (
+      <p className="text-xs">
+        <EmptyScope project={project} />
+      </p>
+    );
   return (
     <div className="flex flex-col gap-1.5">
       <StackedBar {...projectBar(project)} className="h-1.5" />

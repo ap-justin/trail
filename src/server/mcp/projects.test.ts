@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { expect, onTestFinished, test } from "vitest";
+import { expect, onTestFinished, test, vi } from "vitest";
 import { webhookDelivery, webhookSubscription } from "../db/schema.js";
 import { createBot } from "../service/keys.js";
 import { atFakeTimeAsync, projectKey, setupTestApp } from "../test-app.js";
@@ -618,4 +618,129 @@ test("get_project and GET /projects/{slug} carry one progress, by product A to Z
     byProduct: products,
   });
   expect(viaRest.progress).toEqual(viaMcp.progress);
+});
+
+test("a key that reaches a project only through one product or by listing it reads the progress of every item in it", async () => {
+  const one = await productBot("Reach One");
+  const two = await productBot("Reach Two");
+  const slug = freshSlug();
+  await call(one.client, "create_project", {
+    name: "Reach",
+    slug,
+    products: [one.product.key, two.product.key],
+  });
+  const mine = await call(one.client, "add_todo", {
+    product: one.product.key,
+    title: "mine",
+    estimate: 2,
+  });
+  const theirs = await call(two.client, "add_todo", {
+    product: two.product.key,
+    title: "theirs",
+    estimate: 4,
+  });
+  await call(two.client, "update_item", { item: theirs.key, status: "done" });
+  const hiddenTriage = await call(two.client, "file_issue", {
+    product: two.product.key,
+    title: "untriaged",
+  });
+  await call(one.client, "add_to_project", {
+    project: slug,
+    items: [mine.key, theirs.key, hiddenTriage.key],
+  });
+
+  const everything = (await call(one.client, "get_project", { project: slug }))
+    .progress;
+  expect(everything).toMatchObject({
+    itemsInScope: 2,
+    itemsDone: 1,
+    itemsOpen: 1,
+    itemsTriage: 1,
+    hoursEstimated: 6,
+    hoursDone: 4,
+  });
+  expect(everything.byProduct.map((p: Body) => [p.key, p.inScope])).toEqual(
+    [
+      [one.product.key, 1],
+      [two.product.key, 1],
+    ].sort(([a], [b]) => String(a).localeCompare(String(b))),
+  );
+  // a key listing only the other product, and a key listing only the project
+  const scopes: [string, { products?: string[]; projects?: string[] }][] = [
+    ["other product", { products: [two.product.key] }],
+    ["project", { projects: [slug] }],
+    ["first product", { products: [one.product.key] }],
+  ];
+  for (const [name, scope] of scopes) {
+    const key = createBot(db, `reach reader of ${name}`, { scope }).key;
+    const viaMcp = await call(await connect(key), "get_project", {
+      project: slug,
+    });
+    expect(viaMcp.progress).toEqual(everything);
+    const res = await request("GET", `/api/v1/projects/${slug}`, { key });
+    expect(((await res.json()) as Body).progress).toEqual(everything);
+  }
+});
+
+test("the target date reads against the UTC day on get_project and GET /projects/{slug}: upcoming, and overdue with every item done", async () => {
+  const owner = await productBot("Target Owner");
+  const product = owner.product.key;
+  const upcoming = freshSlug();
+  const overdue = freshSlug();
+  await call(owner.client, "create_project", {
+    name: "later",
+    slug: upcoming,
+    targetDate: "2026-12-01",
+    products: [product],
+  });
+  await call(owner.client, "create_project", {
+    name: "late",
+    slug: overdue,
+    targetDate: "2026-11-20",
+    products: [product],
+  });
+  const finished = await call(owner.client, "add_todo", {
+    product,
+    title: "finished",
+  });
+  await call(owner.client, "update_item", {
+    item: finished.key,
+    status: "done",
+  });
+  await call(owner.client, "add_to_project", {
+    project: overdue,
+    items: [finished.key],
+  });
+
+  // the last minute of the 28th in UTC: a local-day reading would differ in most zones
+  vi.useFakeTimers({ toFake: ["Date"] });
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
+  vi.setSystemTime(Date.parse("2026-11-28T23:59:00Z"));
+  const read = async (slug: string) => {
+    const viaMcp = (await call(owner.client, "get_project", { project: slug }))
+      .progress;
+    const res = await request("GET", `/api/v1/projects/${slug}`, {
+      key: owner.key,
+    });
+    expect(((await res.json()) as Body).progress.target).toEqual(viaMcp.target);
+    return viaMcp;
+  };
+  expect((await read(upcoming)).target).toEqual({
+    date: "2026-12-01",
+    status: "upcoming",
+    daysAway: 3,
+  });
+  const late = await read(overdue);
+  expect(late).toMatchObject({
+    itemsInScope: 1,
+    itemsDone: 1,
+    donePercent: 100,
+  });
+  expect(late.target).toEqual({
+    date: "2026-11-20",
+    status: "overdue",
+    daysAway: -8,
+  });
 });

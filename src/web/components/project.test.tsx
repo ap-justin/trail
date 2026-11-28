@@ -206,7 +206,7 @@ describe("progress", () => {
     expect(follows(goal, summary)).toBe(true);
     const chart = screen.getByRole("region", { name: "Progress over time" });
     expect(follows(summary, chart)).toBe(true);
-    expect(within(chart).getByRole("img")).toBeInTheDocument();
+    expect(chart.querySelector("svg")).not.toBeNull();
     expect(
       screen.getByRole("region", { name: "By product" }),
     ).toBeInTheDocument();
@@ -236,6 +236,48 @@ describe("progress", () => {
     expect(
       screen.queryByRole("region", { name: "Progress over time" }),
     ).toBeNull();
+  });
+
+  test("nothing in scope keeps the target date in Details and the 375 ledger", () => {
+    const progress = projectDetail().progress;
+    renderProject({
+      project: {
+        status: "ready",
+        data: projectDetail({
+          targetDate: "2026-12-04",
+          progress: {
+            ...progress,
+            itemsInScope: 0,
+            itemsDone: 0,
+            itemsInProgress: 0,
+            itemsOpen: 0,
+            itemsTriage: 4,
+            byProduct: [],
+            target: { date: "2026-12-04", status: "upcoming", daysAway: 6 },
+          },
+          history: [],
+        }),
+      },
+    });
+    const dls = [...document.querySelectorAll("dl")];
+    expect(dls).toHaveLength(2);
+    for (const dl of dls) {
+      const terms = within(dl)
+        .getAllByRole("term")
+        .map((dt) => dt.textContent);
+      expect(terms).toContain("Target");
+      expect(within(dl).getByText("Dec 4")).toHaveAttribute(
+        "dateTime",
+        "2026-12-04",
+      );
+    }
+  });
+
+  test("with items in scope the target is the summary's, not a Details row", () => {
+    renderProject();
+    for (const dl of document.querySelectorAll("dl")) {
+      expect(within(dl as HTMLElement).queryByText("Target")).toBeNull();
+    }
   });
 
   test("one visible product draws no By product list", () => {
@@ -289,6 +331,32 @@ describe("hidden products", () => {
     for (const leak of ["OPB", "OpenBot"]) {
       expect(markup).not.toContain(leak);
     }
+  });
+
+  test("with nothing in scope the line speaks of items, not numbers and graphs", () => {
+    const progress = projectDetail().progress;
+    renderProject({
+      project: {
+        status: "ready",
+        data: projectDetail({
+          products: [docsSite, trail],
+          hiddenProducts: true,
+          progress: {
+            ...progress,
+            itemsInScope: 0,
+            itemsDone: 0,
+            itemsInProgress: 0,
+            itemsOpen: 0,
+            byProduct: [],
+          },
+          history: [],
+        }),
+      },
+    });
+    expect(screen.queryByText(HIDDEN)).toBeNull();
+    expect(
+      screen.getByText("Items from products you can't see are not shown."),
+    ).toBeInTheDocument();
   });
 });
 

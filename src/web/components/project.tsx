@@ -26,6 +26,7 @@ import {
 import {
   AsideHeading,
   StatusUpdateList,
+  TargetDate,
   UpdateHealth,
 } from "@/components/status-updates";
 import { KeyPill } from "@/components/text";
@@ -114,24 +115,32 @@ export function ProjectHealth({ project }: { project: WebProjectView }) {
   );
 }
 
-const HIDDEN_PRODUCTS =
-  "The numbers and graphs here cover only the products you can see.";
+/** With nothing in scope no numbers or graphs are drawn, so the line speaks of items. */
+const hiddenProductsLine = (inScope: number) =>
+  inScope > 0
+    ? "The numbers and graphs here cover only the products you can see."
+    : "Items from products you can't see are not shown.";
 
 /**
- * Lead, Health and Products as a ledger. `aside` (1024px and up): a 72px label column,
- * the lead's title under the name, each product's name and key. `inline` (below): Lead
- * alone in a 36px row on an 80px column, the title in line; Health rides the heading
- * there and the groups name the products. The target is the progress summary's.
+ * Lead, Target, Health and Products as a ledger. `aside` (1024px and up): a 72px label
+ * column, the lead's title under the name, each product's name and key. `inline` (below):
+ * Lead and Target alone in 36px rows on an 80px column, the title in line; Health rides
+ * the heading there and the groups name the products. With items in scope the target is
+ * the progress summary's, not a row here.
  */
 function ProjectDetails({
   project,
   layout,
+  now,
 }: {
   project: WebProjectDetailView;
   layout: "aside" | "inline";
+  now: Date;
 }) {
   const aside = layout === "aside";
   const label = "text-muted-foreground";
+  const target =
+    project.progress.itemsInScope === 0 ? project.targetDate : null;
   return (
     <dl
       className={cn(
@@ -149,6 +158,14 @@ function ProjectDetails({
           <BotTitle actor={project.lead} />
         </span>
       </dd>
+      {target && (
+        <>
+          <dt className={label}>Target</dt>
+          <dd>
+            <TargetDate date={target} now={now} />
+          </dd>
+        </>
+      )}
       {aside && project.latestStatusUpdate && project.health && (
         <>
           <dt className={label}>Health</dt>
@@ -330,13 +347,15 @@ function ProjectBody(
             />
           )}
           {project.hiddenProducts && (
-            <p className="text-xs text-muted-foreground">{HIDDEN_PRODUCTS}</p>
+            <p className="text-xs text-muted-foreground">
+              {hiddenProductsLine(project.progress.itemsInScope)}
+            </p>
           )}
           {project.progress.itemsInScope > 0 && (
             <ProgressCharts project={project} now={now} />
           )}
           <div className="lg:hidden">
-            <ProjectDetails project={project} layout="inline" />
+            <ProjectDetails project={project} layout="inline" now={now} />
           </div>
         </div>
         {empty ? (
@@ -401,7 +420,7 @@ function ProjectBody(
       <aside className="flex flex-col gap-5 max-lg:pt-5 max-lg:pb-6 lg:w-75 lg:shrink-0">
         <section aria-labelledby={detailsHeading} className="max-lg:hidden">
           <AsideHeading id={detailsHeading}>Details</AsideHeading>
-          <ProjectDetails project={project} layout="aside" />
+          <ProjectDetails project={project} layout="aside" now={now} />
         </section>
         <section aria-labelledby={updatesHeading}>
           <AsideHeading

@@ -113,11 +113,33 @@ describe("projects", () => {
   test("no items yet: the words and no bar, in the table and on the card", () => {
     renderProjects({
       projects: [
-        projectRow({ itemsInScope: 0, itemsDone: 0, itemsInProgress: 0 }),
+        projectRow({
+          openCount: 0,
+          itemsInScope: 0,
+          itemsDone: 0,
+          itemsInProgress: 0,
+        }),
       ],
     });
     expect(cellsOf(rowFor("human-ui"))[6]).toHaveTextContent(/^No items yet$/);
     expect(cardFor("human-ui")).toHaveTextContent("No items yet");
+    expect(document.querySelector("[data-bar]")).toBeNull();
+  });
+
+  test("only triage items: how many are in triage, not No items yet", () => {
+    renderProjects({
+      projects: [
+        projectRow({
+          openCount: 4,
+          itemsInScope: 0,
+          itemsDone: 0,
+          itemsInProgress: 0,
+        }),
+      ],
+    });
+    expect(cellsOf(rowFor("human-ui"))[6]).toHaveTextContent(/^4 in triage$/);
+    expect(cardFor("human-ui")).toHaveTextContent("4 in triage");
+    expect(screen.queryByText("No items yet")).toBeNull();
     expect(document.querySelector("[data-bar]")).toBeNull();
   });
 

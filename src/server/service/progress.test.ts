@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import {
   type ProgressItem,
   projectHistory,
@@ -138,19 +138,12 @@ describe("projectProgress", () => {
     ]).toEqual([4, 4, 0, 99, 1]);
   });
 
-  test("the target against the UTC day: upcoming, today, overdue with negative daysAway", () => {
-    // late on the 28th in UTC is still the 28th, whatever the server's zone
-    const late = new Date("2026-11-28T23:59:00Z");
-    const t = (date: string) => projectProgress([], [], date, late).target;
+  test("a target with unfinished work: upcoming and overdue carry daysAway", () => {
+    const t = (date: string) => projectProgress([], [], date, now).target;
     expect(t("2026-12-01")).toEqual({
       date: "2026-12-01",
       status: "upcoming",
       daysAway: 3,
-    });
-    expect(t("2026-11-28")).toEqual({
-      date: "2026-11-28",
-      status: "today",
-      daysAway: 0,
     });
     expect(t("2026-11-20")).toEqual({
       date: "2026-11-20",
@@ -159,6 +152,70 @@ describe("projectProgress", () => {
     });
   });
 });
+
+// A UTC-day rule that read local date parts would agree with these only where
+// the zone is UTC, so each runs under zones a day either side of it.
+describe.each(["Pacific/Kiritimati", "America/Los_Angeles"])(
+  "UTC days in %s",
+  (zone) => {
+    beforeAll(() => {
+      vi.stubEnv("TZ", zone);
+    });
+    afterAll(() => {
+      vi.unstubAllEnvs();
+    });
+
+    test("the zone is in force", () => {
+      // 14:00 UTC on the 28th is already the 29th at +14 and still the 28th at -8
+      const local = new Date("2026-11-28T14:00:00Z").getDate();
+      expect(local).toBe(zone === "Pacific/Kiritimati" ? 29 : 28);
+    });
+
+    test("the target counts from the UTC day: late on the 28th is still the 28th", () => {
+      const late = new Date("2026-11-28T23:59:00Z");
+      const t = (date: string) => projectProgress([], [], date, late).target;
+      expect(t("2026-11-28")).toEqual({
+        date: "2026-11-28",
+        status: "today",
+        daysAway: 0,
+      });
+      expect(t("2026-12-01")).toEqual({
+        date: "2026-12-01",
+        status: "upcoming",
+        daysAway: 3,
+      });
+    });
+
+    test("the target counts from the UTC day: just after midnight UTC it is the 29th", () => {
+      const early = new Date("2026-11-29T00:00:00Z");
+      const t = (date: string) => projectProgress([], [], date, early).target;
+      expect(t("2026-11-28")).toEqual({
+        date: "2026-11-28",
+        status: "overdue",
+        daysAway: -1,
+      });
+      expect(t("2026-11-29")).toEqual({
+        date: "2026-11-29",
+        status: "today",
+        daysAway: 0,
+      });
+    });
+
+    test("history days are UTC days: 23:59:59Z and 00:00:00Z fall on different days", () => {
+      const items: ProgressItem[] = [
+        item("ALP", "done", null, {
+          joinedAt: new Date("2026-11-26T23:59:59Z"),
+          completedAt: new Date("2026-11-27T00:00:00Z"),
+        }),
+      ];
+      expect(projectHistory(items, new Date("2026-11-28T00:00:01Z"))).toEqual([
+        { date: "2026-11-26", scope: 1, done: 0 },
+        { date: "2026-11-27", scope: 1, done: 1 },
+        { date: "2026-11-28", scope: 1, done: 1 },
+      ]);
+    });
+  },
+);
 
 describe("projectHistory", () => {
   const at = (iso: string) => new Date(iso);

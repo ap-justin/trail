@@ -22,8 +22,9 @@ describe("niceMax", () => {
     [130, 140],
     [1234, 1400],
   ])("%i rounds up to %i, whose half is whole", (value, max) => {
-    expect(niceMax(value)).toBe(max);
-    expect(Number.isInteger(max / 2)).toBe(true);
+    const rounded = niceMax(value);
+    expect(rounded).toBe(max);
+    expect(Number.isInteger(rounded / 2)).toBe(true);
   });
 
   test("an empty or zero scale still has a top", () => {
@@ -47,10 +48,33 @@ describe("burnUpGeometry", () => {
 
   test("the lines start at the plot's left and end at its right, at their values", () => {
     const g = burnUpGeometry(history, 520);
-    expect(g.scope[0]).toEqual([g.left, g.y(9)]);
-    expect(g.scope.at(-1)).toEqual([g.plotRight, g.y(28)]);
-    expect(g.done.at(-1)).toEqual([g.plotRight, g.y(5)]);
-    expect(g.y(0)).toBe(g.bottom);
+    // max 30 over the plot from y 8 to 168: 160 / 30 px a unit
+    expect(g.y(0)).toBe(168);
+    expect(g.y(15)).toBe(88);
+    expect(g.y(30)).toBe(8);
+    expect(g.scope[0]).toEqual([28, 168 - (9 * 160) / 30]);
+    expect(g.scope.at(-1)).toEqual([g.plotRight, 168 - (28 * 160) / 30]);
+    expect(g.done.at(-1)).toEqual([g.plotRight, 168 - (5 * 160) / 30]);
+    // 520 wide less the 8px gap and the 8 chars of "Scope 28" at 7px
+    expect(g.plotRight).toBe(456);
+    expect(g.left).toBe(28);
+  });
+
+  test("a one-day history stays finite, at the plot's left edge and no divide by zero", () => {
+    // BurnUp draws a one-day history as text, but the geometry is still total
+    const g = burnUpGeometry([point("2026-11-28", 3, 1)], 520);
+    // max 4, 40px a unit
+    expect(g.scope).toEqual([[28, 48]]);
+    expect(g.done).toEqual([[28, 128]]);
+  });
+
+  test("two points on the same date stack at the left edge", () => {
+    const g = burnUpGeometry(
+      [point("2026-11-28", 5, 2), point("2026-11-28", 6, 3)],
+      520,
+    );
+    expect(g.scope.map(([x]) => x)).toEqual([28, 28]);
+    expect(Number.isFinite(g.scope[1]?.[1])).toBe(true);
   });
 
   test("the right gutter fits the longer end label plus 8px", () => {

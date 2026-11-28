@@ -372,8 +372,19 @@ describe("a person beside project-scoped keys", () => {
 describe("project progress", () => {
   const scopeOf = (p: Body) => [p.itemsInScope, p.itemsDone, p.itemsOpen];
 
+  /** `fn` with the clock stopped at noon UTC on 2026-11-20, a date before the file's sessions were made, so none has expired. */
+  async function onNov20<T>(fn: () => Promise<T>): Promise<T> {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.parse("2026-11-20T12:00:00Z"));
+    try {
+      return await fn();
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+
   test("the detail's progress covers the viewer's products alone, triage outside scope", async () => {
-    const { body } = await get("/projects/launch", member);
+    const { body } = await onNov20(() => get("/projects/launch", member));
     expect(body.progress).toMatchObject({
       itemsInScope: 3,
       itemsDone: 1,
@@ -382,7 +393,7 @@ describe("project progress", () => {
       itemsTriage: 1,
       itemsCanceled: 0,
       donePercent: 33,
-      target: { date: "2026-12-24", status: expect.any(String) },
+      target: { date: "2026-12-24", status: "upcoming", daysAway: 34 },
     });
     expect(
       body.progress.byProduct.map((p: Body) => [p.key, p.inScope, p.done]),
@@ -394,6 +405,31 @@ describe("project progress", () => {
     const asOwner = await get("/projects/launch", ownerCookie);
     expect(scopeOf(asOwner.body.progress)).toEqual([4, 1, 3]);
     expect(asOwner.body.progress.byProduct).toHaveLength(3);
+  });
+
+  test("a target date in the past reads overdue by days even with every item done, and today reads today", async () => {
+    const delta = addProject("Delta");
+    const done = await item(delta.key, "todo", { status: "done" });
+    await project("Past due", [delta.key], [done], {
+      targetDate: "2026-11-15",
+    });
+    await project("Due today", [delta.key], [done], {
+      targetDate: "2026-11-20",
+    });
+    const read = (slug: string) =>
+      onNov20(() => get(`/projects/${slug}`, ownerCookie));
+    const overdue = (await read("past-due")).body.progress;
+    expect(overdue).toMatchObject({
+      itemsInScope: 1,
+      itemsDone: 1,
+      donePercent: 100,
+      target: { date: "2026-11-15", status: "overdue", daysAway: -5 },
+    });
+    expect((await read("due-today")).body.progress.target).toEqual({
+      date: "2026-11-20",
+      status: "today",
+      daysAway: 0,
+    });
   });
 
   test("the list's itemsInScope counts every product for a viewer of all", async () => {
@@ -412,12 +448,16 @@ describe("project progress", () => {
     const first = today - 10 * DAY;
     const iso = (day: number) =>
       new Date(first + day * DAY).toISOString().slice(0, 10);
-    const on = (day: number) => vi.setSystemTime(first + day * DAY + 36e5 * 9);
+    const on = (day: number, at = 36e5 * 9) =>
+      vi.setSystemTime(first + day * DAY + at);
     const patch = (key: string, status: string) =>
       request("PATCH", `/api/v1/items/${key}`, { json: { status } });
     const add = (items: string[]) =>
       request("POST", "/api/v1/projects/history/items", { json: { items } });
+    // a zone west of UTC: a local-day reading puts 23:59Z and 00:00Z on one day
+    vi.stubEnv("TZ", "America/Los_Angeles");
     vi.useFakeTimers({ toFake: ["Date"] });
+    let body: Body;
     try {
       on(0);
       const open = await item(alpha.key, "todo");
@@ -439,22 +479,33 @@ describe("project progress", () => {
       await add([doneBefore]);
       on(3);
       await add([removed]);
+      // joins in the last minute of day 3 and completes in the first of day 4
+      on(3, 36e5 * 24 - 30_000);
+      const late = await item(alpha.key, "todo");
+      await add([late]);
+      on(4, 30_000);
+      await patch(late, "done");
       on(4);
       await request("DELETE", `/api/v1/projects/history/items/${removed}`, {});
+      // the read runs on the same clock, so "today" is day 10 whenever the test runs
+      on(10);
+      body = (await get("/projects/history", member)).body;
     } finally {
       vi.useRealTimers();
+      vi.unstubAllEnvs();
     }
-    const { body } = await get("/projects/history", member);
     expect(body.history).toEqual([
       { date: iso(0), scope: 2, done: 0 },
       { date: iso(1), scope: 2, done: 0 },
-      ...[2, 3, 4, 5, 6, 7, 8, 9, 10].map((d) => ({
+      { date: iso(2), scope: 3, done: 2 },
+      { date: iso(3), scope: 4, done: 2 },
+      ...[4, 5, 6, 7, 8, 9, 10].map((d) => ({
         date: iso(d),
-        scope: 3,
-        done: 2,
+        scope: 4,
+        done: 3,
       })),
     ]);
-    expect(scopeOf(body.progress)).toEqual([3, 2, 1]);
+    expect(scopeOf(body.progress)).toEqual([4, 3, 1]);
   });
 
   test("a project with nothing in scope has no history", async () => {

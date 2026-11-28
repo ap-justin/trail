@@ -379,16 +379,15 @@ const countsSchema = z
   })
   .openapi("ItemCounts");
 
-const REACHED_ONLY =
-  "Over the products this key reaches alone, like counts; notes are never counted.";
+const OVER_LISTED_PRODUCTS =
+  "Like counts, it covers the products listed in products: every one, a product the key reaches only through this project included, and none the key can't name. Notes are never counted.";
 const SCOPE_RULE =
   "Scope is the project's items in open, in_progress or done: triage and canceled items are outside it and in no total but itemsTriage and itemsCanceled.";
 const HOURS_ARE_ESTIMATES =
   "Hours are the items' work estimates (each item's estimate), not time to finish and not calendar time.";
 
 /** What get_project and GET /projects/{slug} say of progress, so a bot reads it right. */
-export const PROGRESS_READS =
-  "progress says how far it is: itemsInScope counts its open, in_progress and done items (triage and canceled items are outside scope, counted only in itemsTriage and itemsCanceled), and donePercent is by items. hoursEstimated, hoursDone and hoursLeft sum the items' work estimates, not time to finish and not calendar time; when unfinishedWithoutEstimate is above 0, hoursLeft understates the work left, so estimate those items. target is the targetDate against the server's UTC today: status none, upcoming, today or overdue, with daysAway negative when overdue. byProduct splits it per product. Like counts, progress covers only the products this key reaches.";
+export const PROGRESS_READS = `Its progress says how far it is: itemsInScope counts its open, in_progress and done items (triage and canceled items are outside scope, counted only in itemsTriage and itemsCanceled), and donePercent is by items. hoursEstimated, hoursDone and hoursLeft sum the items' work estimates, not time to finish and not calendar time; when unfinishedWithoutEstimate is above 0, hoursLeft understates the work left, so estimate those items. target is the targetDate against the server's UTC today: status none, upcoming, today or overdue, with daysAway negative when overdue. The status goes by the date alone, so it reads overdue past it even when every item is done. byProduct gives each product's key, name, inScope, done, inProgress, open, hoursLeft and unfinishedWithoutEstimate. ${OVER_LISTED_PRODUCTS}`;
 
 const progressTargetSchema = z
   .object({
@@ -398,7 +397,7 @@ const progressTargetSchema = z
     }),
     status: z.enum(["none", "upcoming", "today", "overdue"]).meta({
       description:
-        "none with no target date; otherwise the target date against the server's UTC today: upcoming before it, today on it, overdue past it, whatever is unfinished.",
+        "none with no target date; otherwise the target date against the server's UTC today: upcoming before it, today on it, overdue past it, even when every item is done.",
     }),
     daysAway: z.int().nullable().meta({
       description:
@@ -469,11 +468,11 @@ export const progressSchema = z
     target: progressTargetSchema,
     byProduct: z.array(productProgressSchema).meta({
       description:
-        "One entry per product of the project this key reaches, A to Z by key, with the same rules.",
+        "One entry per product listed in products, A to Z by key, with the same scope and hours rules.",
     }),
   })
   .meta({
-    description: `How far the project is. ${SCOPE_RULE} ${HOURS_ARE_ESTIMATES} ${REACHED_ONLY}`,
+    description: `How far the project is, by items and by estimated hours, and its target date against today. ${SCOPE_RULE} ${HOURS_ARE_ESTIMATES} ${OVER_LISTED_PRODUCTS}`,
   })
   .openapi("ProjectProgress");
 
@@ -531,11 +530,14 @@ export const projectSchema = z
     createdBy: id,
     createdAt: timestamp,
     updatedAt: timestamp,
-    progress: progressSchema.optional().meta({
-      description: `On get_project (GET /projects/{slug}) only: how far the project is, by items and by estimated hours, and its target date against today. ${SCOPE_RULE} ${HOURS_ARE_ESTIMATES} ${REACHED_ONLY}`,
-    }),
   })
   .openapi("Project");
+
+// progress stays bare: a .meta on a registered component rewrites the component's own description
+/** A project as get_project (GET /projects/{slug}) reads it: with its progress. */
+export const projectReadSchema = projectSchema
+  .extend({ progress: progressSchema })
+  .openapi("ProjectRead");
 
 export const projectItemsAddedSchema = z
   .object({
@@ -2012,17 +2014,19 @@ export const webProjectSchema = z.object({
 
 export const webProjectPageSchema = pageSchema(webProjectSchema);
 
-export const webProjectDetailSchema = webProjectSchema.extend({
-  hiddenProducts: z.boolean().meta({
+export const webProjectDetailSchema = webProjectSchema
+  .extend({
+    hiddenProducts: z.boolean().meta({
+      description:
+        "Whether the project draws from a product the viewer can't see; nothing else about such a product is served.",
+    }),
+    progress: progressSchema,
+    history: progressHistorySchema,
+  })
+  .meta({
     description:
-      "Whether the project draws from a product the viewer can't see; nothing else about such a product is served.",
-  }),
-  progress: progressSchema.meta({
-    description:
-      "The numbers get_project gives a bot, over the products the viewer sees.",
-  }),
-  history: progressHistorySchema,
-});
+      "progress holds the numbers get_project gives a bot, over the products the viewer sees.",
+  });
 
 export const webProductDetailSchema = webProductSchema.extend({
   owner: webActorSchema.nullable().meta({

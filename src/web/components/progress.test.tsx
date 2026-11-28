@@ -35,6 +35,18 @@ describe("ProgressSummary · Progress", () => {
     expect(legend()).toEqual(["Done 18", "In progress 3", "Open 10"]);
   });
 
+  test("the percent is the server's, not recomputed from the counts", () => {
+    // 1 of 300 is 0.33%, which a recomputing component rounds to 0; the server shows 1
+    renderSummary({
+      itemsDone: 1,
+      itemsInProgress: 0,
+      itemsOpen: 299,
+      itemsInScope: 300,
+      donePercent: 1,
+    });
+    expect(cell("Progress")).toHaveTextContent("1% 1 of 300 items done");
+  });
+
   test("the bar has a segment per non-zero status, sized by count", () => {
     renderSummary({ itemsDone: 0, itemsInProgress: 3, itemsOpen: 28 });
     const segments = cell("Progress").querySelectorAll("[data-segment]");
@@ -96,10 +108,22 @@ describe("ProgressSummary · hours", () => {
     expect(hours).toHaveTextContent("40 of 64.5 estimated hours done (62%)");
     expect(hours).toHaveTextContent("2 unfinished items have no estimate");
     const fill = hours.querySelector<HTMLElement>("[data-hours-done]");
-    expect(Number.parseFloat(fill?.style.width ?? "")).toBeCloseTo(
-      (40 / 64.5) * 100,
-      3,
-    );
+    // 40 of 64.5 h, a literal rather than the component's own ratio
+    expect(Number.parseFloat(fill?.style.width ?? "")).toBeCloseTo(62.0155, 3);
+  });
+
+  test("the hours percent in the line is the server's, not recomputed from the hours", () => {
+    // the server rounds a sliver up to 1; the ratio 1/300 would read 0%
+    renderSummary({
+      hoursEstimated: 300,
+      hoursDone: 1,
+      hoursLeft: 299,
+      hoursDonePercent: 1,
+    });
+    const hours = cell("Estimated work hours left");
+    expect(hours).toHaveTextContent("1 of 300 estimated hours done (1%)");
+    const fill = hours.querySelector<HTMLElement>("[data-hours-done]");
+    expect(Number.parseFloat(fill?.style.width ?? "")).toBeCloseTo(0.3333, 3);
   });
 
   test("one unestimated item is singular", () => {
@@ -131,6 +155,8 @@ describe("ProgressSummary · hours", () => {
 
   test("no estimates and one unfinished item", () => {
     renderSummary({
+      itemsInProgress: 0,
+      itemsOpen: 1,
       hoursEstimated: 0,
       hoursDone: 0,
       hoursLeft: 0,
@@ -140,6 +166,57 @@ describe("ProgressSummary · hours", () => {
     expect(
       screen.getByText("The unfinished item has no estimate."),
     ).toBeInTheDocument();
+  });
+
+  test("unfinished items all estimated at 0 h: a number, never a NaN width", () => {
+    renderSummary({
+      itemsDone: 0,
+      itemsInProgress: 1,
+      itemsOpen: 4,
+      hoursEstimated: 0,
+      hoursDone: 0,
+      hoursLeft: 0,
+      hoursDonePercent: 0,
+      unfinishedWithoutEstimate: 0,
+    });
+    const hours = cell("Estimated work hours left");
+    expect(hours).toHaveTextContent(/^Estimated work hours left0 h$/);
+    const fill = hours.querySelector<HTMLElement>("[data-hours-done]");
+    expect(fill === null || /^\d/.test(fill.style.width)).toBe(true);
+  });
+
+  test("done hours with every unfinished item unestimated: no bar reading finished", () => {
+    renderSummary({
+      itemsDone: 3,
+      itemsInProgress: 1,
+      itemsOpen: 4,
+      hoursEstimated: 8,
+      hoursDone: 8,
+      hoursLeft: 0,
+      hoursDonePercent: 100,
+      unfinishedWithoutEstimate: 5,
+    });
+    const hours = cell("Estimated work hours left");
+    expect(hours).toHaveTextContent("8 of 8 estimated hours done (100%)");
+    expect(hours).toHaveTextContent("5 unfinished items have no estimate");
+    expect(hours.querySelector("[data-hours-done]")).toBeNull();
+  });
+
+  test("some unfinished items estimated at 0 h and the rest unestimated: counts only the unestimated", () => {
+    renderSummary({
+      itemsDone: 0,
+      itemsInProgress: 1,
+      itemsOpen: 4,
+      hoursEstimated: 0,
+      hoursDone: 0,
+      hoursLeft: 0,
+      hoursDonePercent: 0,
+      unfinishedWithoutEstimate: 3,
+    });
+    const hours = cell("Estimated work hours left");
+    expect(hours).not.toHaveTextContent("None of the");
+    expect(hours).toHaveTextContent("3 unfinished items have no estimate");
+    expect(hours.querySelector("[data-hours-done]")).toBeNull();
   });
 
   test("everything done: 0 h and a full bar", () => {
@@ -273,6 +350,33 @@ describe("ByProduct", () => {
     );
     expect(rows()[0]).toHaveTextContent(/No estimates yet$/);
     expect(rows()[1]).toHaveTextContent(/Nothing left$/);
+  });
+
+  // the server sends every visible product, a triage-only one included
+  const emptyOpenBot = {
+    ...openBot,
+    inScope: 0,
+    done: 0,
+    inProgress: 0,
+    open: 0,
+    hoursLeft: 0,
+    unfinishedWithoutEstimate: 0,
+  };
+  const withScope = products.filter((p) => p.key !== openBot.key);
+
+  test("a product with nothing in scope draws no row", () => {
+    render(<ByProduct products={[...withScope, emptyOpenBot]} />);
+    expect(rows().map((r) => r.textContent)).toEqual([
+      "DOC Docs site 3 of 8 done9 h left · 2 without an estimate",
+      "TRL trail 11 of 18 done14 h left",
+    ]);
+  });
+
+  test("one product with scope beside empty ones draws no list", () => {
+    const { container } = render(
+      <ByProduct products={[emptyOpenBot, ...withScope.slice(1)]} />,
+    );
+    expect(container).toBeEmptyDOMElement();
   });
 
   test("one visible product draws no list", () => {

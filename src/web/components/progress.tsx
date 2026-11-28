@@ -124,7 +124,12 @@ function ProgressCell({ progress }: { progress: ProjectProgress }) {
 function HoursCell({ progress }: { progress: ProjectProgress }) {
   const unfinished = progress.itemsOpen + progress.itemsInProgress;
   const unestimated = progress.unfinishedWithoutEstimate;
-  if (progress.hoursEstimated === 0 && unestimated > 0) {
+  // an estimate may be 0 h, so "none estimated" means every unfinished item lacks one
+  if (
+    progress.hoursEstimated === 0 &&
+    unestimated > 0 &&
+    unestimated === unfinished
+  ) {
     return (
       <div>
         <CellLabel>Estimated work hours left</CellLabel>
@@ -137,21 +142,25 @@ function HoursCell({ progress }: { progress: ProjectProgress }) {
       </div>
     );
   }
-  const share =
-    unfinished === 0
-      ? 100
-      : (progress.hoursDone / progress.hoursEstimated) * 100;
+  // no estimated hours to divide, or a full bar over unestimated work left: no bar
+  const bar =
+    progress.hoursEstimated > 0 &&
+    !(unestimated > 0 && progress.hoursLeft === 0);
   return (
     <div>
       <CellLabel>Estimated work hours left</CellLabel>
       <p className={cellValue}>{`${formatHours(progress.hoursLeft)} h`}</p>
-      <div aria-hidden="true" className="my-1.5 h-1 rounded-full bg-accent">
-        <div
-          data-hours-done
-          className="h-full rounded-full bg-success"
-          style={{ width: `${share}%` }}
-        />
-      </div>
+      {bar && (
+        <div aria-hidden="true" className="my-1.5 h-1 rounded-full bg-accent">
+          <div
+            data-hours-done
+            className="h-full rounded-full bg-success"
+            style={{
+              width: `${(progress.hoursDone / progress.hoursEstimated) * 100}%`,
+            }}
+          />
+        </div>
+      )}
       {progress.hoursEstimated > 0 && (
         <p>
           {`${formatHours(progress.hoursDone)} of ${formatHours(progress.hoursEstimated)} estimated hours done (${progress.hoursDonePercent}%)`}
@@ -250,16 +259,18 @@ function productHoursLine(product: ProductProgress): string {
 
 /**
  * Each visible product's done of scope, a bar as long as its share of the largest
- * product's scope, and its hours left. Drawn only with two or more products.
+ * product's scope, and its hours left. A product with nothing in scope gets no row, and
+ * the list is drawn only with two or more rows.
  */
 export function ByProduct({
-  products,
+  products: all,
   className,
 }: {
   products: ProductProgress[];
   className?: string;
 }) {
   const headingId = useId();
+  const products = all.filter((p) => p.inScope > 0);
   if (products.length < 2) return null;
   const largest = Math.max(...products.map((p) => p.inScope));
   return (
@@ -281,7 +292,7 @@ export function ByProduct({
               open={product.open}
               className="mt-1.5 h-1.5"
               style={{
-                width: `${largest > 0 ? (product.inScope / largest) * 100 : 0}%`,
+                width: `${(product.inScope / largest) * 100}%`,
               }}
             />
             <p className="mt-1 text-xs text-muted-foreground">

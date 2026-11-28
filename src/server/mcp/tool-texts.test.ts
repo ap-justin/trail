@@ -315,7 +315,12 @@ function expectProgressGuidance(text: string | undefined, where: string) {
     /unfinishedWithoutEstimate.*hoursLeft understates/,
   );
   expect(text, where).toMatch(/daysAway.*negative when overdue/);
-  expect(text, where).toMatch(/products this key reaches/);
+  expect(text, where).toMatch(/overdue past it even when every item is done/);
+  expect(text, where).toMatch(/covers the products listed in products/);
+  expect(text, where).toMatch(
+    /the key reaches only through this project included/,
+  );
+  expect(text, where).not.toMatch(/only the products this key reaches/);
 }
 
 test("get_project and GET /projects/{ref} say what progress counts and what its hours are not", async () => {
