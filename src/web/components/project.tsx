@@ -271,7 +271,7 @@ function ProgressCharts({
 }) {
   return (
     <div className="@container mt-2 lg:mt-4">
-      <div className="grid gap-5 @3xl:grid-cols-[--spacing(130)_minmax(0,1fr)]">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-5 @3xl:grid-cols-[--spacing(130)_minmax(0,1fr)]">
         <BurnUp history={project.history} now={now} />
         <ByProduct products={project.progress.byProduct} />
       </div>

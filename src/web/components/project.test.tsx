@@ -210,6 +210,8 @@ describe("progress", () => {
     expect(
       screen.getByRole("region", { name: "By product" }),
     ).toBeInTheDocument();
+    // a bare `grid` column grows to the chart's 520px and pushes the page sideways at 375
+    expect(chart.parentElement).toHaveClass("grid-cols-[minmax(0,1fr)]");
   });
 
   test("no items in scope: no summary and no charts", () => {
