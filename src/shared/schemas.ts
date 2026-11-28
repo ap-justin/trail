@@ -379,6 +379,123 @@ const countsSchema = z
   })
   .openapi("ItemCounts");
 
+const REACHED_ONLY =
+  "Over the products this key reaches alone, like counts; notes are never counted.";
+const SCOPE_RULE =
+  "Scope is the project's items in open, in_progress or done: triage and canceled items are outside it and in no total but itemsTriage and itemsCanceled.";
+const HOURS_ARE_ESTIMATES =
+  "Hours are the items' work estimates (each item's estimate), not time to finish and not calendar time.";
+
+/** What get_project and GET /projects/{slug} say of progress, so a bot reads it right. */
+export const PROGRESS_READS =
+  "progress says how far it is: itemsInScope counts its open, in_progress and done items (triage and canceled items are outside scope, counted only in itemsTriage and itemsCanceled), and donePercent is by items. hoursEstimated, hoursDone and hoursLeft sum the items' work estimates, not time to finish and not calendar time; when unfinishedWithoutEstimate is above 0, hoursLeft understates the work left, so estimate those items. target is the targetDate against the server's UTC today: status none, upcoming, today or overdue, with daysAway negative when overdue. byProduct splits it per product. Like counts, progress covers only the products this key reaches.";
+
+const progressTargetSchema = z
+  .object({
+    date: z.string().nullable().meta({
+      description: "The project's targetDate, YYYY-MM-DD; null when unset.",
+      example: "2026-12-01",
+    }),
+    status: z.enum(["none", "upcoming", "today", "overdue"]).meta({
+      description:
+        "none with no target date; otherwise the target date against the server's UTC today: upcoming before it, today on it, overdue past it, whatever is unfinished.",
+    }),
+    daysAway: z.int().nullable().meta({
+      description:
+        "Whole days from the server's UTC today to the target date: 0 on the day, negative when overdue; null with no target date.",
+    }),
+  })
+  .openapi("ProgressTarget");
+
+const productProgressSchema = z
+  .object({
+    key: z.string(),
+    name: z.string(),
+    inScope: z.int().meta({
+      description: "The product's items in scope: open, in_progress or done.",
+    }),
+    done: z.int(),
+    inProgress: z.int(),
+    open: z.int(),
+    hoursLeft: z.number().meta({
+      description:
+        "The summed work estimates of the product's open and in_progress items that have one, to one decimal; not time to finish.",
+    }),
+    unfinishedWithoutEstimate: z.int().meta({
+      description:
+        "The product's open and in_progress items with no estimate: when above 0, hoursLeft understates the work.",
+    }),
+  })
+  .openapi("ProductProgress");
+
+export const progressSchema = z
+  .object({
+    itemsInScope: z.int().meta({
+      description:
+        "Items in open, in_progress or done; triage and canceled are outside scope.",
+    }),
+    itemsDone: z.int().meta({ description: "Items in done." }),
+    itemsInProgress: z.int().meta({ description: "Items in in_progress." }),
+    itemsOpen: z.int().meta({ description: "Items in open." }),
+    itemsTriage: z.int().meta({
+      description: "Items in triage: outside scope and every other total.",
+    }),
+    itemsCanceled: z.int().meta({
+      description: "Items canceled: outside scope and every other total.",
+    }),
+    donePercent: z.int().meta({
+      description:
+        "itemsDone of itemsInScope as a whole percent, by items, not hours: rounded, but never 0 once one is done and never 100 until all are; 0 with an empty scope.",
+    }),
+    hoursEstimated: z.number().meta({
+      description: `hoursDone plus hoursLeft, to one decimal. ${HOURS_ARE_ESTIMATES}`,
+    }),
+    hoursDone: z.number().meta({
+      description:
+        "The summed estimates of done items, to one decimal; work estimated, not time spent.",
+    }),
+    hoursLeft: z.number().meta({
+      description:
+        "The summed estimates of open and in_progress items that have one, to one decimal: estimated work left, not time to finish. It understates the work when unfinishedWithoutEstimate is above 0.",
+    }),
+    hoursDonePercent: z.int().meta({
+      description:
+        "hoursDone of hoursEstimated as a whole percent, rounded the way donePercent is; 0 with nothing estimated.",
+    }),
+    unfinishedWithoutEstimate: z.int().meta({
+      description:
+        "Open and in_progress items with no estimate: when above 0, hoursLeft understates the work left. Estimating them makes it whole.",
+    }),
+    target: progressTargetSchema,
+    byProduct: z.array(productProgressSchema).meta({
+      description:
+        "One entry per product of the project this key reaches, A to Z by key, with the same rules.",
+    }),
+  })
+  .meta({
+    description: `How far the project is. ${SCOPE_RULE} ${HOURS_ARE_ESTIMATES} ${REACHED_ONLY}`,
+  })
+  .openapi("ProjectProgress");
+
+export const progressHistorySchema = z
+  .array(
+    z.object({
+      date: z.string().meta({ example: "2026-11-20" }),
+      scope: z.int().meta({
+        description:
+          "Items in scope at the end of this UTC day: of those in scope now, the ones in the project by then.",
+      }),
+      done: z.int().meta({
+        description:
+          "Of those, the done ones done by then: on the later of completing and joining the project.",
+      }),
+    }),
+  )
+  .meta({
+    description:
+      "One point per UTC day from the day the first item now in scope joined the project through today, or one a week (and today) past 120 days; empty with an empty scope.",
+  });
+
 export const projectSchema = z
   .object({
     id,
@@ -414,6 +531,9 @@ export const projectSchema = z
     createdBy: id,
     createdAt: timestamp,
     updatedAt: timestamp,
+    progress: progressSchema.optional().meta({
+      description: `On get_project (GET /projects/{slug}) only: how far the project is, by items and by estimated hours, and its target date against today. ${SCOPE_RULE} ${HOURS_ARE_ESTIMATES} ${REACHED_ONLY}`,
+    }),
   })
   .openapi("Project");
 
@@ -1691,6 +1811,10 @@ export type ApiError = z.infer<typeof errorSchema>;
 export type ProductView = z.infer<typeof productSchema>;
 export type NamedProductView = z.infer<typeof namedProductSchema>;
 export type ProjectView = z.infer<typeof projectSchema>;
+export type ProjectProgress = z.infer<typeof progressSchema>;
+export type ProgressHistoryPoint = z.infer<
+  typeof progressHistorySchema
+>[number];
 export type IssueView = z.infer<typeof issueSchema>;
 export type CommentView = z.infer<typeof commentSchema>;
 export type CreatedCommentView = z.infer<typeof createdCommentSchema>;
@@ -1869,6 +1993,17 @@ export const webProjectSchema = z.object({
     description:
       "Items in triage or open, of the products the viewer sees, as the Open tab counts them.",
   }),
+  itemsDone: z.int().meta({
+    description:
+      "progress.itemsDone: done items of the products the viewer sees.",
+  }),
+  itemsInProgress: z.int().meta({
+    description: "progress.itemsInProgress, of the products the viewer sees.",
+  }),
+  itemsInScope: z.int().meta({
+    description:
+      "progress.itemsInScope: open, in_progress and done items of the products the viewer sees; triage and canceled are outside it.",
+  }),
   updatedAt: timestamp.meta({
     description:
       "The latest of the project's own edit, an item added or removed, and a status update.",
@@ -1882,6 +2017,11 @@ export const webProjectDetailSchema = webProjectSchema.extend({
     description:
       "Whether the project draws from a product the viewer can't see; nothing else about such a product is served.",
   }),
+  progress: progressSchema.meta({
+    description:
+      "The numbers get_project gives a bot, over the products the viewer sees.",
+  }),
+  history: progressHistorySchema,
 });
 
 export const webProductDetailSchema = webProductSchema.extend({

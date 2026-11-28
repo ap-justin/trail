@@ -351,8 +351,9 @@ test("a slug no product key matches names the project, its answers carrying no d
     }),
   );
   expect(project).not.toHaveProperty("deprecated");
+  // a read adds progress to what the create returned
   expect(await json(await request("GET", "/api/v1/projects/leg-plan"))).toEqual(
-    project,
+    { ...project, progress: expect.objectContaining({ itemsInScope: 0 }) },
   );
   const posted = await json(
     await request("POST", "/api/v1/projects/leg-plan/status-updates", {

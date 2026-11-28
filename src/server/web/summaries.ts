@@ -14,6 +14,7 @@ import {
   projectProduct,
   projectStatusUpdate,
 } from "../db/schema.js";
+import { progressItems, projectProgress } from "../service/progress.js";
 import { actorsById } from "./visible.js";
 
 type StatusUpdateRow = {
@@ -143,6 +144,11 @@ export function projectSummaries(
     )
     .orderBy(asc(product.key))
     .all();
+  const progressOf = progressItems(
+    db,
+    ids,
+    inArray(projectItem.productId, visible),
+  );
   const open = db
     .select({ projectId: projectItem.projectId, n: sql<number>`count(*)` })
     .from(projectItem)
@@ -177,6 +183,11 @@ export function projectSummaries(
   );
   return rows.map((p) => {
     const update = updates.get(p.id) ?? null;
+    const progress = projectProgress(
+      progressOf.get(p.id) ?? [],
+      [],
+      p.targetDate,
+    );
     return {
       slug: p.slug,
       name: p.name,
@@ -189,6 +200,9 @@ export function projectSummaries(
         .filter((x) => x.projectId === p.id)
         .map(({ key, name }) => ({ key, name })),
       openCount: open.find((x) => x.projectId === p.id)?.n ?? 0,
+      itemsDone: progress.itemsDone,
+      itemsInProgress: progress.itemsInProgress,
+      itemsInScope: progress.itemsInScope,
       updatedAt: latestTime(p.updatedAt, update?.createdAt),
     };
   });

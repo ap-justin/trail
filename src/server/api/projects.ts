@@ -5,6 +5,7 @@ import {
   labelSchema,
   legacyNamedProductSchema,
   legacyProductSchema,
+  PROGRESS_READS,
   pageQuerySchema,
   pageSchema,
   projectCreateSchema,
@@ -126,8 +127,7 @@ const getProject = createRoute({
   method: "get",
   path: "/projects/{ref}",
   summary: "Get a project by slug",
-  description:
-    "Deprecated: a product key that matches no slug returns the product, carrying deprecated; use GET /products/{key}. The project's items are listed by GET /items?project={slug}.",
+  description: `${PROGRESS_READS} The project's items are listed by GET /items?project={slug}. Deprecated: a product key that matches no slug returns the product, carrying deprecated; use GET /products/{key}.`,
   tags,
   request: { params: projectParam },
   responses: {

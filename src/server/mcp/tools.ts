@@ -23,6 +23,7 @@ import {
   myTitleUpdateSchema,
   NOTE_EVENT_ABOUT,
   noteCreateSchema,
+  PROGRESS_READS,
   productCreateSchema,
   productListQuerySchema,
   productUpdateSchema,
@@ -579,8 +580,7 @@ export function registerTools(
   register(
     "get_project",
     {
-      description:
-        "Get a project by slug: goal, lead, target date, its products this key reaches (hiddenProducts true when it draws from others you can't see), counts (its issues and todos per status) and notes (its notes, current and archived) over the products shown, and its latest status update. List its items with list_items and project. Deprecated: a product key (like TRL) that matches no slug returns that product, carrying deprecated; use get_product for that.",
+      description: `Get a project by slug: goal, lead, target date, its products this key reaches (hiddenProducts true when it draws from others you can't see), counts (its issues and todos per status) and notes (its notes, current and archived) over the products shown, and its latest status update. ${PROGRESS_READS} List its items with list_items and project. Deprecated: a product key (like TRL) that matches no slug returns that product, carrying deprecated; use get_product for that.`,
       inputSchema: () => z.strictObject(projectArg),
       annotations: read,
     },

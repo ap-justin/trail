@@ -5,7 +5,7 @@ import { createBot } from "../service/keys.js";
 import { atFakeTimeAsync, projectKey, setupTestApp } from "../test-app.js";
 import { type Body, mcpClients } from "./test-client.js";
 
-const { app, db, bot } = setupTestApp();
+const { app, db, bot, request } = setupTestApp();
 const { connect, call, callError } = mcpClients(app);
 
 /** A bot that owns one product of its own, with an MCP client. */
@@ -529,4 +529,93 @@ test("a webhook that stops following a product drops the queued events of projec
   });
   // the project still drawing from Zeta's product keeps its event
   expect(queued()).toEqual([{ type: "trail.project.created" }]);
+});
+
+test("get_project and GET /projects/{slug} carry one progress, by product A to Z, notes nowhere", async () => {
+  const one = await productBot("Progress One");
+  const two = await productBot("Progress Two");
+  const slug = freshSlug();
+  await call(one.client, "create_project", {
+    name: "Progress",
+    slug,
+    products: [one.product.key, two.product.key],
+  });
+  const todo = async (
+    client: typeof one.client,
+    product: string,
+    patch: Body,
+  ) => {
+    const { key } = await call(client, "add_todo", { product, title: "t" });
+    if (Object.keys(patch).length > 0)
+      await call(client, "update_item", { item: key, ...patch });
+    return key as string;
+  };
+  const p = one.product.key;
+  const keys = [
+    await todo(one.client, p, { estimate: 2 }),
+    await todo(one.client, p, { status: "in_progress", estimate: 3 }),
+    await todo(one.client, p, { status: "done", estimate: 1.5 }),
+    await todo(one.client, p, { status: "canceled", estimate: 8 }),
+    (await call(one.client, "file_issue", { product: p, title: "untriaged" }))
+      .key,
+    await todo(two.client, two.product.key, { estimate: 10 }),
+    await todo(two.client, two.product.key, {}),
+  ];
+  await call(one.client, "add_to_project", { project: slug, items: keys });
+  await call(one.client, "add_note", {
+    product: p,
+    title: "a note counts nowhere",
+    project: slug,
+  });
+
+  const reader = createBot(db, "progress reader", {
+    scope: { products: [p] },
+  }).key;
+  const viaMcp = await call(await connect(reader), "get_project", {
+    project: slug,
+  });
+  const res = await request("GET", `/api/v1/projects/${slug}`, {
+    key: reader,
+  });
+  expect(res.status).toBe(200);
+  const viaRest = (await res.json()) as Body;
+  const products = [
+    {
+      key: p,
+      name: "Progress One's product",
+      inScope: 3,
+      done: 1,
+      inProgress: 1,
+      open: 1,
+      hoursLeft: 5,
+      unfinishedWithoutEstimate: 0,
+    },
+    {
+      key: two.product.key,
+      name: "Progress Two's product",
+      inScope: 2,
+      done: 0,
+      inProgress: 0,
+      open: 2,
+      hoursLeft: 10,
+      unfinishedWithoutEstimate: 1,
+    },
+  ].sort((a, b) => a.key.localeCompare(b.key));
+  expect(viaMcp.progress).toEqual({
+    itemsInScope: 5,
+    itemsDone: 1,
+    itemsInProgress: 1,
+    itemsOpen: 3,
+    itemsTriage: 1,
+    itemsCanceled: 1,
+    donePercent: 20,
+    hoursEstimated: 16.5,
+    hoursDone: 1.5,
+    hoursLeft: 15,
+    hoursDonePercent: 9,
+    unfinishedWithoutEstimate: 1,
+    target: { date: null, status: "none", daysAway: null },
+    byProduct: products,
+  });
+  expect(viaRest.progress).toEqual(viaMcp.progress);
 });

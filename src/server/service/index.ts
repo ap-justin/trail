@@ -94,6 +94,11 @@ import {
   pageLimit,
 } from "./paging.js";
 import { clearActorPhoto, photoUrl, setActorPhoto } from "./photos.js";
+import {
+  type ProjectProgress,
+  progressItems,
+  projectProgress,
+} from "./progress.js";
 import type { Tx } from "./tx.js";
 import {
   completedAtOf,
@@ -303,6 +308,8 @@ export type ProjectView = ProjectRow & {
   counts: ItemCounts;
   notes: NoteCounts;
   latestStatusUpdate: (StatusUpdate & { author: ActorRef }) | null;
+  /** On a project read (get_project) only, over the same items as `counts`. */
+  progress?: ProjectProgress;
 };
 
 /** A product as get_product reads it: with its notes per status. */
@@ -2082,6 +2089,26 @@ export function createService({
     actor: ActingActor,
   ): ProjectView {
     return projectViews(tx, [row], actor)[0] as ProjectView;
+  }
+
+  /** `projectView` with its `progress`, as a project read shows it. */
+  function projectRead(
+    tx: Tx | Db,
+    row: ProjectRow,
+    actor: ActingActor,
+  ): ProjectView {
+    const view = projectView(tx, row, actor);
+    const reached = itemsReached(
+      db,
+      reachFor(actor),
+      projectItem.issueId,
+      projectItem.productId,
+    );
+    const items = progressItems(tx, [row.id], reached).get(row.id) ?? [];
+    return {
+      ...view,
+      progress: projectProgress(items, view.products, row.targetDate),
+    };
   }
 
   const noItems = (): ItemCounts => ({
@@ -4523,7 +4550,7 @@ export function createService({
       requireAction(actor, "read", "read a project", () =>
         resolveProject(db, slug, actor),
       );
-      return projectView(db, resolveProject(db, slug, actor), actor);
+      return projectRead(db, resolveProject(db, slug, actor), actor);
     },
 
     /** A project by exact slug, else a product by key: the meaning `project` had before projects. */
@@ -4536,7 +4563,7 @@ export function createService({
       );
       const found = resolveProjectOrProduct(db, ref, actor);
       return "project" in found
-        ? { kind: "project", project: projectView(db, found.project, actor) }
+        ? { kind: "project", project: projectRead(db, found.project, actor) }
         : {
             kind: "product",
             product: productReads(actor, [found.product])[0] as
